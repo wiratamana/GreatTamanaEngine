@@ -12,6 +12,7 @@
 #include "SkeletalRigCache.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -65,6 +66,9 @@ public:
     // Starts a clip on an entity. False, with no component change, when the entity is dead, has no mesh asset
     // source or skinning data, or the clip does not resolve. Never throws.
     bool Play(Registry& registry, Entity targetEntity, const std::string& absoluteAnimationGtaPath);
+
+    // Last keyframe of an already cached clip (max bone keyframe), or nullopt when the clip is not cached.
+    std::optional<std::uint32_t> TryGetClipLastFrame(const std::string& absoluteAnimationGtaPath) const;
 
     // Frame order: EvaluatePoses() -> PhysicsSystem::Update() -> SkinAndUpload(), linked by ResolvedAnimationPose.
     // Advances every playing animator and writes its pose. Enabled DynamicChainRig entities without an animated pose

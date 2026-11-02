@@ -1,11 +1,13 @@
 #include "DynamicChainSolver.h"
 
 #include "ChainConstraints.h"
+#include "CollisionFilter.h"
+#include "DynamicChainDefinition.h"
+#include "TimeScaling.h"
 #include "VerletIntegration.h"
 #include "../Math/MathTypes.h"
 
 #include <algorithm>
-#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -14,48 +16,20 @@ namespace gte {
 
 namespace {
 
-// Guards against a caller-supplied (or malformed data-driven) mass <= 0
-// producing an infinite/negative inverseMass - mirrors ChainConstraints.cpp's
-// own "degrade gracefully instead of NaN/Inf" convention.
+// Lower bound of a joint mass, keeps inverseMass finite.
 constexpr float kMinMass = 1e-4f;
+// A collision move longer than this counts as a push.
+constexpr float kPushEpsilon = 1e-6f;
+// A joint left penetrating by less than this still counts as outside after the cone (model units).
+constexpr float kRetainTolerance = 1e-4f;
+// Collision/cone alternations per step.
+constexpr int kMaxCollisionConeRounds = 4;
+// Runaway bound from the animated pose: factor * longest root path, never below the minimum (model units).
+constexpr float kDivergenceFactor = 10.0f;
+constexpr float kMinDivergenceBound = 100.0f;
 
-// task_manager/verlet-integration-10, PHASE1 (v2) - a single "which layer am
-// I on" bit, SAFELY derived from a raw group value that this engine never
-// range-validates anywhere in its own load pipeline (PmxLoader.cpp's own
-// ConvertRigidBody(): `out.group = body.m_group;`, a straight byte copy off
-// an untrusted .pmx file, with no range check - see
-// PHASE0_MASTER_STRATEGY.md's Step 2 point 13). PMX authoring tools always
-// emit 0-15, but this engine cannot assume the FILE itself is well-formed.
-// Masking to the documented 4-bit range BEFORE shifting is what guarantees
-// `1u << group` can never become undefined behavior (shifting by an amount
-// >= the promoted-to unsigned int's own bit width, 32, is UB in C++ - a real
-// risk for an unmasked `group` up to 255) - matching this codebase's own
-// "degrade gracefully, never crash" convention (see BoxCollider.cpp's own
-// degenerate half-extent handling, SphereCollider.cpp's own degenerate-
-// center fallback, IsDegenerateColliderShape()'s own sibling precedent in
-// Physics/ModelColliderDetection.cpp).
-constexpr std::uint16_t GroupBit(std::uint8_t group) noexcept
-{
-    return static_cast<std::uint16_t>(1u << (group & 0x0Fu));
-}
-
-// task_manager/verlet-integration-10, PHASE1 - Bullet's own broad-phase
-// collision-filter convention (confirmed against
-// third_party/saba/src/Saba/Model/MMD/MMDPhysics.cpp's own
-// `m_world->addRigidBody(rb, 1 << mmdRB->GetGroup(), mmdRB->GetGroupMask())`
-// call, lines 149-154, and its own `GetGroup()`/`GetGroupMask()` accessors,
-// lines 632-637) - a SYMMETRIC AND-test: A and B may collide only if A's own
-// group bit is set in B's mask, AND B's own group bit is set in A's mask.
-bool GroupsMayCollide(std::uint8_t groupA, std::uint16_t maskA, std::uint8_t groupB, std::uint16_t maskB) noexcept
-{
-    const std::uint16_t bitA = GroupBit(groupA);
-    const std::uint16_t bitB = GroupBit(groupB);
-    return (bitA & maskB) != 0 && (bitB & maskA) != 0;
-}
-
-void SeedParticlesFromAnimatedPose(
-    const DynamicChainDefinition& definition, const std::vector<Vec3>& animatedJointWorldPositions,
-    DynamicChainRuntimeState& state, std::size_t jointCount)
+void SeedParticlesFromAnimatedPose(const DynamicChainDefinition& definition,
+    const std::vector<Vec3>& animatedJointWorldPositions, DynamicChainRuntimeState& state, std::size_t jointCount)
 {
     state.particles.resize(jointCount);
     for (std::size_t i = 0; i < jointCount; ++i) {
@@ -63,9 +37,6 @@ void SeedParticlesFromAnimatedPose(
         particle.position = animatedJointWorldPositions[i];
         particle.previousPosition = animatedJointWorldPositions[i];
         particle.inverseMass = 1.0f / std::max(definition.jointSettings[i].mass, kMinMass);
-        // task_manager/verlet-integration-10, PHASE2 - this joint's own
-        // PMX-rigid-body-derived collision radius (see DynamicJointSettings::
-        // collisionRadius's own doc comment).
         particle.collisionRadius = definition.jointSettings[i].collisionRadius;
         particle.pinned = false;
     }
@@ -76,63 +47,173 @@ bool IsFinite(const Vec3& v) noexcept
     return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
 }
 
+bool IsIgnoredCollider(const std::vector<std::uint16_t>& sortedIgnored, std::size_t colliderIndex) noexcept
+{
+    return !sortedIgnored.empty() && colliderIndex <= 0xFFFFu
+        && std::binary_search(sortedIgnored.begin(), sortedIgnored.end(), static_cast<std::uint16_t>(colliderIndex));
+}
+
+// Pushes one joint out of every collider that applies to it; returns how far it moved.
+float CollideJoint(const DynamicChainDefinition& definition, std::size_t jointIndex, const StepOptions& options,
+    const std::vector<Collider>& colliders, VerletParticle& particle)
+{
+    const DynamicJointSettings& js = definition.jointSettings[jointIndex];
+    particle.collisionRadius
+        = (options.useCollisionFit && js.collisionFitRadius >= 0.0f) ? js.collisionFitRadius : js.collisionRadius;
+    const Vec3 before = particle.position;
+    for (std::size_t k = 0; k < colliders.size(); ++k) {
+        const Collider& collider = colliders[k];
+        if (options.useCollisionFit && IsIgnoredCollider(js.ignoredColliderIndices, k)) {
+            continue;
+        }
+        if (!GroupsMayCollide(js.group, js.collisionMask, collider.group, collider.collisionMask)) {
+            continue;
+        }
+        SolveCollision(particle, collider);
+    }
+    return Length(particle.position - before);
+}
+
+// Longest rest-length path from the anchor to any joint.
+float MaxRootPathLength(const DynamicChainDefinition& definition, std::vector<float>& scratch)
+{
+    const std::size_t jointCount = definition.restLengths.size();
+    scratch.resize(jointCount);
+    float longest = 0.0f;
+    for (std::size_t i = 0; i < jointCount; ++i) {
+        const std::int32_t parent = definition.parentJointIndex[i];
+        const float base = (parent >= 0 && static_cast<std::size_t>(parent) < i) ? scratch[static_cast<std::size_t>(parent)] : 0.0f;
+        scratch[i] = base + definition.restLengths[i];
+        longest = std::max(longest, scratch[i]);
+    }
+    return longest;
+}
+
+// Rebuilds the chain parent-first: each joint keeps its direction, clamped into its cone, at exactly its rest length.
+// Lengths stay exact and no joint is pulled back by its child, so the pass adds no energy.
+void ApplyBendCone(const DynamicChainDefinition& definition, const Vec3& rootWorldPosition,
+    const std::vector<Vec3>& animated, DynamicChainRuntimeState& state, std::uint32_t* clampedJoints)
+{
+    const std::size_t jointCount = state.particles.size();
+    state.scratchPositions.resize(jointCount);
+    for (std::size_t i = 0; i < jointCount; ++i) {
+        state.scratchPositions[i] = state.particles[i].position;
+    }
+
+    for (std::size_t i = 0; i < jointCount; ++i) {
+        const std::int32_t parent = definition.parentJointIndex[i];
+        const bool isRootChild = parent < 0;
+        const std::size_t parentIndex = isRootChild ? 0 : static_cast<std::size_t>(parent);
+        const Vec3 parentBefore = isRootChild ? rootWorldPosition : state.scratchPositions[parentIndex];
+        const Vec3 parentNow = isRootChild ? rootWorldPosition : state.particles[parentIndex].position;
+        const Vec3 parentAnim = isRootChild ? rootWorldPosition : animated[parentIndex];
+
+        const Vec3 offset = state.scratchPositions[i] - parentBefore;
+        const float length = Length(offset);
+        Vec3 direction = Vec3::Down();
+        if (std::isfinite(length) && length > kEpsilon) {
+            direction = offset / length;
+        } else {
+            const Vec3 animatedSegment = animated[i] - parentAnim;
+            const float animatedLength = Length(animatedSegment);
+            if (animatedLength > kEpsilon) {
+                direction = animatedSegment / animatedLength;
+            }
+        }
+
+        VerletParticle& particle = state.particles[i];
+        particle.position = parentNow + direction * definition.restLengths[i];
+        if (SolveBendLimit(particle, parentNow, parentAnim, animated[i], state.scratchLimits[i]) && clampedJoints != nullptr) {
+            ++*clampedJoints;
+        }
+    }
+}
+
 } // namespace
+
+void ComputeCumulativeBendLimits(const DynamicChainDefinition& definition, std::vector<float>& out)
+{
+    // Parents always come first.
+    const std::size_t jointCount = definition.jointSettings.size();
+    out.assign(jointCount, kPi);
+    for (std::size_t i = 0; i < jointCount; ++i) {
+        const std::int32_t parent = i < definition.parentJointIndex.size() ? definition.parentJointIndex[i] : -1;
+        const float parentCumulative
+            = (parent >= 0 && static_cast<std::size_t>(parent) < i) ? out[static_cast<std::size_t>(parent)] : 0.0f;
+        out[i] = std::min(kPi, definition.jointSettings[i].bendLimitRadians + parentCumulative);
+    }
+}
+
+void ComputeEffectiveBendLimits(const DynamicChainDefinition& definition, const StepOptions& options, std::vector<float>& out)
+{
+    if (!options.bendLimitsEnabled) {
+        out.assign(definition.jointSettings.size(), kPi);
+        return;
+    }
+    ComputeCumulativeBendLimits(definition, out);
+    for (float& limit : out) {
+        limit = std::clamp(limit * options.bendLimitScale + options.bendLimitMinRadians, 0.0f, kPi);
+    }
+}
+
+std::vector<float> ComputeEffectiveBendLimits(const DynamicChainDefinition& definition, const StepOptions& options)
+{
+    std::vector<float> limits;
+    ComputeEffectiveBendLimits(definition, options, limits);
+    return limits;
+}
 
 void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& rootWorldPosition,
     const std::vector<Vec3>& animatedJointWorldPositions, DynamicChainRuntimeState& state, float fixedDeltaTime,
-    const Vec3& gravity, const WindSettings& wind, const std::vector<Collider>& colliders)
+    const Vec3& gravity, const WindSettings& wind, const std::vector<Collider>& colliders, const StepOptions& options)
 {
     const std::size_t jointCount = definition.jointBoneIndices.size();
     if (definition.jointSettings.size() != jointCount || definition.restLengths.size() != jointCount
         || definition.parentJointIndex.size() != jointCount || animatedJointWorldPositions.size() != jointCount) {
-        return; // Malformed/stale definition - never read/write out of bounds.
+        return; // Malformed definition: never read or write out of bounds.
     }
     if (jointCount == 0) {
         return;
     }
 
-    // 1. Lazy init - also re-seeds if the chain's own joint count ever
-    // changes after the first call (shouldn't normally happen for a fixed,
-    // authoring-time chain, but never read/write out of bounds either way) -
-    // OR (PHASE5, 3.3) the root bone has moved an implausible distance since
-    // the last call, e.g. a teleporting character/Editor gizmo drag.
+    StepDiagnostics* const diagnostics = options.diagnostics;
+
+    // Seed on the first call, on a joint count change, or after an implausible root jump.
     bool needsSeed = !state.initialized || state.particles.size() != jointCount;
-    if (!needsSeed) {
-        const float rootDelta = Length(rootWorldPosition - state.lastRootWorldPosition);
-        if (rootDelta > definition.maxPlausibleRootDelta) {
-            needsSeed = true;
-        }
+    if (!needsSeed && Length(rootWorldPosition - state.lastRootWorldPosition) > definition.maxPlausibleRootDelta) {
+        needsSeed = true;
     }
     if (needsSeed) {
+        if (state.initialized) {
+            ++state.reseedCount;
+            if (diagnostics != nullptr) {
+                ++diagnostics->reseeds;
+            }
+        }
         SeedParticlesFromAnimatedPose(definition, animatedJointWorldPositions, state, jointCount);
         state.initialized = true;
     }
-    // Set UNCONDITIONALLY, exactly once per call, regardless of which branch
-    // above ran - forgetting this turns the teleport guard into a permanent,
-    // one-shot trip (see this file's own header comment, step 1).
     state.lastRootWorldPosition = rootWorldPosition;
 
-    // 2. Integrate every joint particle under gravity + wind.
+    // Integrate under gravity and wind with step-length damping.
     for (std::size_t i = 0; i < jointCount; ++i) {
         VerletParticle& particle = state.particles[i];
+        const DynamicJointSettings& js = definition.jointSettings[i];
         const Vec3 acceleration = gravity * definition.gravityScale
             + ComputeWindAcceleration(wind, particle.position, state.simulationTimeSeconds) * definition.windScale;
-        IntegrateParticle(particle, fixedDeltaTime, acceleration, definition.jointSettings[i].damping);
+        const float baseDamping = (options.useRawPmxDamping && js.pmxLinearDamping >= 0.0f) ? js.pmxLinearDamping : js.damping;
+        IntegrateParticle(
+            particle, fixedDeltaTime, acceleration, ScaleStepFraction(baseDamping, fixedDeltaTime, options.dampingMultiplier));
     }
 
-    // 3. Constrain-structural: repeated `constraintIterations` times. Every
-    // iteration walks jointBoneIndices in ascending order (root -> tip),
-    // resolving each joint's TREE parent via definition.parentJointIndex[i]
-    // (task_manager/verlet-integration-6, Phase 1) - the root anchor is a
-    // local, stack-allocated particle each iteration, never itself
-    // simulated/stored in `state`. Tree edges are solved BEFORE
-    // extraConstraints every iteration (parent-before-child, guaranteed by
-    // parentJointIndex's own invariant - see DynamicChainDefinition.h),
-    // mirroring standard PBD practice of resolving the "primary" structure
-    // before "secondary" bracing constraints within the same relaxation
-    // pass; extraConstraints are fully order-independent among themselves
-    // (each is a simple, symmetric pairwise correction with no ordering
-    // dependency on any other extra constraint).
+    // The cone pass only runs when at least one joint has a finite limit.
+    bool coneActive = false;
+    if (options.bendLimitsEnabled) {
+        ComputeEffectiveBendLimits(definition, options, state.scratchLimits);
+        coneActive = std::any_of(state.scratchLimits.begin(), state.scratchLimits.end(), [](float limit) { return limit < kPi; });
+    }
+
+    // Rods and braces, repeated.
     const int iterations = static_cast<int>(definition.constraintIterations);
     for (int iter = 0; iter < iterations; ++iter) {
         VerletParticle anchor;
@@ -154,62 +235,91 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
             if (extra.jointIndexA < 0 || extra.jointIndexB < 0
                 || static_cast<std::size_t>(extra.jointIndexA) >= jointCount
                 || static_cast<std::size_t>(extra.jointIndexB) >= jointCount) {
-                continue; // Malformed/stale - never read/write out of bounds.
+                continue;
             }
             SolveDistanceConstraint(state.particles[static_cast<std::size_t>(extra.jointIndexA)],
                 state.particles[static_cast<std::size_t>(extra.jointIndexB)], extra.restLength);
         }
     }
 
-    // 4. Constrain-goal - exactly ONCE per call, AFTER structural relaxation
-    // has already converged the rod lengths this step (never inside the
-    // loop above) - this is what keeps `stiffness` and `constraintIterations`
-    // fully decoupled (see this file's own header comment, step 4).
+    // Soft pull toward the animated pose, once per step.
     for (std::size_t i = 0; i < jointCount; ++i) {
-        SolveGoalConstraint(state.particles[i], animatedJointWorldPositions[i], definition.jointSettings[i].stiffness);
+        SolveGoalConstraint(state.particles[i], animatedJointWorldPositions[i],
+            ScaleStepFraction(definition.jointSettings[i].stiffness, fixedDeltaTime, options.stiffnessMultiplier));
     }
 
-    // 5. Collision (task_manager/verlet-integration-9, PHASE2) - exactly
-    // ONCE per call, AFTER the goal constraint, so collision has the final
-    // say (structural, then soft/goal, then hard collision). Every joint
-    // particle is tested against EVERY collider in the shared,
-    // already-resolved list - order among colliders never matters (each
-    // SolveCollision() call is an independent, idempotent-if-already-outside
-    // projection), so a particle penetrating more than one collider
-    // simultaneously still ends up outside ALL of them by the end of this
-    // loop (each subsequent call only ever pushes it further from whichever
-    // surface it is CURRENTLY penetrating). task_manager/verlet-integration-10,
-    // PHASE1 - before actually solving, a Bullet-style symmetric group/mask
-    // AND-test (GroupsMayCollide(), above) filters out any joint/collider
-    // pair that isn't mutually "visible" to each other via PMX's own
-    // collision-group/layer rule ("use pmx defined rigid body layer rule
-    // with collision map").
-    if (definition.collisionEnabled) {
-        for (std::size_t i = 0; i < jointCount; ++i) {
-            const std::uint8_t jointGroup = definition.jointSettings[i].group;
-            const std::uint16_t jointMask = definition.jointSettings[i].collisionMask;
-            for (const Collider& collider : colliders) {
-                if (!GroupsMayCollide(jointGroup, jointMask, collider.group, collider.collisionMask)) {
-                    continue; // task_manager/verlet-integration-10, PHASE1 - PMX collision-group/layer rule.
+    // Cone first, so collision sees a legal pose.
+    if (coneActive) {
+        ApplyBendCone(definition, rootWorldPosition, animatedJointWorldPositions, state,
+            diagnostics != nullptr ? &diagnostics->bendClampedJoints : nullptr);
+    }
+
+    // Collision; welded joints cannot move, so they skip it.
+    if (definition.collisionEnabled && !colliders.empty()) {
+        state.scratchPushDistance.assign(jointCount, 0.0f);
+        const auto collideAll = [&](bool record) {
+            bool moved = false;
+            for (std::size_t i = 0; i < jointCount; ++i) {
+                if (coneActive && IsWeldedLimit(state.scratchLimits[i])) {
+                    continue;
                 }
-                SolveCollision(state.particles[i], collider);
+                const float pushed = CollideJoint(definition, i, options, colliders, state.particles[i]);
+                if (pushed > kPushEpsilon) {
+                    moved = true;
+                    if (record) {
+                        state.scratchPushDistance[i] = pushed;
+                    }
+                }
+            }
+            return moved;
+        };
+
+        // Alternate collision and cone until the pose is outside the colliders and inside the cones.
+        // The cone always runs last, so it keeps the final say when no pose satisfies both.
+        bool moved = collideAll(true);
+        int rounds = 0;
+        while (coneActive && moved) {
+            ApplyBendCone(definition, rootWorldPosition, animatedJointWorldPositions, state, nullptr);
+            if (++rounds >= kMaxCollisionConeRounds) {
+                break;
+            }
+            moved = collideAll(false);
+        }
+
+        // A push counts only if the joint is still outside after the cone; the raw count has every push.
+        for (std::size_t i = 0; i < jointCount; ++i) {
+            const float pushed = state.scratchPushDistance[i];
+            if (!(pushed > kPushEpsilon) || diagnostics == nullptr) {
+                continue;
+            }
+            ++diagnostics->collisionRawPushedParticles;
+            VerletParticle probe = state.particles[i];
+            if (!coneActive || CollideJoint(definition, i, options, colliders, probe) <= kRetainTolerance) {
+                ++diagnostics->collisionPushedParticles;
+                diagnostics->collisionPushDistanceSum += pushed;
             }
         }
     }
 
-    // 6. NaN/Inf guard (PHASE5, 3.3) - reset only the AFFECTED particle, not
-    // the whole chain, so one bad joint never permanently corrupts its
-    // siblings.
+    // A non-finite or runaway particle reseeds the whole chain.
+    const float maxPath = MaxRootPathLength(definition, state.scratchPathLength);
+    const float divergenceBound = std::max(maxPath * kDivergenceFactor, kMinDivergenceBound);
+    std::uint32_t diverged = 0;
     for (std::size_t i = 0; i < jointCount; ++i) {
-        VerletParticle& particle = state.particles[i];
-        if (!IsFinite(particle.position)) {
-            assert(false && "DynamicChainSolver: a particle's position became non-finite (NaN/Inf) - resetting to its animated target.");
-            particle.position = animatedJointWorldPositions[i];
-            particle.previousPosition = animatedJointWorldPositions[i];
+        const Vec3& position = state.particles[i].position;
+        if (!IsFinite(position) || !(Length(position - animatedJointWorldPositions[i]) <= divergenceBound)) {
+            ++diverged;
+        }
+    }
+    if (diverged > 0) {
+        SeedParticlesFromAnimatedPose(definition, animatedJointWorldPositions, state, jointCount);
+        ++state.reseedCount;
+        if (diagnostics != nullptr) {
+            ++diagnostics->reseeds;
+            diagnostics->nanGuardHits += diverged;
         }
     }
 
-    // 7. Advance the simulation clock.
     state.simulationTimeSeconds += fixedDeltaTime;
 }
 

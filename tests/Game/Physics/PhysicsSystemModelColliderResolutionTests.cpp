@@ -224,6 +224,11 @@ TEST(PhysicsSystemModelColliderResolutionTests, ColliderTracksItsBoneAsTheBoneAn
 {
     PhysicsSystem physicsSystem;
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3::Zero();
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
+    // The joint starts inside the collider; the bind-pose fit would ignore that collider.
+    physicsSystem.GetGlobalPhysicsSettings().useCollisionFit = false;
 
     const Vec3 jointBonePosition(2.0f, 0.0f, 0.0f);
     const Vec3 colliderBonePosition = jointBonePosition; // coincides with the joint's own bind position at bind pose.
@@ -333,6 +338,11 @@ TEST(PhysicsSystemModelColliderResolutionTests, ColliderRespectsItsOwnBindPoseLo
 {
     PhysicsSystem physicsSystem;
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3::Zero();
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
+    // The joint starts inside the collider; the bind-pose fit would ignore that collider.
+    physicsSystem.GetGlobalPhysicsSettings().useCollisionFit = false;
     const BoxColliderFixture fixture = BuildBoxColliderFixture();
 
     Registry registry;
@@ -355,6 +365,9 @@ TEST(PhysicsSystemModelColliderResolutionTests, NoChainWantingCollisionResolvesA
 {
     PhysicsSystem physicsSystem;
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3::Zero();
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
 
     const Vec3 jointBonePosition(2.0f, 0.0f, 0.0f);
     const Vec3 colliderBonePosition = jointBonePosition;
@@ -391,6 +404,11 @@ TEST(PhysicsSystemModelColliderResolutionTests, EntityWorldTransformRotationIsCo
 {
     PhysicsSystem physicsSystem;
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3::Zero();
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
+    // The joint starts inside the collider; the bind-pose fit would ignore that collider.
+    physicsSystem.GetGlobalPhysicsSettings().useCollisionFit = false;
     const BoxColliderFixture fixture = BuildBoxColliderFixture();
 
     Registry registry;

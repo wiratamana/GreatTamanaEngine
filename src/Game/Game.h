@@ -88,6 +88,12 @@ public:
     // or the path is not a valid *.gta animation. Never throws.
     bool PlayAnimationOnEntity(Entity targetEntity, const std::string& absoluteAnimationGtaPath);
 
+    // Evaluates poses and steps physics once, with no skin upload (needs no GPU). Used by the physics debug toolbox.
+    void StepSimulationHeadless(double deltaSeconds);
+
+    // Last frame of an already cached animation clip, or nullopt when the clip is not cached.
+    std::optional<std::uint32_t> TryGetClipLastFrame(const std::string& absoluteAnimationGtaPath) const;
+
     // Forwards to AnimationSystem's CPU/GPU skinning mode switch.
     void SetSkinningMode(AnimationSystem::SkinningMode mode) noexcept { m_animationSystem.SetSkinningMode(mode); }
     AnimationSystem::SkinningMode GetSkinningMode() const noexcept { return m_animationSystem.GetSkinningMode(); }

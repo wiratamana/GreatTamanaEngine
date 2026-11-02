@@ -21,6 +21,7 @@
 #include "../Core/Plugins/RenderFeatureCompositor.h"
 #include "../Application/EventTranslator.h"
 #include "../Application/EngineCommandDispatch.h"
+#include "../Application/PhysicsDebugCommandDispatch.h"
 #include "../Application/MemorySnapshotBuilder.h"
 #include "../Assets/AtomicFile.h" // SweepStaleTempFiles().
 #include "../Assets/AssetTypes.h"
@@ -435,7 +436,7 @@ EditorHost::EditorHost(const std::string& title, int width, int height, bool for
     , m_networkServer(&m_captureBridge, &m_commandBridge, &m_uiCommandBridge, &m_frameDebuggerCommandBridge,
           &m_assetImportCommandBridge, &s_editorLogQueryCapability, &m_renderGraphControlCommandBridge,
           &s_editorHotReloadDebugCapability, &s_editorProjectLifecycleCapability, &s_editorProjectLifecycleCapability,
-          &m_featureDebugCommandBridge, &m_profilerBridge)
+          &m_featureDebugCommandBridge, &m_profilerBridge, &m_physicsDebugCommandBridge)
 {
     m_renderer.LogValidationState();
 
@@ -694,6 +695,16 @@ int EditorHost::Run()
             const EngineCommandResult result = ExecuteEngineCommand(m_game, m_renderer, m_sceneIOCapability,
                 &s_editorHotReloadDebugCapability, m_core.GetSceneServicesDescriptorSet().LayoutHandle(), enginePending->request);
             FulfillOrLogDrop(m_commandBridge, enginePending->id, result, "Engine");
+        }
+
+        // Physics debug commands run on the main thread, at most one per frame.
+        if (const auto pdPending = m_physicsDebugCommandBridge.TryPeekPendingCommand()) {
+            GTE_PROFILE_SCOPE("EditorHost::ExecutePhysicsDebugCommand");
+            PhysicsDebugCommandResult pdResult = ExecutePhysicsDebugCommand(m_game, pdPending->request);
+            pdResult.state.timePaused = m_engineContext.time.IsPaused();
+            pdResult.state.timeFrozenThisFrame = m_engineContext.time.IsFrozenThisFrame();
+            pdResult.state.timeFrameCount = m_engineContext.time.FrameCount();
+            FulfillOrLogDrop(m_physicsDebugCommandBridge, pdPending->id, pdResult, "PhysicsDebug");
         }
 
         ServiceHizDemoMenuAction();

@@ -30,6 +30,7 @@
 | [HTTP routes](debugging/http-routes.md) | Capture, logs, scene, camera, editor, asset routes | Tool and script authors |
 | [HTTP routes (debug)](debugging/http-routes-debug.md) | Profiler, faults, feature debug, frame debugger, render graph, project | Tool and script authors |
 | [Profiling](debugging/profiling.md) | CPU and GPU profiler, how to read it | Performance work |
+| [Physics debug](debugging/physics-debug.md) | Measure, change and see skirt and hair physics over HTTP | Physics work, AI agents |
 | [Frame debugger](debugging/frame-debugger.md) | Freeze one frame, inspect draw events | Render debugging |
 | [Logging](debugging/logging.md) | Write and read log lines | Developers |
 

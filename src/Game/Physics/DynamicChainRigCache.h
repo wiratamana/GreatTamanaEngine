@@ -10,41 +10,29 @@
 
 namespace gte {
 
-// PhysicsSystem's own per-model cache of detected dynamic bone chains -
-// mirrors SkeletalRigCache.h's shape/convention exactly (a path-keyed
-// unordered_map, "load/register once, look up every frame afterwards"), but
-// owned entirely by PhysicsSystem, never by AnimationSystem (see
-// task_manager/verlet-integration-1/PHASE3_PIPELINE_INTEGRATION_AND_FIXED_TIMESTEP.md's
-// own v3 Revision Notice for why this deliberate small duplication of a
-// SkeletonData copy - once in AnimationSystem::m_rigCache, once here - is an
-// accepted trade for genuine system independence).
-// PHASE3 note: real chain detection now lives in
-// Physics/DynamicChainDetection.h (task_manager/verlet-integration-1's own
-// PHASE4, later fully rewritten to traverse the real RigidBody/Joint graph by
-// task_manager/verlet-integration-6 - see that campaign's
-// PHASE0_MASTER_STRATEGY.md). Register()/TryGet()/TryGetMutable() themselves
-// are unchanged by that rewrite - only ModelEntry's own shape gained a new
-// `diagnostics` field (below) to carry DetectDynamicChains()'s diagnostic
-// output alongside its chains.
+// Names and PMX limits of one chain joint, kept for the physics debug toolbox.
+struct JointDebugInfo {
+    std::string rigidBodyName;
+    std::string pmxJointName;
+    float pmxRotLowerRad[3] = { 0.0f, 0.0f, 0.0f };
+    float pmxRotUpperRad[3] = { 0.0f, 0.0f, 0.0f };
+    bool pmxJointFound = false;
+};
+
+// Per-model cache of detected dynamic chains, owned by PhysicsSystem and keyed by the .gta path.
 class DynamicChainRigCache {
 public:
     struct ModelEntry {
         std::vector<DynamicChainDefinition> chains;
+        // Private copy of the model skeleton.
         SkeletonData skeleton;
-        // task_manager/verlet-integration-6, Phase 3/4 - carried straight from
-        // DetectDynamicChains()'s own DynamicChainDetectionResult::diagnostics,
-        // unmodified - PHASE5's Editor visualization reads
-        // diagnostics.orphanedDynamicBoneIndices to render a non-simulated rigid
-        // body distinctly (see this campaign's PHASE0_MASTER_STRATEGY.md).
         DynamicChainDetectionDiagnostics diagnostics;
-        // task_manager/verlet-integration-9, PHASE3 - every Static rigid-body
-        // collider detected for this model (DetectModelColliders(),
-        // Physics/ModelColliderDetection.h), in LOCAL/bind-pose-relative form -
-        // shared read-only by every chain belonging to this model whose own
-        // DynamicChainDefinition::collisionEnabled is true (see
-        // Game/Physics/PhysicsSystem.cpp, PHASE4, which resolves this list to
-        // WORLD space fresh every frame before stepping any chain).
+        // Static-body colliders in bind-pose-relative form, shared by every chain of the model.
         std::vector<ModelColliderDefinition> colliders;
+        // One vector per chain, index-aligned with that chain's joints.
+        std::vector<std::vector<JointDebugInfo>> jointDebugInfo;
+        // Rigid body name per collider, index-aligned with `colliders`.
+        std::vector<std::string> colliderRigidBodyNames;
     };
 
     void Register(const std::string& absoluteGtaPath, ModelEntry entry)
@@ -58,13 +46,7 @@ public:
         return found != m_cache.end() ? &found->second : nullptr;
     }
 
-    // Mutable counterpart of TryGet() above - the ONE sanctioned way to
-    // live-edit a cached chain's DynamicJointSettings (damping/stiffness/
-    // mass) from the Editor's Inspector "Dynamic Chain Physics" section
-    // (Panels/InspectorPanel.cpp, PHASE4 3.5) - edits apply to every entity
-    // spawned from that same model path (per-INSTANCE overrides are
-    // explicitly out of scope for this phase - see PHASE4's own "What We
-    // Will NOT Do").
+    // Live edits of cached joint settings apply to every entity spawned from the same model path.
     ModelEntry* TryGetMutable(const std::string& absoluteGtaPath)
     {
         const auto found = m_cache.find(absoluteGtaPath);

@@ -34,6 +34,7 @@ constexpr auto kRaw = std::to_array<Entry>({
     { "EditorHost::ExecuteEditorUiCommand", "Running an editor command", "Runs one editor command that came in through the HTTP debug server.", "", LoadingAndTools, false },
     { "EditorHost::ExecuteFeatureDebugCommand", "Changing a feature setting", "Applies a setting change to a render feature.", "", LoadingAndTools, false },
     { "EditorHost::ExecuteFrameDebuggerCommand", "Frame debugger command", "Handles one request of the frame debugger.", "", LoadingAndTools, false },
+    { "EditorHost::ExecutePhysicsDebugCommand", "Physics debug command", "Runs one physics debug command that came in through the HTTP debug server.", "", LoadingAndTools, false },
     { "EditorHost::ExecuteHizDemoMenuAction", "Hi-Z demo menu action", "Opens or closes the Hi-Z demo scene.", "", LoadingAndTools, false },
     { "EditorHost::ExecuteProjectLifecycleLoad", "Loading a project", "Loads the code of a game project into the editor.", "", LoadingAndTools, false },
     { "EditorHost::ExecuteRenderGraphControlCommand", "Render graph command", "Switches a render pass or feature on or off.", "", LoadingAndTools, false },
@@ -43,6 +44,7 @@ constexpr auto kRaw = std::to_array<Entry>({
     { "Game::Update", "Game update", "Runs one step of the simulation: animation, physics and game systems.", "", Simulation, false },
     { "AnimationSystem::EvaluatePoses", "Animation poses", "Works out where every bone of every animated model is this frame.", "", Simulation, false },
     { "PhysicsSystem::Update", "Physics", "Moves physical objects and chains and handles collisions.", "", Simulation, false },
+    { "PhysicsDebug.Run", "Physics debug run", "Steps animation and physics many times for one measured test run. The editor is frozen while this runs.", "", Simulation, false },
     { "AnimationSystem::SkinAndUpload", "Animation skinning and upload", "Bends animated meshes to their pose and sends the new vertices to the graphics card.", "", Simulation, false },
 
     // Rendering, CPU side.

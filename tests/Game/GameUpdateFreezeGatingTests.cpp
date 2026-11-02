@@ -129,6 +129,9 @@ struct GameUpdateFreezeGatingFixture {
         pureFkPose = pose.pose;
 
         physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3(0.0f, -9.8f, 0.0f);
+        // Free joints and raw particle output: default PMX limits would weld the chain.
+        physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+        physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
     }
 
     std::vector<BoneLocalOffset> CurrentPose()

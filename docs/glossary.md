@@ -1,6 +1,6 @@
 # Glossary
 > One line per term used in the docs and the code. For anyone who meets a new word and wants the short answer.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-11-02
 
 ## TL;DR
 - Terms are in A to Z order. The last column links to the doc that owns the term.
@@ -10,6 +10,7 @@
 ## Terms
 | Term | Meaning | Owner doc |
 |---|---|---|
+| Bend limit | The largest angle a chain joint may bend away from the animated direction. It comes from the PMX joint rotation limits and adds up from the anchor down. | [Animation and physics](architecture/animation-physics.md) |
 | Blackboard | Per-frame key and value store. Passes publish data to it, later passes read it. Cleared every frame. | [Render graph](architecture/render-graph.md) |
 | Bridge | A one-slot mailbox between an HTTP thread and the main thread. A second request gets `503`. | [HTTP server](architecture/http-server.md) |
 | Browser guard | Check on a few POST routes. It answers `403` to requests that look like they come from a web page. | [HTTP server](architecture/http-server.md) |
@@ -55,12 +56,14 @@
 | SDSM | Sample Distribution Shadow Maps. Shadow cascades fit the depth range that is really visible. | [Shadow](reference/render-features/shadow.md) |
 | Spike | A frame that took much longer than normal. `/profiler/spikes` lists them. | [Profiling](debugging/profiling.md) |
 | Stage | Where a feature runs in a frame: `PreOpaque`, `Opaque`, `PostOpaque` or `PostComposite`. | [Render features](reference/render-features/README.md) |
+| Step fraction | A number 0..1: the part of the velocity (damping) or of the pull to the animated pose (stiffness) that is removed per 1/60 s step. The solver rescales it for the real step length. | [Animation and physics](architecture/animation-physics.md) |
 | Tier (project) | State of a project folder: `NotAProject`, `NotBuildable`, `NotCompiled`, `Compiled`, `AlreadyLoaded`. | [Project assembly](guides/project-assembly.md) |
 | Tone mapping | The last pass. It turns linear HDR color into display values 0..1. | [Tone mapping](reference/render-features/tone-mapping.md) |
 | Toggle | A runtime on/off switch for a pass or feature. Kept in memory. A restart resets it. | [HTTP cheat sheet](debugging/http-cheat-sheet.md) |
 | Verdict | Profiler summary of what limits the frame: `cpu_limited`, `gpu_limited`, `present_limited`, `stalled`, `unreliable`. | [Profiling](debugging/profiling.md) |
 | Verlet chain | A bone chain moved by Verlet integration. Used for hair and skirts. Not a rigid-body engine. | [Animation and physics](architecture/animation-physics.md) |
 | View background | A sky or backdrop drawn by a fullscreen pass after the opaque scene. The Frame Debugger can replay it. | [Feature kit](reference/feature-kit.md) |
+| Weld | A chain joint with a bend limit of 0 on the anchor. It stays exactly on the animated pose. `/physics_debug/run` reports them as `welded_root_children`. | [Physics debug](debugging/physics-debug.md) |
 
 ## Related
 - [Documentation index](README.md) · [Troubleshooting](troubleshooting.md)

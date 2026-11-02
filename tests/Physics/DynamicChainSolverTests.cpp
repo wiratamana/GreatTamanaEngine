@@ -1,9 +1,4 @@
-// Unit tests for StepDynamicChain (src/Physics/DynamicChainSolver.h) - the
-// chain-level orchestration that advances one dynamic bone chain by exactly
-// one fixed timestep of Verlet integration + structural + goal constraints
-// (verlet-integration-1 campaign, PHASE2_BONE_CHAIN_PHYSICS_BRIDGE.md). No
-// ECS/GPU/Renderer/SkeletonData involved - StepDynamicChain operates purely
-// on plain Vec3 positions.
+// Unit tests for StepDynamicChain() on plain Vec3 positions (no ECS, GPU or skeleton).
 
 #include "Physics/DynamicChainSolver.h"
 
@@ -392,18 +387,7 @@ TEST(DynamicChainSolverTests, ImplausibleRootTeleportReseedsInsteadOfWhipping)
     }
 }
 
-// (h) PHASE5, 3.3 - NaN/Inf guard. The RESET-to-finite-target logic runs
-// UNCONDITIONALLY (regardless of NDEBUG); the diagnostic assert() that
-// accompanies it, however, follows this codebase's own established
-// convention (see RenderGraphBuilderTests.cpp's "Name validation guard"
-// section) - a release build (NDEBUG defined) compiles assert() down to a
-// true no-op, so ONLY in that configuration can this call be observed
-// returning normally with a finite, sane position; in every OTHER
-// configuration (assert() live), the guard's own assert(false) is expected
-// to abort the process the instant it detects the poisoned NaN - verified
-// here as a death test, mirroring this codebase's own precedent exactly.
-#ifdef NDEBUG
-
+// A NaN particle is reset to a finite position and counted in the diagnostics.
 TEST(DynamicChainSolverTests, NanPositionIsResetToFiniteSanePosition)
 {
     DynamicChainDefinition definition = BuildThreeJointChainDefinition(/*stiffness=*/0.3f, /*damping=*/0.1f);
@@ -423,42 +407,18 @@ TEST(DynamicChainSolverTests, NanPositionIsResetToFiniteSanePosition)
     const std::vector<Vec3> targets = { Vec3(1.0f, 0.0f, 0.0f), Vec3(2.0f, 0.0f, 0.0f), Vec3(3.0f, 0.0f, 0.0f) };
     const WindSettings noWind{};
 
-    StepDynamicChain(definition, root, targets, state, 1.0f / 60.0f, Vec3::Zero(), noWind);
+    StepDiagnostics diagnostics;
+    StepOptions options;
+    options.diagnostics = &diagnostics;
+    StepDynamicChain(definition, root, targets, state, 1.0f / 60.0f, Vec3::Zero(), noWind, {}, options);
 
     for (const VerletParticle& particle : state.particles) {
         ASSERT_TRUE(std::isfinite(particle.position.x));
         ASSERT_TRUE(std::isfinite(particle.position.y));
         ASSERT_TRUE(std::isfinite(particle.position.z));
     }
+    EXPECT_GE(diagnostics.nanGuardHits, 1u);
 }
-
-#else
-
-TEST(DynamicChainSolverDeathTest, NanPositionTripsTheDiagnosticAssert)
-{
-    DynamicChainDefinition definition = BuildThreeJointChainDefinition(/*stiffness=*/0.3f, /*damping=*/0.1f);
-
-    DynamicChainRuntimeState state;
-    state.initialized = true;
-    state.particles.resize(3);
-    const float nan = std::nanf("");
-    state.particles[0].position = Vec3(nan, nan, nan);
-    state.particles[0].previousPosition = Vec3(nan, nan, nan);
-    state.particles[1].position = Vec3(-3.0f, 2.0f, 1.0f);
-    state.particles[1].previousPosition = Vec3(-3.0f, 2.0f, 1.0f);
-    state.particles[2].position = Vec3(0.0f, -8.0f, 4.0f);
-    state.particles[2].previousPosition = Vec3(0.0f, -8.0f, 4.0f);
-
-    const Vec3 root(0.0f, 0.0f, 0.0f);
-    const std::vector<Vec3> targets = { Vec3(1.0f, 0.0f, 0.0f), Vec3(2.0f, 0.0f, 0.0f), Vec3(3.0f, 0.0f, 0.0f) };
-    const WindSettings noWind{};
-
-    EXPECT_DEATH(
-        { StepDynamicChain(definition, root, targets, state, 1.0f / 60.0f, Vec3::Zero(), noWind); },
-        "");
-}
-
-#endif
 
 // (i) task_manager/verlet-integration-6, Phase 1 - a 3-joint linear chain
 // plus one ExtraStructuralConstraint{0, 2, restLength} (bracing joint 0

@@ -17,6 +17,7 @@
 #include "Assets/RigFile.h"
 
 #include <gtest/gtest.h>
+#include <cmath>
 #include <filesystem>
 
 namespace gte {
@@ -75,12 +76,7 @@ void WriteDetectableSkinnedMeshGtaFile(const std::filesystem::path& path, std::i
         body.boneIndex = boneIndex;
         body.motionType = RigidBodyMotionType::Dynamic;
         body.mass = 1.0f;
-        // DetectDynamicChains() seeds DynamicJointSettings::damping straight
-        // from RigidBody::linearDamping (see DynamicChainDetection.cpp) - set
-        // to match DynamicJointSettings{}'s own default (0.4f) so this test's
-        // own "before any save, this joint has pure defaults" sanity check
-        // below is actually true, rather than accidentally comparing against
-        // a stiffness/mass-only default while damping was really seeded as 0.
+        // Detection maps this PMX damping to the joint's per-step damping.
         body.linearDamping = 0.4f;
         rig.physics.rigidBodies.push_back(body);
     }
@@ -162,7 +158,8 @@ TEST(PhysicsSystemJointOverrideEndToEndTest, EditedJointPhysicsSurvivesSaveAndRe
     for (const DynamicChainDefinition& chain : firstModel->chains) {
         for (std::size_t i = 0; i < chain.jointBoneIndices.size(); ++i) {
             if (chain.jointBoneIndices[i] == jointBoneIndex) {
-                EXPECT_FLOAT_EQ(chain.jointSettings[i].damping, defaults.damping);
+                // Detection maps PMX linear damping d to the per-step fraction 1 - exp(-d / 60).
+                EXPECT_NEAR(chain.jointSettings[i].damping, 1.0f - std::exp(-0.4f / 60.0f), 1e-6f);
                 foundBeforeSave = true;
             }
         }

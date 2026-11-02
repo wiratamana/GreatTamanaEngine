@@ -20,6 +20,7 @@
 #include "../Editor/RotationFieldProbe.h" // Rotation field report of the GET /inspector_state route.
 #include "../Editor/HierarchyStateReport.h" // Report structs of the GET /hierarchy_state and POST /hierarchy_action routes.
 #include "../Editor/SceneCameraControl.h" // Report structs of the viewer and Scene camera routes.
+#include "../Physics/PhysicsDebugReport.h" // Report structs of the /physics_debug/* routes.
 #include "../Renderer/RenderGraph/RenderGraphMetadata.h" // Type of the GET /render_graph body.
 
 namespace gte::Network {
@@ -1338,5 +1339,167 @@ std::string BuildSceneCameraStateJson(const SceneCameraReport& report);
 
 // {"success":true,"selected":"<entity name>"}
 std::string BuildSceneCameraSelectResponseJson(const std::string& entityName);
+
+// --- /physics_debug/* routes. Pure parsing and JSON building; the route table talks to the bridge.
+
+// Query pairs as httplib hands them over (a repeated key stays repeated).
+using PhysicsDebugQueryParams = std::vector<std::pair<std::string, std::string>>;
+
+// Limits shared by the parsers.
+inline constexpr std::uint32_t kPhysicsDebugMaxRunFrames = 3600;
+inline constexpr std::uint32_t kPhysicsDebugMaxWindowFrames = 600;
+inline constexpr std::uint32_t kPhysicsDebugMaxJointRows = 2000;
+
+// GET ...?entity=N (state, reset, colliders). "entity" is required and no other key is allowed.
+struct ParsedPhysicsDebugEntityQuery {
+    bool valid = false;
+    std::string errorMessage;
+    std::string entity;
+};
+ParsedPhysicsDebugEntityQuery ParsePhysicsDebugEntityQuery(const PhysicsDebugQueryParams& params);
+
+// GET /physics_debug/set: at least one key besides the optional "entity". Key names and ranges are checked later.
+struct ParsedPhysicsDebugSetQuery {
+    bool valid = false;
+    std::string errorMessage;
+    std::string errorKey;
+    std::string entity;
+    std::vector<std::pair<std::string, std::string>> pairs;
+};
+ParsedPhysicsDebugSetQuery ParsePhysicsDebugSetQuery(const PhysicsDebugQueryParams& params);
+
+// GET /physics_debug/preset?name=default|legacy.
+struct ParsedPhysicsDebugPresetQuery {
+    bool valid = false;
+    std::string errorMessage;
+    std::string name;
+};
+ParsedPhysicsDebugPresetQuery ParsePhysicsDebugPresetQuery(const PhysicsDebugQueryParams& params);
+
+// POST /physics_debug/play body: {"entity","animation_gta_path","frame"?,"speed"?,"loop"?}.
+struct ParsedPhysicsDebugPlayRequest {
+    bool valid = false;
+    std::string errorMessage;
+    std::string entity;
+    std::string animationGtaPath;
+    bool hasFrame = false;
+    float frame = 0.0f;
+    bool hasSpeed = false;
+    float speed = 1.0f;
+    bool hasLoop = false;
+    bool loop = true;
+};
+ParsedPhysicsDebugPlayRequest ParsePhysicsDebugPlayRequest(const std::string& jsonBody);
+
+// GET /physics_debug/seek?entity=N&frame=F[&reset_physics=true|false].
+struct ParsedPhysicsDebugSeekQuery {
+    bool valid = false;
+    std::string errorMessage;
+    std::string entity;
+    float frame = 0.0f;
+    bool resetPhysics = true;
+};
+ParsedPhysicsDebugSeekQuery ParsePhysicsDebugSeekQuery(const PhysicsDebugQueryParams& params);
+
+// POST /physics_debug/run body: {"entity","frames","render_hz","start_frame"?,"warmup_frames"?,"restore"?,
+// "settings"?,"trace"?:{"bones","every"},"snapshot_frames"?}.
+struct ParsedPhysicsDebugRunRequest {
+    bool valid = false;
+    std::string errorMessage;
+    PhysicsRunRequest run;
+};
+ParsedPhysicsDebugRunRequest ParsePhysicsDebugRunRequest(const std::string& jsonBody);
+
+// GET /physics_debug/capture?enabled=true|false[&window=N][&entity=N].
+struct ParsedPhysicsDebugCaptureQuery {
+    bool valid = false;
+    std::string errorMessage;
+    bool enabled = false;
+    std::uint32_t windowFrames = 120;
+    std::string entity;
+};
+ParsedPhysicsDebugCaptureQuery ParsePhysicsDebugCaptureQuery(const PhysicsDebugQueryParams& params);
+
+// GET /physics_debug/metrics?entity=N[&window=N][&group=KEY].
+struct ParsedPhysicsDebugMetricsQuery {
+    bool valid = false;
+    std::string errorMessage;
+    std::string entity;
+    std::uint32_t windowFrames = 0; // 0 = every recorded frame.
+    std::string group;
+};
+ParsedPhysicsDebugMetricsQuery ParsePhysicsDebugMetricsQuery(const PhysicsDebugQueryParams& params);
+
+// GET /physics_debug/joints?entity=N[&chain=I][&group=KEY][&first=0][&count=200].
+struct ParsedPhysicsDebugJointsQuery {
+    bool valid = false;
+    std::string errorMessage;
+    std::string entity;
+    std::int32_t chain = -1;
+    std::string group;
+    std::uint32_t first = 0;
+    std::uint32_t count = 200;
+};
+ParsedPhysicsDebugJointsQuery ParsePhysicsDebugJointsQuery(const PhysicsDebugQueryParams& params);
+
+// GET /physics_debug/image?entity=N[&view][&mode][&width][&height][&colliders][&joints][&limits][&highlight][&format].
+// `format` is validated as a known key only; the route picks the reply shape itself.
+struct ParsedPhysicsDebugImageQuery {
+    bool valid = false;
+    std::string errorMessage;
+    PhysicsDebugImageRequest request;
+};
+ParsedPhysicsDebugImageQuery ParsePhysicsDebugImageQuery(const PhysicsDebugQueryParams& params);
+
+// {"entities":[...]} of GET /physics_debug/list.
+std::string BuildPhysicsDebugListResponseJson(const PhysicsDebugListReport& report);
+
+// Body of GET /physics_debug/state.
+std::string BuildPhysicsDebugStateResponseJson(const PhysicsDebugStateReport& report);
+
+// {"success":true,"settings":{key:value}}. "true"/"false" and numbers are written as JSON bools and numbers.
+std::string BuildPhysicsDebugSettingsResponseJson(const std::vector<std::pair<std::string, std::string>>& settings);
+
+// {"success":true,"entity":"...","animator":{...}} of play and seek.
+std::string BuildPhysicsDebugPlayResponseJson(const std::string& entity, const PhysicsAnimatorReport& animator);
+
+// {"success":true}
+std::string BuildPhysicsDebugSuccessResponseJson();
+
+// Body of POST /physics_debug/run.
+std::string BuildPhysicsDebugRunResponseJson(const std::string& entity, const PhysicsRunReport& report);
+
+// Body of GET /physics_debug/metrics: the run body without settings, trace and snapshots.
+std::string BuildPhysicsDebugMetricsResponseJson(const std::string& entity, const PhysicsMetricsReport& metrics);
+
+// Body of GET /physics_debug/joints.
+std::string BuildPhysicsDebugJointsResponseJson(const PhysicsJointsReport& report);
+
+// Body of GET /physics_debug/colliders.
+std::string BuildPhysicsDebugCollidersResponseJson(const PhysicsCollidersReport& report);
+
+// {"success":true,"enabled","window_frames","frames_recorded"} of GET /physics_debug/capture.
+std::string BuildPhysicsDebugCaptureResponseJson(const PhysicsCaptureStatus& status);
+
+// Projection facts of one rendered physics image.
+struct PhysicsDebugImageViewInfo {
+    std::string name;
+    Float3 right{};
+    Float3 up{};
+    Float3 forward{};
+    Float3 boundsMin{};
+    Float3 boundsMax{};
+    float pixelsPerUnit = 0.0f;
+};
+
+// format=json reply of GET /physics_debug/image: the capture body plus "view", "legend" and "highlighted_bones".
+std::string BuildPhysicsDebugImageJsonBody(int width, int height, const std::string& base64Png,
+    const PhysicsDebugImageViewInfo& view, const std::vector<std::string>& highlightedBones);
+
+// Messages of the bridge outcomes that are not a normal result.
+inline constexpr const char* kPhysicsDebugTimeoutMessage =
+    "timed out; the change may still apply: read state before you retry";
+inline constexpr const char* kPhysicsDebugBusyMessage = "another physics debug command is already in progress";
+inline constexpr const char* kPhysicsDebugNoBridgeMessage = "physics debug command bridge not available";
 
 } // namespace gte::Network

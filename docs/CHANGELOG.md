@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [MMD-style chain physics and the physics debug toolbox](#mmd-style-chain-physics-and-the-physics-debug-toolbox-branch-fixsmall-fixes-2026-11-02) | `fix/small-fixes` | 2026-11-02 |
 | [Readable profiler](#readable-profiler-branch-fixsmall-fixes-2026-10-31) | `fix/small-fixes` | 2026-10-31 |
 | [GPU culling: two-phase Hi-Z, textured clusters, cheaper fixed cost](#gpu-culling-two-phase-hi-z-textured-clusters-cheaper-fixed-cost-branch-featuregpu-cull-impl-2026-10-28) | `feature/gpu-cull-impl` | 2026-10-28 |
 | [Culling mode and CPU path culling](#culling-mode-and-cpu-path-culling-branch-featuregpu-cull-impl-2026-10-28) | `feature/gpu-cull-impl` | 2026-10-28 |
@@ -35,6 +36,19 @@
 | [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+
+## MMD-style chain physics and the physics debug toolbox (branch `fix/small-fixes`, 2026-11-02)
+
+- **PMX limits are used.** Each chain joint gets a bend limit from the PMX joint to its tree parent. The solver keeps each segment inside a cone
+  around the animated direction. The half angle adds up from the anchor. A limit of 0 on a root child is an exact weld.
+- **Time units.** Damping and stiffness are fractions per 1/60 s and are rescaled to the real step (`ScaleStepFraction`). PMX damping maps
+  once with `1 - exp(-d * rate / 60)`. Defaults are now gravity 98, fixed step 1/120 s, 10 steps per frame.
+- **Collision fit.** A joint that starts inside a collider in the bind pose ignores that collider. A joint near one keeps half of its largest free radius.
+- **Interpolated output.** The written pose is interpolated in anchor-local space between display knots (the mean of two fixed steps). Render rate no longer
+  changes the cloth jitter.
+- **Physics debug toolbox.** `/physics_debug/*` lists, plays, seeks, resets, runs a headless scenario with statistics per joint group,
+  records the live frames, lists joints and colliders, and draws the chains as a PNG (`/physics_debug/image`). Every new behavior has a
+  runtime switch and a `legacy` preset. See [Physics debug](debugging/physics-debug.md). Script: `tools/physics_debug/run_scenario.ps1`.
 
 ## Readable profiler (branch `fix/small-fixes`, 2026-10-31)
 

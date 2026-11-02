@@ -196,6 +196,8 @@ TEST(PhysicsSystemTests, RegisteredDynamicChainVisiblyDivergesFromPureFkPoseUnde
     const std::vector<BoneLocalOffset> pureFkPose = pose.pose;
 
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3(0.0f, -9.8f, 0.0f);
+    // Default PMX joints (all limits 0) weld the chain to the animated pose; free it so gravity can act.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
 
     for (int i = 0; i < 30; ++i) {
         physicsSystem.Update(registry, 1.0 / 60.0);

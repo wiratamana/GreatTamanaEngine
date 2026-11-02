@@ -145,6 +145,9 @@ TEST(PhysicsSystemFreezeAndCulpritFTests, FrozenDynamicChainRigStopsIntegratingB
     PhysicsSystem physicsSystem;
     Registry registry;
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3(0.0f, -9.8f, 0.0f);
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
 
     const SkinnedMeshData data = BuildSyntheticChainFixture();
     const Entity frozenEntity
@@ -250,6 +253,9 @@ TEST(PhysicsSystemFreezeAndCulpritFTests, FrozenDynamicChainRigStillRidesAlongRi
     PhysicsSystem physicsSystem;
     Registry registry;
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3(0.0f, -9.8f, 0.0f);
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
 
     const SkinnedMeshData data = BuildSyntheticChainFixture();
     const Entity entity = RegisterAttachAndSeedPose(physicsSystem, registry, "FreezeRideAlongModel.gta", data);
@@ -334,6 +340,9 @@ TEST(PhysicsSystemFreezeAndCulpritFTests, UnfreezingResetsAccumulatedSecondsSoNo
     PhysicsSystem physicsSystem;
     Registry registry;
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3(0.0f, -9.8f, 0.0f);
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
 
     const SkinnedMeshData data = BuildSyntheticChainFixture();
     const Entity entity = RegisterAttachAndSeedPose(physicsSystem, registry, "UnfreezeModel.gta", data);
@@ -422,6 +431,9 @@ TEST(PhysicsSystemFreezeAndCulpritFTests,
     ASSERT_TRUE(registry.HasComponent<DynamicChainRig>(entity));
 
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3(0.0f, -9.8f, 0.0f);
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
 
     // Simulate a 240 Hz display - the fixed physics timestep (default
     // 1/60) legitimately only crosses on roughly 1 in 4 of these frames,
@@ -502,6 +514,9 @@ TEST(PhysicsSystemFreezeAndCulpritFTests, AnAnimatedEntityWithADynamicChainRigAl
     ASSERT_TRUE(registry.HasComponent<DynamicChainRig>(entity));
 
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3(0.0f, -9.8f, 0.0f);
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
 
     constexpr double kTinyDeltaSeconds = 1.0 / 240.0;
 

@@ -1,15 +1,5 @@
-// Unit tests for task_manager/verlet-integration-7's Phase 5
-// (PHASE5_IDLE_PHYSICS_TUNING_AND_SETTLING_REGRESSION.md, Culprit E) - proves
-// the RE-TUNED default DynamicJointSettings (Physics/DynamicChainDefinition.h)
-// and GlobalPhysicsSettings (Physics/GlobalPhysicsSettings.h) produce a
-// believable, STABLE idle result for a chain that is NEVER animated: a
-// perfectly still (bind-pose target held perfectly constant, no root motion)
-// chain must visibly sag under gravity (not look "dead"/perfectly rigid),
-// must genuinely settle into a steady shape within a bounded, short amount of
-// simulated time (not oscillate/jitter forever), and must never diverge/
-// explode/NaN. Pure Tier 1 - calls StepDynamicChain() directly (no ECS/
-// AnimationSystem/PhysicsSystem at all), mirroring
-// Physics/DynamicChainSolverTests.cpp's own existing convention.
+// Idle settling of a never-animated chain under the default physics settings.
+// Calls StepDynamicChain() directly (no ECS).
 
 #include "Physics/DynamicChainSolver.h"
 #include "Physics/GlobalPhysicsSettings.h"
@@ -24,14 +14,11 @@
 namespace gte {
 namespace {
 
-// A linear chain of `jointCount` joints, every joint using the real,
-// UNTOUCHED default DynamicJointSettings{} - never hand-typed/overridden
-// literals - so this test can never silently drift out of sync with the
-// actual production defaults it is meant to be tuning/guarding.
+// A linear chain of `jointCount` joints with the untouched default DynamicJointSettings.
 DynamicChainDefinition BuildIdleChainDefinition(std::size_t jointCount, float restLengthPerJoint)
 {
     DynamicChainDefinition definition;
-    definition.rootBoneIndex = -1; // unused by StepDynamicChain itself - only jointBoneIndices' SIZE matters here.
+    definition.rootBoneIndex = -1;
     definition.jointBoneIndices.resize(jointCount);
     definition.parentJointIndex = DynamicChainDefinition::MakeLinearParentIndices(jointCount);
     definition.jointSettings.assign(jointCount, DynamicJointSettings{});
@@ -41,19 +28,13 @@ DynamicChainDefinition BuildIdleChainDefinition(std::size_t jointCount, float re
     }
     definition.gravityScale = 1.0f;
     definition.windScale = 1.0f;
-    // DynamicChainDefinition's own default constraintIterations (4) is left
-    // untouched too - this phase never touches that field.
     return definition;
 }
 
 } // namespace
 
-// (a) The headline scenario: a perfectly still, NEVER-animated T-pose chain,
-// stepped for 10 simulated seconds (600 steps @ 1/60s) against the real,
-// unmodified GlobalPhysicsSettings{} defaults. Extends PERPENDICULAR to
-// gravity (along +X, gravity along -Y) - a chain colinear WITH gravity would
-// only ever compress/stretch, never genuinely swing/sag sideways, mirroring
-// PhysicsSystemTests.cpp's own fixture rationale.
+// A still T-pose chain under the default global settings: sags, settles, never diverges.
+// The chain lies along +X, perpendicular to gravity, so it must swing down.
 TEST(DynamicChainSolverIdleSettlingTests,
     PerfectlyStillTPoseChainSagsSettlesAndNeverDivergesUnderDefaultGlobalPhysicsSettings)
 {
@@ -69,14 +50,14 @@ TEST(DynamicChainSolverIdleSettlingTests,
         bindPositions[i] = Vec3(static_cast<float>(i + 1) * kRestLengthPerJoint, 0.0f, 0.0f);
     }
 
-    const GlobalPhysicsSettings globalSettings{}; // real, untouched defaults - never hand-typed literals.
+    const GlobalPhysicsSettings globalSettings{}; // untouched defaults.
     DynamicChainRuntimeState state;
 
-    constexpr int kTotalSteps = 600;         // 10 simulated seconds at the default 1/60s fixed timestep.
-    constexpr int kSettleDeadlineStep = 300; // half the run - "genuinely settles" must happen well before this.
-    const float deadEpsilon = 0.01f * totalRestLength;  // "not dead": must sag more than 1% of total rest length.
-    const float explodedLimit = 1.5f * totalRestLength; // "not exploded": never farther from root than this.
-    constexpr float kConvergenceEpsilon = 0.01f;         // per-step tip delta must drop below and STAY below this.
+    const int kTotalSteps = static_cast<int>(10.0f / globalSettings.fixedTimestepSeconds + 0.5f); // 10 simulated seconds.
+    const int kSettleDeadlineStep = kTotalSteps / 2;
+    const float deadEpsilon = 0.01f * totalRestLength;  // must sag more than 1% of the total rest length.
+    const float explodedLimit = 1.5f * totalRestLength; // never farther from the root than this.
+    constexpr float kConvergenceEpsilon = 0.01f;         // per-step tip delta must drop below and stay below this.
 
     float maxSagFromBind = 0.0f;
     std::vector<float> perStepTipDelta(kTotalSteps, 0.0f);
@@ -107,25 +88,16 @@ TEST(DynamicChainSolverIdleSettlingTests,
         previousTip = tip;
     }
 
-    EXPECT_GT(maxSagFromBind, deadEpsilon)
-        << "Chain never sagged more than 1% of its own total rest length under gravity - looks \"dead\"/rigid, "
-           "exactly the complaint this campaign exists to fix.";
+    EXPECT_GT(maxSagFromBind, deadEpsilon) << "Chain never sagged more than 1% of its total rest length.";
 
-    // "Genuinely settles": from the deadline step onward, the tip's own
-    // per-step motion must never re-exceed the convergence epsilon - proves
-    // it reaches and HOLDS a steady-state shape rather than oscillating/
-    // jittering forever.
+    // From the deadline on, the tip must stay below the convergence epsilon (steady state, no endless jitter).
     for (int step = kSettleDeadlineStep; step < kTotalSteps; ++step) {
         EXPECT_LT(perStepTipDelta[step], kConvergenceEpsilon)
-            << "step " << step << ": chain was still moving measurably after half the run - never settled.";
+            << "step " << step << ": chain was still moving measurably after half the run.";
     }
 }
 
-// (b) The same idle scenario generalizes to a DIFFERENT joint count and
-// NON-UNIFORM, sub-unit rest lengths (a 4-joint chain with varied segment
-// lengths, closer to a real imported hair/skirt chain's own bind-pose
-// geometry than the uniform 1.0-per-joint fixture above) - proves the tuned
-// defaults were not accidentally overfit to one specific chain shape.
+// The same idle scenario with another joint count and non-uniform, sub-unit rest lengths.
 TEST(DynamicChainSolverIdleSettlingTests, GeneralizesToADifferentJointCountAndNonUniformRestLengths)
 {
     const std::vector<float> restLengths = { 0.6f, 0.8f, 0.5f, 0.7f };
@@ -158,8 +130,8 @@ TEST(DynamicChainSolverIdleSettlingTests, GeneralizesToADifferentJointCountAndNo
     const GlobalPhysicsSettings globalSettings{};
     DynamicChainRuntimeState state;
 
-    constexpr int kTotalSteps = 600;
-    constexpr int kSettleDeadlineStep = 300;
+    const int kTotalSteps = static_cast<int>(10.0f / globalSettings.fixedTimestepSeconds + 0.5f); // 10 simulated seconds.
+    const int kSettleDeadlineStep = kTotalSteps / 2;
     const float deadEpsilon = 0.01f * totalRestLength;
     const float explodedLimit = 1.5f * totalRestLength;
     constexpr float kConvergenceEpsilon = 0.01f;
