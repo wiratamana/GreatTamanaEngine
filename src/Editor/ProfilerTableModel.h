@@ -79,17 +79,6 @@ struct TableModel {
 void BuildTableModel(const Profiling::FrameRecord& frame, const TableOptions& options, const Profiling::LaneRowCaps& caps,
     ScopeTextCache& cache, TableModel& out);
 
-// One "what to look at" line.
-struct TopThing {
-    const ScopeText* text = nullptr; // owned by the cache
-    double ms = 0.0;
-    double percent = 0.0;
-    bool gpu = false;
-};
-
-// Refills `out` with up to 3 CPU rows by self time and 3 GPU rows by time, each at least 5% of its base.
-void BuildTopThings(const Profiling::FrameRecord& frame, ScopeTextCache& cache, std::vector<TopThing>& out);
-
 // Numbers for BuildPlainSummary taken from one frame summary.
 PlainSummaryInput MakePlainSummaryInput(const Profiling::FrameSummary& summary);
 

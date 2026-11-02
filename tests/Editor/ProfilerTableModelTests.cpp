@@ -264,28 +264,6 @@ TEST(ProfilerTableModelTest, TextCacheGivesTheSameEntryAndTheCatalogText)
     EXPECT_EQ(feature.info.title, DescribeGpuFeature("Offscreen").title);
 }
 
-TEST(ProfilerTableModelTest, TopThingsTakeBigNonWaitingCpuRowsAndBigGpuRows)
-{
-    auto frame = MakeFrame(100.0);
-    AddAggregate(*frame, ScopeLane::Main, "PhysicsSystem::Update", 60, 60);
-    AddAggregate(*frame, ScopeLane::Main, "Offscreen", 70, 2);
-    AddAggregate(*frame, ScopeLane::Main, "Wait.Workers", 30, 30);
-    AddAggregate(*frame, ScopeLane::Gpu, "PassA", 10, 10, SampleStatus::Present, "FeatA");
-    AddAggregate(*frame, ScopeLane::Gpu, "PassB", 1, 1, SampleStatus::Present, "FeatA");
-    SetGpuSpan(*frame, 40.0f, SampleStatus::Present);
-
-    std::vector<TopThing> things;
-    BuildTopThings(*frame, SharedCache(), things);
-    ASSERT_EQ(things.size(), 2u);
-    EXPECT_FALSE(things[0].gpu);
-    EXPECT_DOUBLE_EQ(things[0].ms, 60.0);
-    EXPECT_DOUBLE_EQ(things[0].percent, 60.0);
-    ASSERT_NE(things[0].text, nullptr);
-    EXPECT_EQ(things[0].text->rawName, "PhysicsSystem::Update");
-    EXPECT_TRUE(things[1].gpu);
-    EXPECT_DOUBLE_EQ(things[1].percent, 25.0);
-}
-
 TEST(ProfilerTableModelTest, PlainSummaryInputSplitsBusyAndWait)
 {
     Profiling::FrameSummary summary;

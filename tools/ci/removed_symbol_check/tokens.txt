@@ -163,3 +163,9 @@ ShadowPluginPanelModule
 SsgiPluginPanelModule
 ToneMappingPluginPanelModule
 VolumetricLightPluginPanelModule
+TopThing
+BuildTopThings
+DrawTopThings
+m_topThings
+kTopThingMinPercent
+kTopThingsPerLane

@@ -109,19 +109,6 @@ void BuildSummary(const std::string& summary, const ProfilerVerdictLine& verdict
     }
 }
 
-void DrawTopThings(const std::vector<TopThing>& things)
-{
-    ImGui::SeparatorText("What to look at");
-    if (things.empty()) {
-        ImGui::TextDisabled("Nothing stands out in this frame.");
-        return;
-    }
-    for (const TopThing& thing : things) {
-        ImGui::TextWrapped("%s%s: %s (%.1f%%)  %s", thing.gpu ? "[GPU] " : "", thing.text->info.title.c_str(),
-            FormatDuration(thing.ms).c_str(), thing.percent, thing.text->info.hint.c_str());
-    }
-}
-
 void BuildFilterRow(std::array<char, 64>& filter, TableOptions& options, const TableModel& table, std::size_t trackedCount)
 {
     ImGui::SetNextItemWidth(160.0f);
@@ -393,12 +380,10 @@ void ProfilerPanel::OnGui(EditorFrame& /*frame*/)
     std::erase_if(m_graph.series, [this](const GraphSeries& s) { return !s.isBase && !IsTracked(m_tracked, s.key); });
 
     BuildTableModel(record, m_options, kTableLaneCaps, m_textCache, m_table);
-    BuildTopThings(record, m_textCache, m_topThings);
     const ProfilerFrameView view = BuildProfilerFrameView(record, profiler.IsCaptureEnabled());
     const ProfilerVerdictLine verdict = BuildVerdictLine(profiler, view.checks);
 
     BuildSummary(BuildPlainSummary(MakePlainSummaryInput(record.summary)), verdict, view, profiler);
-    DrawTopThings(m_topThings);
 
     ImGui::SeparatorText("Frame time");
     DrawProfilerGraph(m_graph, m_visibility, m_tracked, kGraphHeight);

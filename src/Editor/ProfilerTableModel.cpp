@@ -18,8 +18,6 @@ using Profiling::ScopeLane;
 using Profiling::ScopeTableRow;
 
 constexpr std::uint32_t kNoParent = 0xFFFFFFFFu;
-constexpr double kTopThingMinPercent = 5.0;
-constexpr std::size_t kTopThingsPerLane = 3;
 constexpr std::size_t kNameSlots = Profiling::kMaxNames + 1;
 
 std::string Lower(std::string_view text)
@@ -219,60 +217,6 @@ void BuildTableModel(const Profiling::FrameRecord& frame, const TableOptions& op
         ++written;
     }
     views.resize(written);
-}
-
-namespace {
-
-struct Candidate {
-    const ScopeText* text = nullptr;
-    double ms = 0.0;
-};
-
-void AppendTop(std::vector<Candidate>& list, double base, bool gpu, std::vector<TopThing>& out)
-{
-    std::stable_sort(list.begin(), list.end(), [](const Candidate& a, const Candidate& b) { return a.ms > b.ms; });
-    for (std::size_t i = 0; i < list.size() && i < kTopThingsPerLane; ++i) {
-        out.push_back({ list[i].text, list[i].ms, list[i].ms / base * 100.0, gpu });
-    }
-}
-
-} // namespace
-
-void BuildTopThings(const Profiling::FrameRecord& frame, ScopeTextCache& cache, std::vector<TopThing>& out)
-{
-    out.clear();
-    const Bases bases = BasesOf(frame.summary);
-
-    std::vector<Candidate> cpu;
-    std::vector<Candidate> gpu;
-    for (const Profiling::ScopeAggregate& agg : frame.aggregates.Rows()) {
-        if (agg.kind == Profiling::ScopeKind::Marker) {
-            continue;
-        }
-        if (agg.lane == ScopeLane::Main && agg.kind == Profiling::ScopeKind::Work && bases.cpuMs > 0.0) {
-            const double ms = Profiling::TicksToMilliseconds(agg.selfTicks);
-            if (ms / bases.cpuMs * 100.0 < kTopThingMinPercent) {
-                continue;
-            }
-            const ScopeText& text = cache.Get(agg.lane, agg.name);
-            if (!text.info.waiting) {
-                cpu.push_back({ &text, ms });
-            }
-        } else if (agg.lane == ScopeLane::Gpu && bases.gpuKnown && Timed(agg.status)) {
-            const double ms = Profiling::TicksToMilliseconds(agg.totalTicks);
-            if (ms / bases.gpuMs * 100.0 < kTopThingMinPercent) {
-                continue;
-            }
-            gpu.push_back({ &cache.Get(agg.lane, agg.name), ms });
-        }
-    }
-
-    if (bases.cpuMs > 0.0) {
-        AppendTop(cpu, bases.cpuMs, false, out);
-    }
-    if (bases.gpuKnown) {
-        AppendTop(gpu, bases.gpuMs, true, out);
-    }
 }
 
 PlainSummaryInput MakePlainSummaryInput(const Profiling::FrameSummary& summary)
