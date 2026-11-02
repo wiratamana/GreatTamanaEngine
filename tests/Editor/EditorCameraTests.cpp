@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -94,14 +95,28 @@ TEST(EditorCameraTest, PanSpeedScalesWithTheDistance)
     EXPECT_TRUE(ApproximatelyEqual(longMove, 2.0f * shortMove, 1.0e-4f));
 }
 
-TEST(EditorCameraTest, OneWheelNotchClosesFifteenPercentAndKeepsThePivot)
+// One notch applied in a single long frame: the glide finishes at once.
+void ZoomNow(EditorCamera& camera, float wheel)
+{
+    camera.Update(Frame(0.0f, 0.0f, wheel, false, false, 1.0f));
+}
+
+// Idle frames until every pending zoom is applied. Takes longer than the streak gap, so a streak ends.
+void Settle(EditorCamera& camera)
+{
+    for (int i = 0; i < 60; ++i) {
+        camera.Update(Frame());
+    }
+}
+
+TEST(EditorCameraTest, OneWheelNotchClosesTenPercentAndKeepsThePivot)
 {
     EditorCamera camera;
 
-    camera.Update(Frame(0.0f, 0.0f, 1.0f));
+    ZoomNow(camera, 1.0f);
 
-    EXPECT_NEAR(camera.Distance(), 4.25f, 1.0e-4f);
-    EXPECT_TRUE(ApproximatelyEqual(camera.GetTransform().position, Vec3{ 0.0f, 0.0f, -4.25f }, 1.0e-4f));
+    EXPECT_NEAR(camera.Distance(), 4.5f, 1.0e-4f);
+    EXPECT_TRUE(ApproximatelyEqual(camera.GetTransform().position, Vec3{ 0.0f, 0.0f, -4.5f }, 1.0e-4f));
     EXPECT_TRUE(ApproximatelyEqual(camera.Pivot(), Vec3{ 0.0f, 0.0f, 0.0f }, 1.0e-4f));
 }
 
@@ -109,43 +124,99 @@ TEST(EditorCameraTest, WheelOutMirrorsIt)
 {
     EditorCamera camera;
 
-    camera.Update(Frame(0.0f, 0.0f, -1.0f));
+    ZoomNow(camera, -1.0f);
 
-    EXPECT_NEAR(camera.Distance(), 5.0f / 0.85f, 1.0e-4f);
+    EXPECT_NEAR(camera.Distance(), 5.0f / 0.9f, 1.0e-4f);
     EXPECT_TRUE(ApproximatelyEqual(camera.Pivot(), Vec3{ 0.0f, 0.0f, 0.0f }, 1.0e-4f));
 }
 
-TEST(EditorCameraTest, RapidNotchesAccelerate)
+TEST(EditorCameraTest, ANotchGlidesOverSeveralFramesAndEndsAtTheSameDistance)
+{
+    EditorCamera camera;
+
+    camera.Update(Frame(0.0f, 0.0f, 1.0f));
+    const float afterFirstFrame = camera.Distance();
+    EXPECT_LT(afterFirstFrame, 5.0f);
+    EXPECT_GT(afterFirstFrame, 4.5f);
+
+    camera.Update(Frame());
+    EXPECT_LT(camera.Distance(), afterFirstFrame);
+
+    Settle(camera);
+    EXPECT_NEAR(camera.Distance(), 4.5f, 1.0e-3f);
+    EXPECT_TRUE(ApproximatelyEqual(camera.Pivot(), Vec3{ 0.0f, 0.0f, 0.0f }, 1.0e-3f));
+}
+
+TEST(EditorCameraTest, TheGlideDoesNotDependOnTheFrameRate)
+{
+    EditorCamera slowFrames;
+    EditorCamera fastFrames;
+    slowFrames.Update(Frame(0.0f, 0.0f, 1.0f, false, false, 0.033f));
+    fastFrames.Update(Frame(0.0f, 0.0f, 1.0f, false, false, 0.0165f));
+    fastFrames.Update(Frame(0.0f, 0.0f, 0.0f, false, false, 0.0165f));
+
+    EXPECT_NEAR(slowFrames.Distance(), fastFrames.Distance(), 2.0e-2f);
+}
+
+TEST(EditorCameraTest, RapidNotchesAccelerateALittle)
 {
     EditorCamera fast;
     for (int i = 0; i < 3; ++i) {
         fast.Update(Frame(0.0f, 0.0f, 1.0f, false, false, 0.016f));
     }
-    EXPECT_NEAR(fast.Distance(), 5.0f * std::pow(0.85f, 1.0f + 1.2f + 1.4f), 1.0e-4f);
+    Settle(fast);
+    EXPECT_NEAR(fast.Distance(), 5.0f * std::pow(0.9f, 1.0f + 1.05f + 1.1f), 1.0e-3f);
 
     EditorCamera slow;
     for (int i = 0; i < 3; ++i) {
         slow.Update(Frame(0.0f, 0.0f, 1.0f, false, false, 0.016f));
-        slow.Update(Frame(0.0f, 0.0f, 0.0f, false, false, 1.0f));
+        Settle(slow);
     }
-    EXPECT_NEAR(slow.Distance(), 5.0f * std::pow(0.85f, 3.0f), 1.0e-4f);
+    EXPECT_NEAR(slow.Distance(), 5.0f * std::pow(0.9f, 3.0f), 1.0e-3f);
     EXPECT_LT(fast.Distance(), slow.Distance());
+}
+
+TEST(EditorCameraTest, TheStreakGainIsCapped)
+{
+    EditorCamera camera;
+    ASSERT_TRUE(camera.SetDistance(100000.0f));
+    float totalNotches = 0.0f;
+    for (int i = 0; i < 40; ++i) {
+        totalNotches += std::min(1.0f + 0.05f * static_cast<float>(i), 2.0f);
+        camera.Update(Frame(0.0f, 0.0f, 1.0f, false, false, 0.016f));
+    }
+    Settle(camera);
+
+    const float expected = 100000.0f * std::pow(0.9f, totalNotches);
+    EXPECT_NEAR(camera.Distance() / expected, 1.0f, 1.0e-2f);
+}
+
+TEST(EditorCameraTest, ABurstInOneFrameIsLimited)
+{
+    EditorCamera burst;
+    ZoomNow(burst, 50.0f);
+
+    EditorCamera limited;
+    ZoomNow(limited, 3.0f);
+
+    EXPECT_NEAR(burst.Distance(), limited.Distance(), 1.0e-4f);
 }
 
 TEST(EditorCameraTest, AShortPauseKeepsTheStreakAndALongPauseResetsIt)
 {
     EditorCamera shortPause;
     shortPause.Update(Frame(0.0f, 0.0f, 1.0f));
-    EXPECT_NEAR(shortPause.Distance(), 4.25f, 1.0e-4f);
     shortPause.Update(Frame(0.0f, 0.0f, 0.0f, false, false, 0.1f));
     shortPause.Update(Frame(0.0f, 0.0f, 1.0f));
-    EXPECT_NEAR(shortPause.Distance(), 4.25f * std::pow(0.85f, 1.2f), 1.0e-4f);
+    Settle(shortPause);
+    EXPECT_NEAR(shortPause.Distance(), 5.0f * std::pow(0.9f, 1.0f + 1.05f), 2.0e-3f);
 
     EditorCamera longPause;
     longPause.Update(Frame(0.0f, 0.0f, 1.0f));
     longPause.Update(Frame(0.0f, 0.0f, 0.0f, false, false, 0.5f));
     longPause.Update(Frame(0.0f, 0.0f, 1.0f));
-    EXPECT_NEAR(longPause.Distance(), 3.6125f, 1.0e-4f);
+    Settle(longPause);
+    EXPECT_NEAR(longPause.Distance(), 4.05f, 1.0e-3f);
 }
 
 TEST(EditorCameraTest, ALongStreakKeepsTheStateFinite)
@@ -171,16 +242,16 @@ TEST(EditorCameraTest, TheEyeStillFliesForwardAtTheMinimumDistance)
     ASSERT_TRUE(camera.SetDistance(EditorCamera::kMinDistance));
     const Vec3 start = camera.GetTransform().position;
 
-    camera.Update(Frame(0.0f, 0.0f, 1.0f));
+    ZoomNow(camera, 1.0f);
 
-    EXPECT_TRUE(ApproximatelyEqual(camera.GetTransform().position, start + camera.Forward() * 0.15f, 1.0e-4f));
+    EXPECT_TRUE(ApproximatelyEqual(camera.GetTransform().position, start + camera.Forward() * 0.1f, 1.0e-4f));
     EXPECT_NEAR(camera.Distance(), EditorCamera::kMinDistance, 1.0e-6f);
 }
 
 TEST(EditorCameraTest, DistanceAndPositionAreClamped)
 {
     EditorCamera camera;
-    for (int i = 0; i < 200; ++i) {
+    for (int i = 0; i < 400; ++i) {
         camera.Update(Frame(0.0f, 0.0f, -5.0f));
     }
 

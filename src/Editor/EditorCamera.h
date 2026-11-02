@@ -94,14 +94,21 @@ private:
     static constexpr float kDegreesPerPixel = 0.2f;
     static constexpr float kMaxPitchDegrees = 90.0f;
 
-    // Each notch closes 15% of the distance. The base step never drops below 1 unit, so the eye can fly through geometry.
-    static constexpr float kZoomStep = 0.15f;
+    // Each notch closes 10% of the distance. The base step never drops below 1 unit, so the eye can fly through geometry.
+    static constexpr float kZoomStep = 0.10f;
     static constexpr float kMinFlyStep = 1.0f;
 
     // Notches closer than this in time form a streak. Each streak notch adds this much gain, up to the maximum.
     static constexpr float kZoomStreakGapSeconds = 0.25f;
-    static constexpr float kZoomGainPerNotch = 0.2f;
-    static constexpr float kZoomMaxGain = 8.0f;
+    static constexpr float kZoomGainPerNotch = 0.05f;
+    static constexpr float kZoomMaxGain = 2.0f;
+
+    // One frame never counts more than this many notches (a fast wheel or a touchpad can report a burst).
+    static constexpr float kZoomMaxNotchesPerFrame = 3.0f;
+
+    // A zoom glides: each frame it applies the share 1 - exp(-dt / this) of what is still pending.
+    static constexpr float kZoomSmoothSeconds = 0.06f;
+    static constexpr float kZoomSettleEpsilon = 1.0e-3f;
 
     static constexpr float kMinNearClip = 0.1f;
     static constexpr float kNearPerDistance = 0.01f;
@@ -120,6 +127,7 @@ private:
 
     float m_scrollStreakNotches = 0.0f;
     float m_secondsSinceScroll = 1.0f;
+    float m_pendingZoomNotches = 0.0f; // Gain-weighted notches not applied yet.
 };
 
 } // namespace gte

@@ -25,7 +25,7 @@
    ```
 3. Look around. Hierarchy is on the left, Inspector on the right. Scene and Game are tabs in the middle. Log, Profiler and Project are at the bottom.
 4. Load a scene. Use **File > Open Sponza Scene**. It needs the Sponza model that CMake fetched into `_reference/`. If it is missing, the status line says so.
-5. Move in the Scene tab. Middle mouse pans. The wheel zooms (fast scrolling speeds up). Right mouse looks around. Click a head of the gizmo at the top-right to look along an axis. Click `Persp` under it for isometric.
+5. Move in the Scene tab. Middle mouse pans. The wheel zooms smoothly (fast scrolling speeds up a little). Right mouse looks around. Click a head of the gizmo at the top-right to look along an axis. Click `Persp` under it for isometric.
 6. Pause and step. Use the toolbar under the menu bar.
 7. Save the scene with **Ctrl+S**. Load it again with **Ctrl+O**.
 8. Import an asset. Drag a PNG, glTF or PMX file from Windows Explorer into the Project panel. The files live in `build\Project\`.

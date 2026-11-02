@@ -90,7 +90,7 @@ Every window below derives from `EditorWindow`. Open any of them from the Window
 | Where | Input | Action |
 |---|---|---|
 | Scene | Middle mouse drag | Pan. The scene follows the cursor at any zoom |
-| Scene | Mouse wheel | Zoom to the pivot. Fast scrolling accelerates |
+| Scene | Mouse wheel | Zoom to the pivot, 10% per notch, eased over a few frames. Fast scrolling accelerates a little |
 | Scene | Right mouse drag | Look around (Perspective) or orbit the pivot (Isometric) |
 | Scene | Click a gizmo head (top-right) | Look along that axis: Right, Left, Top, Bottom, Back, Front |
 | Scene | Click `Persp` / `Iso` under the gizmo | Switch Perspective and Isometric |

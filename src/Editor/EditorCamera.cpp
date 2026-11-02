@@ -55,21 +55,36 @@ void EditorCamera::Update(const EditorCameraInput& input) noexcept
 
 void EditorCamera::ApplyZoom(float notches, float deltaSeconds) noexcept
 {
-    m_secondsSinceScroll += std::max(deltaSeconds, 0.0f);
+    const float dt = std::max(deltaSeconds, 0.0f);
+    m_secondsSinceScroll += dt;
     if (m_secondsSinceScroll > kZoomStreakGapSeconds) {
         m_scrollStreakNotches = 0.0f;
     }
-    if (notches == 0.0f) {
+
+    if (notches != 0.0f) {
+        const float counted = std::clamp(notches, -kZoomMaxNotchesPerFrame, kZoomMaxNotchesPerFrame);
+        const float gain = std::min(1.0f + m_scrollStreakNotches * kZoomGainPerNotch, kZoomMaxGain);
+        m_scrollStreakNotches += std::fabs(counted);
+        m_secondsSinceScroll = 0.0f;
+        m_pendingZoomNotches += counted * gain;
+    }
+    if (m_pendingZoomNotches == 0.0f) {
         return;
     }
 
-    const float gain = std::min(1.0f + m_scrollStreakNotches * kZoomGainPerNotch, kZoomMaxGain);
-    m_scrollStreakNotches += std::fabs(notches);
-    m_secondsSinceScroll = 0.0f;
+    // Glide: apply a share of the pending zoom, so the view eases in instead of jumping. Frame-rate independent.
+    float applied = m_pendingZoomNotches * (1.0f - std::exp(-dt / kZoomSmoothSeconds));
+    if (std::fabs(m_pendingZoomNotches - applied) < kZoomSettleEpsilon) {
+        applied = m_pendingZoomNotches;
+    }
+    m_pendingZoomNotches -= applied;
+    if (applied == 0.0f) {
+        return;
+    }
 
     // The eye moves along forward by a share of the distance, so the pivot stays put while the distance is 1 unit or more.
     // Closer than that the eye flies on and drags the pivot with it.
-    const float factor = std::pow(1.0f - kZoomStep, notches * gain);
+    const float factor = std::pow(1.0f - kZoomStep, applied);
     const float step = std::max(m_distance, kMinFlyStep) * (1.0f - factor);
     m_transform.position += Forward() * step;
     m_distance = std::clamp(m_distance - step, kMinDistance, kMaxDistance);
