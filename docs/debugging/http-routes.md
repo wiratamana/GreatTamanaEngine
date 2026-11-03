@@ -172,7 +172,7 @@ JSON quoting on Windows is painful. Use `--data-binary "@body.json"`, or the `ht
 ## Preset scenes
 | Route | Body | Success | Errors |
 |---|---|---|---|
-| `POST /open_preset_scene` **MUT** | B `preset`* (`sponza` or `hiz_demo`), `count` (integer, 0 or more), `spacing` (0.1 to 1000), `profile` (`geometry_only` default, or `full`) | `{success, preset, message, ...}` | `400`, `500` open failed (old scene kept), `503`, `504` after 300 s |
+| `POST /open_preset_scene` **MUT** | B `preset`* (`sponza`, `hiz_demo` or `furina_showcase`), `count` (integer, 0 or more), `spacing` (0.1 to 1000), `profile` (`geometry_only` default, or `full`) | `{success, preset, message, ...}` | `400`, `500` open failed (old scene kept), `503`, `504` after 300 s |
 | `POST /close_preset_scene` **MUT** | none | `{success, message}` | `500` no demo open or restore incomplete, `504` after 30 s |
 | `GET /hiz_demo/geometry_only_features` | none | `{"prefixes":["Shadow","VolumetricLight",...]}` | none. Constant data. |
 
@@ -180,6 +180,7 @@ Reply extras:
 - `sponza` adds `imported_this_call` and `gta_path`.
 - `hiz_demo` adds `profile`, `instanceCount`, `countClamped`, `clustersPerInstance`, `workItems`, `entities` (`camera`, `sun`, `wall`, each `"index/generation"`), `gpuDrivenScene` (`mode`, `collectStats`), `restoresOnClose`.
 - `hiz_demo` clamps `count` to 1..100000. The `message` says so.
+- `furina_showcase` ignores `count`, `spacing` and `profile`. It adds `entities` (`model`, `camera`, `sun`), `modelHeight`, `cameraDistance`, `animationStarted`, `featuresSwitchedOn`, `featuresSwitchedOff`, `restoresOnClose`. A missing `Project/Furina.gta` gives `500` with a clear message and the scene stays. See [Toon character](../reference/render-features/toon-character.md).
 - With `geometry_only`, the demo also turns off the fixed-cost features listed by `/hiz_demo/geometry_only_features`.
 - Close the demo to restore those features and settings.
 - On `504`, the open may still be running. Check `/get_logs`.

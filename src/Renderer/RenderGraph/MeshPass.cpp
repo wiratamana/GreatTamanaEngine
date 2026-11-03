@@ -41,6 +41,12 @@ void DeclareMeshPass(RenderGraphBuilder::PassBuilder& pass, const MeshPassRecord
     if (record.depth.IsValid()) {
         pass.WriteDepthStencilAttachment(record.depth, record.clearDepth);
     }
+    for (const MeshPassTextureRead& read : record.readTextures) {
+        pass.ReadTexture(read.texture, ResourceAccess::ShaderRead, read.depth);
+    }
+    for (const BufferHandle& buffer : record.readVertexBuffers) {
+        pass.ReadBuffer(buffer, ResourceAccess::VertexBufferRead);
+    }
 }
 
 MeshPass::MeshPass(RenderGraphBuilder& builder, StaticName name, ViewScope scope, RenderPassEvent event)
@@ -75,6 +81,22 @@ MeshPass& MeshPass::Depth(TextureHandle target, std::optional<float> clear)
 {
     m_record.depth = target;
     m_record.clearDepth = clear;
+    return *this;
+}
+
+MeshPass& MeshPass::ReadTexture(TextureHandle texture, bool isDepth)
+{
+    if (texture.IsValid()) {
+        m_record.readTextures.push_back(MeshPassTextureRead{ texture, isDepth });
+    }
+    return *this;
+}
+
+MeshPass& MeshPass::ReadVertexBuffer(BufferHandle buffer)
+{
+    if (buffer.IsValid()) {
+        m_record.readVertexBuffers.push_back(buffer);
+    }
     return *this;
 }
 

@@ -26,9 +26,9 @@ struct MaterialImageKeyHash {
     }
 };
 
-// One material: the four image Guids (role order) and the exact params bytes.
+// One material: the image Guids (role order) and the exact params bytes.
 struct MaterialKey {
-    std::array<Guid, 4> guids;
+    std::array<Guid, 5> guids;
     MaterialParams params;
 
     friend bool operator==(const MaterialKey& a, const MaterialKey& b) noexcept

@@ -3,7 +3,7 @@
 #ifndef DIRECTIONAL_LIGHTING_GLSL
 #define DIRECTIONAL_LIGHTING_GLSL
 
-// Scene-services binding 8; must match SceneLightingUniformData (448 bytes).
+// Scene-services binding 8; must match SceneLightingUniformData (512 bytes).
 layout(set = 1, binding = 8, std140) uniform SceneGlobalUniformBlock {
     vec4 sunDirectionAndValid;         // xyz = toward sun, w = 1 when written
     vec4 sunIlluminance;               // xyz = sun color * intensity, w = padding
@@ -21,6 +21,10 @@ layout(set = 1, binding = 8, std140) uniform SceneGlobalUniformBlock {
     mat4 cascadeViewProjection1;
     mat4 cascadeViewProjection2;
     mat4 cascadeViewProjection3;
+    vec4 toonLook0;                    // x band threshold, y band softness, z deep threshold, w shadow strength
+    vec4 toonLook1;                    // x rim strength, y rim width, z hair highlight, w emissive boost
+    vec4 toonLook2;                    // x face flatten, y outline NDC height, z outline darkness, w debug view
+    vec4 toonLook3;                    // x shade blend, y gem heuristic, z gold glint, w viewport aspect
 } uSceneLighting;
 
 // Used while the block has never been written (the block is all zeros then).
@@ -149,6 +153,43 @@ vec3 SceneSunDirection() { return SceneSunWritten() ? uSceneLighting.sunDirectio
 vec3 SceneSunIlluminance() { return SceneSunWritten() ? uSceneLighting.sunIlluminance.xyz : kDefaultSunIlluminance; }
 vec3 SceneEyePosition() { return uSceneLighting.cameraPositionAndFadeStart.xyz; }
 int SceneMaterialDebugView() { return int(uSceneLighting.groundAmbientAndMaterialDebugView.w + 0.5); }
+
+// Toon look values from the block tail; built-in defaults while the tail is all zeros (never written).
+struct ToonLookParams
+{
+    float bandThreshold;
+    float bandSoftness;
+    float deepThreshold;
+    float shadowStrength;
+    float rimStrength;
+    float rimWidth;
+    float hairHighlight;
+    float emissiveBoost;
+    float faceFlatten;
+    float outlineNdcY;     // Outline width in NDC units of the viewport height.
+    float outlineDarkness;
+    int debugView;
+    float shadeBlend;
+    float gemHeuristic;
+    float goldGlint;
+    float viewportAspect;  // Width / height.
+};
+
+ToonLookParams ReadToonLook()
+{
+    if (uSceneLighting.toonLook0.x <= 0.0) {
+        return ToonLookParams(0.50, 0.02, 0.22, 0.60, 0.35, 0.60, 0.80, 3.0,
+                              0.80, 0.0044444, 0.35, 0, 1.0, 1.0, 1.0, 0.5625);
+    }
+    return ToonLookParams(uSceneLighting.toonLook0.x, uSceneLighting.toonLook0.y,
+                          uSceneLighting.toonLook0.z, uSceneLighting.toonLook0.w,
+                          uSceneLighting.toonLook1.x, uSceneLighting.toonLook1.y,
+                          uSceneLighting.toonLook1.z, uSceneLighting.toonLook1.w,
+                          uSceneLighting.toonLook2.x, uSceneLighting.toonLook2.y,
+                          uSceneLighting.toonLook2.z, int(uSceneLighting.toonLook2.w + 0.5),
+                          uSceneLighting.toonLook3.x, uSceneLighting.toonLook3.y,
+                          uSceneLighting.toonLook3.z, max(uSceneLighting.toonLook3.w, 0.01));
+}
 
 // Hemisphere ambient seen from direction `dir`: sky above, ground below (Y is up).
 vec3 SceneHemisphereAmbient(vec3 dir)

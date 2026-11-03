@@ -1,28 +1,11 @@
-// Tier-2 (real, headless GPU) smoke test for Pipeline's new, trailing,
-// defaulted `sceneServicesSetLayout` constructor parameter - Block 4 "Global
-// Scene Services Descriptor Set" campaign (task_manager/better-render-pass-6),
-// PHASE3 (PHASE3_PIPELINE_SET1_WIRING.md). This codebase has no pre-existing
-// PipelineTests.cpp - per that phase file's own instruction, this is
-// deliberately a MINIMAL, device-backed smoke test, not a large new test
-// infrastructure: confirm a Pipeline built with a real, throwaway
-// VkDescriptorSetLayout passed as `sceneServicesSetLayout` reports
-// HasSceneServicesSet() == true and does not throw (VertexLayout::
-// PositionColor - no set = 0 content, so Pipeline must synthesize its own
-// zero-binding filler layout for set = 0 - see Pipeline.cpp), and that an
-// UNCHANGED existing construction (no sceneServicesSetLayout at all) still
-// reports HasSceneServicesSet() == false, exactly as before this parameter
-// existed.
-//
-// Uses the SAME HeadlessRenderGraphFixture (tests/Fakes/HeadlessRenderGraphFixture.h)
-// every other real-device Renderer test in this codebase already uses -
-// GTEST_SKIP()-guarded exactly like every other HeadlessSurfaceProvider
-// consumer whenever this machine's Vulkan driver/loader doesn't report
-// VK_EXT_headless_surface.
+// Pipeline tests: set-layout bookkeeping and fixed-state mapping.
+// Device-backed tests skip when the headless Vulkan surface is unavailable.
 
 #include "Renderer/Pipeline.h"
 
 #include "Renderer/Mesh.h"
 #include "Renderer/MeshVertex.h"
+#include "Renderer/PipelineStateMapping.h"
 
 #include "../Fakes/HeadlessRenderGraphFixture.h"
 
@@ -34,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <span>
 
 namespace gte {
 namespace {
@@ -159,6 +143,85 @@ TEST(PipelineTest, UnchangedConstructionWithNoMaterialSetLayoutReportsHasMateria
         "shaders/Triangle.frag.spv", VertexLayout::PositionColor, VK_NULL_HANDLE, "PipelineTest.NoMaterialSet");
 
     EXPECT_FALSE(pipeline.HasMaterialSet());
+    EXPECT_NE(pipeline.Native(), static_cast<VkPipeline>(VK_NULL_HANDLE));
+}
+
+TEST(ScenePipelineStateTest, DefaultsAndEquality)
+{
+    const ScenePipelineState a{};
+    EXPECT_EQ(a.cull, CullMode::Back);
+    EXPECT_EQ(a.depthCompare, CompareOp::Less);
+    EXPECT_TRUE(a.depthWrite);
+    EXPECT_EQ(a.blend, BlendMode::Opaque);
+    EXPECT_EQ(a, ScenePipelineState{});
+
+    ScenePipelineState b{};
+    b.cull = CullMode::Front;
+    EXPECT_FALSE(a == b);
+}
+
+TEST(ScenePipelineStateTest, DefaultMapsToVulkanBackLessOpaque)
+{
+    const PipelineFixedState fixed = ToPipelineFixedState(ScenePipelineState{});
+    EXPECT_EQ(fixed.cullMode, static_cast<VkCullModeFlags>(VK_CULL_MODE_BACK_BIT));
+    EXPECT_EQ(fixed.depthCompare, VK_COMPARE_OP_LESS);
+    EXPECT_TRUE(fixed.depthWrite);
+    EXPECT_EQ(fixed.blend.blendEnable, static_cast<VkBool32>(VK_FALSE));
+    EXPECT_EQ(fixed.blend.colorWriteMask, OpaqueBlendAttachment().colorWriteMask);
+}
+
+TEST(ScenePipelineStateTest, FrontCullLessEqualMapsToVulkan)
+{
+    ScenePipelineState state{};
+    state.cull = CullMode::Front;
+    state.depthCompare = CompareOp::LessEqual;
+    state.depthWrite = false;
+    const PipelineFixedState fixed = ToPipelineFixedState(state);
+    EXPECT_EQ(fixed.cullMode, static_cast<VkCullModeFlags>(VK_CULL_MODE_FRONT_BIT));
+    EXPECT_EQ(fixed.depthCompare, VK_COMPARE_OP_LESS_OR_EQUAL);
+    EXPECT_FALSE(fixed.depthWrite);
+}
+
+TEST(ScenePipelineStateTest, AdditiveBlendIsOneOnePerChannelAndOnlyAdditiveBlends)
+{
+    ScenePipelineState state{};
+    state.blend = BlendMode::Additive;
+    const VkPipelineColorBlendAttachmentState additive = ToPipelineFixedState(state).blend;
+    EXPECT_EQ(additive.blendEnable, static_cast<VkBool32>(VK_TRUE));
+    EXPECT_EQ(additive.srcColorBlendFactor, VK_BLEND_FACTOR_ONE);
+    EXPECT_EQ(additive.dstColorBlendFactor, VK_BLEND_FACTOR_ONE);
+    EXPECT_EQ(additive.srcAlphaBlendFactor, VK_BLEND_FACTOR_ONE);
+    EXPECT_EQ(additive.dstAlphaBlendFactor, VK_BLEND_FACTOR_ONE);
+    EXPECT_EQ(additive.colorBlendOp, VK_BLEND_OP_ADD);
+
+    state.blend = BlendMode::Opaque;
+    EXPECT_EQ(ToPipelineFixedState(state).blend.blendEnable, static_cast<VkBool32>(VK_FALSE));
+}
+
+TEST(ScenePipelineStateTest, FullscreenAdditiveBlendKeepsSourceAlphaFactor)
+{
+    EXPECT_EQ(ToVkBlendState(BlendMode::Additive).srcColorBlendFactor, VK_BLEND_FACTOR_SRC_ALPHA);
+}
+
+TEST(PipelineTest, FixedStateFormBuildsWithFrontCullAdditiveLessEqual)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    Renderer& renderer = fixture.GetRenderer();
+    const VkFormat colorFormat = renderer.ColorFormat();
+    ScenePipelineState state{};
+    state.cull = CullMode::Front;
+    state.depthCompare = CompareOp::LessEqual;
+    state.depthWrite = false;
+    state.blend = BlendMode::Additive;
+
+    Pipeline pipeline(fixture.Device(), std::span<const VkFormat>(&colorFormat, 1), renderer.DepthFormat(),
+        "shaders/Triangle.vert.spv", "shaders/Triangle.frag.spv", VertexLayout::PositionColor, VK_NULL_HANDLE,
+        "PipelineTest.FixedState", VK_NULL_HANDLE, VK_NULL_HANDLE, ToPipelineFixedState(state));
+
     EXPECT_NE(pipeline.Native(), static_cast<VkPipeline>(VK_NULL_HANDLE));
 }
 

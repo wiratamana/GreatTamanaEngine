@@ -14,8 +14,26 @@ namespace gte {
 // Keep the two values equal.
 inline constexpr std::size_t kPipelineMaxColorAttachments = 8;
 
+// Blend state with blending off and a full RGBA write mask.
+inline VkPipelineColorBlendAttachmentState OpaqueBlendAttachment() noexcept
+{
+    VkPipelineColorBlendAttachmentState state{};
+    state.blendEnable = VK_FALSE;
+    state.colorWriteMask =
+        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    return state;
+}
+
+// Fixed-function state of the path-based pipeline form. Defaults: no cull, LESS, depth write on, opaque.
+struct PipelineFixedState {
+    VkCullModeFlags cullMode = VK_CULL_MODE_NONE;
+    VkCompareOp depthCompare = VK_COMPARE_OP_LESS;
+    bool depthWrite = true;
+    VkPipelineColorBlendAttachmentState blend = OpaqueBlendAttachment();
+};
+
 // RAII owner of a VkPipeline and its layout for dynamic rendering; it only draws into targets of the exact
-// formats it was built for. Create through Renderer::CreatePipeline(). Depth test and write are always on (LESS).
+// formats it was built for. Create through Renderer::CreatePipeline(). Depth test is always on.
 // Push constants: "model" then "viewProj" matrices (vertex stage, offset 0, 128 bytes).
 class Pipeline {
 public:
@@ -27,8 +45,8 @@ public:
         VkDescriptorSetLayout bufferSetLayout = VK_NULL_HANDLE,
         VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE);
 
-    // Multi-render-target form: one opaque, full-write blend state per entry. `colorFormats` may be empty (depth-only)
-    // and at most kPipelineMaxColorAttachments. `cullMode` defaults to none. Other parameters behave as above.
+    // Multi-render-target form: the same blend state on every entry. `colorFormats` may be empty (depth-only)
+    // and at most kPipelineMaxColorAttachments. Opaque, depth LESS + write; `cullMode` defaults to none.
     Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFormat depthFormat,
         const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
         VertexLayout vertexLayout = VertexLayout::PositionColor,
@@ -36,6 +54,13 @@ public:
         VkDescriptorSetLayout bufferSetLayout = VK_NULL_HANDLE,
         VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE,
         VkCullModeFlags cullMode = VK_CULL_MODE_NONE);
+
+    // Path-based form with caller-chosen cull, depth compare/write and blend. Other parameters as above.
+    Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFormat depthFormat,
+        const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
+        VertexLayout vertexLayout, VkDescriptorSetLayout materialSetLayout, const char* debugName,
+        VkDescriptorSetLayout bufferSetLayout, VkDescriptorSetLayout sceneServicesSetLayout,
+        const PipelineFixedState& fixedState);
 
     // Configurable form built from in-memory SPIR-V with caller-resolved blend, cull, compare, topology, extra
     // set layouts and an optional push-constant range. HasSceneServicesSet()/HasMaterialSet() stay false: the

@@ -224,6 +224,13 @@ public:
         bool useMaterialTexture = false, const char* debugName = nullptr,
         DescriptorSetLayoutHandle sceneServicesSetLayout = DescriptorSetLayoutHandle::Invalid) const;
 
+    // Scene geometry pipeline with caller-chosen cull, depth compare/write and blend. Same set layout as
+    // CreatePipeline: set 0 material when `useMaterialTexture`, set 1 scene services when valid.
+    Pipeline CreateScenePipeline(const ScenePipelineState& state, std::span<const PixelFormat> colorFormats,
+        const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
+        VertexLayout vertexLayout, bool useMaterialTexture, const char* debugName = nullptr,
+        DescriptorSetLayoutHandle sceneServicesSetLayout = DescriptorSetLayoutHandle::Invalid) const;
+
     // Layout of the buffer set: binding 0 = visible list, binding 1 = instances.
     DescriptorSetLayoutHandle BufferSetLayout() const noexcept;
 

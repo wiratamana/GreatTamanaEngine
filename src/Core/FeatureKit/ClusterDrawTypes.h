@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <span>
 #include <string_view>
 
 namespace gte::fx {
@@ -111,6 +112,15 @@ ClusterCamera MakeClusterCamera(const Mat4& viewProjection, const Vec3& eye);
 // Opaque handle to a per-frame set of entities that the CPU scene draw skips. Valid until the next frame.
 struct EntityExclusion {
     const void* handle = nullptr;
+};
+
+// Entities a scene draw is restricted to, from Frame::SelectEntities(). Valid for this frame only.
+// `entities` is caller-owned and must outlive every Record() that uses the selection.
+struct EntitySelection {
+    const void* handle = nullptr;
+    std::span<const Entity> entities;
+
+    bool IsValid() const noexcept { return handle != nullptr; }
 };
 
 // Why a chain declared nothing on purpose (not a refusal). None when it ran or was refused.

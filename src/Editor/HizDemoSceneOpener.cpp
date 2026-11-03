@@ -3,6 +3,7 @@
 #include "HizDemoLayout.h"
 #include "HizDemoProfile.h"
 #include "InstanceGridTestSpawner.h"
+#include "PresetFeatureSettings.h"
 #include "../Core/Logging.h"
 #include "../Core/Plugins/RenderFeatureCompositor.h"
 #include "../ECS/Components/Camera.h"
@@ -43,34 +44,6 @@ std::string EntityText(Entity entity)
     return std::to_string(entity.index) + "/" + std::to_string(entity.generation);
 }
 
-std::string ValueText(const fx::FeatureDebugValue& value)
-{
-    return std::visit(
-        [](const auto& v) -> std::string {
-            using T = std::decay_t<decltype(v)>;
-            if constexpr (std::is_same_v<T, bool>) {
-                return v ? "true" : "false";
-            } else if constexpr (std::is_same_v<T, std::string>) {
-                return v;
-            } else {
-                return std::to_string(v);
-            }
-        },
-        value);
-}
-
-std::vector<fx::FeatureDebugArg> SnapshotSettings(const fx::IFeatureDebugEndpoint& endpoint)
-{
-    const fx::FeatureDebugResult state = endpoint.GetState();
-    std::vector<fx::FeatureDebugArg> saved;
-    for (const fx::FeatureDebugField& field : state.fields) {
-        if (std::find(kSettingKeys.begin(), kSettingKeys.end(), field.key) != kSettingKeys.end()) {
-            saved.push_back({ field.key, ValueText(field.value) });
-        }
-    }
-    return saved;
-}
-
 // Logs an error without ever throwing (callers run in noexcept paths).
 void LogError(std::string_view what, std::string_view detail = {}) noexcept
 {
@@ -88,15 +61,6 @@ void LogInfo(const std::string& message) noexcept
     }
 }
 
-bool TrySwitch(RenderFeatureCompositor& compositor, const std::string& name, bool enabled) noexcept
-{
-    try {
-        return compositor.SetFeatureEnabled(name, enabled);
-    } catch (...) {
-        return false;
-    }
-}
-
 // Switches `turnOn` features on, `turnOff` features off and sets `settings` back. A failure is logged and
 // the rest still runs. False when anything failed.
 bool Undo(const HizDemoServices& services, std::span<const std::string> turnOn, std::span<const std::string> turnOff,
@@ -110,13 +74,13 @@ bool Undo(const HizDemoServices& services, std::span<const std::string> turnOn, 
         }
     } else {
         for (const std::string& name : turnOn) {
-            if (!TrySwitch(*services.compositor, name, true)) {
+            if (!TrySetFeatureEnabled(*services.compositor, name, true)) {
                 complete = false;
                 LogError("Could not turn the feature back on: ", name);
             }
         }
         for (const std::string& name : turnOff) {
-            if (!TrySwitch(*services.compositor, name, false)) {
+            if (!TrySetFeatureEnabled(*services.compositor, name, false)) {
                 complete = false;
                 LogError("Could not turn the feature back off: ", name);
             }
@@ -187,7 +151,7 @@ private:
 bool ApplySettings(const HizDemoServices& services, PresetProfile profile, bool haveBaseline, HizDemoState& next,
     SettingsChange& change, std::string& error)
 {
-    change.before = SnapshotSettings(*services.gpuDrivenScene);
+    change.before = SnapshotFeatureSettings(*services.gpuDrivenScene, kSettingKeys);
     if (!haveBaseline) {
         next.savedSettings = change.before;
     }
@@ -222,7 +186,7 @@ bool ApplySettings(const HizDemoServices& services, PresetProfile profile, bool 
     next.disabledFeatures.reserve(next.disabledFeatures.size() + plan.turnOff.size());
 
     for (const std::string& name : plan.turnOn) {
-        if (!TrySwitch(*services.compositor, name, true)) {
+        if (!TrySetFeatureEnabled(*services.compositor, name, true)) {
             error = "could not turn the feature \"" + name + "\" back on";
             return false;
         }
@@ -232,7 +196,7 @@ bool ApplySettings(const HizDemoServices& services, PresetProfile profile, bool 
         next.disabledFeatures.clear();
     }
     for (const std::string& name : plan.turnOff) {
-        if (!TrySwitch(*services.compositor, name, false)) {
+        if (!TrySetFeatureEnabled(*services.compositor, name, false)) {
             error = "could not turn off the feature \"" + name + "\"";
             return false;
         }

@@ -43,6 +43,16 @@ struct DescriptorBindingDesc {
     ShaderStageMask stages = ShaderStageMask::Fragment;
 };
 
+// Fixed-function state of a scene geometry pipeline (path-based, material set 0 + scene services set 1).
+struct ScenePipelineState {
+    CullMode cull = CullMode::Back;
+    CompareOp depthCompare = CompareOp::Less;
+    bool depthWrite = true;
+    BlendMode blend = BlendMode::Opaque;
+
+    constexpr bool operator==(const ScenePipelineState&) const noexcept = default;
+};
+
 // Extra pipeline-layout state beyond PipelineDesc's fixed fields below -
 // default-constructed means "no extra descriptor sets, no push constants".
 // `extraSetLayouts` is a non-owning span - the caller's own local array must

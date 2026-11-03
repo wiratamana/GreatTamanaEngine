@@ -172,6 +172,25 @@ TEST(MeshPassRecordTest, DepthOnlyDeclaresNoColorAttachment)
     EXPECT_EQ(pass.writes.size(), 1u);
 }
 
+TEST(MeshPassRecordTest, DeclaresTextureReadsAndVertexBufferReads)
+{
+    MeshPassRecord record;
+    record.color = kTexA;
+    record.readTextures.push_back(MeshPassTextureRead{ kTexB, true });
+    record.readVertexBuffers.push_back(kBufferA);
+
+    PassRecord pass;
+    RenderGraphBuilder::PassBuilder builder(pass);
+    DeclareMeshPass(builder, record);
+
+    ASSERT_EQ(pass.reads.size(), 2u);
+    EXPECT_EQ(pass.reads[0].texture, kTexB);
+    EXPECT_EQ(pass.reads[0].access, ResourceAccess::ShaderRead);
+    EXPECT_TRUE(pass.reads[0].isDepthResource);
+    EXPECT_EQ(pass.reads[1].buffer, kBufferA);
+    EXPECT_EQ(pass.reads[1].access, ResourceAccess::VertexBufferRead);
+}
+
 TEST(MeshPassTest, DrawDeclaresAGraphicsPassOnlyWithAnAttachmentAndADrawFunction)
 {
     RenderGraphBuilder builder;

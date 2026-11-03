@@ -273,8 +273,8 @@ public:
     // Changes whenever BuildFrame() clears the exclusion sets. A pass compares it at execute time to catch a stale set.
     const std::uint64_t* ExclusionEpoch() const noexcept { return &m_exclusionEpoch; }
 
-    // Most exclusion sets one frame can reserve.
-    static constexpr std::size_t kMaxExclusionSetsPerFrame = 16;
+    // Most exclusion sets one frame can reserve (cluster draws, depth-map draws, entity selections).
+    static constexpr std::size_t kMaxExclusionSetsPerFrame = 32;
 
 private:
     // A view output a feature exposed this frame (see ExposeViewOutput()). `name` points into the exposing

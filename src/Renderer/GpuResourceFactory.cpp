@@ -43,20 +43,21 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
         throw std::runtime_error("GpuResourceFactory: vkCreateCommandPool failed");
     }
 
-    // Material set layout (fragment stage): 0 = base color, 1 = MaterialParams, 2 = normal,
-    // 3 = metallic-roughness, 4 = occlusion.
-    VkDescriptorSetLayoutBinding materialBindings[5]{};
-    for (std::uint32_t binding = 0; binding < 5; ++binding) {
+    // Material set layout: 0 = base color, 1 = MaterialParams (vertex + fragment), 2 = normal,
+    // 3 = metallic-roughness, 4 = occlusion, 5 = sphere. Samplers are fragment-only.
+    VkDescriptorSetLayoutBinding materialBindings[6]{};
+    for (std::uint32_t binding = 0; binding < 6; ++binding) {
         materialBindings[binding].binding = binding;
         materialBindings[binding].descriptorType
             = binding == 1 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         materialBindings[binding].descriptorCount = 1;
-        materialBindings[binding].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        materialBindings[binding].stageFlags
+            = binding == 1 ? (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT) : VK_SHADER_STAGE_FRAGMENT_BIT;
     }
 
     VkDescriptorSetLayoutCreateInfo setLayoutInfo{};
     setLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    setLayoutInfo.bindingCount = 5;
+    setLayoutInfo.bindingCount = 6;
     setLayoutInfo.pBindings = materialBindings;
 
     if (vkCreateDescriptorSetLayout(m_device, &setLayoutInfo, nullptr, &m_materialSetLayout) != VK_SUCCESS) {
@@ -342,6 +343,16 @@ Pipeline GpuResourceFactory::CreatePipeline(std::span<const VkFormat> colorForma
     const VkDescriptorSetLayout materialSetLayout = useMaterialTexture ? m_materialSetLayout : VK_NULL_HANDLE;
     return Pipeline(m_device, colorFormats, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath,
         vertexLayout, materialSetLayout, debugName, VK_NULL_HANDLE, sceneServicesSetLayout);
+}
+
+Pipeline GpuResourceFactory::CreateScenePipeline(const PipelineFixedState& fixedState,
+    std::span<const VkFormat> colorFormats, const std::string& vertexShaderSpirvPath,
+    const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture,
+    const char* debugName, VkDescriptorSetLayout sceneServicesSetLayout) const
+{
+    const VkDescriptorSetLayout materialSetLayout = useMaterialTexture ? m_materialSetLayout : VK_NULL_HANDLE;
+    return Pipeline(m_device, colorFormats, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath,
+        vertexLayout, materialSetLayout, debugName, VK_NULL_HANDLE, sceneServicesSetLayout, fixedState);
 }
 
 Pipeline GpuResourceFactory::CreateClusterPipeline(std::span<const VkFormat> colorFormats,
@@ -662,12 +673,14 @@ std::shared_ptr<Texture2D> GpuResourceFactory::DefaultMaterialImage(MaterialImag
     if (std::any_of(m_defaultMaterialImages.begin(), m_defaultMaterialImages.end(),
             [](const std::shared_ptr<Texture2D>& image) { return image == nullptr; })) {
         static constexpr std::uint8_t kWhite[4] = { 255, 255, 255, 255 };
+        static constexpr std::uint8_t kBlack[4] = { 0, 0, 0, 255 }; // A missing sphere map adds nothing.
         static constexpr std::uint8_t kFlatNormal[4] = { 128, 128, 255, 255 }; // Decodes to about (0, 0, 1).
         const std::array<MaterialImageUpload, kMaterialImageRoleCount> uploads = { {
             { kWhite, 1, 1, MaterialImageRole::BaseColor, "MaterialDefaultBaseColor" },
             { kFlatNormal, 1, 1, MaterialImageRole::Normal, "MaterialDefaultNormal" },
             { kWhite, 1, 1, MaterialImageRole::MetallicRoughness, "MaterialDefaultMetallicRoughness" },
             { kWhite, 1, 1, MaterialImageRole::Occlusion, "MaterialDefaultOcclusion" },
+            { kBlack, 1, 1, MaterialImageRole::Sphere, "MaterialDefaultSphere" },
         } };
         std::vector<std::shared_ptr<Texture2D>> created = CreateMaterialImages(uploads);
         if (created.size() != kMaterialImageRoleCount
@@ -696,8 +709,8 @@ MaterialTexture GpuResourceFactory::CreateMaterialVariant(const MaterialImages& 
     const VkDescriptorSet descriptorSet = m_materialSets->Allocate();
     MaterialSetLease lease(m_materialSets, descriptorSet); // Frees the set if anything below throws.
 
-    // Image bindings in role order: base color, normal, metallic-roughness, occlusion.
-    static constexpr std::uint32_t kImageBindings[kMaterialImageRoleCount] = { 0, 2, 3, 4 };
+    // Image bindings in role order: base color, normal, metallic-roughness, occlusion, sphere.
+    static constexpr std::uint32_t kImageBindings[kMaterialImageRoleCount] = { 0, 2, 3, 4, 5 };
     VkDescriptorImageInfo imageInfos[kMaterialImageRoleCount]{};
     VkWriteDescriptorSet writes[kMaterialImageRoleCount + 1]{};
     for (std::size_t i = 0; i < kMaterialImageRoleCount; ++i) {

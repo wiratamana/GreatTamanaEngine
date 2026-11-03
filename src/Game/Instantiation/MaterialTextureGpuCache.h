@@ -28,6 +28,7 @@ struct MaterialTextureSet {
     Guid normal = Guid::Invalid();
     Guid metallicRoughness = Guid::Invalid();
     Guid occlusion = Guid::Invalid();
+    Guid sphere = Guid::Invalid();
 };
 
 // One image the caller will need soon.

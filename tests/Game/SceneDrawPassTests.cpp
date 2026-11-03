@@ -30,6 +30,7 @@ TEST(SceneDrawRequestTest, LeavesEveryOtherFieldAtItsDefault)
     const SceneDrawRequest request = MakeSceneDrawRequest(Mat4::Identity(), PipelineOverrideSet{});
     EXPECT_EQ(request.frameDebuggerCapture, nullptr);
     EXPECT_EQ(request.batchedEntities, nullptr);
+    EXPECT_EQ(request.onlyEntities, nullptr);
     EXPECT_FALSE(request.maxDrawCount.has_value());
     EXPECT_EQ(request.sceneServicesSet, DescriptorSetHandle::Invalid);
 }

@@ -10,6 +10,7 @@
 #include "../../Renderer/Renderer.h"
 
 #include <array>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -60,8 +61,9 @@ std::string_view DepthOnlyShaderSuffix(VertexLayout layout) noexcept
 }
 
 struct SceneShaderSet::Impl {
-    explicit Impl(const char* base)
+    Impl(const char* base, std::optional<ScenePipelineState> shadedState)
         : baseName(base != nullptr ? base : "")
+        , shaded(shadedState)
     {
     }
 
@@ -86,17 +88,13 @@ struct SceneShaderSet::Impl {
     {
         RenderSystem& renderSystem = core.GetGame().GetRenderSystem();
         Renderer& renderer = core.GetRenderer();
-        const std::string fragment = "shaders/" + baseName + ".frag.spv";
         std::vector<PipelineHandle> inserted;
         PipelineOverrideSet built;
         try {
-            for (const LayoutShader& entry : kLayoutShaders) {
-                const std::string vertex = "shaders/" + baseName + entry.suffix + ".vert.spv";
-                const std::string debugName = baseName + entry.suffix + ".vert/" + baseName + ".frag (depth-only)";
-                const PipelineHandle handle = renderSystem.RegisterPipeline(renderer.CreatePipeline(
-                    std::span<const PixelFormat>{}, vertex, fragment, entry.layout, /*useMaterialTexture=*/false, debugName.c_str()));
-                inserted.push_back(handle);
-                built.byLayout[static_cast<std::size_t>(entry.layout)] = handle;
+            if (shaded.has_value()) {
+                BuildShaded(core, renderSystem, renderer, inserted, built);
+            } else {
+                BuildDepthOnly(renderSystem, renderer, inserted, built);
             }
         } catch (...) {
             for (const PipelineHandle handle : inserted) {
@@ -109,7 +107,37 @@ struct SceneShaderSet::Impl {
         overrides = std::move(built);
     }
 
+    void BuildDepthOnly(
+        RenderSystem& renderSystem, Renderer& renderer, std::vector<PipelineHandle>& inserted, PipelineOverrideSet& built) const
+    {
+        const std::string fragment = "shaders/" + baseName + ".frag.spv";
+        for (const LayoutShader& entry : kLayoutShaders) {
+            const std::string vertex = "shaders/" + baseName + entry.suffix + ".vert.spv";
+            const std::string debugName = baseName + entry.suffix + ".vert/" + baseName + ".frag (depth-only)";
+            const PipelineHandle handle = renderSystem.RegisterPipeline(renderer.CreatePipeline(
+                std::span<const PixelFormat>{}, vertex, fragment, entry.layout, /*useMaterialTexture=*/false, debugName.c_str()));
+            inserted.push_back(handle);
+            built.byLayout[static_cast<std::size_t>(entry.layout)] = handle;
+        }
+    }
+
+    // One colour pipeline for the position+normal+uv layout, with the material set and the scene services set bound.
+    void BuildShaded(Core& core, RenderSystem& renderSystem, Renderer& renderer, std::vector<PipelineHandle>& inserted,
+        PipelineOverrideSet& built) const
+    {
+        const std::array<PixelFormat, 1> colorFormats{ renderer.ScenePixelFormat() };
+        const std::string vertex = "shaders/" + baseName + ".vert.spv";
+        const std::string fragment = "shaders/" + baseName + ".frag.spv";
+        const std::string debugName = baseName + ".vert/" + baseName + ".frag (shaded)";
+        const PipelineHandle handle = renderSystem.RegisterPipeline(renderer.CreateScenePipeline(*shaded, colorFormats, vertex,
+            fragment, VertexLayout::PositionNormalUv, /*useMaterialTexture=*/true, debugName.c_str(),
+            core.GetSceneServicesDescriptorSet().LayoutHandle()));
+        inserted.push_back(handle);
+        built.byLayout[static_cast<std::size_t>(VertexLayout::PositionNormalUv)] = handle;
+    }
+
     std::string baseName;
+    std::optional<ScenePipelineState> shaded; // Set: one colour pipeline. Empty: depth-only set.
     detail::GatedBuild build;
     RenderSystem* system = nullptr; // The system the pipelines live in; it outlives the feature.
     std::vector<PipelineHandle> registered;
@@ -118,7 +146,12 @@ struct SceneShaderSet::Impl {
 
 SceneShaderSet SceneShaderSet::DepthOnly(const char* baseName)
 {
-    return SceneShaderSet(std::make_unique<Impl>(baseName));
+    return SceneShaderSet(std::make_unique<Impl>(baseName, std::nullopt));
+}
+
+SceneShaderSet SceneShaderSet::Shaded(const char* baseName, const ScenePipelineState& state)
+{
+    return SceneShaderSet(std::make_unique<Impl>(baseName, state));
 }
 
 SceneShaderSet::SceneShaderSet(std::unique_ptr<Impl> impl) noexcept
@@ -165,6 +198,11 @@ bool PrepareSceneShaders(SceneShaderSet& set, FrameContext& context)
 const PipelineOverrideSet& OverridesOf(const SceneShaderSet& set) noexcept
 {
     return set.m_impl->overrides;
+}
+
+bool BindsSceneServices(const SceneShaderSet& set) noexcept
+{
+    return set.m_impl != nullptr && set.m_impl->shaded.has_value();
 }
 
 } // namespace detail

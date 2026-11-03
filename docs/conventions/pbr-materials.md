@@ -1,12 +1,12 @@
 # PBR materials
 > Rules for glTF materials: image roles, tangent convention, GGX shading, and material GPU lifetime. For anyone touching material shaders, import or the material cache.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-11-03
 
 ## TL;DR
 - Imported glTF meshes use a normal map, a metallic-roughness map, an occlusion map and a GGX sun specular.
-- PMX models and primitives keep the older base-color shaders.
+- PMX models and primitives keep the older base-color shaders. The toon data of PMX materials is used only by the [ToonCharacter](../reference/render-features/toon-character.md) feature.
 - Scene color stays linear HDR. Tone mapping does the display transform (see [Tone mapping](../reference/render-features/tone-mapping.md)).
-- Only base color is sRGB. Every other image is linear.
+- Base color and the PMX sphere map are sRGB. Every other image is linear.
 - Nothing here throws. A bad image or material falls back to a default and logs once.
 
 ## Rules
@@ -14,12 +14,12 @@
 2. A vertex tangent is a `Vec4`: xyz is the unit tangent T, w is +1 or -1. The bitangent is `cross(N, T) * w`.
 3. The shadow lookup uses the geometric normal, never the bump normal.
 4. The `MaterialParams` C++ struct and `MaterialParams.glsl` must match. Both are 48 bytes.
-5. Every material set is complete: all five bindings are written, also for PMX materials.
+5. Every material set is complete: all six bindings (0 to 5) are written, also for PMX materials.
 6. Keep radiance clamped to `kMaxSceneRadiance` (8192). Scene color is `RGBA16F`. Above 65504 it becomes `+inf`, then a black pixel.
 7. Release materials only through the sweep on the main thread. Never free a GPU material by hand.
 
 ## Image roles
-`MaterialImageRole` (`src/Renderer/MaterialImageRole.h`) names the four slots.
+`MaterialImageRole` (`src/Renderer/MaterialImageRole.h`) names the five slots.
 
 | Role | Set 0 binding | GPU format | Channels |
 |---|---|---|---|
@@ -27,10 +27,11 @@
 | `Normal` | 2 | `RGBA8_UNorm` | rgb = tangent-space normal * 0.5 + 0.5 |
 | `MetallicRoughness` | 3 | `RGBA8_UNorm` | G roughness, B metallic |
 | `Occlusion` | 4 | `RGBA8_UNorm` | R occlusion (1 = unoccluded) |
+| `Sphere` | 5 | `RGBA8_SRGB` | PMX sphere map, rgb |
 
-- Binding 1 is the `MaterialParams` block: `baseColorFactor`, then alpha cutoff, metallic, roughness, normal scale, occlusion strength.
+- Binding 1 is the `MaterialParams` block (vertex and fragment stages): `baseColorFactor`, then alpha cutoff, metallic, roughness, normal scale, occlusion strength, and three toon floats (class id, edge width scale, draw-edge flag).
 - `MakeMaterialParams` clamps colors, cutoff, metallic, roughness and occlusion to 0..1, and normal scale to 0..8. A non-finite value becomes its default.
-- A missing image becomes a 1x1 default: white sRGB, flat normal (128,128,255), white metallic-roughness, white occlusion.
+- A missing image becomes a 1x1 default: white sRGB, flat normal (128,128,255), white metallic-roughness, white occlusion, black sphere.
 - Mip chains of data images are plain linear averages. The shader normalizes the sampled normal.
 
 ## Tangent convention
@@ -90,7 +91,7 @@ curl.exe "http://127.0.0.1:8080/feature_debug/set?name=SceneLighting&materialDeb
 ## Material lifetime
 - **Upload.** Many images go up in few submits: one staging buffer and one command buffer per chunk (64 MiB or 256 images). Images are decoded in groups of 48 MiB. One summary line is logged.
 - **Sets.** `MaterialSetPool` holds up to 4096 material sets. A `MaterialSetLease` frees its set when the material dies.
-- **Cache.** One image per `(Guid, srgb)`. One material per `(four Guids, MaterialParams bytes)`.
+- **Cache.** One image per `(Guid, srgb)`. One material per `(five Guids, MaterialParams bytes)`.
 - **Sweep.** `Core::BuildFrame` calls `Game::ReleaseUnusedGpuResources` first, on the main thread. When a sweep is pending it runs every 30 frames. Materials no entity and no cached part uses go first, then images only the cache holds, then unused meshes.
 - The GPU is drained once, and only if something was freed. The log line is "Released N materials and M images".
 

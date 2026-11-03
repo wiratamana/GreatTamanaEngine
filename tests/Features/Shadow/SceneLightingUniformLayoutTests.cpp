@@ -41,6 +41,11 @@ TEST(SceneLightingUniformLayoutTest, EveryFieldMatchesTheStd140BlockInName_Order
         GTE_EXPECT_MEMBER(cascadeViewProjection1),
         GTE_EXPECT_MEMBER(cascadeViewProjection2),
         GTE_EXPECT_MEMBER(cascadeViewProjection3),
+        // The C++ tail is float[4][4]; the block names each row.
+        { "toonLook0", offsetof(SceneLightingUniformData, toonLook) },
+        { "toonLook1", offsetof(SceneLightingUniformData, toonLook) + 16 },
+        { "toonLook2", offsetof(SceneLightingUniformData, toonLook) + 32 },
+        { "toonLook3", offsetof(SceneLightingUniformData, toonLook) + 48 },
     };
 #undef GTE_EXPECT_MEMBER
 
@@ -50,7 +55,7 @@ TEST(SceneLightingUniformLayoutTest, EveryFieldMatchesTheStd140BlockInName_Order
         EXPECT_EQ(block.members[i].offset, expected[i].second) << expected[i].first;
     }
     EXPECT_EQ(block.size, sizeof(SceneLightingUniformData));
-    EXPECT_EQ(block.size, 448u);
+    EXPECT_EQ(block.size, 512u);
 }
 
 TEST(SceneLightingUniformLayoutTest, BlockFitsTheEngineUniformLimit)

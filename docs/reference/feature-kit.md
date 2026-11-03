@@ -1,6 +1,6 @@
 # Feature kit reference
 > Look-up tables for `gte::fx`, the Vulkan-free kit that render features are written against.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-11-03
 
 ## TL;DR
 - Include `src/Core/FeatureKit/FeatureKit.h`. It is the one umbrella header.
@@ -44,7 +44,8 @@ Blend (`fx::Blend`): `Replace` writes over the view (ToneMapping, last). `AlphaO
 | `PassEnabled("Pass")` | `bool` | False while the pass is toggled off. Ask before any side effect |
 | `Compute(shader, "Pass")` | `ComputeChain` | One dispatch |
 | `Fullscreen(shader, "Pass")` | `FullscreenChain` | One fullscreen draw |
-| `SceneDraw("Pass")` | `SceneDrawChain` | A scene redraw: depth pre-pass, shadow map, outline |
+| `SceneDraw("Pass")` | `SceneDrawChain` | A scene redraw: depth pre-pass, shadow map, colour redraw of chosen entities (toon, outline) |
+| `SelectEntities(span)` | `EntitySelection` | Reserves a per-frame entity set for `SceneDraw().Only()`. Invalid for an empty span or when the pool is used up. The span must outlive `Record()` |
 | `ClusterDraw(state, lane)` | `ClusterDrawChain` | GPU-culled draw of cluster meshes. Inert in a Shared frame and during a capture |
 | `FillBuffer("Pass", buf, value)` | `bool` | Clears `byteSize` rounded up to 4. False: nothing declared, so do not dispatch |
 | `Blit("Pass", src, dst, filter)` | `bool` | Scaled copy. `BlitFilter::Linear` or `Nearest` |
@@ -70,13 +71,18 @@ Every chain ends with a terminal call. A refused call makes the terminal declare
 |---|---|---|
 | `ComputeChain` | `Bind(name, tex)`, `Bind(name, fx::Depth(tex))`, `BindBuffer(name, buf)`, `Push(T)`, `Params(gpuParams, T)`, `Params(binding, gpuParams, T)`, `BindOutput(name, readback)` | `Dispatch(extent[, depth])` |
 | `FullscreenChain` | `Bind`, `Push`, `Acknowledge(depth)`, `Target(tex[, clear])`, `DepthTest(tex, compare, write)` | `Draw()` |
-| `SceneDrawChain` | `Shaders(set)`, `Camera(vp)`, `ClearDepthTarget(tex, v)`, `ColorTarget(tex)`, `CullToFrustum(padding)`, `Exclude(set)` | `Record()` |
+| `SceneDrawChain` | `Shaders(set)`, `Camera(vp)`, `ClearDepthTarget(tex, v)`, `ColorTarget(tex)`, `Target(tex)`, `SceneServices()`, `CullToFrustum(padding)`, `Exclude(set)`, `Only(selection)`, `Claim()` | `Record()` |
 | `ClusterDrawChain` | `Instances`, `Camera`, `CullCamera`, `Culling`, `TwoPhase(hiz, depth)`, `ReuseSurvivors()`, `Target` or `DepthOnlyTarget`, `IdTint`, `Stats` | `Plan()` (optional), `Record()` |
 
 - Variables are bound by name. Names must be literals. Access (read or write) comes from the shader.
 - `Fullscreen` acknowledges scene depth by default. `DepthCompare` is `Less`, `LessEqual`, `Equal` or `Always`.
 - `FullscreenShader{base, blend}` takes `Opaque`, `AlphaBlend` or `Additive`.
 - `CullToFrustum` skips draws whose bounds miss the camera. Meshes without bounds are never skipped.
+- `Target(tex)` draws into one texture as color and depth and loads both. Use `OpaqueFrame::SceneTarget()`.
+- `SceneServices()` binds the sun, ambient and shadow set of this view and declares reads of the published scene slots. A `Shaded` set refuses to record without it. Refused in a Shared frame.
+- `Only(selection)` draws just those entities. An invalid selection draws nothing. Get one with `f.SelectEntities(span)`. One selection can feed several chains of the frame. At most 32 sets exist per frame (cluster draws, shadow cascades and selections share them).
+- `Claim()` needs `Only()`. After the pass was declared the main draw of this view skips the selected entities, so they are drawn once. It declares nothing in a Shared frame and while `ViewCaptureArmed()`: the main draw keeps the entities. Claimed entities still cast shadows.
+- Every `SceneDraw` reads the GPU skinning buffers of the frame, so skinned meshes are drawn after the skinning compute.
 - `Record()` of a cluster chain also frees idle buffers. Call it every frame. A callback that skips the chain calls `state.TickIdle(frame, false)`.
 - A cluster chain that is toggled off, lacks device support or is refused declares nothing and claims no entity. More in [GPU-driven rendering](../architecture/gpu-driven-rendering.md).
 
@@ -96,6 +102,7 @@ Every chain ends with a terminal call. A refused call makes the terminal declare
 | `HizPyramid{base}` | Feature (atlas lasts one frame) | Farthest-depth pyramid of the scene depth. `Plan`, `Build` |
 | `ClusterDrawState{base, shape}` | Feature | Buffers and names of a cluster draw. Destroy only while the GPU is idle |
 | `SceneShaderSet::DepthOnly("Base")` | Feature | Depth pipelines per vertex layout. Needs `Base<suffix>.vert` and `Base.frag` |
+| `SceneShaderSet::Shaded("Base", state)` | Feature | One colour pipeline for position+normal+uv meshes (skinned too). Needs `Base.vert` and `Base.frag`. `state` is a `ScenePipelineState`: `cull`, `depthCompare`, `depthWrite`, `blend`. Binds material set 0 and scene services set 1. Needs `SceneServices()` on the chain |
 | `ComputeShader{"Name"}` | Feature | Loads `shaders/Name.comp.spv`. Built lazily. A failed build retries on a cooldown, never throws |
 | `FullscreenShader{"Name"}` | Feature | Loads `Name.vert` and `Name.frag` |
 | `Channel<T>{"name"}` | Frame | Hand-off between callbacks. See channels |

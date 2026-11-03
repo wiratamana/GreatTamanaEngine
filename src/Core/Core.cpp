@@ -30,6 +30,7 @@
 #include "CullRequestRules.h"
 #include "../Renderer/Culling/CullingTypes.h"
 #include "FaultInjection.h"
+#include "GpuSkinningKeys.h"
 #include "FeatureKit/ClusterPartPlanning.h"
 #include "../Jobs/JobDispatch.h"
 #include "../Jobs/JobSystem.h"
@@ -66,10 +67,6 @@ float AspectRatioOf(int width, int height) noexcept
 
 // Fixed time step for frame debugging (1/60s).
 constexpr double kFixedStepSeconds = 1.0 / 60.0;
-
-// Blackboard key for GPU skinning output buffers.
-using rg::operator""_passId;
-constexpr rg::RenderPassId kGpuSkinningOutputsKey = "GpuSkinning.OutputBuffers"_passId;
 
 // Resolves color and depth texture handles for post-opaque and post-transparent passes.
 // Returns nullopt when the view has no sampleable depth.

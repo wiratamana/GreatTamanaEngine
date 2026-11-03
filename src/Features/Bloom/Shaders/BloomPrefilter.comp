@@ -1,0 +1,52 @@
+#version 450
+
+// Half-resolution bright pass: clamp, soft threshold, then a Karis-weighted 2x2 average that suppresses fireflies.
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(push_constant) uniform PushConstants {
+    vec4 thresholdKneeMax; // x threshold, y absolute knee, z max radiance, w reserved
+} pc;
+
+layout(binding = 0) uniform sampler2D sourceColor;
+layout(binding = 1, rgba16f) uniform writeonly image2D destinationImage;
+
+vec3 BrightPart(ivec2 texel, ivec2 sourceSize)
+{
+    vec3 c = texelFetch(sourceColor, clamp(texel, ivec2(0), sourceSize - 1), 0).rgb;
+    if (any(isnan(c)) || any(isinf(c))) {
+        return vec3(0.0);
+    }
+    c = max(c, vec3(0.0));
+    float brightness = max(c.r, max(c.g, c.b));
+    if (brightness > pc.thresholdKneeMax.z) {
+        c *= pc.thresholdKneeMax.z / brightness;
+        brightness = pc.thresholdKneeMax.z;
+    }
+    float threshold = pc.thresholdKneeMax.x;
+    float knee = pc.thresholdKneeMax.y;
+    float soft = clamp(brightness - threshold + knee, 0.0, 2.0 * knee);
+    soft = soft * soft / (4.0 * knee + 1e-5);
+    float weight = max(soft, brightness - threshold) / max(brightness, 1e-5);
+    return c * weight;
+}
+
+void main()
+{
+    ivec2 outSize = imageSize(destinationImage);
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    if (texel.x >= outSize.x || texel.y >= outSize.y) {
+        return;
+    }
+    ivec2 sourceSize = textureSize(sourceColor, 0);
+    ivec2 base = texel * 2;
+
+    vec3 sum = vec3(0.0);
+    float weightSum = 0.0;
+    for (int i = 0; i < 4; ++i) {
+        vec3 c = BrightPart(base + ivec2(i & 1, i >> 1), sourceSize);
+        float karis = 1.0 / (1.0 + dot(c, vec3(0.2126, 0.7152, 0.0722)));
+        sum += c * karis;
+        weightSum += karis;
+    }
+    imageStore(destinationImage, texel, vec4(sum / weightSum, 1.0));
+}

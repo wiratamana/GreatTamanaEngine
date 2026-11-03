@@ -9,6 +9,7 @@
 #include "../../ECS/Components/MeshRenderer.h"
 #include "../../ECS/Components/Name.h"
 #include "../../ECS/Components/SkeletalAnimator.h"
+#include "../../ECS/Components/ToonShading.h"
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"
 #include "../../ECS/TransformHierarchy.h"
@@ -639,6 +640,13 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx, PhysicsSystem&
             ImGui::ColorEdit3("Color", &light->color.x);
             ImGui::DragFloat("Illuminance (lux)", &light->illuminanceLux, 100.0f, 0.0f, 200000.0f);
             ImGui::Checkbox("Active", &light->active);
+        }
+    }
+
+    if (ToonShading* toon = registry.TryGetComponent<ToonShading>(entity)) {
+        if (ImGui::CollapsingHeader("Toon Shading", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Checkbox("Enabled", &toon->enabled);
+            ImGui::TextDisabled("Marks this entity and its children for the ToonCharacter feature.");
         }
     }
 

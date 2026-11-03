@@ -1,10 +1,10 @@
 # Render features
 
-> Master table of the 8 built-in render features: order, toggles, data flow, defaults. Read this before any single feature page.
-> Verified against code: 2026-10-30
+> Master table of the 10 built-in render features: order, toggles, data flow, defaults. Read this before any single feature page.
+> Verified against code: 2026-11-03
 
 ## TL;DR
-- 8 features ship in `src/Features/`. All use the feature kit (`fx::`), none touches Vulkan.
+- 10 features ship in `src/Features/`. All use the feature kit (`fx::`), none touches Vulkan.
 - Order in a frame: stage first, then priority (low number runs first).
 - Features share data through channels, never by including each other.
 - Settings live in memory only. Scene files do not save them. Set them again after a load.
@@ -22,6 +22,8 @@
 | `Ssgi` | One-bounce screen-space GI | [ssgi](ssgi.md) | `Ssgi` |
 | `VolumetricLight` | Light shafts and fog | [volumetric-light](volumetric-light.md) | `VolumetricLight` |
 | `GpuDrivenScene` | GPU cluster culling | [gpu-driven-scene](gpu-driven-scene.md) | Panel `Culling`, debug name `GpuDrivenScene` |
+| `Bloom` | Glow around very bright pixels | [bloom](bloom.md) | `Bloom` |
+| `ToonCharacter` | Cel shading and outline for marked characters | [toon-character](toon-character.md) | `ToonCharacter` |
 
 ## Order in the frame
 
@@ -31,10 +33,14 @@
 | PreOpaque | 0 | `AtmosphereViewLut` | Atmosphere | `AtmosphereSkyViewLutPass` |
 | PreOpaque | 5 | `Atmosphere.SunLight` | Atmosphere | none (`Always`) |
 | PreOpaque | 10 | `Shadow.Cascades` | Shadow | `Shadow.Cascade0..3.Draw`, `Shadow.Cluster.L<c>.P<s>.Reset/Cull/Draw` |
+| PreOpaque | 15 | `ToonCharacter.Look` | ToonCharacter | none (`Always`) |
 | PreOpaque | 20 | `SceneLighting.Uniforms` | SceneLighting | none (`Always`) |
-| PreOpaque | 30, 35, 40, 40, 45 | `<Feature>.FrameStamp` | Shadow, Ssgi, Gtao, ToneMapping, VolumetricLight | none (`Always`) |
+| PreOpaque | 30, 35, 40, 40, 45, 46 | `<Feature>.FrameStamp` | Shadow, Ssgi, Gtao, ToneMapping, VolumetricLight, Bloom | none (`Always`) |
 | Opaque | -10 | `GpuDrivenScene.SceneCull` | GpuDrivenScene | none (`Always`) |
 | Opaque | 0 | `GpuDrivenScene.Opaque` | GpuDrivenScene | `GpuDrivenScene.*` passes |
+| Opaque | 100 | `ToonCharacter.Surface` | ToonCharacter | `ToonCharacter.Surface.Draw` |
+| Opaque | 110 | `ToonCharacter.Outline` | ToonCharacter | `ToonCharacter.Outline.Draw` |
+| Opaque | 120 | `ToonCharacter.Overlay` | ToonCharacter | `ToonCharacter.Overlay.Draw` |
 | PostOpaque | 0 | `Shadow.Mask` | Shadow | `Shadow.Mask.Dispatch` |
 | PostOpaque | 20 | `AtmosphereAerialVolume` | Atmosphere | `AtmosphereAerialPerspectiveVolumePass` |
 | PostOpaque | 50 | `Gtao.Occlusion` | Gtao | `Gtao.Main.Dispatch`, `Gtao.Resolve.Dispatch` |
@@ -47,9 +53,11 @@
 | PostComposite | -1000 | `AtmosphereComposite` | Atmosphere | `AtmosphereAerialPerspectiveCompositePass`, `AtmosphereComposite.CopyToPrivateTarget` |
 | PostComposite | -500 | `Shadow.Composite` | Shadow | `Shadow.Composite.Draw` |
 | PostComposite | -250 | `VolumetricLight.Composite` | VolumetricLight | `VolumetricLight.Composite.Dispatch`, `...CopyToPrivateTarget` |
+| PostComposite | -100 | `Bloom` | Bloom | `Bloom.Prefilter`, `Bloom.Down0..4`, `Bloom.Up0..4`, `Bloom.CopyToPrivateTarget` |
 | PostComposite | 1000 | `ToneMapping` | ToneMapping | `ToneMapping.Dispatch`, `ToneMapping.CopyToPrivateTarget` |
 
-- Blend of the composite entries: `ScreenSpaceMask` for Ssgi, Gtao, Shadow. `AlphaOver` for Atmosphere, VolumetricLight. `Replace` for ToneMapping.
+- Blend of the composite entries: `ScreenSpaceMask` for Ssgi, Gtao, Shadow. `AlphaOver` for Atmosphere, VolumetricLight. `Additive` for Bloom. `Replace` for ToneMapping.
+- The three ToonCharacter draws claim or redraw the entities of marked characters. See [toon-character](toon-character.md).
 - `PostTransparent` and `PreUI` stages are not used by any built-in feature.
 - `Always` entries are not render passes. A pass toggle cannot switch them off.
 
@@ -67,9 +75,12 @@ Shadow.Cascades --> Shadow.Map --> Shadow.Mask --> Shadow.Composite
                 \-> scene slots 0..3 --> material shaders (set 1, binding 0..3)
 Gtao, Ssgi, VolumetricLight: Result channel from build pass to composite pass
 SceneLighting.Uniforms --> scene uniform block, binding 8 --> every lit material
+ToonCharacter.Look --> SceneLighting.Uniforms (last 64 bytes of the block) --> ToonCharacter draws
+ToonCharacter.Surface (claims entities) --> Outline, Overlay (same entities)
+Bloom: PostComposite, reads scene color, adds glow before ToneMapping
 ```
 
-- Plain records in `src/Game/Lighting/` carry the shared data: `SunShadowReceiver.h`, `SunLightModulation.h`, `DirectionalLightResolver.h`.
+- Plain records in `src/Game/Lighting/` carry the shared data: `SunShadowReceiver.h`, `SunLightModulation.h`, `DirectionalLightResolver.h`, `ToonLook.h`.
 - The first active ECS `DirectionalLight` is the sun. With none, a fixed placeholder sun is used.
 - Atmosphere and VolumetricLight read the shadow receiver even in views that show no surface.
 
@@ -78,7 +89,7 @@ SceneLighting.Uniforms --> scene uniform block, binding 8 --> every lit material
 | In the Scene view (secondary) | Features |
 |---|---|
 | Off at start | Gtao, Ssgi, VolumetricLight, Atmosphere aerial volume, Atmosphere composite |
-| On at start | Shadow, SceneLighting, GpuDrivenScene, ToneMapping, sky background, Atmosphere LUTs, sun light |
+| On at start | Shadow, SceneLighting, GpuDrivenScene, ToneMapping, Bloom, ToonCharacter, sky background, Atmosphere LUTs, sun light |
 
 - Turn one on: `curl.exe "http://127.0.0.1:8080/render_graph/set_feature_enabled?name=Gtao.Occlusion&enabled=true&view=secondary"`.
 - `name` is a registration name from the table above. `view` is `primary` or `secondary`. No `view` means both.

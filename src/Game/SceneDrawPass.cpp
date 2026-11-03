@@ -1,5 +1,7 @@
 #include "SceneDrawPass.h"
 
+#include "../Renderer/SceneServicesDescriptorSet.h"
+
 #include <cassert>
 #include <utility>
 
@@ -60,21 +62,62 @@ SceneDrawPass& SceneDrawPass::ExcludeEntities(const EntityMarkSet* entities, con
     return *this;
 }
 
+SceneDrawPass& SceneDrawPass::OnlyEntities(const EntityMarkSet* entities, const std::uint64_t* liveEpoch)
+{
+    m_only = entities;
+    m_liveEpoch = liveEpoch;
+    m_epochAtDeclare = liveEpoch != nullptr ? *liveEpoch : 0;
+    return *this;
+}
+
+SceneDrawPass& SceneDrawPass::SceneServices(const SceneServicesDescriptorSet& services, rg::RenderViewId view,
+    std::span<const rg::MeshPassTextureRead> publishedSlots)
+{
+    m_services = &services;
+    m_servicesView = view;
+    for (const rg::MeshPassTextureRead& slot : publishedSlots) {
+        m_mesh.ReadTexture(slot.texture, slot.depth);
+    }
+    return *this;
+}
+
+SceneDrawPass& SceneDrawPass::ReadVertexBuffers(std::span<const rg::BufferHandle> buffers)
+{
+    for (const rg::BufferHandle& buffer : buffers) {
+        m_mesh.ReadVertexBuffer(buffer);
+    }
+    return *this;
+}
+
 bool SceneDrawPass::Draw()
 {
     SceneDrawRequest request = MakeSceneDrawRequest(m_viewProjection, m_overrides);
     request.batchedEntities = m_excluded;
+    request.onlyEntities = m_only;
     if (m_cullPadding.has_value()) {
         request.cull = SceneCullRequest{ m_viewProjection, *m_cullPadding };
     }
     return m_mesh.Draw([system = m_system, registry = m_registry, renderer = m_renderer, liveEpoch = m_liveEpoch,
-                           epochAtDeclare = m_epochAtDeclare, request = std::move(request)]() {
-        // A set from an older frame may be gone: draw everything on the CPU path instead.
-        if (liveEpoch != nullptr && *liveEpoch != epochAtDeclare && request.batchedEntities != nullptr) {
+                           epochAtDeclare = m_epochAtDeclare, services = m_services, servicesView = m_servicesView,
+                           request = std::move(request)]() {
+        const bool stale = liveEpoch != nullptr && *liveEpoch != epochAtDeclare;
+        // A selection from an older frame may be gone: draw nothing rather than everything.
+        if (stale && request.onlyEntities != nullptr) {
+            assert(false && "selection set read after its frame ended");
+            return;
+        }
+        // An exclusion set from an older frame may be gone: draw everything on the CPU path instead.
+        if (stale && request.batchedEntities != nullptr) {
             assert(false && "exclusion set read after its frame ended");
             SceneDrawRequest safe = request;
             safe.batchedEntities = nullptr;
             DrawScene(*system, *registry, *renderer, safe);
+            return;
+        }
+        if (services != nullptr) {
+            SceneDrawRequest bound = request;
+            bound.sceneServicesSet = services->DescriptorSetFor(servicesView);
+            DrawScene(*system, *registry, *renderer, bound);
             return;
         }
         DrawScene(*system, *registry, *renderer, request);

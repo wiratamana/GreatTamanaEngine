@@ -70,7 +70,7 @@ More about threads and bridges: [HTTP server](../architecture/http-server.md).
 | Move the scene camera | `GET /scene_camera/set_pose?x=0&y=2&z=5&yaw=0&pitch=0` **W** |
 | Look along an axis, switch Persp / Iso | `GET /scene_camera/view?direction=top&projection=orthographic` **W** |
 | Build a repro scene | `POST /instantiate_primitive` **W** |
-| Load the Hi-Z demo scene | `POST /open_preset_scene` **W** |
+| Load the Hi-Z demo scene or the Furina toon showcase | `POST /open_preset_scene` **W** (`hiz_demo`, `furina_showcase`; see R11) |
 | Hot reload a game project | `POST /project_assembly/hot_reload?name=<project>` **W** |
 | Play a clip on a model | `POST /physics_debug/play` **W** (see [physics debug](physics-debug.md)) |
 | Measure skirt or hair motion | `POST /physics_debug/run {"entity":"<n>","frames":204,"render_hz":60}` |
@@ -132,7 +132,7 @@ Full params and responses: [HTTP routes](http-routes.md) and [HTTP routes (debug
 | Scene | `POST /set_entity_trs` | `name`, `translation`, `rotation_euler_degrees`, `scale` | **W** |
 | Scene | `POST /delete_entity` | `name` | **W** |
 | Scene | `POST /save_scene`, `/load_scene` | `path` (optional) | **W** |
-| Scene | `POST /open_preset_scene`, `/close_preset_scene` | `preset=sponza\|hiz_demo`, `count`, `spacing`, `profile` | **W** |
+| Scene | `POST /open_preset_scene`, `/close_preset_scene` | `preset=sponza\|hiz_demo\|furina_showcase`, `count`, `spacing`, `profile` (`count`, `spacing`, `profile` are for `hiz_demo`) | **W** |
 | Scene | `POST /spawn_instance_grid` | `count`, `spacing` | **W** |
 | Camera | `/scene_camera/state`, `/scene_camera/pose` | none | |
 | Camera | `/scene_camera/set_pose` | `x`, `y`, `z`, `yaw`, `pitch` (all 5) | **W** |
@@ -299,6 +299,26 @@ curl.exe http://127.0.0.1:8080/debug/fault
 - `/profiler` answers even when the main thread is blocked. Read `live_block[].site` (what it waits on) and `snapshot_age`.
 - `state:"no_snapshot"` is not an error. Retry.
 - Bridge routes give `504` while frozen. That is expected. See [Troubleshooting](../troubleshooting.md).
+
+### R11. Toon character look (Furina showcase)
+```cmd
+curl.exe -X POST http://127.0.0.1:8080/open_preset_scene -d "{\"preset\":\"furina_showcase\"}"
+curl.exe http://127.0.0.1:8080/get_game_view -o toon_01.png
+curl.exe "http://127.0.0.1:8080/feature_debug/state?name=ToonCharacter"
+curl.exe "http://127.0.0.1:8080/feature_debug/set?name=ToonCharacter&debugView=1"
+curl.exe "http://127.0.0.1:8080/feature_debug/set?name=ToonCharacter&outlineWidthPx=2.4&rimStrength=0.5"
+curl.exe "http://127.0.0.1:8080/feature_debug/set?name=Bloom&intensity=0.4&threshold=1"
+curl.exe "http://127.0.0.1:8080/render_graph/set_feature_enabled?name=ToonCharacter.Surface&enabled=false&view=primary"
+curl.exe "http://127.0.0.1:8080/feature_debug/invoke?name=ToonCharacter&action=reset_defaults"
+curl.exe -X POST http://127.0.0.1:8080/close_preset_scene
+```
+- The preset needs `Project/Furina.gta` next to the exe. A missing file gives an error text and leaves the scene alone.
+- `/get_game_view` returns only the Game view (no editor window). Save each try as `toon_NN.png`, then compare it with the reference picture side by side at the same size.
+- `debugView`: `0` off, `1` class colors, `2` band mask, `3` shadow amount, `4` outline only, `5` albedo only. For exact pixel values set ToneMapping `mode=Clamp exposure=1 saturation=1 dither=0`.
+- Look at `game.status` (`Ok`), `game.drawnPartCount` and `game.claimedEntityCount` in the state. `CaptureArmed` means the Frame Debugger is on. The toon passes are skipped then.
+- Toggle names: feature `ToonCharacter`, passes `ToonCharacter.Surface.Draw`, `.Outline.Draw`, `.Overlay.Draw`. Bloom has `Bloom.*` passes.
+- `/get_logs?category=FeatureKit` and `category=RenderFeatureCompositor` must stay empty.
+- Pages: [Toon character](../reference/render-features/toon-character.md), [Bloom](../reference/render-features/bloom.md).
 
 ## 8. Gotchas
 - Only one editor can serve. A second editor has no HTTP (port 8080 busy).

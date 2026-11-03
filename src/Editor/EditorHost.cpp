@@ -501,6 +501,7 @@ EditorHost::EditorHost(const std::string& title, int width, int height, bool for
     // Scene IO for the engine command dispatch. One process-lifetime instance; the demo handles are resolved per call.
     static EditorSceneIOCapability s_editorSceneIOCapability;
     s_editorSceneIOCapability.SetHizDemoServicesProvider([this]() { return MakeHizDemoServices(); });
+    s_editorSceneIOCapability.SetFurinaShowcaseServicesProvider([this]() { return MakeFurinaShowcaseServices(); });
     m_sceneIOCapability = &s_editorSceneIOCapability;
 
 #if GTE_ENABLE_NETWORK
@@ -563,6 +564,20 @@ void EditorHost::ServiceFeatureDebugCommand()
     }
     result.found = result.found || request->kind == FeatureDebugCommandKind::List;
     FulfillOrLogDrop(m_featureDebugCommandBridge, pending->id, std::move(result), "FeatureDebug");
+}
+
+FurinaShowcaseServices EditorHost::MakeFurinaShowcaseServices()
+{
+    FurinaShowcaseServices services;
+    services.compositor = m_core.GetRenderFeatureCompositor();
+    for (const std::unique_ptr<IEngineFeatureModule>& module : m_builtinFeatureModules) {
+        fx::Feature* feature = module ? fx::FindFeature(*module) : nullptr;
+        if (feature != nullptr && std::string_view(feature->Name()) == "ToneMapping") {
+            services.toneMapping = feature->DebugEndpoint();
+            break;
+        }
+    }
+    return services;
 }
 
 HizDemoServices EditorHost::MakeHizDemoServices()

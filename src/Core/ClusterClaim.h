@@ -37,6 +37,17 @@ constexpr bool ClusterClaimAllowed(const ClusterClaimContext& context) noexcept
     return !(context.captureArmed && context.scope == rg::ViewScope::Primary);
 }
 
+// Why a scene draw chain may not take over its selected entities; None when it may.
+enum class SelectionClaimRefusal : std::uint8_t { None, NoSelection, NotAllowed };
+
+constexpr SelectionClaimRefusal SelectionClaimRefusalOf(bool hasSelection, const ClusterClaimContext& context) noexcept
+{
+    if (!hasSelection) {
+        return SelectionClaimRefusal::NoSelection;
+    }
+    return ClusterClaimAllowed(context) ? SelectionClaimRefusal::None : SelectionClaimRefusal::NotAllowed;
+}
+
 // The CPU draw cull follows the claim rule: a captured primary frame keeps its full draw list.
 constexpr bool SceneCullAllowed(const ClusterClaimContext& context) noexcept
 {

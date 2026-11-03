@@ -117,7 +117,8 @@ const char* VertexLayoutDebugName(VertexLayout layout)
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
     IFrameDebuggerCaptureRecorder* capture, std::optional<std::size_t> maxDrawCount,
     const EntityMarkSet& batchedEntities, std::optional<PipelineOverrideSet> pipelineOverrideSet,
-    DescriptorSetHandle sceneServicesSet, rg::CommandBuffer* cmd, std::optional<SceneCullRequest> cull)
+    DescriptorSetHandle sceneServicesSet, rg::CommandBuffer* cmd, std::optional<SceneCullRequest> cull,
+    const EntityMarkSet* onlyEntities)
 {
     GTE_PROFILE_SCOPE("RenderSystem::Draw");
 
@@ -144,6 +145,11 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
 
         // A batched entity is drawn by its indirect pass, but still counts toward maxDrawCount.
         if (batchedEntities.Contains(command.entity)) {
+            continue;
+        }
+
+        // Checked before any layout or pipeline lookup, so unselected entities never log a warning.
+        if (onlyEntities != nullptr && !onlyEntities->Contains(command.entity)) {
             continue;
         }
 

@@ -8,15 +8,16 @@
 
 namespace gte {
 
-// Which material slot an image feeds. Only the color slot is sRGB; the others are linear data.
-enum class MaterialImageRole : std::uint8_t { BaseColor, Normal, MetallicRoughness, Occlusion };
+// Which material slot an image feeds. Base color and sphere are sRGB; the others are linear data.
+enum class MaterialImageRole : std::uint8_t { BaseColor, Normal, MetallicRoughness, Occlusion, Sphere };
 
-inline constexpr std::size_t kMaterialImageRoleCount = 4;
-static_assert(kMaterialImageRoleCount == static_cast<std::size_t>(MaterialImageRole::Occlusion) + 1);
+inline constexpr std::size_t kMaterialImageRoleCount = 5;
+static_assert(kMaterialImageRoleCount == static_cast<std::size_t>(MaterialImageRole::Sphere) + 1);
 
 constexpr PixelFormat MaterialImageFormat(MaterialImageRole role) noexcept
 {
-    return role == MaterialImageRole::BaseColor ? PixelFormat::RGBA8_SRGB : PixelFormat::RGBA8_UNorm;
+    return (role == MaterialImageRole::BaseColor || role == MaterialImageRole::Sphere) ? PixelFormat::RGBA8_SRGB
+                                                                                       : PixelFormat::RGBA8_UNorm;
 }
 
 // Display name of a slot for debug tools.
@@ -31,6 +32,8 @@ constexpr const char* MaterialImageRoleLabel(MaterialImageRole role) noexcept
         return "Metallic-Roughness";
     case MaterialImageRole::Occlusion:
         return "Occlusion";
+    case MaterialImageRole::Sphere:
+        return "Sphere";
     }
     return "Unknown";
 }

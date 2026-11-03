@@ -79,6 +79,13 @@ public:
         bool useMaterialTexture = false, const char* debugName = nullptr,
         VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE) const;
 
+    // Scene pipeline with caller-chosen fixed-function state; set 0 = material set when `useMaterialTexture`,
+    // set 1 = `sceneServicesSetLayout` when non-null.
+    Pipeline CreateScenePipeline(const PipelineFixedState& fixedState, std::span<const VkFormat> colorFormats,
+        const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
+        VertexLayout vertexLayout, bool useMaterialTexture, const char* debugName,
+        VkDescriptorSetLayout sceneServicesSetLayout) const;
+
     // Cluster draw pipeline: set 0 = material set when `useMaterialSet`, set 1 = `sceneServicesSetLayout` when
     // non-null, set 2 = buffer set. Empty `colorFormats` builds a depth-only pipeline.
     Pipeline CreateClusterPipeline(std::span<const VkFormat> colorFormats, const std::string& vertexShaderSpirvPath,

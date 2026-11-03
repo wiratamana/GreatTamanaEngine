@@ -92,6 +92,27 @@ TEST(MaterialParamsTest, NegativeZeroAndPositiveZeroGiveEqualBytes)
     EXPECT_EQ(std::memcmp(&a, &b, sizeof(MaterialParams)), 0);
 }
 
+TEST(MaterialParamsTest, ToonDataSitsInThePbrYzwSlots)
+{
+    static_assert(offsetof(MaterialParams, toonClass) == offsetof(MaterialParams, occlusionStrength) + 4);
+    static_assert(offsetof(MaterialParams, edgeWidthScale) == offsetof(MaterialParams, occlusionStrength) + 8);
+    static_assert(offsetof(MaterialParams, drawEdge) == offsetof(MaterialParams, occlusionStrength) + 12);
+
+    const MaterialParams p = MakeToonMaterialParams(7, 1.5f, true);
+    EXPECT_FLOAT_EQ(p.toonClass, 7.0f);
+    EXPECT_FLOAT_EQ(p.edgeWidthScale, 1.5f);
+    EXPECT_FLOAT_EQ(p.drawEdge, 1.0f);
+    EXPECT_FLOAT_EQ(p.baseColorFactor[0], 1.0f);
+
+    const MaterialParams clamped = MakeToonMaterialParams(0, 100.0f, false);
+    EXPECT_FLOAT_EQ(clamped.edgeWidthScale, 8.0f);
+    EXPECT_FLOAT_EQ(clamped.drawEdge, 0.0f);
+
+    const MaterialParams negativeZero = MakeToonMaterialParams(0, -0.0f, false);
+    const MaterialParams zero = MakeToonMaterialParams(0, 0.0f, false);
+    EXPECT_EQ(std::memcmp(&negativeZero, &zero, sizeof(MaterialParams)), 0);
+}
+
 TEST(MaterialParamsTest, ShaderBlockMatchesTheStructLayout)
 {
     const test_support::Std140Block block = test_support::ParseBlock(

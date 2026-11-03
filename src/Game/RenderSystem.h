@@ -88,14 +88,14 @@ public:
         rg::CommandBuffer* cmd = nullptr, std::optional<SceneCullRequest> cull = std::nullopt);
 
     // Draw() with an explicit view-projection. Extras: frame-debugger `capture`, `maxDrawCount`, `batchedEntities`,
-    // per-layout `pipelineOverrideSet`, a draw `cmd`, and `cull` (skips entities whose padded bounds miss its frustum;
-    // an unusable matrix culls nothing).
+    // per-layout `pipelineOverrideSet`, a draw `cmd`, `cull` (skips entities whose padded bounds miss its frustum;
+    // an unusable matrix culls nothing) and `onlyEntities` (non-null: nothing else is drawn).
     void Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
         IFrameDebuggerCaptureRecorder* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
         const EntityMarkSet& batchedEntities = {},
         std::optional<PipelineOverrideSet> pipelineOverrideSet = std::nullopt,
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid, rg::CommandBuffer* cmd = nullptr,
-        std::optional<SceneCullRequest> cull = std::nullopt);
+        std::optional<SceneCullRequest> cull = std::nullopt, const EntityMarkSet* onlyEntities = nullptr);
 
 private:
     ResourcePool<Mesh, MeshHandle> m_meshes;

@@ -26,7 +26,7 @@ constexpr const char* kLogCategory = "MaterialTextureGpuCache";
 
 MaterialImageKey KeyOf(const Guid& guid, MaterialImageRole role) noexcept
 {
-    return MaterialImageKey{ guid, role == MaterialImageRole::BaseColor };
+    return MaterialImageKey{ guid, MaterialImageFormat(role) == PixelFormat::RGBA8_SRGB };
 }
 
 // Distinct per image so the Frame Debugger and the memory panel list each one under its own name.
@@ -38,6 +38,7 @@ std::string DebugNameOf(const Guid& guid, MaterialImageRole role)
     case MaterialImageRole::Normal: prefix = "MaterialNormal "; break;
     case MaterialImageRole::MetallicRoughness: prefix = "MaterialMetallicRoughness "; break;
     case MaterialImageRole::Occlusion: prefix = "MaterialOcclusion "; break;
+    case MaterialImageRole::Sphere: prefix = "MaterialSphere "; break;
     }
     return prefix + guid.ToString();
 }
@@ -65,6 +66,7 @@ void AppendImageRequests(const MaterialTextureSet& set, std::vector<ImageRequest
     add(set.normal, MaterialImageRole::Normal);
     add(set.metallicRoughness, MaterialImageRole::MetallicRoughness);
     add(set.occlusion, MaterialImageRole::Occlusion);
+    add(set.sphere, MaterialImageRole::Sphere);
 }
 
 void MaterialTextureGpuCache::MarkFailed(const MaterialImageKey& key, MaterialImageRole role, const std::string& reason)
@@ -183,7 +185,7 @@ void MaterialTextureGpuCache::PrepareImages(
 MaterialTextureHandle MaterialTextureGpuCache::Resolve(RenderSystem& renderSystem, Renderer& renderer,
     const AssetDatabase& database, const MaterialTextureSet& set, const MaterialParams& params)
 {
-    const MaterialKey key{ { set.baseColor, set.normal, set.metallicRoughness, set.occlusion }, params };
+    const MaterialKey key{ { set.baseColor, set.normal, set.metallicRoughness, set.occlusion, set.sphere }, params };
     if (const auto found = m_materials.find(key); found != m_materials.end()) {
         return found->second;
     }

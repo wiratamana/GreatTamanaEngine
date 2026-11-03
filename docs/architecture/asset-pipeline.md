@@ -154,7 +154,7 @@ The stamp is not part of the general importer.
 For a new mesh format: return `MeshData` (and `MaterialData`), call `FinalizeMeshAssetImport`, and append a `MeshSourceFormat` value.
 
 ## Gotchas
-- PMX toon, sphere and edge data are imported but not drawn. The PMX `diffuse` color is not applied.
+- PMX toon ramp, sphere map and edge data are drawn only by the `ToonCharacter` feature, on entities under a `ToonShading` root. Everywhere else they are imported but not drawn. The PMX `diffuse` color is still not applied. See [Toon character](../reference/render-features/toon-character.md).
 - The glTF emissive texture is imported but not sampled.
 - Textures carry no color-space tag. The GPU picks sRGB for base color and linear for data images.
 - Not supported: `.glb`, `KHR_*` extensions, glTF sampler modes, a second UV set.

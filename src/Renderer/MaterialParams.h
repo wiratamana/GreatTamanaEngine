@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <type_traits>
 
 namespace gte {
@@ -15,7 +16,9 @@ struct MaterialParams {
     float roughnessFactor = 1.0f;
     float normalScale = 1.0f;
     float occlusionStrength = 1.0f;
-    float reserved[3] = { 0.0f, 0.0f, 0.0f };
+    float toonClass = 0.0f;     // Toon shader class id (see ToonMaterialClass.h). Unused by PBR shaders.
+    float edgeWidthScale = 0.0f; // Outline width multiplier of this material.
+    float drawEdge = 0.0f;       // 1 = the outline pass draws this material.
 
     friend bool operator==(const MaterialParams&, const MaterialParams&) = default;
 };
@@ -43,6 +46,17 @@ inline MaterialParams MakeMaterialParams(float r, float g, float b, float a, flo
     params.roughnessFactor = range(roughness, 1.0f, 1.0f);
     params.normalScale = range(normalScale, 1.0f, 8.0f);
     params.occlusionStrength = range(occlusionStrength, 1.0f, 1.0f);
+    return params;
+}
+
+// Default-factor material carrying toon data. Edge scale clamps to 0..8; a non-finite scale becomes 0.
+inline MaterialParams MakeToonMaterialParams(std::uint32_t classId, float edgeScale, bool drawEdge) noexcept
+{
+    MaterialParams params;
+    params.toonClass = static_cast<float>(classId);
+    const float scale = std::isfinite(edgeScale) ? std::clamp(edgeScale, 0.0f, 8.0f) : 0.0f;
+    params.edgeWidthScale = scale == 0.0f ? 0.0f : scale; // Normalizes -0 so equal values have equal bytes.
+    params.drawEdge = drawEdge ? 1.0f : 0.0f;
     return params;
 }
 

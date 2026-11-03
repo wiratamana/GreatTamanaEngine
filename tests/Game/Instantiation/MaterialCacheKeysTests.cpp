@@ -27,6 +27,9 @@ TEST(MaterialCacheKeys, DifferentParamsOrGuidsAreNotEqual)
     MaterialKey otherParams = MakeKey(0.5f);
     MaterialKey otherGuid = a;
     otherGuid.guids[2] = Guid{ 3, 4 };
+    MaterialKey otherSphere = a;
+    otherSphere.guids[4] = Guid{ 5, 6 };
+    EXPECT_FALSE(a == otherSphere);
     EXPECT_FALSE(a == otherParams);
     EXPECT_FALSE(a == otherGuid);
 }

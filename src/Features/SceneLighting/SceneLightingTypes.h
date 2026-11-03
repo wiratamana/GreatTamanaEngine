@@ -3,12 +3,14 @@
 #include "../../Game/Lighting/DirectionalLightResolver.h"
 #include "../../Game/Lighting/SunLightModulation.h"
 #include "../../Game/Lighting/SunShadowReceiver.h"
+#include "../../Game/Lighting/ToonLook.h"
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <type_traits>
 
 namespace gte {
@@ -51,7 +53,7 @@ inline SceneLightingSettings SanitizeSceneLightingSettings(const SceneLightingSe
     return s;
 }
 
-// Scene Services binding 8 (std140, 448 bytes). Member names and order match
+// Scene Services binding 8 (std140, 512 bytes). Member names and order match
 // SceneGlobalUniformBlock in DirectionalLighting.glsl.
 struct SceneLightingUniformData {
     float sunDirectionAndValid[4];         // xyz = toward sun, w = 1 once written
@@ -70,16 +72,17 @@ struct SceneLightingUniformData {
     Mat4 cascadeViewProjection1;
     Mat4 cascadeViewProjection2;
     Mat4 cascadeViewProjection3;
+    float toonLook[4][4];                  // ToonLook v0..v3; all zero when no toon look was published
 };
-static_assert(sizeof(SceneLightingUniformData) == 448);
+static_assert(sizeof(SceneLightingUniformData) == 512);
 static_assert(std::is_trivially_copyable_v<SceneLightingUniformData>);
 
-// Packs the sun, settings, eye and optional cascade data; a non-finite direction becomes up.
-// The sun illuminance and the ambient intensity are scaled by `sunLight` (sanitized; null = identity).
-// No receiver, or zero material strength, leaves every cascade field at zero; the eye is always written.
+// Packs sun, settings, eye, optional cascade data and the optional toon tail; a non-finite direction becomes up.
+// Sun illuminance and ambient intensity are scaled by `sunLight` (sanitized; null = identity).
+// No receiver, or zero material strength, zeroes every cascade field; the eye is always written.
 inline SceneLightingUniformData PackSceneLightingUniformData(const ResolvedDirectionalLight& sun,
     const SceneLightingSettings& settings, const Vec3& eye, const SunShadowReceiver* receiver = nullptr,
-    const SunLightModulation* sunLight = nullptr) noexcept
+    const SunLightModulation* sunLight = nullptr, const ToonLook* toonLook = nullptr) noexcept
 {
     const bool finite = std::isfinite(sun.directionTowardSun.x) && std::isfinite(sun.directionTowardSun.y)
         && std::isfinite(sun.directionTowardSun.z);
@@ -108,6 +111,12 @@ inline SceneLightingUniformData PackSceneLightingUniformData(const ResolvedDirec
     data.cameraPositionAndFadeStart[0] = eyeFinite ? eye.x : 0.0f;
     data.cameraPositionAndFadeStart[1] = eyeFinite ? eye.y : 0.0f;
     data.cameraPositionAndFadeStart[2] = eyeFinite ? eye.z : 0.0f;
+    if (toonLook != nullptr) {
+        std::memcpy(data.toonLook[0], toonLook->v0, sizeof(toonLook->v0));
+        std::memcpy(data.toonLook[1], toonLook->v1, sizeof(toonLook->v1));
+        std::memcpy(data.toonLook[2], toonLook->v2, sizeof(toonLook->v2));
+        std::memcpy(data.toonLook[3], toonLook->v3, sizeof(toonLook->v3));
+    }
 
     if (receiver == nullptr || !(receiver->materialStrength > 0.0f) || receiver->cascadeCount == 0) {
         return data;

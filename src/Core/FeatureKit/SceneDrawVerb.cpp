@@ -2,13 +2,20 @@
 
 #include "SceneShaderSet.h"
 #include "VerbSupport.h"
+#include "../ClusterClaim.h"
 #include "../Core.h"
+#include "../GpuSkinningKeys.h"
 #include "../../Game/Game.h"
 #include "../../Game/SceneDrawPass.h"
+#include "../../Renderer/SceneServicesDescriptorSet.h"
 
+#include <array>
 #include <cassert>
 #include <optional>
+#include <span>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace gte::fx {
 
@@ -33,6 +40,9 @@ struct SceneDrawChain::Impl {
     Texture color;
     std::optional<float> cullPadding;
     const EntityMarkSet* excluded = nullptr;
+    EntitySelection only;
+    bool sceneServices = false;
+    bool claim = false;
 };
 
 SceneDrawChain Frame::SceneDraw(rg::StaticName passName)
@@ -44,6 +54,25 @@ SceneDrawChain Frame::SceneDraw(rg::StaticName passName)
         active = detail::PassEnabled(*m_context, passName);
     }
     return SceneDrawChain(std::make_unique<SceneDrawChain::Impl>(*this, passName, active));
+}
+
+EntitySelection Frame::SelectEntities(std::span<const Entity> entities)
+{
+    if (m_context == nullptr || m_context->core == nullptr) {
+        ReportOnce("SelectEntities() needs a frame that belongs to a render callback");
+        return {};
+    }
+    if (entities.empty()) {
+        return {};
+    }
+    Core& core = *m_context->core;
+    const EntityExclusion reserved = core.ReserveExclusion();
+    if (reserved.handle == nullptr) {
+        ReportOnce("SelectEntities(): no entity set is left this frame");
+        return {};
+    }
+    core.FillExclusion(reserved, entities);
+    return EntitySelection{ reserved.handle, entities };
 }
 
 SceneDrawChain::SceneDrawChain(std::unique_ptr<Impl> impl) noexcept
@@ -100,6 +129,28 @@ SceneDrawChain& SceneDrawChain::ColorTarget(Texture color)
     return *this;
 }
 
+SceneDrawChain& SceneDrawChain::Target(Texture target)
+{
+    if (m_impl && m_impl->active) {
+        if (detail::CheckOwned(*m_impl->frame, target, m_impl->name, "the scene target")) {
+            m_impl->color = target;
+            m_impl->depth = target;
+            m_impl->depthClear.reset();
+        } else {
+            m_impl->refused = true;
+        }
+    }
+    return *this;
+}
+
+SceneDrawChain& SceneDrawChain::SceneServices()
+{
+    if (m_impl) {
+        m_impl->sceneServices = true;
+    }
+    return *this;
+}
+
 SceneDrawChain& SceneDrawChain::CullToFrustum(float paddingFraction)
 {
     if (m_impl) {
@@ -116,6 +167,49 @@ SceneDrawChain& SceneDrawChain::Exclude(const EntityExclusion& exclusion)
     return *this;
 }
 
+SceneDrawChain& SceneDrawChain::Only(const EntitySelection& selection)
+{
+    if (m_impl && m_impl->active) {
+        // An invalid selection means "nothing to draw", never "everything".
+        if (selection.IsValid()) {
+            m_impl->only = selection;
+        } else {
+            m_impl->refused = true;
+        }
+    }
+    return *this;
+}
+
+SceneDrawChain& SceneDrawChain::Claim()
+{
+    if (m_impl) {
+        m_impl->claim = true;
+    }
+    return *this;
+}
+
+namespace {
+
+// Scene-service slots published for this view, as the reads the pass must declare.
+std::size_t PublishedSceneSlots(const detail::FrameContext& context,
+    std::array<rg::MeshPassTextureRead, kSceneServiceSlotCount>& slots)
+{
+    std::size_t count = 0;
+    if (context.blackboard == nullptr) {
+        return count;
+    }
+    for (std::uint32_t slot = 0; slot < kSceneServiceSlotCount; ++slot) {
+        const std::optional<rg::TextureHandle> published =
+            context.blackboard->Fetch<rg::TextureHandle>(SceneServiceBlackboardKey(slot, context.view));
+        if (published.has_value()) {
+            slots[count++] = rg::MeshPassTextureRead{ *published, SceneServiceSlotIsDepthResource(slot) };
+        }
+    }
+    return count;
+}
+
+} // namespace
+
 bool SceneDrawChain::Record()
 {
     if (!m_impl || !m_impl->active || m_impl->finished) {
@@ -131,12 +225,34 @@ bool SceneDrawChain::Record()
         impl.frame->ReportOnce(std::string("Pass '") + impl.name.value + "': no shader set was given");
         return false;
     }
+    Core& core = *context.core;
+
+    const bool needsServices = detail::BindsSceneServices(*impl.shaders);
+    if (needsServices && !impl.sceneServices) {
+        impl.frame->ReportOnce(std::string("Pass '") + impl.name.value + "': a shaded set needs SceneServices()");
+        return false;
+    }
+    if (impl.sceneServices && context.scope == rg::ViewScope::Shared) {
+        impl.frame->ReportOnce(std::string("Pass '") + impl.name.value + "': SceneServices() needs a view frame");
+        return false;
+    }
+    if (impl.claim) {
+        const ClusterClaimContext claimContext{ context.scope, core.CaptureArmedThisFrame() };
+        switch (SelectionClaimRefusalOf(impl.only.IsValid(), claimContext)) {
+        case SelectionClaimRefusal::NoSelection:
+            impl.frame->ReportOnce(std::string("Pass '") + impl.name.value + "': Claim() needs Only()");
+            return false;
+        case SelectionClaimRefusal::NotAllowed:
+            return false; // The main draw keeps the entities, so none is drawn twice.
+        case SelectionClaimRefusal::None:
+            break;
+        }
+    }
     if (!detail::PrepareSceneShaders(*impl.shaders, context)) {
         impl.frame->ReportOnce(std::string("Pass '") + impl.name.value + "': the shader set is not ready, nothing was declared");
         return false;
     }
 
-    Core& core = *context.core;
     SceneDrawPass pass(*context.builder, core.GetGame().GetRenderSystem(), core.GetRegistry(), core.GetRenderer(),
         impl.name, context.scope, context.event);
     pass.Pipelines(detail::OverridesOf(*impl.shaders)).Camera(impl.camera);
@@ -152,7 +268,29 @@ bool SceneDrawChain::Record()
     if (impl.excluded != nullptr) {
         pass.ExcludeEntities(impl.excluded, core.ExclusionEpoch());
     }
-    return pass.Draw();
+    if (impl.only.IsValid()) {
+        pass.OnlyEntities(static_cast<const EntityMarkSet*>(impl.only.handle), core.ExclusionEpoch());
+    }
+    if (impl.sceneServices) {
+        std::array<rg::MeshPassTextureRead, kSceneServiceSlotCount> slots{};
+        const std::size_t slotCount = PublishedSceneSlots(context, slots);
+        pass.SceneServices(core.GetSceneServicesDescriptorSet(), context.view,
+            std::span<const rg::MeshPassTextureRead>(slots.data(), slotCount));
+    }
+    if (context.blackboard != nullptr) {
+        // Skinned vertices are written by compute passes of this frame.
+        const std::optional<std::vector<rg::BufferHandle>> skinned =
+            context.blackboard->Fetch<std::vector<rg::BufferHandle>>(kGpuSkinningOutputsKey);
+        if (skinned.has_value()) {
+            pass.ReadVertexBuffers(*skinned);
+        }
+    }
+
+    const bool declared = pass.Draw();
+    if (declared && impl.claim) {
+        core.ClaimEntities(context.scope, impl.only.entities);
+    }
+    return declared;
 }
 
 } // namespace gte::fx

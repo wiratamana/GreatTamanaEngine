@@ -72,7 +72,7 @@
 | Doc | What it gives you | Who |
 |---|---|---|
 | [Feature kit](reference/feature-kit.md) | `gte::fx` verbs, resources, channels | Feature authors |
-| [Render features](reference/render-features/README.md) | Master table of the 8 features | Everyone |
+| [Render features](reference/render-features/README.md) | Master table of the 10 features | Everyone |
 | [Atmosphere](reference/render-features/atmosphere.md) | Sky, aerial perspective, sun tint | Tuning, debugging |
 | [Shadow](reference/render-features/shadow.md) | Sun cascade shadows | Tuning, debugging |
 | [Scene lighting](reference/render-features/scene-lighting.md) | Sun and ambient data for materials | Tuning, debugging |
@@ -81,6 +81,8 @@
 | [SSGI](reference/render-features/ssgi.md) | One-bounce screen-space GI | Tuning, debugging |
 | [Volumetric light](reference/render-features/volumetric-light.md) | Light shafts and fog | Tuning, debugging |
 | [GPU-driven scene](reference/render-features/gpu-driven-scene.md) | Culling feature, "Culling" panel | Tuning, debugging |
+| [Bloom](reference/render-features/bloom.md) | Glow around very bright pixels | Tuning, debugging |
+| [Toon character](reference/render-features/toon-character.md) | Cel shading and outline for marked characters | Tuning, debugging |
 
 ## Tools
 | Tool | What it does |

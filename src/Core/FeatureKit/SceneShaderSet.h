@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../PipelineDesc.h" // ScenePipelineState, CullMode, CompareOp, BlendMode
 #include "../../Renderer/VertexLayout.h"
 
 #include <memory>
@@ -22,6 +23,9 @@ bool PrepareSceneShaders(SceneShaderSet& set, FrameContext& context);
 
 // The per-vertex-layout pipelines of a ready set.
 const PipelineOverrideSet& OverridesOf(const SceneShaderSet& set) noexcept;
+
+// True when the set's pipelines read the scene services set, so a draw must bind it.
+bool BindsSceneServices(const SceneShaderSet& set) noexcept;
 } // namespace detail
 
 // The vertex layouts a depth-only set builds a pipeline for, in build order.
@@ -38,6 +42,11 @@ public:
     // (PositionColor, PositionNormal, PositionNormalUv, PositionNormalUvTangent) plus shaders/<base>.frag.
     static SceneShaderSet DepthOnly(const char* baseName);
 
+    // Colour draw of position+normal+uv meshes (skinned ones included): shaders/<base>.vert and shaders/<base>.frag.
+    // Binds the material set (set 0) and the scene services set (set 1). Other vertex layouts are skipped by the draw.
+    //   fx::SceneShaderSet::Shaded("Look", { .cull = CullMode::None });
+    static SceneShaderSet Shaded(const char* baseName, const ScenePipelineState& state = {});
+
     ~SceneShaderSet();
     SceneShaderSet(SceneShaderSet&&) noexcept;
     SceneShaderSet& operator=(SceneShaderSet&&) noexcept;
@@ -50,6 +59,7 @@ public:
 private:
     friend bool detail::PrepareSceneShaders(SceneShaderSet&, detail::FrameContext&);
     friend const PipelineOverrideSet& detail::OverridesOf(const SceneShaderSet&) noexcept;
+    friend bool detail::BindsSceneServices(const SceneShaderSet&) noexcept;
 
     struct Impl;
     explicit SceneShaderSet(std::unique_ptr<Impl> impl) noexcept;

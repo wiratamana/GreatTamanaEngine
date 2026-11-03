@@ -21,7 +21,7 @@ class Game;
 class Renderer;
 
 // Pre-built scenes the editor can open in one step.
-enum class PresetScene { Sponza, HizDemo };
+enum class PresetScene { Sponza, HizDemo, FurinaShowcase };
 
 // Which fixed-cost features a preset leaves on.
 enum class PresetProfile { GeometryOnly, Full };
@@ -33,10 +33,15 @@ struct PresetParameters {
     PresetProfile profile = PresetProfile::GeometryOnly;
 };
 
-// Wire name of a preset ("sponza", "hiz_demo").
+// Wire name of a preset ("sponza", "hiz_demo", "furina_showcase").
 constexpr std::string_view PresetSceneName(PresetScene kind) noexcept
 {
-    return kind == PresetScene::Sponza ? "sponza" : "hiz_demo";
+    switch (kind) {
+    case PresetScene::Sponza: return "sponza";
+    case PresetScene::HizDemo: return "hiz_demo";
+    case PresetScene::FurinaShowcase: return "furina_showcase";
+    }
+    return "sponza";
 }
 
 // Wire name of a profile ("geometry_only", "full").
@@ -81,7 +86,7 @@ public:
         std::string message;
     };
 
-    // Closes the open preset scene (the Hi-Z demo) and restores the settings it changed. Main thread only.
+    // Closes the open preset scene (Hi-Z demo or Furina showcase) and restores the settings it changed. Main thread only.
     virtual CloseSceneOutcome ClosePresetScene(Game& game) = 0;
 };
 

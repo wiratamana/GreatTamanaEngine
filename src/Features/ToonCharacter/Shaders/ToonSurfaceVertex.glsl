@@ -1,0 +1,27 @@
+// Vertex stage shared by the toon surface and overlay passes: world normal, uv, world position, head forward.
+
+layout(push_constant) uniform PushConstants {
+    mat4 model;
+    mat4 viewProj;
+} pc;
+
+layout(location = 0) in vec3 inPosition;
+layout(location = 1) in vec3 inNormal;
+layout(location = 2) in vec2 inUv;
+
+layout(location = 0) out vec3 outWorldNormal;
+layout(location = 1) out vec2 outUv;
+layout(location = 2) out vec3 outWorldPos;
+layout(location = 3) out vec3 outHeadForward;
+
+void main()
+{
+    vec4 world = pc.model * vec4(inPosition, 1.0);
+    gl_Position = pc.viewProj * world;
+    outWorldPos = world.xyz;
+    // mat3(model) is exact only for rotation and uniform scale.
+    outWorldNormal = mat3(pc.model) * inNormal;
+    outUv = inUv;
+    // The model front is -Z in model space.
+    outHeadForward = normalize(mat3(pc.model) * vec3(0.0, 0.0, -1.0));
+}

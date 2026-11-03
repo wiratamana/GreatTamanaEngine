@@ -6,12 +6,14 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <span>
 
 namespace gte {
 
 class Registry;
 class Renderer;
 class RenderSystem;
+class SceneServicesDescriptorSet;
 
 // The request a scene redraw hands to DrawScene: the camera and the per-layout pipeline overrides.
 SceneDrawRequest MakeSceneDrawRequest(const Mat4& viewProjection, const PipelineOverrideSet& overrides);
@@ -38,6 +40,17 @@ public:
     // With `liveEpoch`, a changed epoch at execute time means the set is gone: debug asserts, release skips nothing.
     SceneDrawPass& ExcludeEntities(const EntityMarkSet* entities, const std::uint64_t* liveEpoch = nullptr);
 
+    // Draws only these entities. Same lifetime rules as ExcludeEntities(), but a stale set draws nothing.
+    SceneDrawPass& OnlyEntities(const EntityMarkSet* entities, const std::uint64_t* liveEpoch = nullptr);
+
+    // Binds the scene-services set (set = 1) of `view` for every draw. The set is looked up when the pass executes.
+    // `publishedSlots` are the textures bound in it; each is declared as a read (`depth` marks depth-format slots).
+    SceneDrawPass& SceneServices(const SceneServicesDescriptorSet& services, rg::RenderViewId view,
+        std::span<const rg::MeshPassTextureRead> publishedSlots);
+
+    // Declares reads of vertex buffers written by earlier passes (GPU skinning output).
+    SceneDrawPass& ReadVertexBuffers(std::span<const rg::BufferHandle> buffers);
+
     // Declares the pass. False (and one error in the log) when it has no attachment.
     bool Draw();
 
@@ -50,8 +63,11 @@ private:
     Mat4 m_viewProjection = Mat4::Identity();
     std::optional<float> m_cullPadding;
     const EntityMarkSet* m_excluded = nullptr;
+    const EntityMarkSet* m_only = nullptr;
     const std::uint64_t* m_liveEpoch = nullptr;
     std::uint64_t m_epochAtDeclare = 0;
+    const SceneServicesDescriptorSet* m_services = nullptr;
+    rg::RenderViewId m_servicesView;
 };
 
 } // namespace gte

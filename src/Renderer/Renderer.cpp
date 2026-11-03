@@ -6,6 +6,7 @@
 #include "Compute/ComputePipeline.h"
 #include "DescriptorSet.h"
 #include "GpuWaitFailure.h"
+#include "PipelineStateMapping.h"
 #include "RenderGraph/GpuBufferInternal.h"
 #include "RenderGraph/RenderGraph.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
@@ -46,73 +47,6 @@ VkPrimitiveTopology ToVkTopology(Topology topology) noexcept
         default:
             return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     }
-}
-
-VkCullModeFlags ToVkCullMode(CullMode cullMode) noexcept
-{
-    switch (cullMode) {
-        case CullMode::Front:
-            return VK_CULL_MODE_FRONT_BIT;
-        case CullMode::Back:
-            return VK_CULL_MODE_BACK_BIT;
-        case CullMode::None:
-        default:
-            return VK_CULL_MODE_NONE;
-    }
-}
-
-VkCompareOp ToVkCompareOp(CompareOp op) noexcept
-{
-    switch (op) {
-        case CompareOp::Never:
-            return VK_COMPARE_OP_NEVER;
-        case CompareOp::Less:
-            return VK_COMPARE_OP_LESS;
-        case CompareOp::Equal:
-            return VK_COMPARE_OP_EQUAL;
-        case CompareOp::LessEqual:
-            return VK_COMPARE_OP_LESS_OR_EQUAL;
-        case CompareOp::Greater:
-            return VK_COMPARE_OP_GREATER;
-        case CompareOp::GreaterEqual:
-            return VK_COMPARE_OP_GREATER_OR_EQUAL;
-        case CompareOp::Always:
-        default:
-            return VK_COMPARE_OP_ALWAYS;
-    }
-}
-
-// Returns the color blend attachment state for a given BlendMode.
-VkPipelineColorBlendAttachmentState ToVkBlendState(BlendMode mode) noexcept
-{
-    VkPipelineColorBlendAttachmentState state{};
-    state.colorWriteMask =
-        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    switch (mode) {
-        case BlendMode::AlphaBlend:
-            state.blendEnable = VK_TRUE;
-            state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-            state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-            state.colorBlendOp = VK_BLEND_OP_ADD;
-            state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-            state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-            state.alphaBlendOp = VK_BLEND_OP_ADD;
-            break;
-        case BlendMode::Additive:
-            state.blendEnable = VK_TRUE;
-            state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-            state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
-            state.colorBlendOp = VK_BLEND_OP_ADD;
-            state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-            state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-            state.alphaBlendOp = VK_BLEND_OP_ADD;
-            break;
-        case BlendMode::Opaque:
-        default:
-            state.blendEnable = VK_FALSE;
-            break;
-    }
-    return state;
 }
 
 // Tracks active UI descriptor sets to prevent double-releases.
@@ -547,6 +481,19 @@ Pipeline Renderer::CreatePipeline(std::span<const PixelFormat> colorFormats, con
     }
     return m_resources.CreatePipeline(vkColorFormats, vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout,
         useMaterialTexture, debugName, Native(sceneServicesSetLayout));
+}
+
+Pipeline Renderer::CreateScenePipeline(const ScenePipelineState& state, std::span<const PixelFormat> colorFormats,
+    const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout,
+    bool useMaterialTexture, const char* debugName, DescriptorSetLayoutHandle sceneServicesSetLayout) const
+{
+    std::vector<VkFormat> vkColorFormats;
+    vkColorFormats.reserve(colorFormats.size());
+    for (const PixelFormat format : colorFormats) {
+        vkColorFormats.push_back(ToVkFormat(format));
+    }
+    return m_resources.CreateScenePipeline(ToPipelineFixedState(state), vkColorFormats, vertexShaderSpirvPath,
+        fragmentShaderSpirvPath, vertexLayout, useMaterialTexture, debugName, Native(sceneServicesSetLayout));
 }
 
 ComputePipeline Renderer::CreateComputePipeline(const std::string& shaderSpirvPath,

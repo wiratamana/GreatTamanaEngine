@@ -201,14 +201,14 @@ void ResetSceneServiceRegistryForTesting() noexcept
 
 namespace {
 
-// 8 fragment-stage combined image samplers plus the lighting UBO at binding 8.
+// 8 fragment-stage combined image samplers plus the lighting UBO at binding 8 (vertex + fragment).
 VkDescriptorSetLayout BuildSceneServicesLayout(VkDevice device)
 {
     DescriptorSetLayoutBuilder layoutBuilder(device);
     for (std::uint32_t i = 0; i < kSceneServiceSlotCount; ++i) {
         layoutBuilder.AddCombinedImageSampler(i, VK_SHADER_STAGE_FRAGMENT_BIT);
     }
-    layoutBuilder.AddUniformBuffer(kSceneServiceSlotCount, VK_SHADER_STAGE_FRAGMENT_BIT);
+    layoutBuilder.AddUniformBuffer(kSceneServiceSlotCount, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
     return layoutBuilder.Build();
 }
 

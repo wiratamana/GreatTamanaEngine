@@ -8,12 +8,13 @@
 namespace gte {
 namespace {
 
-TEST(MaterialImageRoleTest, OnlyBaseColorIsSrgb)
+TEST(MaterialImageRoleTest, OnlyColorRolesAreSrgb)
 {
     EXPECT_EQ(MaterialImageFormat(MaterialImageRole::BaseColor), PixelFormat::RGBA8_SRGB);
     EXPECT_EQ(MaterialImageFormat(MaterialImageRole::Normal), PixelFormat::RGBA8_UNorm);
     EXPECT_EQ(MaterialImageFormat(MaterialImageRole::MetallicRoughness), PixelFormat::RGBA8_UNorm);
     EXPECT_EQ(MaterialImageFormat(MaterialImageRole::Occlusion), PixelFormat::RGBA8_UNorm);
+    EXPECT_EQ(MaterialImageFormat(MaterialImageRole::Sphere), PixelFormat::RGBA8_SRGB);
 }
 
 TEST(MaterialImageRoleTest, EveryRoleHasADistinctLabel)

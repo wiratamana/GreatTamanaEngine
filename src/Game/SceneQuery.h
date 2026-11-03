@@ -62,6 +62,9 @@ struct SceneDrawRequest {
     // Entities drawn by GPU-driven batches instead; nullptr is an empty set.
     const EntityMarkSet* batchedEntities = nullptr;
 
+    // When set, only these entities are drawn; nullptr draws every entity.
+    const EntityMarkSet* onlyEntities = nullptr;
+
     // Scene-services descriptor set (set = 1) bound for every draw of this call; Invalid binds none.
     DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid;
 

@@ -1718,6 +1718,7 @@ namespace {
 
 using gte::PresetProfile;
 using gte::PresetScene;
+using gte::PresetSceneName;
 using gte::Network::BuildOpenPresetSceneResponseJson;
 using gte::Network::ParseOpenPresetSceneRequest;
 
@@ -1792,6 +1793,14 @@ TEST(ParseOpenPresetSceneRequestTests, AcceptsBothPresetsWithDefaults)
     EXPECT_EQ(*demo.parameters.count, 50000u);
     EXPECT_FLOAT_EQ(*demo.parameters.spacing, 2.5f);
     EXPECT_EQ(demo.parameters.profile, PresetProfile::Full);
+}
+
+TEST(ParseOpenPresetSceneRequestTests, AcceptsFurinaShowcase)
+{
+    const auto furina = ParseOpenPresetSceneRequest(R"({"preset":"furina_showcase"})");
+    ASSERT_TRUE(furina.valid);
+    EXPECT_EQ(furina.preset, PresetScene::FurinaShowcase);
+    EXPECT_EQ(PresetSceneName(furina.preset), "furina_showcase");
 }
 
 TEST(ParseOpenPresetSceneRequestTests, RejectsBadBodies)

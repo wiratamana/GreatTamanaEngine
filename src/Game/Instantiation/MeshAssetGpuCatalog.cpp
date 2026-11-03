@@ -19,6 +19,7 @@
 #include "MeshClusterTableSelection.h"
 #include "MeshLifetimeRules.h"
 #include "MeshVertexPacking.h"
+#include "ToonMaterialClass.h"
 #include "../RenderSystem.h"
 
 #include <algorithm>
@@ -75,6 +76,9 @@ MaterialTextureSet TextureSetOf(const Material& m, const MaterialData& data, boo
         set.normal = guidAt(m.normalTextureIndex);
         set.metallicRoughness = guidAt(m.metallicRoughnessTextureIndex);
         set.occlusion = guidAt(m.occlusionTextureIndex);
+    }
+    if (!UsesPbrShading(m) && m.sphereMode != SphereTextureMode::Disabled) {
+        set.sphere = guidAt(m.sphereTextureIndex);
     }
     return set;
 }
@@ -218,8 +222,8 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
                     texture = m_materialTextureCache.Resolve(renderSystem, renderer, textureDatabase, set, params);
                 }
             } else if (set.baseColor.IsValid()) {
-                texture = m_materialTextureCache.Resolve(
-                    renderSystem, renderer, textureDatabase, set, MaterialParams{});
+                texture = m_materialTextureCache.Resolve(renderSystem, renderer, textureDatabase, set,
+                    MakeToonParamsFor(material, materials.textures));
             }
         }
 

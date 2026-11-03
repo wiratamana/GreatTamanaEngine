@@ -144,8 +144,13 @@ public:
     // editor and the HTTP endpoints. Call it only after the pass that writes the texture was declared.
     void ExposeAsViewOutput(ViewOutput& output, Texture produced);
 
-    // A scene redraw (depth pre-pass, outline, ...). Declares nothing while its pass is toggled off.
+    // A scene redraw (depth pre-pass, colour redraw of chosen entities, outline, ...). Declares nothing while its pass is toggled off.
     SceneDrawChain SceneDraw(rg::StaticName passName);
+
+    // Reserves this frame's set of `entities` for SceneDraw().Only(). One selection can feed several chains.
+    // Invalid (and nothing reserved) for an empty span, without an engine context, or when this frame's sets are used up.
+    // `entities` must stay alive until the last chain that uses the selection has called Record().
+    EntitySelection SelectEntities(std::span<const Entity> entities);
 
     // Instances of cluster-ready meshes in this frame, in stable order. Empty without an engine context, in a
     // shared frame, or when the device cannot run the cluster path. Valid for this frame only.

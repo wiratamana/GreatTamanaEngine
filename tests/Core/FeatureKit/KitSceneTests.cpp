@@ -13,6 +13,8 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstdint>
 #include <memory>
 #include <string_view>
 
@@ -130,6 +132,94 @@ TEST(KitSceneTest, ADisabledSceneDrawPassDeclaresNothingAndLogsNothing)
     SceneShaderSet shaders = SceneShaderSet::DepthOnly("DoesNotExistDepth");
     EXPECT_FALSE(frame.SceneDraw("Test.Draw").Shaders(shaders).Record());
     EXPECT_EQ(scene.builder.DeclaredPassCount(), 0u);
+    EXPECT_EQ(CountByCategory(sink, "SceneShaderSet"), 0);
+}
+
+Entity MakeEntity(std::uint32_t index)
+{
+    Entity entity;
+    entity.index = index;
+    entity.generation = 1;
+    return entity;
+}
+
+TEST(KitSceneTest, SelectEntitiesFillsOneSetPerCallAndRefusesAnEmptySpanOrAnExhaustedPool)
+{
+    GTE_SKIP_IF_NO_HEADLESS_CORE(core);
+    RecordingLogSink sink;
+    const ScopedLogSinkInstall guard(&sink);
+    Scene scene(*core);
+    PreOpaqueFrame frame = scene.MakeFrame();
+
+    const std::array<Entity, 2> entities{ MakeEntity(3), MakeEntity(5) };
+    EXPECT_FALSE(frame.SelectEntities({}).IsValid());
+
+    const EntitySelection first = frame.SelectEntities(entities);
+    ASSERT_TRUE(first.IsValid());
+    EXPECT_EQ(first.entities.size(), entities.size());
+    const EntityMarkSet& set = *static_cast<const EntityMarkSet*>(first.handle);
+    EXPECT_TRUE(set.Contains(MakeEntity(3)));
+    EXPECT_TRUE(set.Contains(MakeEntity(5)));
+    EXPECT_FALSE(set.Contains(MakeEntity(4)));
+
+    for (std::size_t i = 1; i < Core::kMaxExclusionSetsPerFrame; ++i) {
+        EXPECT_TRUE(frame.SelectEntities(entities).IsValid());
+    }
+    EXPECT_FALSE(frame.SelectEntities(entities).IsValid());
+    EXPECT_EQ(CountByCategory(sink, "FeatureKit"), 1); // One error for the exhausted pool.
+}
+
+TEST(KitSceneTest, ClaimNeedsASelectionAndAShadedSetNeedsSceneServices)
+{
+    GTE_SKIP_IF_NO_HEADLESS_CORE(core);
+    RecordingLogSink sink;
+    const ScopedLogSinkInstall guard(&sink);
+    Scene scene(*core);
+    PreOpaqueFrame frame = scene.MakeFrame();
+
+    OffscreenTarget target("Test.Map");
+    const Texture map = target.Acquire(frame, DepthOnly{ 32 });
+    ASSERT_TRUE(map.IsValid());
+
+    SceneShaderSet depth = SceneShaderSet::DepthOnly("DoesNotExistDepth");
+    EXPECT_FALSE(frame.SceneDraw("Test.Claim").Shaders(depth).ClearDepthTarget(map, 1.0f).Claim().Record());
+
+    SceneShaderSet shaded = SceneShaderSet::Shaded("DoesNotExistShaded");
+    EXPECT_FALSE(frame.SceneDraw("Test.Shaded").Shaders(shaded).ClearDepthTarget(map, 1.0f).Record());
+
+    EXPECT_EQ(scene.builder.DeclaredPassCount(), 0u);
+    EXPECT_EQ(CountByCategory(sink, "FeatureKit"), 2);
+    EXPECT_EQ(CountByCategory(sink, "SceneShaderSet"), 0); // Refused before any build was tried.
+}
+
+TEST(KitSceneTest, AnInvalidSelectionAndAClaimInASharedFrameDeclareNothingAndStaySilent)
+{
+    GTE_SKIP_IF_NO_HEADLESS_CORE(core);
+    RecordingLogSink sink;
+    const ScopedLogSinkInstall guard(&sink);
+    Scene scene(*core);
+    scene.context.scope = rg::ViewScope::Shared;
+    PreOpaqueFrame frame = scene.MakeFrame();
+
+    OffscreenTarget target("Test.Map");
+    const Texture map = target.Acquire(frame, DepthOnly{ 32 });
+    ASSERT_TRUE(map.IsValid());
+    SceneShaderSet depth = SceneShaderSet::DepthOnly("DoesNotExistDepth");
+
+    EXPECT_FALSE(frame.SceneDraw("Test.NoSelection").Shaders(depth).ClearDepthTarget(map, 1.0f).Only(EntitySelection{}).Record());
+
+    const std::array<Entity, 1> entities{ MakeEntity(1) };
+    const EntitySelection selection = frame.SelectEntities(entities);
+    ASSERT_TRUE(selection.IsValid());
+    EXPECT_FALSE(frame.SceneDraw("Test.SharedClaim")
+                     .Shaders(depth)
+                     .ClearDepthTarget(map, 1.0f)
+                     .Only(selection)
+                     .Claim()
+                     .Record());
+
+    EXPECT_EQ(scene.builder.DeclaredPassCount(), 0u);
+    EXPECT_EQ(CountByCategory(sink, "FeatureKit"), 0);
     EXPECT_EQ(CountByCategory(sink, "SceneShaderSet"), 0);
 }
 

@@ -299,12 +299,16 @@ Ranges and defaults live in each feature page. Read the returned state to see wh
 | `ToneMapping` | `exposure`, `saturation`, `dither`, `mode` (`Clamp`, `Aces`, `PbrNeutral`) | [Tone mapping](../reference/render-features/tone-mapping.md) |
 | `SceneLighting` | `skyAmbientR/G/B`, `groundAmbientR/G/B`, `ambientIntensity`, `materialDebugView` (integer 0..8) | [Scene lighting](../reference/render-features/scene-lighting.md) |
 | `Atmosphere` | `sceneLightFollowsAtmosphere`, `autoScale`, `aerialPerspectiveStrength`, `aerialPerspectiveMaxDistanceKm`, `aerialPerspectiveDepthExponent`, `aerialPerspectiveSamplesPerSlice`, `aerialPerspectiveScatteringExaggeration` | [Atmosphere](../reference/render-features/atmosphere.md) |
+| `Bloom` | `enabled`, `threshold`, `knee`, `intensity`, `levels` | [Bloom](../reference/render-features/bloom.md) |
+| `ToonCharacter` | `enabled`, `bandThreshold`, `bandSoftness`, `deepThreshold`, `shadowStrength`, `shadeBlend`, `rimStrength`, `rimWidth`, `hairHighlight`, `emissiveBoost`, `gemHeuristic`, `goldGlint`, `faceFlatten`, `outlineWidthPx`, `outlineDarkness`, `debugView` (integer 0..5) | [Toon character](../reference/render-features/toon-character.md) |
 
 ### Read-only state per feature
 | `name=` | What `state` also returns |
 |---|---|
 | `Gtao` | Per view: `status` (`NotRendered`, `Ok`, `NoValidCamera`, `ShadersNotReady`, `TargetFailed`, `PassDisabled`), `frameIndex`, `aoExtent`, `divisor`, `historyUsed`, `screenRadiusAt5m`, `textureBytes` |
 | `Shadow`, `Ssgi`, `VolumetricLight`, `ToneMapping` | A per-view snapshot of what was applied last frame |
+| `Bloom` | Per view: `status`, `frameIndex`, `activeLevels` |
+| `ToonCharacter` | Per view: `status`, `frameIndex`, `candidatePartCount`, `claimedEntityCount`, `drawnPartCount` |
 | `SceneLighting` | `game.` and `scene.` applied values |
 | `Atmosphere` | Per view: `active`, `sunTintR/G/B`, `ambientScale`, `frameIndex`, `aerial.{maxDistanceKm,exaggeration,shadowBlend,cascadeCount,receiver,scaleHeld,frameIndex}`. `receiver` is `NotChecked`, `Used`, `Missing`, `Rejected` or `Mismatch`. |
 | `GpuDrivenScene` | See next section |

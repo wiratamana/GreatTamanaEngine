@@ -1,7 +1,7 @@
 # Scene lighting
 
 > Feature that writes sun, ambient and shadow data for every lit material. For anyone debugging lit shading.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-11-03
 
 ## TL;DR
 - Feature `SceneLighting` in `src/Features/SceneLighting/`. It has no shader and no render pass.
@@ -17,7 +17,7 @@
 | `SceneLighting.Uniforms` | PreOpaque, 20 | Packs and writes the block | none (`Always`) |
 
 - It must run after `Atmosphere.SunLight` (5) and `Shadow.Cascades` (10). A `static_assert` guards the sun-light order.
-- Inputs: ECS `DirectionalLight`, channel `Atmosphere.SunLight`, channel `Shadow.Receiver`.
+- Inputs: ECS `DirectionalLight`, channel `Atmosphere.SunLight`, channel `Shadow.Receiver`, channel `ToonCharacter.Look` (priority 15, copied unchanged into the block tail; zero when nobody publishes it).
 - The sun tint scales the sun illuminance. The ambient scale scales the ambient intensity.
 - Active in both views.
 
@@ -26,7 +26,7 @@
 | Fact | Value |
 |---|---|
 | Location | scene-services binding 8, `std140` |
-| Struct | `SceneLightingUniformData` in `SceneLightingTypes.h`, 448 bytes |
+| Struct | `SceneLightingUniformData` in `SceneLightingTypes.h`, 512 bytes. The last 64 bytes (`toonLook0..3`) are the `ToonLook` record |
 | Limit | 512 bytes (`kSceneGlobalUniformBlockSize`) |
 | Shader side | `SceneGlobalUniformBlock` in `src/Shaders/DirectionalLighting.glsl` |
 | Same layout | Member names and order match the GLSL block. A `static_assert` checks the size |

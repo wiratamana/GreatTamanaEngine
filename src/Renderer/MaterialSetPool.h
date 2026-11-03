@@ -17,7 +17,7 @@ namespace gte {
 class MaterialSetPool {
 public:
     // Samplers and uniform buffers one material set consumes; must match the material set layout.
-    static constexpr std::uint32_t kSamplersPerSet = 4;
+    static constexpr std::uint32_t kSamplersPerSet = 5;
     static constexpr std::uint32_t kUniformBuffersPerSet = 1;
 
     // Throws std::runtime_error when the pool cannot be created.

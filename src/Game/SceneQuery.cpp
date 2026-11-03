@@ -17,7 +17,7 @@ void DrawScene(RenderSystem& renderSystem, Registry& registry, Renderer& rendere
 {
     renderSystem.Draw(registry, renderer, request.viewProjection, request.frameDebuggerCapture, request.maxDrawCount,
         ExcludedEntitiesOf(request), request.pipelineOverrideSet, request.sceneServicesSet, /*cmd=*/nullptr,
-        request.cull);
+        request.cull, request.onlyEntities);
 }
 
 } // namespace gte

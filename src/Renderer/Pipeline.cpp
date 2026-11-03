@@ -75,6 +75,16 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
     const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout,
     VkDescriptorSetLayout materialSetLayout, const char* debugName, VkDescriptorSetLayout bufferSetLayout,
     VkDescriptorSetLayout sceneServicesSetLayout, VkCullModeFlags cullMode)
+    : Pipeline(device, colorFormats, depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout,
+          materialSetLayout, debugName, bufferSetLayout, sceneServicesSetLayout,
+          PipelineFixedState{ .cullMode = cullMode })
+{
+}
+
+Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFormat depthFormat,
+    const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout,
+    VkDescriptorSetLayout materialSetLayout, const char* debugName, VkDescriptorSetLayout bufferSetLayout,
+    VkDescriptorSetLayout sceneServicesSetLayout, const PipelineFixedState& fixedState)
     : m_device(device)
     , m_debugName(debugName != nullptr ? debugName : std::string())
     , m_vertexLayout(vertexLayout)
@@ -129,7 +139,7 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         VkPipelineRasterizationStateCreateInfo rasterizer{};
         rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
         rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-        rasterizer.cullMode = cullMode;
+        rasterizer.cullMode = fixedState.cullMode;
         rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
         rasterizer.lineWidth = 1.0f;
 
@@ -137,22 +147,18 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
         multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-        // Depth test/write with LESS, matching the engine's [0,1] depth range (see PerspectiveFovLH_ZO).
+        // Depth test is always on; compare op and write come from the caller (engine depth range is [0,1]).
         VkPipelineDepthStencilStateCreateInfo depthStencil{};
         depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
         depthStencil.depthTestEnable = VK_TRUE;
-        depthStencil.depthWriteEnable = VK_TRUE;
-        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+        depthStencil.depthWriteEnable = fixedState.depthWrite ? VK_TRUE : VK_FALSE;
+        depthStencil.depthCompareOp = fixedState.depthCompare;
         depthStencil.depthBoundsTestEnable = VK_FALSE;
         depthStencil.stencilTestEnable = VK_FALSE;
 
-        // One identical opaque blend state per color target (no blending, full RGBA write mask).
-        std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments(colorFormats.size());
-        for (VkPipelineColorBlendAttachmentState& state : colorBlendAttachments) {
-            state.blendEnable = VK_FALSE;
-            state.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
-                VK_COLOR_COMPONENT_A_BIT;
-        }
+        // The same blend state on every color target.
+        const std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments(
+            colorFormats.size(), fixedState.blend);
 
         VkPipelineColorBlendStateCreateInfo colorBlend{};
         colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;

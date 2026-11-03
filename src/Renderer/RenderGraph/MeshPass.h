@@ -8,6 +8,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace gte {
 class Renderer;
@@ -33,18 +34,26 @@ private:
     Renderer* m_renderer = nullptr;
 };
 
-// Attachments of a scene redraw pass, as plain data. A clear value set clears, unset loads.
+// A texture the draw samples; declared as a read so the graph orders and transitions it.
+struct MeshPassTextureRead {
+    TextureHandle texture;
+    bool depth = false; // Sampled through its depth aspect.
+};
+
+// Attachments and reads of a scene redraw pass, as plain data. A clear value set clears, unset loads.
 struct MeshPassRecord {
     TextureHandle color;
     TextureHandle depth; // May be the same texture as `color` (a view target carries both).
     std::optional<std::array<float, 4>> clearColor;
     std::optional<float> clearDepth;
+    std::vector<MeshPassTextureRead> readTextures;
+    std::vector<BufferHandle> readVertexBuffers; // Buffers earlier passes wrote that this draw uses as vertices.
 };
 
 // Why the record cannot be declared, or nullopt: at least one attachment is required.
 std::optional<std::string> ValidateMeshPassRecord(const MeshPassRecord& record);
 
-// Declares the attachment writes of a validated record.
+// Declares the attachment writes and the reads of a validated record.
 void DeclareMeshPass(RenderGraphBuilder::PassBuilder& pass, const MeshPassRecord& record);
 
 // A scene redraw into the given attachments. `draw` runs inside a SceneRecording; it may capture by value only.
@@ -61,6 +70,10 @@ public:
 
     MeshPass& Color(TextureHandle target, std::optional<std::array<float, 4>> clear = std::nullopt);
     MeshPass& Depth(TextureHandle target, std::optional<float> clear = std::nullopt);
+
+    // Reads declared with the pass; an invalid handle is ignored.
+    MeshPass& ReadTexture(TextureHandle texture, bool isDepth);
+    MeshPass& ReadVertexBuffer(BufferHandle buffer);
 
     // Declares the pass. False (and one error in the log) when it has no attachment or was declared twice.
     bool Draw(std::function<void()> draw);

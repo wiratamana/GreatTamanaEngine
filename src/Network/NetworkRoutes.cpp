@@ -912,8 +912,10 @@ ParsedOpenPresetSceneRequest ParseOpenPresetSceneRequest(const std::string& json
         result.preset = PresetScene::Sponza;
     } else if (preset == PresetSceneName(PresetScene::HizDemo)) {
         result.preset = PresetScene::HizDemo;
+    } else if (preset == PresetSceneName(PresetScene::FurinaShowcase)) {
+        result.preset = PresetScene::FurinaShowcase;
     } else {
-        result.errorMessage = "unknown preset (expected \"sponza\" or \"hiz_demo\")";
+        result.errorMessage = "unknown preset (expected \"sponza\", \"hiz_demo\" or \"furina_showcase\")";
         return result;
     }
 

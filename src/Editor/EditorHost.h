@@ -9,6 +9,7 @@
 #include "../Core/Plugins/IEngineFeatureModule.h"
 #include "EditorHostServices.h"
 #include "EditorLayer.h"
+#include "FurinaShowcaseSceneOpener.h"
 #include "HizDemoSceneOpener.h"
 #include "../Game/Game.h"
 #include "../Network/NetworkServer.h"
@@ -56,6 +57,9 @@ private:
 
     // Handles to what the Hi-Z demo scene works through, resolved fresh on every call.
     HizDemoServices MakeHizDemoServices();
+
+    // Handles to what the Furina showcase scene works through, resolved fresh on every call.
+    FurinaShowcaseServices MakeFurinaShowcaseServices();
 
     // Runs the Hi-Z demo action a menu click left in the editor state, on the main thread.
     void ServiceHizDemoMenuAction();

@@ -142,6 +142,15 @@ TEST(ClusterClaimTest, NoPartsClaimNothing)
     EXPECT_TRUE(Claimed({}, GameContext()).empty());
 }
 
+TEST(SelectionClaimRefusalTest, ClaimNeedsASelectionAndAPerViewScopeOutsideAPrimaryCapture)
+{
+    EXPECT_EQ(SelectionClaimRefusalOf(false, { rg::ViewScope::Primary, false }), SelectionClaimRefusal::NoSelection);
+    EXPECT_EQ(SelectionClaimRefusalOf(true, { rg::ViewScope::Shared, false }), SelectionClaimRefusal::NotAllowed);
+    EXPECT_EQ(SelectionClaimRefusalOf(true, { rg::ViewScope::Primary, true }), SelectionClaimRefusal::NotAllowed);
+    EXPECT_EQ(SelectionClaimRefusalOf(true, { rg::ViewScope::Primary, false }), SelectionClaimRefusal::None);
+    EXPECT_EQ(SelectionClaimRefusalOf(true, { rg::ViewScope::Secondary, true }), SelectionClaimRefusal::None);
+}
+
 TEST(SceneCullAllowedTest, MatchesTheClaimRuleForEveryScopeAndCaptureState)
 {
     for (const rg::ViewScope scope : { rg::ViewScope::Shared, rg::ViewScope::Primary, rg::ViewScope::Secondary }) {

@@ -5,6 +5,7 @@
 #include "../../Core/FeatureKit/FeatureKit.h"
 #include "../../Game/Lighting/SunLightModulation.h"
 #include "../../Game/Lighting/SunShadowReceiver.h"
+#include "../../Game/Lighting/ToonLook.h"
 
 namespace gte {
 
@@ -27,6 +28,7 @@ private:
     SceneLightingDebugEndpoint m_endpoint{ m_settings, &m_applied };
     fx::ChannelReader<SunShadowReceiver> m_receiver{ kSunShadowReceiverOwner, kSunShadowReceiverChannel };
     fx::ChannelReader<SunLightModulation> m_sunLight{ kSunLightModulationOwner, kSunLightModulationChannel };
+    fx::ChannelReader<ToonLook> m_toonLook{ kToonLookOwner, kToonLookChannel };
 };
 
 } // namespace gte

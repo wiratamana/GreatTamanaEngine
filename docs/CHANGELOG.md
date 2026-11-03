@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [Toon character, Bloom and the Furina showcase](#toon-character-bloom-and-the-furina-showcase-branch-featuretoon-shading-impl-2026-11-03) | `feature/toon-shading-impl` | 2026-11-03 |
 | [Bend floor for locked PMX strands](#bend-floor-for-locked-pmx-strands-branch-fixsmall-fixes-2026-11-03) | `fix/small-fixes` | 2026-11-03 |
 | [MMD-style chain physics and the physics debug toolbox](#mmd-style-chain-physics-and-the-physics-debug-toolbox-branch-fixsmall-fixes-2026-11-02) | `fix/small-fixes` | 2026-11-02 |
 | [Readable profiler](#readable-profiler-branch-fixsmall-fixes-2026-10-31) | `fix/small-fixes` | 2026-10-31 |
@@ -37,6 +38,26 @@
 | [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+
+## Toon character, Bloom and the Furina showcase (branch `feature/toon-shading-impl`, 2026-11-03)
+
+- **New feature `ToonCharacter`.** Cel shading and an inverted-hull outline for characters under a `ToonShading` root. Passes: `ToonCharacter.Look`
+  (PreOpaque 15), `.Surface` (Opaque 100, claims the parts), `.Outline` (110), `.Overlay` (120, additive hair ring). The look follows the sun and
+  receives cascade shadows. Toon parts still cast shadows. See [Toon character](reference/render-features/toon-character.md).
+- **New feature `Bloom`.** Soft glow in PostComposite (-100, additive) before ToneMapping. See [Bloom](reference/render-features/bloom.md).
+- **Preset `furina_showcase`.** `POST /open_preset_scene` builds the Furina model, one sun and a portrait camera fitted to the model height.
+  `/close_preset_scene` restores the feature toggles and the ToneMapping values.
+- **`ToonShading` component.** Marks a model root. Saved with the scene.
+- **Toon material data.** `ClassifyToonMaterial` gives each PMX material a class (9 classes). `MaterialParams` carries class id, edge scale and draw-edge flag.
+- **Sixth material image role.** `MaterialImageRole::Sphere` (set 0, binding 5, sRGB, default black) carries the PMX sphere map. The material params block is
+  now visible to the vertex stage, and the scene uniform block (binding 8) too. The scene block ends with `toonLook0..3` (512 bytes).
+- **SceneDraw parity in the kit.** New verbs `Target`, `SceneServices`, `Only`, `Claim` on `SceneDrawChain`, `Frame::SelectEntities`,
+  `SceneShaderSet::Shaded`. Every kit `SceneDraw` now reads the GPU skinning buffers. The per-frame entity set pool grew from 16 to 32.
+  See [Feature kit](reference/feature-kit.md).
+- **`ScenePipelineState`.** `Renderer::CreateScenePipeline` takes cull, depth compare, depth write and blend (opaque or additive).
+- **Docs.** Render feature count is 10. HTTP cheat sheet has recipe R11. The asset-pipeline gotcha about unused PMX toon data is rewritten.
+- **Not done.** Face shadow SDF, closed eyes (no morph blending), outline normals welded by position, a stylized sky. The look values are first
+  guesses and still need tuning against the reference picture.
 
 ## Bend floor for locked PMX strands (branch `fix/small-fixes`, 2026-11-03)
 

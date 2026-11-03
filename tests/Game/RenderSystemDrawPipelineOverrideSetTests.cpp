@@ -303,4 +303,44 @@ TEST(RenderSystemDrawPipelineOverrideSetTest, StalePerLayoutHandleSkipsThoseEnti
     EXPECT_EQ(matchingWarningCount, 1);
 }
 
+TEST(RenderSystemDrawPipelineOverrideSetTest, OnlyEntitiesDrawsTheSelectionAndSkipsTheRest)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+    Renderer& renderer = fixture.GetRenderer();
+    RenderSystem renderSystem;
+
+    const MeshHandle meshHandle = renderSystem.RegisterMesh(MakeQuadMesh(renderer, "Quad"));
+    const PipelineHandle pipelineHandle =
+        renderSystem.RegisterPipeline(MakePositionNormalPipeline(renderer, "Pipeline"));
+
+    Registry registry;
+    const Entity picked = registry.CreateEntity();
+    registry.AddComponent<Transform>(picked);
+    registry.AddComponent<MeshRenderer>(picked, MeshRenderer{ meshHandle, pipelineHandle });
+    const Entity other = registry.CreateEntity();
+    registry.AddComponent<Transform>(other);
+    registry.AddComponent<MeshRenderer>(other, MeshRenderer{ meshHandle, pipelineHandle });
+
+    EntityMarkSet only;
+    only.Insert(picked);
+
+    RecordingFrameDebuggerCapture capture;
+    renderSystem.Draw(registry, renderer, Mat4::Identity(), &capture, /*maxDrawCount=*/std::nullopt,
+        /*batchedEntities=*/{}, std::nullopt, DescriptorSetHandle::Invalid, /*cmd=*/nullptr, /*cull=*/std::nullopt,
+        &only);
+    ASSERT_EQ(capture.recorded.size(), 1u);
+    EXPECT_EQ(capture.recorded[0].entity, picked);
+
+    // A selection that names nobody draws nothing.
+    capture.recorded.clear();
+    const EntityMarkSet nobody;
+    renderSystem.Draw(registry, renderer, Mat4::Identity(), &capture, /*maxDrawCount=*/std::nullopt,
+        /*batchedEntities=*/{}, std::nullopt, DescriptorSetHandle::Invalid, /*cmd=*/nullptr, /*cull=*/std::nullopt,
+        &nobody);
+    EXPECT_TRUE(capture.recorded.empty());
+}
+
 } // namespace gte
