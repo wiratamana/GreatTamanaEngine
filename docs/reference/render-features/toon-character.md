@@ -37,7 +37,7 @@ Add `ToonShading { enabled = true }` to the root entity of the model.
 |---|---|---|---|
 | Surface | None (most PMX parts are double sided; the shader flips the normal on back faces) | Less, write on | Opaque |
 | Outline | Front | LessEqual, write on | Opaque |
-| Overlay | Back | LessEqual, write off | Alpha blend (`hairHighlight` is the opacity; scene alpha is kept) |
+| Overlay | Back | LessEqual, write off | Alpha blend (`hairHighlight` is the opacity; scene alpha is kept). The vertex stage keeps only `HairOverlay` parts and pulls depth 2e-5 NDC toward the camera, so the coplanar hair layer passes |
 
 ## Toon classes
 Each PMX material gets one class id when the mesh is built. The shader reads it from `MaterialParams`.
@@ -51,7 +51,7 @@ Code: `ClassifyToonMaterial` in `src/Game/Instantiation/ToonMaterialClass.cpp`.
 | 3 | `FaceLine` | Unlit. Albedo only |
 | 4 | `Eye` | Unlit. Albedo only |
 | 5 | `Hair` | Cool shade. Stronger rim (x1.5) |
-| 6 | `HairOverlay` | Skipped by Surface. Drawn by Overlay (alpha-blended blue band `kToonRingBand` (0.45, 0.65, 1.00), mixed 0.8 into the hair texel, on the upper hair, masked by the camera-up normal, shadowed by the cascade shadow) |
+| 6 | `HairOverlay` | Clipped in the surface vertex stage. Drawn by Overlay: alpha-blended blue band `kToonRingBand` (0.45, 0.65, 1.00) times the shadowed sun term, on the upper hair, masked by the camera-up normal. The layer texture is not read: it is a faint alpha mask (alpha 0.4 at most), so an alpha cutoff on it discards every pixel |
 | 7 | `Gem` | Emissive (`emissiveBoost`) plus the sphere map |
 | 8 | `ClothBack` | Like cloth, no outline |
 
@@ -125,7 +125,7 @@ Route: `/feature_debug/{state,set,invoke}?name=ToonCharacter`. Panel: `ToonChara
 | `faceFlatten` | 0.8 | 0..1 | Face normal blend toward the head forward axis |
 | `outlineWidthPx` | 1.6 | 0..8 | Outline width at 720 p height |
 | `outlineDarkness` | 0.35 | 0..1 | Outline colour darkness |
-| `debugView` | 0 | 0..5 | See below. Clamped, not rejected |
+| `debugView` | 0 | 0..8 | See below. Clamped, not rejected |
 
 Action: `reset_defaults` (no arguments).
 Read-only, per view with prefix `game.` or `scene.`: `status`, `frameIndex`, `candidatePartCount`, `claimedEntityCount` (parts the surface pass can draw and took from the main draw).
@@ -139,6 +139,12 @@ Read-only, per view with prefix `game.` or `scene.`: `status`, `frameIndex`, `ca
 | 3 | Shadow amount |
 | 4 | Outline only (surface black, outline white) |
 | 5 | Albedo only |
+| 6 | Overlay writes opaque magenta (1, 0, 1), alpha 1, on every `HairOverlay` fragment. No mask, no alpha discard, still depth tested |
+| 7 | Overlay writes magenta where the mask is above 0.01 and a grey of `ny` (camera-up normal, 0..1) elsewhere |
+| 8 | Overlay writes a grey of `ny * 0.5 + 0.5` on every `HairOverlay` fragment |
+
+- Views 6..8 keep the normal look in Surface and Outline. Views 1..5 draw no overlay.
+- No magenta in view 6: the overlay pass draws nothing (depth, class or pass off). Magenta in 6 but not in 7: the mask misses the normals; read `ny` in 8.
 
 - Debug views write plain values. For exact numbers set ToneMapping `mode=Clamp exposure=1 saturation=1 dither=0`.
 
@@ -165,7 +171,7 @@ curl.exe http://127.0.0.1:8080/get_game_view -o toon.png
 - Camera: vertical FOV 28 degrees, pitched 6.5 degrees up. Distance and height are solved from the bind-pose height so the hat top sits 3% from the top and the hips 85% from the top of a 9:16 frame.
 - Sun: pitch 40 degrees, yaw 35 degrees, colour (1.0, 0.96, 0.90). The sun is on the camera-left side.
 - Features switched off: `AtmosphereAerialVolume`, `AtmosphereComposite`, `Gtao.*`, `Ssgi.*`, `VolumetricLight.*`. Switched on if they were off: Shadow, SceneLighting, ToonCharacter, Bloom, ToneMapping.
-- ToneMapping is set to `PbrNeutral`, exposure 1.4, saturation 1.2. ToonCharacter is set to `enabled=true`, `debugView=0`. Bloom is set to `enabled=true`, `threshold=2.5`, `intensity=0.5` (the white hair and the face stay below the threshold; only the gem glows). The old values of these keys come back on close.
+- ToneMapping is set to `PbrNeutral`, exposure 1.4, saturation 1.2. ToonCharacter is set to `enabled=true`, `debugView=0`. Bloom is set to `enabled=true`, `threshold=4.0`, `intensity=0.5` (sun-lit hair and face stay below the threshold, so the eye does not change with the sun direction; the gem still glows). The old values of these keys come back on close.
 - If `ChatanyaraKuushanku_bassui260717a.gta` is next to the model, it is played. If not, the model stands in T-pose.
 - `POST /close_preset_scene` removes the preset entities and restores the feature toggles and the saved settings above. It cannot bring back the scene that was open before.
 - Preset code: `src/Editor/FurinaShowcaseSceneOpener.*`, layout maths in `FurinaShowcaseLayout.*`.
@@ -186,15 +192,17 @@ Measured live at 1264x629 (Release, `furina_showcase`, 32 parts, 39037 triangles
 
 | Pass | GPU ms |
 |---|---|
-| `ToonCharacter.Surface` | 1.60 |
-| `ToonCharacter.Outline` | 0.09 |
-| `ToonCharacter.Overlay` | 0.11 |
-| `Bloom` total | 0.73 (CopyToPrivateTarget 0.22, Prefilter 0.25, Down/Up 0.26) |
+| `ToonCharacter.Surface` | 2.48 |
+| `ToonCharacter.Outline` | 0.12 |
+| `ToonCharacter.Overlay` | 0.15 |
+| `Bloom` total | 0.89 (Prefilter 0.27, CopyToPrivateTarget 0.21, Up0 0.12, rest 0.29) |
 
-- Total 2.53 ms. For comparison the main opaque draw needed 1.08 ms for the same 32 parts.
-- Likely reasons for Surface (not profiled per instruction): per pixel cascade shadow reads, ramp and sphere map reads, and double-sided parts. No cheap fix was found.
-- Bloom is a fixed cost of 5 down and 5 up compute passes plus one full-resolution copy to the feature target. The prefilter already does only 4 fetches per half-resolution texel. No cheap win is left without cutting quality or adding a new Bloom structure.
-- If the budget matters, turn off `Bloom` first (it is a global post effect), then `ToonCharacter.Overlay.Draw`.
+- Total 3.57 ms, above the 2.0 ms budget. The main opaque draw needs 1.32 ms for the same 32 parts.
+- Surface split, by debug view: albedo only 0.92 ms, shadow amount 2.03 ms, normal look 2.48 ms. So about 1.1 ms is the cascade shadow lookup and about 0.5 ms is the rest of the toon maths. `gemHeuristic`, `goldGlint`, `rimStrength` and `shadowStrength` do not change the time.
+- The lookup cannot be skipped by the band thresholds. A sun-facing pixel has half-Lambert 0.5 or more, and `shadowStrength` 0.6 can push it down to 0.2, so the shadow can move any such pixel to shade (and it dims rim and gold glint too). Pixels facing away from the sun, eyes, face lines and gems already skip it. The lookup runs once per pixel. Its cost is the multi-tap filter (`filterSamples`) of the shared cascade code, run on every layer of a double-sided, unsorted draw.
+- Parts of class `HairOverlay` are clipped in the surface vertex stage, and the overlay clips every other class there. Their fragments are no longer shaded and discarded. These two changes are not measured yet; the table is the measurement taken before them.
+- Bloom is a fixed cost of 5 down and 5 up compute passes plus one full-resolution copy to the feature target. No cheap win is left without cutting quality or adding a new Bloom structure.
+- If the budget matters, turn off `Bloom` first (it is a global post effect), then `ToonCharacter.Overlay.Draw`. Lowering the Shadow `filterSamples` is the next lever for Surface.
 
 ## Related
 - [Render features](README.md) · [Bloom](bloom.md) · [Scene lighting](scene-lighting.md) · [Shadow](shadow.md) · [Tone mapping](tone-mapping.md)

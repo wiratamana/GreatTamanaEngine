@@ -7,8 +7,9 @@ namespace gte {
 // Name the feature registers under.
 inline constexpr const char* kToonCharacterFeatureName = "ToonCharacter";
 
-// Debug views of the toon shader: 0 off, 1 class colors, 2 band mask, 3 shadow amount, 4 outline only, 5 albedo only.
-inline constexpr std::int32_t kToonDebugViewCount = 6;
+// Debug views: 0 off, 1 class colours, 2 band mask, 3 shadow amount, 4 outline only, 5 albedo only,
+// 6 overlay magenta (all HairOverlay fragments), 7 overlay mask test, 8 overlay camera-up normal.
+inline constexpr std::int32_t kToonDebugViewCount = 9;
 
 // Tunables. Stored only through SanitizeToonCharacterSettings().
 struct ToonCharacterSettings {

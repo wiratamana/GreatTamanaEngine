@@ -436,6 +436,18 @@ TEST(ToonCharacterDebugArgsTest, DebugViewIsClamped)
     const std::vector<fx::FeatureDebugArg> args = Args({ { "debugView", "99" } });
     EXPECT_FALSE(ParseToonCharacterDebugArgs(s, args).has_value());
     EXPECT_EQ(s.debugView, kToonDebugViewCount - 1);
+    EXPECT_EQ(kToonDebugViewCount, 9); // Views 6..8 are the overlay debug views.
+}
+
+TEST(ToonCharacterDebugArgsTest, OverlayDebugViewsAreAccepted)
+{
+    const char* const views[] = { "6", "7", "8" };
+    for (const char* text : views) {
+        ToonCharacterSettings s;
+        EXPECT_FALSE(ParseToonCharacterDebugArgs(s, Args({ { "debugView", text } })).has_value());
+        EXPECT_EQ(s.debugView, text[0] - '0');
+        EXPECT_EQ(SanitizeToonCharacterSettings(s).debugView, text[0] - '0');
+    }
 }
 
 TEST(ToonCharacterDebugArgsTest, BadKeysAndValuesAreNamed)

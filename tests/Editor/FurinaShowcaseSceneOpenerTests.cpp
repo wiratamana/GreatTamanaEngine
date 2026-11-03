@@ -208,10 +208,10 @@ TEST(FurinaLookTest, ToneMappingExposureIsOnePointFour)
     EXPECT_EQ(LookValue("ToneMapping", "saturation"), "1.2");
 }
 
-TEST(FurinaLookTest, BloomIsEnabledWithAThresholdAboveTheWhiteHair)
+TEST(FurinaLookTest, BloomIsEnabledWithAThresholdAboveSunLitHair)
 {
     EXPECT_EQ(LookValue("Bloom", "enabled"), "true");
-    EXPECT_EQ(LookValue("Bloom", "threshold"), "2.5");
+    EXPECT_EQ(LookValue("Bloom", "threshold"), "4.0");
     EXPECT_EQ(LookValue("Bloom", "intensity"), "0.5");
 }
 

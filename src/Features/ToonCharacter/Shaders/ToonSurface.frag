@@ -23,8 +23,7 @@ void Emit(vec3 color)
 
 void main()
 {
-    int cls = ToonClassOf(uMaterial.pbr.y);
-    if (cls == kToonHairOverlay) { discard; } // Drawn by the overlay pass.
+    int cls = ToonClassOf(uMaterial.pbr.y); // HairOverlay parts never get here: the vertex stage clips them.
 
     vec4 texel = texture(uDiffuseTexture, inUv) * uMaterial.baseColorFactor; // SRGB format: already linear here.
     if (texel.a < kToonAlphaCutoff) { discard; }
@@ -48,7 +47,9 @@ void main()
     float deep = 1.0;
     if (!unlit) {
         float nDotL = dot(n, l);
-        if (SceneSunWritten() && nDotL > 0.0) { shadow = SunShadowAmount(inWorldPos, n, nDotL); }
+        // Gems ignore the band and the shadow in the final colour; the lookup runs once per sun-facing pixel.
+        bool gemSkipsShadow = (cls == kToonGem) && (look.debugView != 2) && (look.debugView != 3);
+        if (SceneSunWritten() && nDotL > 0.0 && !gemSkipsShadow) { shadow = SunShadowAmount(inWorldPos, n, nDotL); }
         float h = (dot(shadeNormal, l) * 0.5 + 0.5) * (1.0 - look.shadowStrength * shadow);
         float w = max(look.bandSoftness, 1e-4);
         float w2 = 2.0 * w;

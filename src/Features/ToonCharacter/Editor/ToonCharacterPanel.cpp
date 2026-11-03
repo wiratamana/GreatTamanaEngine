@@ -12,7 +12,8 @@ namespace gte {
 namespace {
 
 constexpr std::array<const char*, kToonDebugViewCount> kDebugViewLabels{
-    "Off", "Class colours", "Band mask", "Shadow amount", "Outline only", "Albedo only"
+    "Off", "Class colours", "Band mask", "Shadow amount", "Outline only", "Albedo only",
+    "Overlay: all fragments", "Overlay: mask test", "Overlay: camera-up normal"
 };
 
 const char* StatusText(ToonCharacterFrameStatus status) noexcept

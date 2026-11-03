@@ -88,12 +88,52 @@ TEST(ToonShaderPinTest, HairRingIsAMaskedBandWithTheHighlightAsOpacity)
     EXPECT_TRUE(Has(overlay, "clamp(look.hairHighlight, 0.0, 1.0) * mask"));
     EXPECT_TRUE(Has(overlay, "if (alpha < 0.01) { discard; }"));
     EXPECT_TRUE(Has(overlay, "ShadeDirectionalLinear(vec3(1.0), normalize(SceneSunDirection()), true, inWorldPos)"));
-    EXPECT_TRUE(Has(overlay, "vec3 color = mix(texel.rgb, kToonRingBand, 0.8) * lit;"));
+    EXPECT_TRUE(Has(overlay, "outColor = vec4(min(kToonRingBand * lit, vec3(kToonMaxRadiance)), alpha);"));
     EXPECT_TRUE(Has(ReadToonShader("ToonCommon.glsl"), "const vec3 kToonRingBand = vec3(0.45, 0.65, 1.00);"));
+    // The layer texture is a faint alpha mask (alpha below the cutoff): sampling or clipping on it draws nothing.
+    EXPECT_FALSE(Has(overlay, "uDiffuseTexture"));
+    EXPECT_FALSE(Has(overlay, "kToonAlphaCutoff"));
     EXPECT_FALSE(Has(overlay, "uSphereTexture"));
     EXPECT_FALSE(Has(overlay, "kToonRingTint"));
     EXPECT_TRUE(Has(ReadSrc("Features/ToonCharacter/ToonCharacterFeature.h"), "BlendMode::AlphaBlend"));
     EXPECT_FALSE(Has(ReadSrc("Features/ToonCharacter/ToonCharacterFeature.h"), "BlendMode::Additive"));
+}
+
+TEST(ToonShaderPinTest, OverlayDebugViewsDrawEveryHairOverlayFragment)
+{
+    const std::string overlay = ReadToonShader("ToonOverlay.frag");
+    const std::size_t classTest = overlay.find("!= kToonHairOverlay) { discard; }");
+    const std::size_t view6 = overlay.find("if (look.debugView == 6) { outColor = vec4(1.0, 0.0, 1.0, 1.0); return; }");
+    const std::size_t viewDiscard = overlay.find("if (look.debugView != 0 && look.debugView < 6) { discard; }");
+    const std::size_t view7 = overlay.find("look.debugView == 7");
+    const std::size_t view8 = overlay.find("if (look.debugView == 8) { outColor = vec4(vec3(ny * 0.5 + 0.5), 1.0); return; }");
+    const std::size_t alphaDiscard = overlay.find("if (alpha < 0.01) { discard; }");
+    ASSERT_NE(classTest, std::string::npos);
+    ASSERT_NE(view6, std::string::npos);
+    ASSERT_NE(viewDiscard, std::string::npos);
+    ASSERT_NE(view7, std::string::npos);
+    ASSERT_NE(view8, std::string::npos);
+    EXPECT_LT(classTest, view6);
+    EXPECT_LT(view6, viewDiscard);
+    EXPECT_LT(view7, alphaDiscard);
+    EXPECT_LT(view8, alphaDiscard);
+    EXPECT_TRUE(Has(overlay, "(mask > 0.01) ? vec4(1.0, 0.0, 1.0, 1.0) : vec4(vec3(clamp(ny, 0.0, 1.0)), 1.0)"));
+    // Views 6..8 keep the normal look in the other passes.
+    EXPECT_TRUE(Has(ReadToonShader("ToonOutline.frag"), "look.debugView >= 1 && look.debugView <= 5 && look.debugView != 4"));
+    EXPECT_FALSE(Has(ReadToonShader("ToonSurface.frag"), "debugView == 6"));
+}
+
+TEST(ToonShaderPinTest, OverlayLayerIsClippedByClassInTheVertexStage)
+{
+    const std::string vertex = ReadToonShader("ToonSurfaceVertex.glsl");
+    EXPECT_TRUE(Has(vertex, "if (overlayClass) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }"));
+    EXPECT_TRUE(Has(vertex, "if (!overlayClass) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }"));
+    EXPECT_TRUE(Has(vertex, "gl_Position.z -= TOON_DEPTH_NUDGE * gl_Position.w;"));
+    EXPECT_TRUE(Has(ReadToonShader("ToonSurface.vert"), "#define TOON_SKIP_OVERLAY_CLASS"));
+    EXPECT_FALSE(Has(ReadToonShader("ToonSurface.vert"), "TOON_DEPTH_NUDGE"));
+    const std::string overlayVert = ReadToonShader("ToonOverlay.vert");
+    EXPECT_TRUE(Has(overlayVert, "#define TOON_KEEP_ONLY_OVERLAY_CLASS"));
+    EXPECT_TRUE(Has(overlayVert, "#define TOON_DEPTH_NUDGE 2e-5"));
 }
 
 TEST(ToonShaderPinTest, ToonLookReaderLivesInTheToonHeaderOnly)

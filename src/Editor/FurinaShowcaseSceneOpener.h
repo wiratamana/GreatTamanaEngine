@@ -48,9 +48,9 @@ struct FurinaFeatureLook {
 inline constexpr std::array<FurinaLookSetting, 3> kFurinaToneMappingLook{
     { { "mode", "PbrNeutral" }, { "exposure", "1.4" }, { "saturation", "1.2" } } };
 inline constexpr std::array<FurinaLookSetting, 2> kFurinaToonCharacterLook{ { { "enabled", "true" }, { "debugView", "0" } } };
-// Threshold above the lit white hair, so only the gems glow.
+// Threshold above sun-lit hair and face, so only the gems glow and the eye does not follow the sun.
 inline constexpr std::array<FurinaLookSetting, 3> kFurinaBloomLook{
-    { { "enabled", "true" }, { "threshold", "2.5" }, { "intensity", "0.5" } } };
+    { { "enabled", "true" }, { "threshold", "4.0" }, { "intensity", "0.5" } } };
 inline constexpr std::array<FurinaFeatureLook, 3> kFurinaShowcaseLooks{ { { "ToneMapping", kFurinaToneMappingLook },
     { "ToonCharacter", kFurinaToonCharacterLook }, { "Bloom", kFurinaBloomLook } } };
 

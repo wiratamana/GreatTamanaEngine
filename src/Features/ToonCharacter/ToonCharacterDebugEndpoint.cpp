@@ -109,7 +109,7 @@ std::optional<ToonDebugArgError> ParseToonCharacterDebugArgs(
         if (arg.key == kDebugViewKey) {
             const auto view = fx::ParseDebugUnsigned(arg.value);
             if (!view) {
-                return ToonDebugArgError{ arg.key, "must be a whole number 0..5" };
+                return ToonDebugArgError{ arg.key, "must be a whole number 0..8" };
             }
             candidate.debugView = static_cast<std::int32_t>(
                 std::min<std::uint64_t>(*view, static_cast<std::uint64_t>(kToonDebugViewCount - 1)));

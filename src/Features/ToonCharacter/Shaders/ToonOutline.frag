@@ -16,7 +16,7 @@ layout(location = 0) out vec4 outColor;
 void main()
 {
     ToonLookParams look = ReadToonLook();
-    if (look.debugView != 0 && look.debugView != 4) { discard; }
+    if (look.debugView >= 1 && look.debugView <= 5 && look.debugView != 4) { discard; } // Views 6..8 keep the normal look.
 
     vec4 texel = texture(uDiffuseTexture, inUv) * uMaterial.baseColorFactor;
     if (texel.a < kToonAlphaCutoff) { discard; }

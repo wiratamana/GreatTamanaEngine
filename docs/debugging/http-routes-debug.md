@@ -300,7 +300,7 @@ Ranges and defaults live in each feature page. Read the returned state to see wh
 | `SceneLighting` | `skyAmbientR/G/B`, `groundAmbientR/G/B`, `ambientIntensity`, `materialDebugView` (integer 0..8) | [Scene lighting](../reference/render-features/scene-lighting.md) |
 | `Atmosphere` | `sceneLightFollowsAtmosphere`, `autoScale`, `aerialPerspectiveStrength`, `aerialPerspectiveMaxDistanceKm`, `aerialPerspectiveDepthExponent`, `aerialPerspectiveSamplesPerSlice`, `aerialPerspectiveScatteringExaggeration` | [Atmosphere](../reference/render-features/atmosphere.md) |
 | `Bloom` | `enabled`, `threshold`, `knee`, `intensity`, `levels` | [Bloom](../reference/render-features/bloom.md) |
-| `ToonCharacter` | `enabled`, `bandThreshold`, `bandSoftness`, `deepThreshold`, `shadowStrength`, `shadeBlend`, `rimStrength`, `rimWidth`, `hairHighlight`, `emissiveBoost`, `gemHeuristic`, `goldGlint`, `faceFlatten`, `outlineWidthPx`, `outlineDarkness`, `debugView` (integer 0..5) | [Toon character](../reference/render-features/toon-character.md) |
+| `ToonCharacter` | `enabled`, `bandThreshold`, `bandSoftness`, `deepThreshold`, `shadowStrength`, `shadeBlend`, `rimStrength`, `rimWidth`, `hairHighlight`, `emissiveBoost`, `gemHeuristic`, `goldGlint`, `faceFlatten`, `outlineWidthPx`, `outlineDarkness`, `debugView` (integer 0..8) | [Toon character](../reference/render-features/toon-character.md) |
 
 ### Read-only state per feature
 | `name=` | What `state` also returns |
