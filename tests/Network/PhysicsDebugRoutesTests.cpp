@@ -322,7 +322,8 @@ TEST(PhysicsDebugBuilderTests, StateHasEveryKey)
 {
     PhysicsDebugStateReport report;
     report.entityName = kTrickyName;
-    report.settings = { { "gravity_y", "-98" }, { "bend_limits_enabled", "true" }, { "damping_mode", "mapped" } };
+    report.settings = { { "gravity_y", "-98" }, { "bend_limits_enabled", "true" }, { "damping_mode", "mapped" },
+        { "bend_joint_floor_degrees", "3" } };
     report.chains.push_back({});
     report.groups.push_back({});
 
@@ -342,9 +343,12 @@ TEST(PhysicsDebugBuilderTests, StateHasEveryKey)
 
 TEST(PhysicsDebugBuilderTests, SettingsPlayCaptureAndSuccess)
 {
-    const nlohmann::json settings = nlohmann::json::parse(BuildPhysicsDebugSettingsResponseJson({ { "fixed_step_hz", "120" } }));
+    const nlohmann::json settings = nlohmann::json::parse(
+        BuildPhysicsDebugSettingsResponseJson({ { "fixed_step_hz", "120" }, { "bend_joint_floor_degrees", "3" } }));
     EXPECT_TRUE(settings["success"].get<bool>());
     EXPECT_EQ(settings["settings"]["fixed_step_hz"].get<int>(), 120);
+    EXPECT_TRUE(settings["settings"].contains("bend_joint_floor_degrees"));
+    EXPECT_TRUE(settings["settings"]["bend_joint_floor_degrees"].is_number());
 
     const nlohmann::json play = nlohmann::json::parse(BuildPhysicsDebugPlayResponseJson(kTrickyName, MakeAnimator()));
     EXPECT_TRUE(HasKeys(play, { "success", "entity", "animator" }));
@@ -450,6 +454,8 @@ TEST(PhysicsDebugBuilderTests, JointsHaveEveryKey)
     row.bone = kTrickyName;
     row.collisionMask = 0xffbf;
     row.ignoredColliders = { "a\\b", "c\"d" };
+    row.bendLimitDeg = 0.0f;
+    row.ownLimitWithFloorDeg = 3.0f;
     report.rows.push_back(row);
 
     const nlohmann::json body = nlohmann::json::parse(BuildPhysicsDebugJointsResponseJson(report));
@@ -457,8 +463,11 @@ TEST(PhysicsDebugBuilderTests, JointsHaveEveryKey)
     const nlohmann::json& r = body["rows"][0];
     EXPECT_TRUE(HasKeys(r, { "i", "chain", "bone", "bone_index", "group", "parent_joint", "parent_bone", "rest_length",
         "rigid_body", "mass", "damping", "pmx_linear_damping", "stiffness", "collision_radius", "collision_fit_radius",
-        "ignored_colliders", "group_bit", "collision_mask", "bend_limit_deg", "cumulative_bend_limit_deg",
-        "effective_bend_limit_deg", "pmx_joint", "pmx_rot_lower_deg", "pmx_rot_upper_deg", "pmx_joint_found", "live" }));
+        "ignored_colliders", "group_bit", "collision_mask", "bend_limit_deg", "own_limit_with_floor_deg",
+        "cumulative_bend_limit_deg", "effective_bend_limit_deg", "pmx_joint", "pmx_rot_lower_deg", "pmx_rot_upper_deg",
+        "pmx_joint_found", "live" }));
+    EXPECT_FLOAT_EQ(r["bend_limit_deg"].get<float>(), 0.0f);
+    EXPECT_FLOAT_EQ(r["own_limit_with_floor_deg"].get<float>(), 3.0f);
     EXPECT_TRUE(HasKeys(r["live"], { "valid", "animated", "display", "particle", "fk", "dist_from_animated", "seg_dir_err_deg" }));
     EXPECT_EQ(r["collision_mask"].get<std::string>(), "0xffbf");
     EXPECT_EQ(r["ignored_colliders"][1].get<std::string>(), "c\"d");

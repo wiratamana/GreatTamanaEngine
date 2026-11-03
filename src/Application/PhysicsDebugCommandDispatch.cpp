@@ -779,7 +779,8 @@ PhysicsDebugCommandResult DoJoints(Game& game, const PhysicsDebugCommandRequest&
         const std::vector<std::string> names = ChainBoneNames(model.skeleton, chain);
         const std::vector<float> effective = ComputeEffectiveBendLimits(chain, options);
         std::vector<float> cumulative;
-        ComputeCumulativeBendLimits(chain, cumulative);
+        std::vector<float> flooredOwn;
+        ComputeCumulativeBendLimits(chain, options.bendJointFloorRadians, cumulative, &flooredOwn);
         const std::vector<JointDebugInfo>* debugInfo = c < model.jointDebugInfo.size() ? &model.jointDebugInfo[c] : nullptr;
         const ChainFrameSample* sample = (liveValid && c < live.size()) ? &live[c] : nullptr;
 
@@ -816,6 +817,7 @@ PhysicsDebugCommandResult DoJoints(Game& game, const PhysicsDebugCommandRequest&
             row.groupBit = GroupBit(js.group);
             row.collisionMask = js.collisionMask;
             row.bendLimitDeg = RadToDeg(js.bendLimitRadians);
+            row.ownLimitWithFloorDeg = RadToDeg(flooredOwn[i]);
             row.cumulativeBendLimitDeg = RadToDeg(cumulative[i]);
             row.effectiveBendLimitDeg = RadToDeg(effective[i]);
             if (debugInfo != nullptr && i < debugInfo->size()) {

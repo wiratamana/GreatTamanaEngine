@@ -138,6 +138,7 @@ $scenarioDefs = @{
     'S5' = @{ Frames = 204; Hz = 60; Warmup = 0; Settings = $null }
     'S6' = @{ Frames = 204; Hz = 60; Warmup = 0; Settings = @{ collision_enabled = $false } }
     'S7' = @{ Frames = 204; Hz = 60; Warmup = 0; Settings = @{ collision_fit_enabled = $false } }
+    'S8' = @{ Frames = 68; Hz = 20; Warmup = 0; Settings = $null }
 }
 $repeats = @{ 'S1' = 1; 'S2' = 1; 'S3' = 1; 'S4' = 1 }
 foreach ($g in $gates) {
@@ -224,7 +225,7 @@ try {
     $play = Invoke-Api -Method 'POST' -Path '/physics_debug/play' -Body $playBody
     if ($play.Status -ne 200) { throw ('physics_debug/play failed: ' + $play.Text) }
 
-    foreach ($id in @('S1', 'S2', 'S3', 'S5', 'S6', 'S7')) {
+    foreach ($id in @('S1', 'S2', 'S3', 'S5', 'S6', 'S7', 'S8')) {
         if ($repeats.ContainsKey($id)) { Invoke-Scenario $id }
     }
 

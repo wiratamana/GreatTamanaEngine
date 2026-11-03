@@ -10,17 +10,20 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <initializer_list>
+
 namespace gte {
 namespace {
 
 constexpr const char* kModelPath = "DispatchTestModel.gta";
 constexpr const char* kEntityName = "Dancer";
 
-// Anchor bone 1 (static body) with a two-joint chain along +X.
-SkinnedMeshData MakeChainModel()
+// Anchor bone 1 (static body) with a chain of `jointCount` joints along +X. Every PMX joint has all-zero limits.
+SkinnedMeshData MakeChainModel(int jointCount)
 {
     SkinnedMeshData data;
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < jointCount + 2; ++i) {
         Bone bone;
         bone.name = i == 1 ? "Anchor" : "Joint_" + std::to_string(i);
         bone.position = Vec3(static_cast<float>(i), 0.0f, 0.0f);
@@ -29,14 +32,13 @@ SkinnedMeshData MakeChainModel()
     }
 
     PhysicsData physics;
-    const std::int32_t boneOfBody[3] = { 1, 2, 3 };
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i <= jointCount; ++i) {
         RigidBody body;
-        body.boneIndex = boneOfBody[i];
+        body.boneIndex = i + 1;
         body.motionType = i == 0 ? RigidBodyMotionType::Static : RigidBodyMotionType::Dynamic;
         physics.rigidBodies.push_back(body);
     }
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < jointCount; ++i) {
         Joint joint;
         joint.rigidBodyAIndex = i;
         joint.rigidBodyBIndex = i + 1;
@@ -49,10 +51,12 @@ SkinnedMeshData MakeChainModel()
 struct Scene {
     Game game;
     Entity entity = kInvalidEntity;
+    std::size_t boneCount = 0;
 
-    Scene()
+    explicit Scene(int jointCount = 2)
+        : boneCount(static_cast<std::size_t>(jointCount) + 2)
     {
-        game.GetPhysicsSystem().RegisterDynamicChains(kModelPath, MakeChainModel());
+        game.GetPhysicsSystem().RegisterDynamicChains(kModelPath, MakeChainModel(jointCount));
         Registry& registry = game.GetRegistry();
         entity = registry.CreateEntity();
         registry.AddComponent<Name>(entity).value = kEntityName;
@@ -74,7 +78,7 @@ struct Scene {
         if (pose == nullptr) {
             pose = &registry.AddComponent<ResolvedAnimationPose>(entity);
         }
-        pose->pose.assign(4, BoneLocalOffset{});
+        pose->pose.assign(boneCount, BoneLocalOffset{});
     }
 
     PhysicsDebugCommandResult Run(PhysicsDebugCommandKind kind, const PhysicsDebugCommandRequest& request)
@@ -421,6 +425,76 @@ TEST(PhysicsDebugCommandDispatchTests, JointsReportRowsWithLiveData)
     ASSERT_EQ(page.joints.rows.size(), 1u);
     EXPECT_EQ(page.joints.rows[0].bone, "Joint_3");
     EXPECT_EQ(page.joints.total, 2u);
+}
+
+void ExpectJointLimitRows(const PhysicsJointsReport& report, std::initializer_list<float> ownWithFloor,
+    std::initializer_list<float> cumulativeAndEffective)
+{
+    ASSERT_EQ(report.rows.size(), ownWithFloor.size());
+    std::size_t i = 0;
+    auto own = ownWithFloor.begin();
+    auto sum = cumulativeAndEffective.begin();
+    for (; i < report.rows.size(); ++i, ++own, ++sum) {
+        const PhysicsJointRow& row = report.rows[i];
+        EXPECT_NEAR(row.bendLimitDeg, 0.0f, 1e-3f) << "raw PMX limit, row " << i;
+        EXPECT_NEAR(row.ownLimitWithFloorDeg, *own, 1e-3f) << "row " << i;
+        EXPECT_NEAR(row.cumulativeBendLimitDeg, *sum, 1e-3f) << "row " << i;
+        EXPECT_NEAR(row.effectiveBendLimitDeg, *sum, 1e-3f) << "row " << i;
+    }
+}
+
+TEST(PhysicsDebugCommandDispatchTests, JointRowsCarryTheFlooredLimits)
+{
+    Scene scene(4);
+    ASSERT_FLOAT_EQ(scene.game.GetPhysicsSystem().GetGlobalPhysicsSettings().bendJointFloorDegrees, 3.0f);
+
+    const PhysicsDebugCommandResult floor3 = scene.Run(PhysicsDebugCommandKind::Joints, scene.ForEntity());
+    ASSERT_TRUE(floor3.success) << floor3.errorMessage;
+    ASSERT_EQ(floor3.joints.rows.size(), 4u);
+    EXPECT_EQ(floor3.joints.rows[0].parentJoint, -1);
+    ExpectJointLimitRows(floor3.joints, { 0.0f, 3.0f, 3.0f, 3.0f }, { 0.0f, 3.0f, 6.0f, 9.0f });
+
+    PhysicsDebugCommandRequest set = scene.ForEntity();
+    set.pairs = { { "bend_joint_floor_degrees", "2" } };
+    const PhysicsDebugCommandResult applied = scene.Run(PhysicsDebugCommandKind::Set, set);
+    ASSERT_TRUE(applied.success) << applied.errorMessage;
+    const auto key = std::find_if(applied.settings.begin(), applied.settings.end(),
+        [](const auto& pair) { return pair.first == "bend_joint_floor_degrees"; });
+    ASSERT_NE(key, applied.settings.end());
+    EXPECT_EQ(key->second, "2");
+
+    const PhysicsDebugCommandResult floor2 = scene.Run(PhysicsDebugCommandKind::Joints, scene.ForEntity());
+    ExpectJointLimitRows(floor2.joints, { 0.0f, 2.0f, 2.0f, 2.0f }, { 0.0f, 2.0f, 4.0f, 6.0f });
+
+    set.pairs = { { "bend_joint_floor_degrees", "3" } };
+    ASSERT_TRUE(scene.Run(PhysicsDebugCommandKind::Set, set).success);
+    const PhysicsDebugCommandResult back = scene.Run(PhysicsDebugCommandKind::Joints, scene.ForEntity());
+    ExpectJointLimitRows(back.joints, { 0.0f, 3.0f, 3.0f, 3.0f }, { 0.0f, 3.0f, 6.0f, 9.0f });
+}
+
+TEST(PhysicsDebugCommandDispatchTests, StateSettingsListTheBendJointFloor)
+{
+    Scene scene;
+    const PhysicsDebugCommandResult state = scene.Run(PhysicsDebugCommandKind::State, scene.ForEntity());
+    ASSERT_TRUE(state.success);
+    const auto key = std::find_if(state.state.settings.begin(), state.state.settings.end(),
+        [](const auto& pair) { return pair.first == "bend_joint_floor_degrees"; });
+    ASSERT_NE(key, state.state.settings.end());
+    EXPECT_EQ(key->second, "3");
+}
+
+TEST(PhysicsDebugCommandDispatchTests, LegacyPresetTurnsTheFloorOff)
+{
+    Scene scene(4);
+    PhysicsDebugCommandRequest preset;
+    preset.presetName = "legacy";
+    ASSERT_TRUE(scene.Run(PhysicsDebugCommandKind::Preset, preset).success);
+    const PhysicsDebugCommandResult rows = scene.Run(PhysicsDebugCommandKind::Joints, scene.ForEntity());
+    ASSERT_TRUE(rows.success);
+    ASSERT_EQ(rows.joints.rows.size(), 4u);
+    for (const PhysicsJointRow& row : rows.joints.rows) {
+        EXPECT_NEAR(row.ownLimitWithFloorDeg, 0.0f, 1e-3f);
+    }
 }
 
 TEST(PhysicsDebugCommandDispatchTests, CollidersListTheStaticBodies)

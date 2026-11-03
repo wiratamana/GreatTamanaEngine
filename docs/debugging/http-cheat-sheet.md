@@ -76,7 +76,8 @@ More about threads and bridges: [HTTP server](../architecture/http-server.md).
 | Measure skirt or hair motion | `POST /physics_debug/run {"entity":"<n>","frames":204,"render_hz":60}` |
 | Change a physics setting, then measure | `GET /physics_debug/set?bend_limits_enabled=false` **W**, then `/physics_debug/run` |
 | See the cloth and hair as lines | `GET /physics_debug/image?entity=<n>&view=negz` **IMG** |
-| Read one row per physics joint | `GET /physics_debug/joints?entity=<n>&group=Q` |
+| Read one row per physics joint | `GET /physics_debug/joints?entity=<n>&group=Q` (`own_limit_with_floor_deg`, `effective_bend_limit_deg`) |
+| Make locked strands stiffer or floppier | `GET /physics_debug/set?bend_joint_floor_degrees=3` **W** (0..45), then `/physics_debug/run` |
 | Test a recovery path | `GET /debug/fault?kind=<kind>` **W** |
 
 ## 4. Status codes

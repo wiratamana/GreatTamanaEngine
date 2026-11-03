@@ -166,7 +166,7 @@ TEST(DynamicChainSolverStabilityTests, FinalPoseObeysTheConeAfterCollision)
     Strand strand = BuildStrand(kJoints, DegToRad(5.0f));
     strand.definition.collisionEnabled = true;
     std::vector<float> cumulative;
-    ComputeCumulativeBendLimits(strand.definition, cumulative);
+    ComputeCumulativeBendLimits(strand.definition, 0.0f, cumulative);
 
     Collider sphere;
     sphere.shape = ColliderShape::Sphere;

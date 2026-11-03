@@ -131,16 +131,26 @@ void ApplyBendCone(const DynamicChainDefinition& definition, const Vec3& rootWor
 
 } // namespace
 
-void ComputeCumulativeBendLimits(const DynamicChainDefinition& definition, std::vector<float>& out)
+void ComputeCumulativeBendLimits(
+    const DynamicChainDefinition& definition, float floorRadians, std::vector<float>& out, std::vector<float>* flooredOwnOut)
 {
     // Parents always come first.
     const std::size_t jointCount = definition.jointSettings.size();
     out.assign(jointCount, kPi);
+    if (flooredOwnOut != nullptr) {
+        flooredOwnOut->assign(jointCount, kPi);
+    }
     for (std::size_t i = 0; i < jointCount; ++i) {
         const std::int32_t parent = i < definition.parentJointIndex.size() ? definition.parentJointIndex[i] : -1;
+        const bool isRootChild = parent < 0;
+        const float stored = definition.jointSettings[i].bendLimitRadians;
+        const float own = isRootChild ? stored : std::max(stored, floorRadians);
         const float parentCumulative
             = (parent >= 0 && static_cast<std::size_t>(parent) < i) ? out[static_cast<std::size_t>(parent)] : 0.0f;
-        out[i] = std::min(kPi, definition.jointSettings[i].bendLimitRadians + parentCumulative);
+        out[i] = std::min(kPi, own + parentCumulative);
+        if (flooredOwnOut != nullptr) {
+            (*flooredOwnOut)[i] = std::min(kPi, own);
+        }
     }
 }
 
@@ -150,7 +160,7 @@ void ComputeEffectiveBendLimits(const DynamicChainDefinition& definition, const 
         out.assign(definition.jointSettings.size(), kPi);
         return;
     }
-    ComputeCumulativeBendLimits(definition, out);
+    ComputeCumulativeBendLimits(definition, options.bendJointFloorRadians, out);
     for (float& limit : out) {
         limit = std::clamp(limit * options.bendLimitScale + options.bendLimitMinRadians, 0.0f, kPi);
     }

@@ -30,6 +30,7 @@ const std::vector<RangeCase>& NumericCases()
         { "stiffness_multiplier", "0", "50", "-0.5", "50.5" },
         { "bend_limit_scale", "0", "20", "-0.5", "20.5" },
         { "bend_limit_min_degrees", "0", "180", "-0.5", "180.5" },
+        { "bend_joint_floor_degrees", "0", "45", "-0.001", "45.001" },
     };
     return cases;
 }
@@ -157,7 +158,7 @@ TEST(PhysicsDebugSettingsTest, FixedStepHzStoresTheStepLength)
 TEST(PhysicsDebugSettingsTest, DefaultPresetMatchesTheStructDefaults)
 {
     const GlobalPhysicsSettings defaults;
-    EXPECT_EQ(DescribeSettings(defaults).size(), 14u);
+    EXPECT_EQ(DescribeSettings(defaults).size(), 15u);
 
     GlobalPhysicsSettings legacy;
     ASSERT_TRUE(ApplyPhysicsPreset(legacy, "legacy"));
@@ -166,6 +167,72 @@ TEST(PhysicsDebugSettingsTest, DefaultPresetMatchesTheStructDefaults)
     EXPECT_FLOAT_EQ(legacy.gravity.y, defaults.gravity.y);
     EXPECT_EQ(legacy.fixedTimestepSeconds, defaults.fixedTimestepSeconds); // bit exact, no 1/hz round trip.
     EXPECT_EQ(legacy.maxStepsPerFrame, defaults.maxStepsPerFrame);
+}
+
+TEST(PhysicsDebugSettingsTest, BendJointFloorRejectsMalformedAndOutOfRangeValues)
+{
+    const char* bad[] = { "12abc", "+1", "nan", "" };
+    for (const char* text : bad) {
+        GlobalPhysicsSettings settings;
+        EXPECT_FALSE(Apply(settings, "bend_joint_floor_degrees", text)) << text;
+        EXPECT_FLOAT_EQ(settings.bendJointFloorDegrees, 3.0f) << text;
+    }
+
+    GlobalPhysicsSettings settings;
+    EXPECT_FALSE(Apply(settings, "Bend_Joint_Floor_Degrees", "2"));
+    EXPECT_FLOAT_EQ(settings.bendJointFloorDegrees, 3.0f);
+
+    std::string message;
+    std::string errorKey;
+    EXPECT_FALSE(ApplyPhysicsSettingPairs(settings, { { "bend_joint_floor_degrees", "45.001" } }, message, errorKey));
+    EXPECT_EQ(errorKey, "bend_joint_floor_degrees");
+    EXPECT_EQ(message, "bend_joint_floor_degrees must be between 0 and 45");
+
+    errorKey.clear();
+    EXPECT_FALSE(ApplyPhysicsSettingPairs(
+        settings, { { "bend_joint_floor_degrees", "1" }, { "bend_joint_floor_degrees", "2" } }, message, errorKey));
+    EXPECT_EQ(errorKey, "bend_joint_floor_degrees");
+    EXPECT_FLOAT_EQ(settings.bendJointFloorDegrees, 3.0f);
+}
+
+TEST(PhysicsDebugSettingsTest, BendJointFloorBadPairLeavesTheGoodPairUnapplied)
+{
+    GlobalPhysicsSettings settings;
+    std::string message;
+    std::string errorKey;
+    EXPECT_FALSE(ApplyPhysicsSettingPairs(
+        settings, { { "bend_joint_floor_degrees", "10" }, { "bend_limit_scale", "-1" } }, message, errorKey));
+    EXPECT_EQ(errorKey, "bend_limit_scale");
+    EXPECT_FLOAT_EQ(settings.bendJointFloorDegrees, 3.0f);
+
+    EXPECT_TRUE(ApplyPhysicsSettingPairs(settings, { { "bend_joint_floor_degrees", "10" } }, message, errorKey));
+    EXPECT_FLOAT_EQ(settings.bendJointFloorDegrees, 10.0f);
+}
+
+TEST(PhysicsDebugSettingsTest, BendJointFloorIsListedRightAfterBendLimitMinDegrees)
+{
+    const auto described = DescribeSettings(GlobalPhysicsSettings{});
+    const auto minRow = std::find_if(described.begin(), described.end(),
+        [](const auto& pair) { return pair.first == "bend_limit_min_degrees"; });
+    ASSERT_NE(minRow, described.end());
+    ASSERT_NE(minRow + 1, described.end());
+    EXPECT_EQ((minRow + 1)->first, "bend_joint_floor_degrees");
+    EXPECT_EQ((minRow + 1)->second, "3");
+}
+
+TEST(PhysicsDebugSettingsTest, BendJointFloorPresetsKeepWind)
+{
+    GlobalPhysicsSettings settings;
+    settings.wind.baseStrength = 4.5f;
+
+    ASSERT_TRUE(ApplyPhysicsPreset(settings, "legacy"));
+    EXPECT_EQ(ValueOf(settings, "bend_joint_floor_degrees"), "0");
+    EXPECT_FLOAT_EQ(settings.bendJointFloorDegrees, 0.0f);
+
+    ASSERT_TRUE(ApplyPhysicsPreset(settings, "default"));
+    EXPECT_EQ(ValueOf(settings, "bend_joint_floor_degrees"), "3");
+    EXPECT_FLOAT_EQ(settings.bendJointFloorDegrees, GlobalPhysicsSettings{}.bendJointFloorDegrees);
+    EXPECT_FLOAT_EQ(settings.wind.baseStrength, 4.5f); // presets never touch wind.
 }
 
 TEST(PhysicsDebugSettingsTest, LegacyPresetSwitchesEveryNewBehaviorOff)
@@ -185,6 +252,7 @@ TEST(PhysicsDebugSettingsTest, LegacyPresetSwitchesEveryNewBehaviorOff)
     EXPECT_FALSE(settings.bendLimitsEnabled);
     EXPECT_FLOAT_EQ(settings.bendLimitScale, 1.0f);
     EXPECT_FLOAT_EQ(settings.bendLimitMinDegrees, 0.0f);
+    EXPECT_FLOAT_EQ(settings.bendJointFloorDegrees, 0.0f);
     EXPECT_FALSE(settings.interpolateOutput);
 }
 

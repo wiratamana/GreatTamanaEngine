@@ -469,12 +469,13 @@ Measure, change and look at the dynamic bone chains (skirt, hair) of a model. Fu
 | `POST /physics_debug/run` | body `entity`, `frames` 1..3600, `render_hz` 10..480, optional `start_frame`, `warmup_frames`, `restore`, `settings`, `trace`, `snapshot_frames` | Statistics per joint group. Waits up to 60 s. |
 | `GET /physics_debug/capture` | `enabled=true\|false`, `window` 1..600 | Recorder status |
 | `GET /physics_debug/metrics` | `entity`, `window`, `group` | Same shape as `run`, from the live recorder |
-| `GET /physics_debug/joints` | `entity`, `chain`, `group`, `first`, `count` 1..2000 | One row per joint |
+| `GET /physics_debug/joints` | `entity`, `chain`, `group`, `first`, `count` 1..2000 | One row per joint (`bend_limit_deg` raw, `own_limit_with_floor_deg`, `cumulative_bend_limit_deg`, `effective_bend_limit_deg`) |
 | `GET /physics_debug/colliders` | `entity` | Colliders and bind-pose penetrations |
 | `GET /physics_debug/image` | `entity`, `view`, `mode`, `width`, `height`, `colliders`, `joints`, `limits`, `highlight`, `format` | PNG, or JSON with `data_base64` |
 
 - Errors: `400` bad input (the body names the key), `404` unknown entity, `409` state conflict, `503` bridge busy, `504` main thread too slow. Read the state before you repeat a write after `504`.
 - All settings are in memory. A restart resets them. `GET /physics_debug/preset?name=default` restores them.
+- Bend settings: `bend_limits_enabled`, `bend_limit_scale`, `bend_limit_min_degrees`, `bend_joint_floor_degrees` (0..45, default 3, legacy 0; minimum own limit of non-root joints).
 
 ## Related
 - [HTTP cheat sheet](http-cheat-sheet.md) · [HTTP routes](http-routes.md) · [HTTP server](../architecture/http-server.md)

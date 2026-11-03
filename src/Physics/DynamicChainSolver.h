@@ -30,14 +30,14 @@ struct StepOptions {
     bool bendLimitsEnabled = false;
     float bendLimitScale = 1.0f;
     float bendLimitMinRadians = 0.0f;
+    float bendJointFloorRadians = 0.0f; // minimum own limit of every non-root-child joint.
 };
 
 // Own bend limits summed from the anchor down to each joint, capped at pi (radians).
-void ComputeCumulativeBendLimits(const DynamicChainDefinition& definition, std::vector<float>& out);
-
-// Effective bend limit per joint in radians (pi = free):
-// clamp(cumulativeOwnLimits * scale + minRadians, 0, pi). All pi when limits are disabled.
-void ComputeEffectiveBendLimits(const DynamicChainDefinition& definition, const StepOptions& options, std::vector<float>& out);
+// Root children keep their own limit; every other joint uses max(own, floorRadians).
+// flooredOwnOut, when set, receives the per-joint own limit after the floor.
+void ComputeCumulativeBendLimits(
+    const DynamicChainDefinition& definition, float floorRadians, std::vector<float>& out, std::vector<float>* flooredOwnOut = nullptr);
 std::vector<float> ComputeEffectiveBendLimits(const DynamicChainDefinition& definition, const StepOptions& options);
 
 // Advances one chain by one fixed step. Root, animated and collider positions are world space.

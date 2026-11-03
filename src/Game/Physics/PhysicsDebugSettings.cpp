@@ -27,9 +27,9 @@ struct Row {
 // Bool and Enum rows ignore min/max.
 constexpr double kNoRange = 0.0;
 
-const std::array<Row, 14>& Table()
+const std::array<Row, 15>& Table()
 {
-    static const std::array<Row, 14> rows = { {
+    static const std::array<Row, 15> rows = { {
         { "gravity_x", Kind::Float, -1000.0, 1000.0, 0.0,
             [](const GlobalPhysicsSettings& s) { return static_cast<double>(s.gravity.x); },
             [](GlobalPhysicsSettings& s, double v) { s.gravity.x = static_cast<float>(v); }, {} },
@@ -69,6 +69,9 @@ const std::array<Row, 14>& Table()
         { "bend_limit_min_degrees", Kind::Float, 0.0, 180.0, 0.0,
             [](const GlobalPhysicsSettings& s) { return static_cast<double>(s.bendLimitMinDegrees); },
             [](GlobalPhysicsSettings& s, double v) { s.bendLimitMinDegrees = static_cast<float>(v); }, {} },
+        { "bend_joint_floor_degrees", Kind::Float, 0.0, 45.0, 0.0,
+            [](const GlobalPhysicsSettings& s) { return static_cast<double>(s.bendJointFloorDegrees); },
+            [](GlobalPhysicsSettings& s, double v) { s.bendJointFloorDegrees = static_cast<float>(v); }, {} },
         { "interpolate_output", Kind::Bool, kNoRange, kNoRange, 0.0,
             [](const GlobalPhysicsSettings& s) { return s.interpolateOutput ? 1.0 : 0.0; },
             [](GlobalPhysicsSettings& s, double v) { s.interpolateOutput = v != 0.0; }, {} },

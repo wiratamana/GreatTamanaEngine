@@ -193,7 +193,8 @@ struct PhysicsJointRow {
     std::vector<std::string> ignoredColliders;
     std::uint32_t groupBit = 0;
     std::uint32_t collisionMask = 0;
-    float bendLimitDeg = 180.0f;
+    float bendLimitDeg = 180.0f; // raw PMX own limit.
+    float ownLimitWithFloorDeg = 180.0f; // own limit after the bend floor.
     float cumulativeBendLimitDeg = 180.0f;
     float effectiveBendLimitDeg = 180.0f;
     std::string pmxJointName;

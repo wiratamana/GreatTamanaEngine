@@ -256,6 +256,7 @@ StepOptions BuildStepOptions(const GlobalPhysicsSettings& settings) noexcept
     options.bendLimitsEnabled = settings.bendLimitsEnabled;
     options.bendLimitScale = settings.bendLimitScale;
     options.bendLimitMinRadians = DegToRad(settings.bendLimitMinDegrees);
+    options.bendJointFloorRadians = DegToRad(settings.bendJointFloorDegrees);
     return options;
 }
 

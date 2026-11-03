@@ -40,8 +40,9 @@ Needs `curl.exe` (ships with Windows 10 and later) and Windows PowerShell 5.1 or
 | S5 | S1 with the `legacy` preset. |
 | S6 | S1 with `collision_enabled=false`. |
 | S7 | S1 with `collision_fit_enabled=false`. |
+| S8 | Stress. Dance, 68 frames at 20 Hz (the clip moves 3 times faster per frame), 0 warmup. |
 
-S5, S6, S7 run only when a gate names them. The pictures are live frames of the editor (clip playing) taken right after the run. The exact frames of a run are in `snapshots` when you ask for `snapshot_frames`.
+S5, S6, S7, S8 run only when a gate names them. The pictures are live frames of the editor (clip playing) taken right after the run. The exact frames of a run are in `snapshots` when you ask for `snapshot_frames`.
 
 ## Gates
 Gates are in `thresholds.json`. A gate whose JSON field does not exist counts as FAIL. It is never skipped.
@@ -56,8 +57,24 @@ Gates are in `thresholds.json`. A gate whose JSON field does not exist counts as
 | E6 | Stability. `nan_count` and `reseed_count` are 0 in S1 and S4. `abs_stretch` p99 per group <= max(1.1 x baseline p99, 0.10). S4 `dist_from_animated` max <= 6.0. |
 | E7 | Performance. S1 `physics_ms.median` <= 2.5 x baseline. The script uses the median of the medians of 3 runs. Run the editor with `--no-vsync`. |
 | E9 | Determinism. Two identical S1 runs are equal except `physics_ms`. |
+| C1 | Strands move. HB2, HB3, HB4, `左F`, `右F`: `dist_from_animated` mean in 0.15 .. 1.00. |
+| C2 | Strand tails move. Same groups: `dist_from_animated` p95 >= 0.40 and max <= 7.0. |
+| C3 | Strands bend. Same groups: `seg_dir_err_deg` p50 >= 2.0 and p95 >= 8.0. |
+| C4 | Hat decorations. DM `dist_from_animated` mean in 0.02 .. 0.50. |
+| C5 | Skirt rows under control. HB1 mean in 0.9 .. 1.8 x baseline, Q mean in 0.9 .. 1.1 x baseline (baseline `S1_default`). |
+| C6 | Unchanged groups. `帽D1`, `右CF`, `左CF`, `SZY親`: `dist_from_animated` mean within 10 percent of baseline `S1_default`. |
+| C7 | Weld stays. `welded_root_children.joints` == 15, mean <= 0.05, p95 <= 0.12. |
+| C8 | Limit adherence with the floor. Same numbers as E1. |
+| C10 | Idle. S4 has `nan_count` 0, `reseed_count` 0, `dist_from_animated` max <= 6.0, `abs_stretch` p99 <= 0.10 for every group. |
+| C12 | Stress. S8 has `nan_count` 0, `reseed_count` 0, `abs_stretch` p99 <= 0.10 for every group, `limit_violation_deg` max <= 12.0 for the seven E1 groups. |
+| D1 | Stability. S1, S2, S3: `nan_count` and `reseed_count` are 0. `abs_stretch` p99 <= max(1.1 x baseline `S1_default`, 0.10). |
+| D3 | Collision. S1 `pushed_particles_per_frame` <= 15.31 and <= 1.15 x baseline `S1_default`. |
+| D4 | Performance. S1 `physics_ms.median` <= 1.15 x baseline `S1_default` and <= 2.5 x baseline `S1_legacy` (3 runs). |
 
 E8 (damping and goal pull at 60 Hz and 120 Hz) is a unit test, not a gate here. The live `GET /profiler/scope?name=PhysicsSystem::Update` median of E7 is checked by hand.
+
+The C and D gates are for `-Preset default`. They need the baseline file `S1_default.json` (S1 with the default preset on the code before the floor). D2 is covered by E4.
+C9 (joint rows), D5 (legacy identity), D6 (floor-zero identity), D7 and the floor sweep are not in the script. Compute them with a python script from saved JSON files.
 
 ### Gate fields
 | Field | Meaning |
