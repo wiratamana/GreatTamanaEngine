@@ -89,6 +89,7 @@ curl.exe http://127.0.0.1:8080/get_game_view -o taa.png
 - One jittered, unresolved frame is possible when the `TemporalAa` registration is disabled while it runs. The heartbeat is from the last frame, so one frame still gets jitter. Then jitter stops. The shift is under 1 pixel.
 - If BOTH resolve passes are toggled off, the `PostComposite` gate skips the callback (the gate lets it run when at least one pass is on). The resolve status then ages to `NotRendered` instead of `PassDisabled`. The jitter decision still reads `PassDisabled`. With only one pass off the status is `PassDisabled`.
 - Depth is drawn with the jittered matrix. Features that unproject it with the unjittered matrix have an error of up to 0.5 pixel. This is accepted.
+- A very large `jitterScale` on a tiny view gives no jitter. The engine accepts at most 0.5 NDC, so the jitter is skipped (no error log, `jitterApplied` stays false).
 
 ## Memory
 - `width * height * 24` bytes per view: two RGBA16F (8 bytes) and two R32F (4 bytes) targets. `game.textureBytes` shows it.

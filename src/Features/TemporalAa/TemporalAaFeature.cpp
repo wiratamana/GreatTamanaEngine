@@ -99,7 +99,9 @@ void TemporalAaFeature::JitterPass(fx::PreOpaqueFrame& f)
     if (decision == TemporalAaJitterDecision::Apply) {
         pixels = TemporalAaJitterPixels(f.FrameIndex(), cfg);
         const Vec2 ndc = TemporalAaJitterNdc(pixels, v.extent);
-        if (f.SetViewJitter(ndc)) {
+        if (!fx::IsValidViewJitter(ndc)) {
+            pixels = Vec2{}; // Too big for this view size: no jitter, not an error.
+        } else if (f.SetViewJitter(ndc)) {
             applied = ndc != Vec2::Zero();
         } else {
             pixels = Vec2{};

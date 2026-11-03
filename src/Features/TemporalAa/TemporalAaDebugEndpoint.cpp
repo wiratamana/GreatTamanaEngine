@@ -47,16 +47,6 @@ constexpr std::array kScopes{
     ScopeName{ rg::ViewScope::Secondary, "scene." },
 };
 
-std::optional<TemporalAaDebugView> ParseDebugView(std::string_view text) noexcept
-{
-    for (const TemporalAaDebugView view : { TemporalAaDebugView::Off, TemporalAaDebugView::JitterOnly }) {
-        if (text == TemporalAaDebugViewName(view)) {
-            return view;
-        }
-    }
-    return std::nullopt;
-}
-
 // A float shown with 6 significant digits, so 0.85f reads 0.85 and not 0.8500000238.
 double Shown(float value) noexcept
 {
@@ -173,7 +163,7 @@ fx::FeatureDebugResult TemporalAaDebugEndpoint::Set(std::span<const fx::FeatureD
     TemporalAaSettings candidate = m_feature.Settings();
     for (const fx::FeatureDebugArg& arg : args) {
         if (arg.key == kDebugViewKey) {
-            const auto view = ParseDebugView(arg.value);
+            const auto view = fx::ParseEnum(kTemporalAaDebugViewTable, arg.value);
             if (!view) {
                 return Fail(arg.key, "debugView must be Off or JitterOnly");
             }

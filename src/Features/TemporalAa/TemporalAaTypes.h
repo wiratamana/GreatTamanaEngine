@@ -1,9 +1,11 @@
 #pragma once
 
 #include "../../Core/Extent.h"
+#include "../../Core/FeatureKit/EnumTable.h"
 #include "../../Core/FeatureKit/ScreenSpaceView.h"
 #include "../../Math/Mat4.h"
 
+#include <array>
 #include <cstdint>
 #include <type_traits>
 
@@ -18,6 +20,11 @@ inline constexpr std::uint32_t kTemporalAaMinViewSide = 8; // Smaller views are 
 inline constexpr float kTemporalAaLumaFloor = 0.2f;        // Same constant as the shader's feedback weight.
 
 enum class TemporalAaDebugView : std::uint8_t { Off, JitterOnly }; // JitterOnly: jitter on, history ignored.
+
+inline constexpr std::array kTemporalAaDebugViewTable{
+    fx::EnumEntry<TemporalAaDebugView>{ TemporalAaDebugView::Off, "Off" },
+    fx::EnumEntry<TemporalAaDebugView>{ TemporalAaDebugView::JitterOnly, "JitterOnly" },
+};
 
 // Tunables. Stored only through SanitizeTemporalAaSettings().
 struct TemporalAaSettings {
@@ -36,10 +43,36 @@ enum class TemporalAaFrameStatus : std::uint8_t {
     NotRendered, Ok, Disabled, PassDisabled, ShadersNotReady, TargetFailed,
     NoValidCamera, ExtentTooSmall, ViewNotSupported, CaptureArmed };
 
+inline constexpr std::array kTemporalAaFrameStatusTable{
+    fx::EnumEntry<TemporalAaFrameStatus>{ TemporalAaFrameStatus::NotRendered, "NotRendered" },
+    fx::EnumEntry<TemporalAaFrameStatus>{ TemporalAaFrameStatus::Ok, "Ok" },
+    fx::EnumEntry<TemporalAaFrameStatus>{ TemporalAaFrameStatus::Disabled, "Disabled" },
+    fx::EnumEntry<TemporalAaFrameStatus>{ TemporalAaFrameStatus::PassDisabled, "PassDisabled" },
+    fx::EnumEntry<TemporalAaFrameStatus>{ TemporalAaFrameStatus::ShadersNotReady, "ShadersNotReady" },
+    fx::EnumEntry<TemporalAaFrameStatus>{ TemporalAaFrameStatus::TargetFailed, "TargetFailed" },
+    fx::EnumEntry<TemporalAaFrameStatus>{ TemporalAaFrameStatus::NoValidCamera, "NoValidCamera" },
+    fx::EnumEntry<TemporalAaFrameStatus>{ TemporalAaFrameStatus::ExtentTooSmall, "ExtentTooSmall" },
+    fx::EnumEntry<TemporalAaFrameStatus>{ TemporalAaFrameStatus::ViewNotSupported, "ViewNotSupported" },
+    fx::EnumEntry<TemporalAaFrameStatus>{ TemporalAaFrameStatus::CaptureArmed, "CaptureArmed" },
+};
+
 // What the jitter step decided. The order here is the order of the checks in DecideTemporalAaJitter().
 enum class TemporalAaJitterDecision : std::uint8_t {
     NotRun, Apply, NotPrimaryView, Disabled, CaptureArmed, PassDisabled,
     NoValidCamera, ExtentTooSmall, ShadersNotReady, NoHeartbeat };
+
+inline constexpr std::array kTemporalAaJitterDecisionTable{
+    fx::EnumEntry<TemporalAaJitterDecision>{ TemporalAaJitterDecision::NotRun, "NotRun" },
+    fx::EnumEntry<TemporalAaJitterDecision>{ TemporalAaJitterDecision::Apply, "Apply" },
+    fx::EnumEntry<TemporalAaJitterDecision>{ TemporalAaJitterDecision::NotPrimaryView, "NotPrimaryView" },
+    fx::EnumEntry<TemporalAaJitterDecision>{ TemporalAaJitterDecision::Disabled, "Disabled" },
+    fx::EnumEntry<TemporalAaJitterDecision>{ TemporalAaJitterDecision::CaptureArmed, "CaptureArmed" },
+    fx::EnumEntry<TemporalAaJitterDecision>{ TemporalAaJitterDecision::PassDisabled, "PassDisabled" },
+    fx::EnumEntry<TemporalAaJitterDecision>{ TemporalAaJitterDecision::NoValidCamera, "NoValidCamera" },
+    fx::EnumEntry<TemporalAaJitterDecision>{ TemporalAaJitterDecision::ExtentTooSmall, "ExtentTooSmall" },
+    fx::EnumEntry<TemporalAaJitterDecision>{ TemporalAaJitterDecision::ShadersNotReady, "ShadersNotReady" },
+    fx::EnumEntry<TemporalAaJitterDecision>{ TemporalAaJitterDecision::NoHeartbeat, "NoHeartbeat" },
+};
 
 struct TemporalAaJitterInputs {
     bool primaryView = false;

@@ -22,7 +22,7 @@ TemporalAaSettings SanitizeTemporalAaSettings(const TemporalAaSettings& settings
     s.feedbackMax = std::max(s.feedbackMax, s.feedbackMin);
     s.clipGamma = fx::SanitizeFinite(settings.clipGamma, 0.25f, 4.0f, d.clipGamma);
     s.depthTolerance = fx::SanitizeFinite(settings.depthTolerance, 0.001f, 0.5f, d.depthTolerance);
-    if (settings.debugView != TemporalAaDebugView::Off && settings.debugView != TemporalAaDebugView::JitterOnly) {
+    if (!fx::EnumKnown(kTemporalAaDebugViewTable, settings.debugView)) {
         s.debugView = TemporalAaDebugView::Off;
     }
     return s;
@@ -123,45 +123,17 @@ TemporalAaParamsGpu MakeTemporalAaParams(const fx::CameraBasis& basis, const fx:
 
 std::string_view TemporalAaStatusName(TemporalAaFrameStatus status) noexcept
 {
-    switch (status) {
-    case TemporalAaFrameStatus::NotRendered: return "NotRendered";
-    case TemporalAaFrameStatus::Ok: return "Ok";
-    case TemporalAaFrameStatus::Disabled: return "Disabled";
-    case TemporalAaFrameStatus::PassDisabled: return "PassDisabled";
-    case TemporalAaFrameStatus::ShadersNotReady: return "ShadersNotReady";
-    case TemporalAaFrameStatus::TargetFailed: return "TargetFailed";
-    case TemporalAaFrameStatus::NoValidCamera: return "NoValidCamera";
-    case TemporalAaFrameStatus::ExtentTooSmall: return "ExtentTooSmall";
-    case TemporalAaFrameStatus::ViewNotSupported: return "ViewNotSupported";
-    case TemporalAaFrameStatus::CaptureArmed: return "CaptureArmed";
-    }
-    return "NotRendered";
+    return fx::EnumName(kTemporalAaFrameStatusTable, status);
 }
 
 std::string_view TemporalAaJitterDecisionName(TemporalAaJitterDecision decision) noexcept
 {
-    switch (decision) {
-    case TemporalAaJitterDecision::NotRun: return "NotRun";
-    case TemporalAaJitterDecision::Apply: return "Apply";
-    case TemporalAaJitterDecision::NotPrimaryView: return "NotPrimaryView";
-    case TemporalAaJitterDecision::Disabled: return "Disabled";
-    case TemporalAaJitterDecision::CaptureArmed: return "CaptureArmed";
-    case TemporalAaJitterDecision::PassDisabled: return "PassDisabled";
-    case TemporalAaJitterDecision::NoValidCamera: return "NoValidCamera";
-    case TemporalAaJitterDecision::ExtentTooSmall: return "ExtentTooSmall";
-    case TemporalAaJitterDecision::ShadersNotReady: return "ShadersNotReady";
-    case TemporalAaJitterDecision::NoHeartbeat: return "NoHeartbeat";
-    }
-    return "NotRun";
+    return fx::EnumName(kTemporalAaJitterDecisionTable, decision);
 }
 
 std::string_view TemporalAaDebugViewName(TemporalAaDebugView view) noexcept
 {
-    switch (view) {
-    case TemporalAaDebugView::Off: return "Off";
-    case TemporalAaDebugView::JitterOnly: return "JitterOnly";
-    }
-    return "Off";
+    return fx::EnumName(kTemporalAaDebugViewTable, view);
 }
 
 } // namespace gte
