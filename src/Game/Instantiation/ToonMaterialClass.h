@@ -2,24 +2,12 @@
 
 #include "../../Assets/MaterialData.h"
 #include "../../Renderer/MaterialParams.h"
+#include "../Lighting/ToonClass.h"
 
 #include <cstdint>
 #include <span>
 
 namespace gte {
-
-// Toon shading class of one material. Ids are stable (append only): shaders read them from MaterialParams.
-enum class ToonClass : std::uint32_t {
-    Cloth = 0,
-    Skin = 1,
-    FaceSkin = 2,
-    FaceLine = 3,
-    Eye = 4,
-    Hair = 5,
-    HairOverlay = 6,
-    Gem = 7,
-    ClothBack = 8,
-};
 
 // PMX edge size that maps to an outline width scale of 1.
 inline constexpr float kToonReferenceEdgeSize = 0.54f;

@@ -2,6 +2,7 @@
 
 #include "ToonCharacterTypes.h"
 #include "../../Core/Extent.h"
+#include "../../Game/Lighting/ToonClass.h"
 #include "../../Game/Lighting/ToonLook.h"
 
 #include <cstdint>
@@ -34,22 +35,19 @@ ToonCharacterSettings SanitizeToonCharacterSettings(const ToonCharacterSettings&
 ToonLook PackToonLook(const ToonCharacterSettings& safe, Extent2D viewExtent) noexcept;
 
 // Tint of `shadeClass`; an unknown id gives the cloth tint.
-const ToonClassTint& ToonTintOf(ToonShadeClass shadeClass) noexcept;
+const ToonClassTint& ToonTintOf(ToonClass shadeClass) noexcept;
 
 // Classes drawn without lighting.
-bool ToonClassIsUnlit(ToonShadeClass shadeClass) noexcept;
+bool ToonClassIsUnlit(ToonClass shadeClass) noexcept;
 
 // Classes with a third, darker tone.
-bool ToonClassHasDeepBand(ToonShadeClass shadeClass) noexcept;
-
-// Classes that get an outline from the hull pass.
-bool ToonClassDrawsOutline(ToonShadeClass shadeClass) noexcept;
+bool ToonClassHasDeepBand(ToonClass shadeClass) noexcept;
 
 // Rec. 709 luminance of a linear color.
 float ToonLuminance(const ToonRgb& color) noexcept;
 
-// The shade tone of `shadeClass` (`deepBand` multiplies the deep tint in), scaled up when its luminance
-// would fall below kToonMinShadeLuminance.
-ToonRgb ToonShadeTone(ToonShadeClass shadeClass, bool deepBand) noexcept;
+// The shade tone of `shadeClass` (`deepBand` multiplies the deep tint in), lifted toward white when its
+// luminance would fall below kToonMinShadeLuminance.
+ToonRgb ToonShadeTone(ToonClass shadeClass, bool deepBand) noexcept;
 
 } // namespace gte

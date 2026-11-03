@@ -93,7 +93,7 @@ Toon data is carried by the normal material set. No new binding is needed for it
 - Receive: the shader reads the cascade maps with `SunShadowAmount`. A shadow pushes the half-Lambert value toward the shade band (`shadowStrength`).
 - Cast: the shadow cascades draw every `MeshRenderer`, so toon parts cast shadows. A claim only changes the main opaque draw. The toon selection is never given to a shadow draw.
 - Eyes and face lines are unlit. They do not change with the sun direction.
-- Shaded pixels keep at least 35% of the lit luminance (no dead black).
+- Shaded pixels keep at least 35% of the lit luminance. A tone below the floor is lifted toward white, never scaled above 1.
 - Output radiance is clamped to 8192.
 
 ## Outline
@@ -128,7 +128,7 @@ Route: `/feature_debug/{state,set,invoke}?name=ToonCharacter`. Panel: `ToonChara
 | `debugView` | 0 | 0..5 | See below. Clamped, not rejected |
 
 Action: `reset_defaults` (no arguments).
-Read-only, per view with prefix `game.` or `scene.`: `status`, `frameIndex`, `candidatePartCount`, `claimedEntityCount`, `drawnPartCount`.
+Read-only, per view with prefix `game.` or `scene.`: `status`, `frameIndex`, `candidatePartCount`, `claimedEntityCount` (parts the surface pass can draw and took from the main draw).
 `status`: `NotRendered`, `Ok`, `FeatureDisabled`, `NoToonParts`, `PassDisabled`, `CaptureArmed`, `DrawRefused`.
 
 | `debugView` | Writes |
@@ -165,9 +165,9 @@ curl.exe http://127.0.0.1:8080/get_game_view -o toon.png
 - Camera: vertical FOV 28 degrees, pitched 6.5 degrees up. Distance and height are solved from the bind-pose height so the hat top sits 3% from the top and the hips 85% from the top of a 9:16 frame.
 - Sun: pitch 40 degrees, yaw 35 degrees, colour (1.0, 0.96, 0.90). The sun is on the camera-left side.
 - Features switched off: `AtmosphereAerialVolume`, `AtmosphereComposite`, `Gtao.*`, `Ssgi.*`, `VolumetricLight.*`. Switched on if they were off: Shadow, SceneLighting, ToonCharacter, Bloom, ToneMapping.
-- ToneMapping is set to `PbrNeutral`, exposure 0.9, saturation 1.2. The old values come back on close.
+- ToneMapping is set to `PbrNeutral`, exposure 0.9, saturation 1.2. ToonCharacter is set to `enabled=true`, `debugView=0`. Bloom is set to `enabled=true`. The old values of these keys come back on close.
 - If `ChatanyaraKuushanku_bassui260717a.gta` is next to the model, it is played. If not, the model stands in T-pose.
-- `POST /close_preset_scene` removes the preset entities and restores the feature toggles and the ToneMapping values. It cannot bring back the scene that was open before.
+- `POST /close_preset_scene` removes the preset entities and restores the feature toggles and the saved settings above. It cannot bring back the scene that was open before.
 - Preset code: `src/Editor/FurinaShowcaseSceneOpener.*`, layout maths in `FurinaShowcaseLayout.*`.
 
 ## Known gaps
@@ -175,7 +175,7 @@ curl.exe http://127.0.0.1:8080/get_game_view -o toon.png
 - No morph blending in the engine, so the eyes cannot close.
 - Hard-edge normals (split vertices) can leave small gaps in the outline on clothes. Hair and skin are smooth.
 - A thin one-sided sheet (skirt, cape) can show a wrong or no hull, because the outline culls front faces.
-- A toon-marked part whose pipeline is not position+normal+uv (for example a glTF part with tangents and a texture) is claimed but not drawn. The kit has no layout query to filter it.
+- A toon-marked part whose pipeline is not position+normal+uv (for example a glTF part with tangents and a texture) is not claimed. It stays on the main draw and keeps its normal look.
 - The front-cull winding was written for PMX data. Check it with a picture on a new model.
 - Materials 28..30 of Furina (the `+` skirt layers) draw like cloth with no outline.
 - The cyan and gold tricks are colour heuristics, not material data.

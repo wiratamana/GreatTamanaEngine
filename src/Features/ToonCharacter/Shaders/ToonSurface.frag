@@ -67,7 +67,8 @@ void main()
     vec3 tone = mix(shadeTint * kToonDeepTint[cls], shadeTint, deep);
     tone = mix(tone, vec3(1.0), band);
     float toneLuma = dot(tone, kToonLuma);
-    if (toneLuma < kToonMinShadeLuma) { tone *= kToonMinShadeLuma / max(toneLuma, 1e-4); }
+    // Lift toward white until the luminance floor holds; channels stay at or below 1.
+    if (toneLuma < kToonMinShadeLuma) { tone = mix(tone, vec3(1.0), (kToonMinShadeLuma - toneLuma) / max(1.0 - toneLuma, 1e-4)); }
 
     vec3 color = albedo * whiteLit * tone;
 

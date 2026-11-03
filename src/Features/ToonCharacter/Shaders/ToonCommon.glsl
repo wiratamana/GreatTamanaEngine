@@ -2,7 +2,7 @@
 #ifndef TOON_COMMON_GLSL
 #define TOON_COMMON_GLSL
 
-// Class ids; must match ToonClass in Game/Instantiation/ToonMaterialClass.h.
+// Class ids; pinned against ToonClass in Game/Lighting/ToonClass.h.
 const int kToonCloth = 0;
 const int kToonSkin = 1;
 const int kToonFaceSkin = 2;
@@ -50,10 +50,41 @@ int ToonClassOf(float rawId)
     return (id < 0 || id > 8) ? kToonCloth : id;
 }
 
-// Classes that never get an outline hull.
-bool ToonClassHasNoOutline(int cls)
+// Toon look values from the scene uniform block tail; defaults while the tail is all zeros (never written).
+struct ToonLookParams
 {
-    return cls == kToonEye || cls == kToonFaceLine || cls == kToonHairOverlay || cls == kToonClothBack;
+    float bandThreshold;
+    float bandSoftness;
+    float deepThreshold;
+    float shadowStrength;
+    float rimStrength;
+    float rimWidth;
+    float hairHighlight;
+    float emissiveBoost;
+    float faceFlatten;
+    float outlineNdcY;     // Outline width in NDC units of the viewport height.
+    float outlineDarkness;
+    int debugView;
+    float shadeBlend;
+    float gemHeuristic;
+    float goldGlint;
+    float viewportAspect;  // Width / height.
+};
+
+ToonLookParams ReadToonLook()
+{
+    if (uSceneLighting.toonLook0.x <= 0.0) {
+        return ToonLookParams(0.50, 0.02, 0.22, 0.60, 0.35, 0.60, 0.80, 3.0,
+                              0.80, 0.0044444, 0.35, 0, 1.0, 1.0, 1.0, 0.5625);
+    }
+    return ToonLookParams(uSceneLighting.toonLook0.x, uSceneLighting.toonLook0.y,
+                          uSceneLighting.toonLook0.z, uSceneLighting.toonLook0.w,
+                          uSceneLighting.toonLook1.x, uSceneLighting.toonLook1.y,
+                          uSceneLighting.toonLook1.z, uSceneLighting.toonLook1.w,
+                          uSceneLighting.toonLook2.x, uSceneLighting.toonLook2.y,
+                          uSceneLighting.toonLook2.z, int(uSceneLighting.toonLook2.w + 0.5),
+                          uSceneLighting.toonLook3.x, uSceneLighting.toonLook3.y,
+                          uSceneLighting.toonLook3.z, max(uSceneLighting.toonLook3.w, 0.01));
 }
 
 // Matcap uv of a world normal in the camera basis (v grows downward).

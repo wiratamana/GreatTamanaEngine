@@ -147,9 +147,8 @@ public:
     // A scene redraw (depth pre-pass, colour redraw of chosen entities, outline, ...). Declares nothing while its pass is toggled off.
     SceneDrawChain SceneDraw(rg::StaticName passName);
 
-    // Reserves this frame's set of `entities` for SceneDraw().Only(). One selection can feed several chains.
-    // Invalid (and nothing reserved) for an empty span, without an engine context, or when this frame's sets are used up.
-    // `entities` must stay alive until the last chain that uses the selection has called Record().
+    // Reserves this frame's entity set for SceneDraw().Only(); one selection can feed several chains. Invalid when
+    // empty or no set is left. `entities` must outlive the last chain's Record().
     EntitySelection SelectEntities(std::span<const Entity> entities);
 
     // Instances of cluster-ready meshes in this frame, in stable order. Empty without an engine context, in a

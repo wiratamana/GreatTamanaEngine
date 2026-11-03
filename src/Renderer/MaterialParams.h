@@ -16,7 +16,7 @@ struct MaterialParams {
     float roughnessFactor = 1.0f;
     float normalScale = 1.0f;
     float occlusionStrength = 1.0f;
-    float toonClass = 0.0f;     // Toon shader class id (see ToonMaterialClass.h). Unused by PBR shaders.
+    float toonClass = 0.0f;     // Toon shader class id (see Game/Lighting/ToonClass.h). Unused by PBR shaders.
     float edgeWidthScale = 0.0f; // Outline width multiplier of this material.
     float drawEdge = 0.0f;       // 1 = the outline pass draws this material.
 

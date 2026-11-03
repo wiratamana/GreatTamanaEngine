@@ -42,9 +42,8 @@ public:
     // (PositionColor, PositionNormal, PositionNormalUv, PositionNormalUvTangent) plus shaders/<base>.frag.
     static SceneShaderSet DepthOnly(const char* baseName);
 
-    // Colour draw of position+normal+uv meshes (skinned ones included): shaders/<base>.vert and shaders/<base>.frag.
-    // Binds the material set (set 0) and the scene services set (set 1). Other vertex layouts are skipped by the draw.
-    //   fx::SceneShaderSet::Shaded("Look", { .cull = CullMode::None });
+    // Colour draw of position+normal+uv meshes: shaders/<base>.vert and .frag, material set 0 and scene services set 1.
+    // Other vertex layouts have no pipeline, so a draw skips them.
     static SceneShaderSet Shaded(const char* baseName, const ScenePipelineState& state = {});
 
     ~SceneShaderSet();

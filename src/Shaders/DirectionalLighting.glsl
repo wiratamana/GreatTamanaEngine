@@ -154,43 +154,6 @@ vec3 SceneSunIlluminance() { return SceneSunWritten() ? uSceneLighting.sunIllumi
 vec3 SceneEyePosition() { return uSceneLighting.cameraPositionAndFadeStart.xyz; }
 int SceneMaterialDebugView() { return int(uSceneLighting.groundAmbientAndMaterialDebugView.w + 0.5); }
 
-// Toon look values from the block tail; built-in defaults while the tail is all zeros (never written).
-struct ToonLookParams
-{
-    float bandThreshold;
-    float bandSoftness;
-    float deepThreshold;
-    float shadowStrength;
-    float rimStrength;
-    float rimWidth;
-    float hairHighlight;
-    float emissiveBoost;
-    float faceFlatten;
-    float outlineNdcY;     // Outline width in NDC units of the viewport height.
-    float outlineDarkness;
-    int debugView;
-    float shadeBlend;
-    float gemHeuristic;
-    float goldGlint;
-    float viewportAspect;  // Width / height.
-};
-
-ToonLookParams ReadToonLook()
-{
-    if (uSceneLighting.toonLook0.x <= 0.0) {
-        return ToonLookParams(0.50, 0.02, 0.22, 0.60, 0.35, 0.60, 0.80, 3.0,
-                              0.80, 0.0044444, 0.35, 0, 1.0, 1.0, 1.0, 0.5625);
-    }
-    return ToonLookParams(uSceneLighting.toonLook0.x, uSceneLighting.toonLook0.y,
-                          uSceneLighting.toonLook0.z, uSceneLighting.toonLook0.w,
-                          uSceneLighting.toonLook1.x, uSceneLighting.toonLook1.y,
-                          uSceneLighting.toonLook1.z, uSceneLighting.toonLook1.w,
-                          uSceneLighting.toonLook2.x, uSceneLighting.toonLook2.y,
-                          uSceneLighting.toonLook2.z, int(uSceneLighting.toonLook2.w + 0.5),
-                          uSceneLighting.toonLook3.x, uSceneLighting.toonLook3.y,
-                          uSceneLighting.toonLook3.z, max(uSceneLighting.toonLook3.w, 0.01));
-}
-
 // Hemisphere ambient seen from direction `dir`: sky above, ground below (Y is up).
 vec3 SceneHemisphereAmbient(vec3 dir)
 {

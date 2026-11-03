@@ -78,7 +78,7 @@ void BloomFeature::CompositePass(fx::CompositeFrame& f)
         view.snapshot = BloomViewSnapshot{ status, f.FrameIndex(), levels };
     };
 
-    // Every early return declares nothing, so the compositor skips this entry.
+    // A return before the first compute pass declares nothing, so the compositor skips this entry.
     const BloomSettings& cfg = m_settings;
     if (!cfg.enabled || !(cfg.intensity > 0.0f)) {
         finish(BloomFrameStatus::Disabled);

@@ -1,5 +1,6 @@
 #include "PresetFeatureSettings.h"
 
+#include "PresetSceneSupport.h"
 #include "../Core/Plugins/RenderFeatureCompositor.h"
 
 #include <algorithm>
@@ -44,6 +45,55 @@ bool TrySetFeatureEnabled(RenderFeatureCompositor& compositor, const std::string
     } catch (...) {
         return false;
     }
+}
+
+bool SetFeaturesEnabled(RenderFeatureCompositor* compositor, const char* category, std::span<const std::string> turnOn,
+    std::span<const std::string> turnOff) noexcept
+{
+    if (compositor == nullptr) {
+        if (turnOn.empty() && turnOff.empty()) {
+            return true;
+        }
+        PresetLogError(category, "Cannot switch features back: the render feature compositor is missing.");
+        return false;
+    }
+    bool complete = true;
+    for (const std::string& name : turnOn) {
+        if (!TrySetFeatureEnabled(*compositor, name, true)) {
+            complete = false;
+            PresetLogError(category, "Could not turn the feature back on: ", name);
+        }
+    }
+    for (const std::string& name : turnOff) {
+        if (!TrySetFeatureEnabled(*compositor, name, false)) {
+            complete = false;
+            PresetLogError(category, "Could not turn the feature back off: ", name);
+        }
+    }
+    return complete;
+}
+
+bool RestoreFeatureSettings(fx::IFeatureDebugEndpoint* endpoint, const char* category, std::string_view label,
+    std::span<const fx::FeatureDebugArg> saved) noexcept
+{
+    if (saved.empty()) {
+        return true;
+    }
+    if (endpoint == nullptr) {
+        PresetLogError(category, "Cannot restore the settings: the feature is missing: ", label);
+        return false;
+    }
+    try {
+        const fx::FeatureDebugResult restored = endpoint->Set(saved);
+        if (!restored.ok) {
+            PresetLogError(category, std::string(label) + " refused the saved settings: ", restored.message);
+            return false;
+        }
+    } catch (...) {
+        PresetLogError(category, "Restoring the settings threw: ", label);
+        return false;
+    }
+    return true;
 }
 
 } // namespace gte

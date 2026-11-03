@@ -14,6 +14,9 @@ layout(location = 1) out vec2 outUv;
 layout(location = 2) out vec3 outWorldPos;
 layout(location = 3) out vec3 outHeadForward;
 
+// Surface and overlay must produce bit-equal depth for the overlay's LESS_EQUAL test.
+invariant gl_Position;
+
 void main()
 {
     vec4 world = pc.model * vec4(inPosition, 1.0);

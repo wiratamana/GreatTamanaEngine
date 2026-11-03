@@ -1,12 +1,11 @@
 #include "FurinaShowcaseSceneOpener.h"
 
 #include "PresetFeatureSettings.h"
+#include "PresetSceneSupport.h"
 #include "ProjectRootPath.h"
-#include "../Core/Logging.h"
 #include "../Core/Plugins/RenderFeatureCompositor.h"
 #include "../ECS/Components/Camera.h"
 #include "../ECS/Components/DirectionalLight.h"
-#include "../ECS/Components/Name.h"
 #include "../ECS/Components/ToonShading.h"
 #include "../ECS/Components/Transform.h"
 #include "../ECS/TransformHierarchy.h"
@@ -15,9 +14,11 @@
 #include "../Game/Game.h"
 
 #include <algorithm>
+#include <array>
 #include <exception>
 #include <filesystem>
 #include <limits>
+#include <span>
 #include <utility>
 
 namespace gte {
@@ -36,131 +37,77 @@ constexpr const char* kClipFile = "ChatanyaraKuushanku_bassui260717a.gta";
 constexpr std::string_view kHipBoneName = "\xE4\xB8\x8B\xE5\x8D\x8A\xE8\xBA\xAB";
 constexpr std::string_view kHipBoneEnglishName = "lower body";
 
-// ToneMapping keys the showcase rewrites, and the values it sets.
-constexpr std::array<std::string_view, 3> kToneMappingKeys{ "mode", "exposure", "saturation" };
+// Feature settings the showcase writes. The old values are saved first and restored on close.
+struct LookSetting {
+    std::string_view key;
+    std::string_view value;
+};
+struct FeatureLook {
+    std::string_view feature;
+    std::span<const LookSetting> settings;
+};
 
-std::string EntityText(Entity entity)
+constexpr std::array<LookSetting, 3> kToneMappingLook{ { { "mode", "PbrNeutral" }, { "exposure", "0.9" }, { "saturation", "1.2" } } };
+constexpr std::array<LookSetting, 2> kToonCharacterLook{ { { "enabled", "true" }, { "debugView", "0" } } };
+constexpr std::array<LookSetting, 1> kBloomLook{ { { "enabled", "true" } } };
+constexpr std::array<FeatureLook, 3> kLooks{ { { "ToneMapping", kToneMappingLook }, { "ToonCharacter", kToonCharacterLook },
+    { "Bloom", kBloomLook } } };
+
+fx::IFeatureDebugEndpoint* FindEndpoint(const FurinaShowcaseServices& services, std::string_view feature)
 {
-    return std::to_string(entity.index) + "/" + std::to_string(entity.generation);
+    return services.findEndpoint ? services.findEndpoint(feature) : nullptr;
 }
 
-// Logs an error without ever throwing (callers run in noexcept paths).
-void LogError(std::string_view what, std::string_view detail = {}) noexcept
-{
-    try {
-        GTE_LOG_ERROR(kLogCategory, std::string(what).append(detail));
-    } catch (...) {
-    }
-}
-
-void LogInfo(const std::string& message) noexcept
-{
-    try {
-        GTE_LOG_INFO(kLogCategory, message);
-    } catch (...) {
-    }
-}
-
-// Switches `enable` registrations on, `disable` ones off and sets the ToneMapping settings back. A failure is
+// Switches `enable` registrations on, `disable` ones off and restores the saved settings. A failure is
 // logged and the rest still runs. False when anything failed.
 bool UndoSettings(const FurinaShowcaseServices& services, std::span<const std::string> enable,
-    std::span<const std::string> disable, std::span<const fx::FeatureDebugArg> toneMapping) noexcept
+    std::span<const std::string> disable, std::span<const SavedFeatureSettings> saved) noexcept
 {
-    bool complete = true;
-    if (services.compositor == nullptr) {
-        if (!enable.empty() || !disable.empty()) {
-            complete = false;
-            LogError("Cannot switch features back: the render feature compositor is missing.");
-        }
-    } else {
-        for (const std::string& name : enable) {
-            if (!TrySetFeatureEnabled(*services.compositor, name, true)) {
-                complete = false;
-                LogError("Could not turn the feature back on: ", name);
-            }
-        }
-        for (const std::string& name : disable) {
-            if (!TrySetFeatureEnabled(*services.compositor, name, false)) {
-                complete = false;
-                LogError("Could not turn the feature back off: ", name);
-            }
-        }
-    }
-    if (toneMapping.empty()) {
-        return complete;
-    }
-    if (services.toneMapping == nullptr) {
-        LogError("Cannot restore the ToneMapping settings: the feature is missing.");
-        return false;
-    }
-    try {
-        const fx::FeatureDebugResult restored = services.toneMapping->Set(toneMapping);
-        if (!restored.ok) {
-            complete = false;
-            LogError("ToneMapping refused the saved settings: ", restored.message);
-        }
-    } catch (...) {
-        complete = false;
-        LogError("Restoring the ToneMapping settings threw.");
+    bool complete = SetFeaturesEnabled(services.compositor, kLogCategory, enable, disable);
+    for (const SavedFeatureSettings& entry : saved) {
+        const bool restored = RestoreFeatureSettings(FindEndpoint(services, entry.feature), kLogCategory, entry.feature, entry.args);
+        complete = restored && complete;
     }
     return complete;
 }
 
 // What one open call changed, so a failure can undo exactly that and nothing else.
 struct SettingsChange {
-    std::vector<fx::FeatureDebugArg> toneBefore;
-    bool toneSet = false;
+    std::vector<SavedFeatureSettings> before; // Settings as they were when this call started.
     std::vector<std::string> switchedOn;
     std::vector<std::string> switchedOff;
 };
 
-// Undoes `change` on destruction unless released.
-class ChangeGuard {
-public:
-    ChangeGuard(const FurinaShowcaseServices& services, const SettingsChange& change) noexcept
-        : m_services(services), m_change(change)
-    {
-    }
-    ~ChangeGuard()
-    {
-        if (m_armed) {
-            UndoSettings(m_services, m_change.switchedOff, m_change.switchedOn,
-                m_change.toneSet ? std::span<const fx::FeatureDebugArg>(m_change.toneBefore)
-                                 : std::span<const fx::FeatureDebugArg>{});
-        }
-    }
-    ChangeGuard(const ChangeGuard&) = delete;
-    ChangeGuard& operator=(const ChangeGuard&) = delete;
-
-    void Release() noexcept { m_armed = false; }
-
-private:
-    const FurinaShowcaseServices& m_services;
-    const SettingsChange& m_change;
-    bool m_armed = true;
-};
-
-// Sets the ToneMapping look and switches features for the showcase. `next` holds the baseline of an active
-// showcase, else the current settings become it. All changes go to `change`. False with `error` on failure.
+// Sets the look of every feature found and switches features for the showcase. `next` holds the baseline of an
+// active showcase, else the current settings become it. All changes go to `change`. False with `error` on failure.
 bool ApplySettings(const FurinaShowcaseServices& services, bool haveBaseline, FurinaShowcaseState& next,
     SettingsChange& change, std::string& error)
 {
-    if (services.toneMapping != nullptr) {
-        change.toneBefore = SnapshotFeatureSettings(*services.toneMapping, kToneMappingKeys);
-        if (!haveBaseline) {
-            next.savedToneMapping = change.toneBefore;
+    change.before.reserve(kLooks.size());
+    if (!haveBaseline) {
+        next.savedSettings.reserve(kLooks.size());
+    }
+    for (const FeatureLook& look : kLooks) {
+        fx::IFeatureDebugEndpoint* endpoint = FindEndpoint(services, look.feature);
+        if (endpoint == nullptr) {
+            continue;
         }
-        const std::array<fx::FeatureDebugArg, 3> look{ {
-            { "mode", "PbrNeutral" },
-            { "exposure", "0.9" },
-            { "saturation", "1.2" },
-        } };
-        const fx::FeatureDebugResult applied = services.toneMapping->Set(look);
+        std::vector<std::string_view> keys;
+        std::vector<fx::FeatureDebugArg> values;
+        for (const LookSetting& setting : look.settings) {
+            keys.push_back(setting.key);
+            values.push_back({ std::string(setting.key), std::string(setting.value) });
+        }
+        // Recorded before Set(), so an undo after a refusal writes back what was there anyway.
+        change.before.push_back({ std::string(look.feature), SnapshotFeatureSettings(*endpoint, keys) });
+        if (!haveBaseline) {
+            next.savedSettings.push_back(change.before.back());
+        }
+        const fx::FeatureDebugResult applied = endpoint->Set(values);
         if (!applied.ok) {
-            error = "ToneMapping settings were refused: " + applied.message;
+            error = std::string(look.feature) + " settings were refused: " + applied.message;
             return false;
         }
-        change.toneSet = true;
     }
 
     if (services.compositor == nullptr) {
@@ -194,48 +141,9 @@ bool ApplySettings(const FurinaShowcaseServices& services, bool haveBaseline, Fu
     return true;
 }
 
-// Destroys everything made so far unless released.
-class CreatedGuard {
-public:
-    explicit CreatedGuard(Registry& registry) noexcept : m_registry(registry) { }
-    ~CreatedGuard()
-    {
-        if (m_armed && !m_created.empty()) {
-            try {
-                DestroyEntitiesAndDescendants(m_registry, m_created);
-            } catch (const std::exception& e) {
-                LogError("Removing a half-built showcase failed: ", e.what());
-            }
-        }
-    }
-    CreatedGuard(const CreatedGuard&) = delete;
-    CreatedGuard& operator=(const CreatedGuard&) = delete;
-
-    void Add(Entity entity) { m_created.push_back(entity); }
-    std::vector<Entity> Release() noexcept
-    {
-        m_armed = false;
-        return std::move(m_created);
-    }
-
-private:
-    Registry& m_registry;
-    std::vector<Entity> m_created;
-    bool m_armed = true;
-};
-
-void SetName(Registry& registry, Entity entity, std::string_view name)
-{
-    if (Name* existing = registry.TryGetComponent<Name>(entity)) {
-        existing->value = std::string(name);
-    } else {
-        registry.AddComponent<Name>(entity, Name{ std::string(name) });
-    }
-}
-
 FurinaShowcaseReport Fail(std::string message)
 {
-    LogError(message);
+    PresetLogError(kLogCategory, message);
     FurinaShowcaseReport report;
     report.message = std::move(message) + " The previous scene was kept.";
     return report;
@@ -261,14 +169,14 @@ FurinaShowcaseReport OpenImpl(Game& game, Renderer& renderer, DescriptorSetLayou
     // Old roots are listed before anything new exists, so the new scene is never part of them.
     const std::vector<Entity> oldRoots = GetChildren(registry, kInvalidEntity);
 
-    CreatedGuard created(registry);
+    CreatedEntityGuard created(registry, kLogCategory);
 
     const Entity model = game.CreateMeshEntityFromGtaFile(renderer, modelPathText, sceneServicesSetLayout);
     if (model == kInvalidEntity) {
         return Fail("Furina showcase: could not load \"" + modelPathText + "\".");
     }
     created.Add(model);
-    SetName(registry, model, kRootName);
+    SetEntityName(registry, model, kRootName);
     registry.AddComponent<ToonShading>(model);
 
     const SkinnedMeshData* skin = game.GetMeshInstantiationSystem().TryGetSkinnedMeshData(modelPathText);
@@ -298,7 +206,7 @@ FurinaShowcaseReport OpenImpl(Game& game, Renderer& renderer, DescriptorSetLayou
     cameraComponent.fovYDegrees = layout.fovYDegrees;
     cameraComponent.nearZ = layout.nearZ;
     cameraComponent.farZ = layout.farZ;
-    SetName(registry, camera, kCameraName);
+    SetEntityName(registry, camera, kCameraName);
 
     const Entity sun = game.CreateDirectionalLightEntity();
     created.Add(sun);
@@ -308,7 +216,7 @@ FurinaShowcaseReport OpenImpl(Game& game, Renderer& renderer, DescriptorSetLayou
     if (DirectionalLight* sunLight = registry.TryGetComponent<DirectionalLight>(sun)) {
         sunLight->color = layout.sunColor;
     }
-    SetName(registry, sun, kSunName);
+    SetEntityName(registry, sun, kSunName);
 
     // The scene exists; a replaced preset hands its settings back before the baseline is read.
     if (services.releasePrevious) {
@@ -320,10 +228,12 @@ FurinaShowcaseReport OpenImpl(Game& game, Renderer& renderer, DescriptorSetLayou
     if (state.active) {
         next.enabledByPreset = state.enabledByPreset;
         next.disabledByPreset = state.disabledByPreset;
-        next.savedToneMapping = state.savedToneMapping;
+        next.savedSettings = state.savedSettings;
     }
     SettingsChange change;
-    ChangeGuard changeGuard(services, change);
+    ScopeUndo changeGuard([&]() noexcept {
+        UndoSettings(services, change.switchedOff, change.switchedOn, change.before);
+    });
     std::string applyError;
     if (!ApplySettings(services, state.active, next, change, applyError)) {
         return Fail("Furina showcase settings failed: " + applyError + ".");
@@ -405,7 +315,7 @@ try
 {
     FurinaShowcaseReport report = OpenImpl(game, renderer, sceneServicesSetLayout, services);
     if (report.success) {
-        LogInfo(report.message);
+        PresetLogInfo(kLogCategory, report.message);
     }
     return report;
 }
@@ -427,23 +337,23 @@ try
         return false;
     }
     FurinaShowcaseState& state = *services.state;
-    const bool restored = UndoSettings(services, state.disabledByPreset, state.enabledByPreset, state.savedToneMapping);
+    const bool restored = UndoSettings(services, state.disabledByPreset, state.enabledByPreset, state.savedSettings);
     DestroyEntitiesAndDescendants(game.GetRegistry(), state.created);
     state = FurinaShowcaseState{};
     message = restored ? "Closed the Furina showcase."
                        : "Closed the Furina showcase, but restoring the settings was incomplete (see the log).";
-    LogInfo(message);
+    PresetLogInfo(kLogCategory, message);
     return restored;
 }
 catch (const std::exception& e)
 {
-    LogError("Closing the Furina showcase failed: ", e.what());
+    PresetLogError(kLogCategory, "Closing the Furina showcase failed: ", e.what());
     message = "Closing the Furina showcase failed (see the log).";
     return false;
 }
 catch (...)
 {
-    LogError("Closing the Furina showcase failed.");
+    PresetLogError(kLogCategory, "Closing the Furina showcase failed.");
     message = "Closing the Furina showcase failed (see the log).";
     return false;
 }
@@ -454,7 +364,7 @@ bool ReleaseFurinaShowcaseSettings(const FurinaShowcaseServices& services) noexc
         return true;
     }
     FurinaShowcaseState& state = *services.state;
-    const bool restored = UndoSettings(services, state.disabledByPreset, state.enabledByPreset, state.savedToneMapping);
+    const bool restored = UndoSettings(services, state.disabledByPreset, state.enabledByPreset, state.savedSettings);
     state = FurinaShowcaseState{};
     return restored;
 }

@@ -21,8 +21,8 @@ constexpr ToonClassTint kSkinTint{ { 0.92f, 0.74f, 0.72f }, kWhite, { 0.55f, 0.3
 constexpr ToonClassTint kFaceSkinTint{ { 0.97f, 0.86f, 0.84f }, kWhite, { 0.55f, 0.36f, 0.34f } };
 constexpr ToonClassTint kNeutralTint{ kWhite, kWhite, { 0.30f, 0.36f, 0.62f } };
 
-// Indexed by ToonShadeClass.
-constexpr std::array<ToonClassTint, kToonShadeClassCount> kTints{
+// Indexed by ToonClass.
+constexpr std::array<ToonClassTint, kToonClassCount> kTints{
     kClothTint,   // Cloth
     kSkinTint,    // Skin
     kFaceSkinTint, // FaceSkin
@@ -83,34 +83,21 @@ ToonLook PackToonLook(const ToonCharacterSettings& s, Extent2D viewExtent) noexc
     return look;
 }
 
-const ToonClassTint& ToonTintOf(ToonShadeClass shadeClass) noexcept
+const ToonClassTint& ToonTintOf(ToonClass shadeClass) noexcept
 {
     const std::uint32_t id = static_cast<std::uint32_t>(shadeClass);
-    return id < kToonShadeClassCount ? kTints[id] : kClothTint;
+    return id < kToonClassCount ? kTints[id] : kClothTint;
 }
 
-bool ToonClassIsUnlit(ToonShadeClass shadeClass) noexcept
+bool ToonClassIsUnlit(ToonClass shadeClass) noexcept
 {
-    return shadeClass == ToonShadeClass::FaceLine || shadeClass == ToonShadeClass::Eye;
+    return shadeClass == ToonClass::FaceLine || shadeClass == ToonClass::Eye;
 }
 
-bool ToonClassHasDeepBand(ToonShadeClass shadeClass) noexcept
+bool ToonClassHasDeepBand(ToonClass shadeClass) noexcept
 {
-    return shadeClass == ToonShadeClass::Cloth || shadeClass == ToonShadeClass::ClothBack
-        || shadeClass == ToonShadeClass::Hair;
-}
-
-bool ToonClassDrawsOutline(ToonShadeClass shadeClass) noexcept
-{
-    switch (shadeClass) {
-    case ToonShadeClass::Eye:
-    case ToonShadeClass::FaceLine:
-    case ToonShadeClass::HairOverlay:
-    case ToonShadeClass::ClothBack:
-        return false;
-    default:
-        return true;
-    }
+    return shadeClass == ToonClass::Cloth || shadeClass == ToonClass::ClothBack
+        || shadeClass == ToonClass::Hair;
 }
 
 float ToonLuminance(const ToonRgb& c) noexcept
@@ -118,7 +105,7 @@ float ToonLuminance(const ToonRgb& c) noexcept
     return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
 }
 
-ToonRgb ToonShadeTone(ToonShadeClass shadeClass, bool deepBand) noexcept
+ToonRgb ToonShadeTone(ToonClass shadeClass, bool deepBand) noexcept
 {
     const ToonClassTint& tint = ToonTintOf(shadeClass);
     ToonRgb tone = tint.shade;

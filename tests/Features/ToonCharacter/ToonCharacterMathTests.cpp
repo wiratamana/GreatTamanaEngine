@@ -273,71 +273,49 @@ TEST(ToonCharacterMathTest, SceneUniformBlockInTheShaderEndsWithTheToonLookVecto
 
 TEST(ToonCharacterMathTest, TintTableHoldsTheSpecValues)
 {
-    const ToonClassTint& cloth = ToonTintOf(ToonShadeClass::Cloth);
+    const ToonClassTint& cloth = ToonTintOf(ToonClass::Cloth);
     EXPECT_FLOAT_EQ(cloth.shade.r, 0.42f);
     EXPECT_FLOAT_EQ(cloth.shade.g, 0.48f);
     EXPECT_FLOAT_EQ(cloth.shade.b, 0.82f);
     EXPECT_FLOAT_EQ(cloth.deep.r, 0.80f);
     EXPECT_FLOAT_EQ(cloth.outline.b, 0.62f);
 
-    const ToonClassTint& hair = ToonTintOf(ToonShadeClass::Hair);
+    const ToonClassTint& hair = ToonTintOf(ToonClass::Hair);
     EXPECT_FLOAT_EQ(hair.shade.r, 0.62f);
     EXPECT_FLOAT_EQ(hair.shade.b, 0.93f);
     EXPECT_FLOAT_EQ(hair.outline.g, 0.55f);
 
-    const ToonClassTint& skin = ToonTintOf(ToonShadeClass::Skin);
+    const ToonClassTint& skin = ToonTintOf(ToonClass::Skin);
     EXPECT_FLOAT_EQ(skin.shade.g, 0.74f);
     EXPECT_FLOAT_EQ(skin.outline.r, 0.55f);
 
-    EXPECT_FLOAT_EQ(ToonTintOf(ToonShadeClass::FaceSkin).shade.r, 0.97f);
-    EXPECT_FLOAT_EQ(ToonTintOf(ToonShadeClass::ClothBack).shade.b, cloth.shade.b);
+    EXPECT_FLOAT_EQ(ToonTintOf(ToonClass::FaceSkin).shade.r, 0.97f);
+    EXPECT_FLOAT_EQ(ToonTintOf(ToonClass::ClothBack).shade.b, cloth.shade.b);
 }
 
 TEST(ToonCharacterMathTest, UnknownClassUsesTheClothTint)
 {
-    const ToonClassTint& unknown = ToonTintOf(static_cast<ToonShadeClass>(77));
-    EXPECT_FLOAT_EQ(unknown.shade.b, ToonTintOf(ToonShadeClass::Cloth).shade.b);
-}
-
-TEST(ToonCharacterMathTest, ClassIdsMatchTheMaterialCatalog)
-{
-    EXPECT_EQ(static_cast<std::uint32_t>(ToonShadeClass::Cloth), 0u);
-    EXPECT_EQ(static_cast<std::uint32_t>(ToonShadeClass::Skin), 1u);
-    EXPECT_EQ(static_cast<std::uint32_t>(ToonShadeClass::FaceSkin), 2u);
-    EXPECT_EQ(static_cast<std::uint32_t>(ToonShadeClass::FaceLine), 3u);
-    EXPECT_EQ(static_cast<std::uint32_t>(ToonShadeClass::Eye), 4u);
-    EXPECT_EQ(static_cast<std::uint32_t>(ToonShadeClass::Hair), 5u);
-    EXPECT_EQ(static_cast<std::uint32_t>(ToonShadeClass::HairOverlay), 6u);
-    EXPECT_EQ(static_cast<std::uint32_t>(ToonShadeClass::Gem), 7u);
-    EXPECT_EQ(static_cast<std::uint32_t>(ToonShadeClass::ClothBack), 8u);
-    EXPECT_EQ(kToonShadeClassCount, 9u);
+    const ToonClassTint& unknown = ToonTintOf(static_cast<ToonClass>(77));
+    EXPECT_FLOAT_EQ(unknown.shade.b, ToonTintOf(ToonClass::Cloth).shade.b);
 }
 
 TEST(ToonCharacterMathTest, ClassRules)
 {
-    EXPECT_TRUE(ToonClassIsUnlit(ToonShadeClass::Eye));
-    EXPECT_TRUE(ToonClassIsUnlit(ToonShadeClass::FaceLine));
-    EXPECT_FALSE(ToonClassIsUnlit(ToonShadeClass::Cloth));
-    EXPECT_FALSE(ToonClassIsUnlit(ToonShadeClass::FaceSkin));
+    EXPECT_TRUE(ToonClassIsUnlit(ToonClass::Eye));
+    EXPECT_TRUE(ToonClassIsUnlit(ToonClass::FaceLine));
+    EXPECT_FALSE(ToonClassIsUnlit(ToonClass::Cloth));
+    EXPECT_FALSE(ToonClassIsUnlit(ToonClass::FaceSkin));
 
-    EXPECT_TRUE(ToonClassHasDeepBand(ToonShadeClass::Cloth));
-    EXPECT_TRUE(ToonClassHasDeepBand(ToonShadeClass::Hair));
-    EXPECT_FALSE(ToonClassHasDeepBand(ToonShadeClass::Skin));
-    EXPECT_FALSE(ToonClassHasDeepBand(ToonShadeClass::FaceSkin));
-
-    EXPECT_TRUE(ToonClassDrawsOutline(ToonShadeClass::Cloth));
-    EXPECT_TRUE(ToonClassDrawsOutline(ToonShadeClass::Hair));
-    EXPECT_TRUE(ToonClassDrawsOutline(ToonShadeClass::Skin));
-    EXPECT_FALSE(ToonClassDrawsOutline(ToonShadeClass::Eye));
-    EXPECT_FALSE(ToonClassDrawsOutline(ToonShadeClass::FaceLine));
-    EXPECT_FALSE(ToonClassDrawsOutline(ToonShadeClass::HairOverlay));
-    EXPECT_FALSE(ToonClassDrawsOutline(ToonShadeClass::ClothBack));
+    EXPECT_TRUE(ToonClassHasDeepBand(ToonClass::Cloth));
+    EXPECT_TRUE(ToonClassHasDeepBand(ToonClass::Hair));
+    EXPECT_FALSE(ToonClassHasDeepBand(ToonClass::Skin));
+    EXPECT_FALSE(ToonClassHasDeepBand(ToonClass::FaceSkin));
 }
 
 TEST(ToonCharacterMathTest, ShadeTonesKeepTheLuminanceFloorAndStayBelowWhite)
 {
-    for (std::uint32_t id = 0; id < kToonShadeClassCount; ++id) {
-        const auto shadeClass = static_cast<ToonShadeClass>(id);
+    for (std::uint32_t id = 0; id < kToonClassCount; ++id) {
+        const auto shadeClass = static_cast<ToonClass>(id);
         for (const bool deep : { false, true }) {
             const ToonRgb tone = ToonShadeTone(shadeClass, deep);
             EXPECT_GE(ToonLuminance(tone), kToonMinShadeLuminance - 1e-5f) << "class " << id;
@@ -348,20 +326,20 @@ TEST(ToonCharacterMathTest, ShadeTonesKeepTheLuminanceFloorAndStayBelowWhite)
 
 TEST(ToonCharacterMathTest, ClothShadeIsColouredAndTheDeepBandIsDarker)
 {
-    const ToonRgb shade = ToonShadeTone(ToonShadeClass::Cloth, false);
-    const ToonRgb deep = ToonShadeTone(ToonShadeClass::Cloth, true);
+    const ToonRgb shade = ToonShadeTone(ToonClass::Cloth, false);
+    const ToonRgb deep = ToonShadeTone(ToonClass::Cloth, true);
     EXPECT_FLOAT_EQ(shade.r, 0.42f);
     EXPECT_GT(shade.b - shade.r, 0.15f);
     EXPECT_LT(ToonLuminance(deep), ToonLuminance(shade));
     // A class without a deep band ignores the deep request.
-    const ToonRgb skin = ToonShadeTone(ToonShadeClass::Skin, true);
+    const ToonRgb skin = ToonShadeTone(ToonClass::Skin, true);
     EXPECT_FLOAT_EQ(skin.g, 0.74f);
 }
 
 TEST(ToonCharacterMathTest, UnlitClassesKeepAWhiteTone)
 {
     // An unlit class has a white tint, so the luminance floor leaves it unchanged.
-    const ToonRgb unlit = ToonShadeTone(ToonShadeClass::Eye, true);
+    const ToonRgb unlit = ToonShadeTone(ToonClass::Eye, true);
     EXPECT_FLOAT_EQ(unlit.r, 1.0f);
     EXPECT_FLOAT_EQ(unlit.g, 1.0f);
     EXPECT_FLOAT_EQ(unlit.b, 1.0f);

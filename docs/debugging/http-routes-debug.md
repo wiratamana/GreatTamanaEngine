@@ -308,7 +308,7 @@ Ranges and defaults live in each feature page. Read the returned state to see wh
 | `Gtao` | Per view: `status` (`NotRendered`, `Ok`, `NoValidCamera`, `ShadersNotReady`, `TargetFailed`, `PassDisabled`), `frameIndex`, `aoExtent`, `divisor`, `historyUsed`, `screenRadiusAt5m`, `textureBytes` |
 | `Shadow`, `Ssgi`, `VolumetricLight`, `ToneMapping` | A per-view snapshot of what was applied last frame |
 | `Bloom` | Per view: `status`, `frameIndex`, `activeLevels` |
-| `ToonCharacter` | Per view: `status`, `frameIndex`, `candidatePartCount`, `claimedEntityCount`, `drawnPartCount` |
+| `ToonCharacter` | Per view: `status`, `frameIndex`, `candidatePartCount`, `claimedEntityCount` (parts the surface pass can draw and claimed) |
 | `SceneLighting` | `game.` and `scene.` applied values |
 | `Atmosphere` | Per view: `active`, `sunTintR/G/B`, `ambientScale`, `frameIndex`, `aerial.{maxDistanceKm,exaggeration,shadowBlend,cascadeCount,receiver,scaleHeld,frameIndex}`. `receiver` is `NotChecked`, `Used`, `Missing`, `Rejected` or `Mismatch`. |
 | `GpuDrivenScene` | See next section |

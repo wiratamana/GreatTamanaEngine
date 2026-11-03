@@ -34,7 +34,7 @@ void DrawStatus(const char* label, const ToonCharacterViewSnapshot& view)
     const ImVec4 green(0.4f, 0.9f, 0.4f, 1.0f);
     const ImVec4 orange(1.0f, 0.65f, 0.2f, 1.0f);
     ImGui::TextColored(view.status == ToonCharacterFrameStatus::Ok ? green : orange, "%s: %s", label, StatusText(view.status));
-    ImGui::Text("    parts %u, claimed %u, drawn %u", view.candidatePartCount, view.claimedEntityCount, view.drawnPartCount);
+    ImGui::Text("    parts %u, claimed %u", view.candidatePartCount, view.claimedEntityCount);
 }
 
 } // namespace

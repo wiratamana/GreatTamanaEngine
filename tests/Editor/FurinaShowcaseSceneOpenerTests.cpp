@@ -7,7 +7,9 @@
 #include <nlohmann/json.hpp>
 
 #include <cmath>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace gte {
@@ -121,6 +123,64 @@ TEST(FurinaReleaseTest, ReleaseIsANoOpWhenTheShowcaseIsNotActive)
     services.state = &state;
     EXPECT_TRUE(ReleaseFurinaShowcaseSettings(services));
     EXPECT_TRUE(ReleaseFurinaShowcaseSettings(FurinaShowcaseServices{}));
+}
+
+// Records the arguments of the last Set() call.
+class RecordingEndpoint final : public fx::IFeatureDebugEndpoint {
+public:
+    fx::FeatureDebugResult GetState() const override { return {}; }
+    fx::FeatureDebugResult Set(std::span<const fx::FeatureDebugArg> args) override
+    {
+        received.assign(args.begin(), args.end());
+        ++setCount;
+        return {};
+    }
+    fx::FeatureDebugResult Invoke(std::string_view, std::span<const fx::FeatureDebugArg>) override { return {}; }
+
+    std::vector<fx::FeatureDebugArg> received;
+    int setCount = 0;
+};
+
+TEST(FurinaReleaseTest, ReleaseWritesBackEverySavedFeatureAndForgetsThem)
+{
+    RecordingEndpoint toon;
+    RecordingEndpoint bloom;
+    FurinaShowcaseState state;
+    state.active = true;
+    state.savedSettings = { { "ToonCharacter", { { "enabled", "false" }, { "debugView", "3" } } },
+        { "Bloom", { { "enabled", "false" } } } };
+    FurinaShowcaseServices services;
+    services.state = &state;
+    services.findEndpoint = [&](std::string_view name) -> fx::IFeatureDebugEndpoint* {
+        return name == "ToonCharacter" ? static_cast<fx::IFeatureDebugEndpoint*>(&toon)
+                                       : name == "Bloom" ? static_cast<fx::IFeatureDebugEndpoint*>(&bloom) : nullptr;
+    };
+
+    EXPECT_TRUE(ReleaseFurinaShowcaseSettings(services));
+    ASSERT_EQ(toon.received.size(), 2u);
+    EXPECT_EQ(toon.received[1].key, "debugView");
+    EXPECT_EQ(toon.received[1].value, "3");
+    ASSERT_EQ(bloom.received.size(), 1u);
+    EXPECT_EQ(bloom.received[0].value, "false");
+    EXPECT_FALSE(state.active);
+    EXPECT_TRUE(state.savedSettings.empty());
+}
+
+TEST(FurinaReleaseTest, ReleaseReportsAMissingFeatureButStillRestoresTheOthers)
+{
+    RecordingEndpoint bloom;
+    FurinaShowcaseState state;
+    state.active = true;
+    state.savedSettings = { { "ToonCharacter", { { "enabled", "false" } } }, { "Bloom", { { "enabled", "false" } } } };
+    FurinaShowcaseServices services;
+    services.state = &state;
+    services.findEndpoint = [&](std::string_view name) -> fx::IFeatureDebugEndpoint* {
+        return name == "Bloom" ? &bloom : nullptr;
+    };
+
+    EXPECT_FALSE(ReleaseFurinaShowcaseSettings(services));
+    EXPECT_EQ(bloom.setCount, 1);
+    EXPECT_FALSE(state.active);
 }
 
 } // namespace

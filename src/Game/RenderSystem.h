@@ -67,6 +67,9 @@ public:
         return material != nullptr ? material->set.Handle() : DescriptorSetHandle::Invalid;
     }
 
+    // True when Draw() with `overrides` would submit a draw for `renderer` (live mesh, a pipeline for its layout, material).
+    bool CanDrawWithOverrides(const MeshRenderer& renderer, const PipelineOverrideSet& overrides) const;
+
     // One DrawCommand per entity with a MeshRenderer, with its world matrix. Touches only `registry`.
     static std::vector<DrawCommand> CollectRenderables(Registry& registry);
 
@@ -87,9 +90,7 @@ public:
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid,
         rg::CommandBuffer* cmd = nullptr, std::optional<SceneCullRequest> cull = std::nullopt);
 
-    // Draw() with an explicit view-projection. Extras: frame-debugger `capture`, `maxDrawCount`, `batchedEntities`,
-    // per-layout `pipelineOverrideSet`, a draw `cmd`, `cull` (skips entities whose padded bounds miss its frustum;
-    // an unusable matrix culls nothing) and `onlyEntities` (non-null: nothing else is drawn).
+    // Draw() with an explicit view-projection and extras. `onlyEntities`, when non-null, limits the draw to its entities.
     void Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
         IFrameDebuggerCaptureRecorder* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
         const EntityMarkSet& batchedEntities = {},

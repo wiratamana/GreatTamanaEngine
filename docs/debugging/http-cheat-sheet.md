@@ -315,7 +315,7 @@ curl.exe -X POST http://127.0.0.1:8080/close_preset_scene
 - The preset needs `Project/Furina.gta` next to the exe. A missing file gives an error text and leaves the scene alone.
 - `/get_game_view` returns only the Game view (no editor window). Save each try as `toon_NN.png`, then compare it with the reference picture side by side at the same size.
 - `debugView`: `0` off, `1` class colors, `2` band mask, `3` shadow amount, `4` outline only, `5` albedo only. For exact pixel values set ToneMapping `mode=Clamp exposure=1 saturation=1 dither=0`.
-- Look at `game.status` (`Ok`), `game.drawnPartCount` and `game.claimedEntityCount` in the state. `CaptureArmed` means the Frame Debugger is on. The toon passes are skipped then.
+- Look at `game.status` (`Ok`), and `game.claimedEntityCount` in the state. `CaptureArmed` means the Frame Debugger is on. The toon passes are skipped then.
 - Toggle names: feature `ToonCharacter`, passes `ToonCharacter.Surface.Draw`, `.Outline.Draw`, `.Overlay.Draw`. Bloom has `Bloom.*` passes.
 - `/get_logs?category=FeatureKit` and `category=RenderFeatureCompositor` must stay empty.
 - Pages: [Toon character](../reference/render-features/toon-character.md), [Bloom](../reference/render-features/bloom.md).

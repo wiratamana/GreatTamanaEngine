@@ -100,6 +100,18 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, float aspectWidt
         batchedEntities, std::nullopt, sceneServicesSet, cmd, cull);
 }
 
+bool RenderSystem::CanDrawWithOverrides(const MeshRenderer& renderer, const PipelineOverrideSet& overrides) const
+{
+    const Pipeline* own = m_pipelines.TryGet(renderer.pipeline);
+    if (own == nullptr || m_meshes.TryGet(renderer.mesh) == nullptr) {
+        return false;
+    }
+    const std::optional<PipelineHandle> perLayout = ResolveOverridePipeline(overrides, own->VertexLayoutKind());
+    const Pipeline* replacement = perLayout.has_value() ? m_pipelines.TryGet(*perLayout) : nullptr;
+    return replacement != nullptr
+        && CanDrawWithMaterial(replacement->HasMaterialSet(), m_textures.TryGet(renderer.texture) != nullptr);
+}
+
 namespace {
 const char* VertexLayoutDebugName(VertexLayout layout)
 {

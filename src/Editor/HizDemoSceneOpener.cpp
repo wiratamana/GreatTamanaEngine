@@ -4,10 +4,9 @@
 #include "HizDemoProfile.h"
 #include "InstanceGridTestSpawner.h"
 #include "PresetFeatureSettings.h"
-#include "../Core/Logging.h"
+#include "PresetSceneSupport.h"
 #include "../Core/Plugins/RenderFeatureCompositor.h"
 #include "../ECS/Components/Camera.h"
-#include "../ECS/Components/Name.h"
 #include "../ECS/Components/Transform.h"
 #include "../ECS/TransformHierarchy.h"
 #include "../Game/Game.h"
@@ -39,71 +38,14 @@ constexpr float kSunYawDegrees = 30.0f;
 constexpr std::array<std::string_view, 5> kSettingKeys{ "enabled", "mode", "cone", "collectStats", "debugView" };
 constexpr std::string_view kDemoMode = "Frustum";
 
-std::string EntityText(Entity entity)
-{
-    return std::to_string(entity.index) + "/" + std::to_string(entity.generation);
-}
-
-// Logs an error without ever throwing (callers run in noexcept paths).
-void LogError(std::string_view what, std::string_view detail = {}) noexcept
-{
-    try {
-        GTE_LOG_ERROR(kLogCategory, std::string(what).append(detail));
-    } catch (...) {
-    }
-}
-
-void LogInfo(const std::string& message) noexcept
-{
-    try {
-        GTE_LOG_INFO(kLogCategory, message);
-    } catch (...) {
-    }
-}
-
 // Switches `turnOn` features on, `turnOff` features off and sets `settings` back. A failure is logged and
 // the rest still runs. False when anything failed.
 bool Undo(const HizDemoServices& services, std::span<const std::string> turnOn, std::span<const std::string> turnOff,
     std::span<const fx::FeatureDebugArg> settings) noexcept
 {
-    bool complete = true;
-    if (services.compositor == nullptr) {
-        if (!turnOn.empty() || !turnOff.empty()) {
-            complete = false;
-            LogError("Cannot switch features back: the render feature compositor is missing.");
-        }
-    } else {
-        for (const std::string& name : turnOn) {
-            if (!TrySetFeatureEnabled(*services.compositor, name, true)) {
-                complete = false;
-                LogError("Could not turn the feature back on: ", name);
-            }
-        }
-        for (const std::string& name : turnOff) {
-            if (!TrySetFeatureEnabled(*services.compositor, name, false)) {
-                complete = false;
-                LogError("Could not turn the feature back off: ", name);
-            }
-        }
-    }
-    if (settings.empty()) {
-        return complete;
-    }
-    if (services.gpuDrivenScene == nullptr) {
-        LogError("Cannot restore the GpuDrivenScene settings: the feature is missing.");
-        return false;
-    }
-    try {
-        const fx::FeatureDebugResult restored = services.gpuDrivenScene->Set(settings);
-        if (!restored.ok) {
-            complete = false;
-            LogError("GpuDrivenScene refused the saved settings: ", restored.message);
-        }
-    } catch (...) {
-        complete = false;
-        LogError("Restoring the GpuDrivenScene settings threw.");
-    }
-    return complete;
+    const bool switched = SetFeaturesEnabled(services.compositor, kLogCategory, turnOn, turnOff);
+    const bool restored = RestoreFeatureSettings(services.gpuDrivenScene, kLogCategory, "GpuDrivenScene", settings);
+    return switched && restored;
 }
 
 // Gives back the baseline the demo saved and forgets it. Safe to call twice. False when incomplete.
@@ -121,29 +63,6 @@ struct SettingsChange {
     bool settingsSet = false;
     std::vector<std::string> turnedOff;
     std::vector<std::string> turnedOn;
-};
-
-// Undoes `change` on destruction unless released.
-class ChangeGuard {
-public:
-    ChangeGuard(const HizDemoServices& services, const SettingsChange& change) noexcept : m_services(services), m_change(change) { }
-    ~ChangeGuard()
-    {
-        if (m_armed) {
-            Undo(m_services, m_change.turnedOff, m_change.turnedOn,
-                m_change.settingsSet ? std::span<const fx::FeatureDebugArg>(m_change.before)
-                                     : std::span<const fx::FeatureDebugArg>{});
-        }
-    }
-    ChangeGuard(const ChangeGuard&) = delete;
-    ChangeGuard& operator=(const ChangeGuard&) = delete;
-
-    void Release() noexcept { m_armed = false; }
-
-private:
-    const HizDemoServices& m_services;
-    const SettingsChange& m_change;
-    bool m_armed = true;
 };
 
 // Sets the GpuDrivenScene settings and switches features for `profile`; `next` holds the baseline of an active
@@ -208,49 +127,9 @@ bool ApplySettings(const HizDemoServices& services, PresetProfile profile, bool 
     return true;
 }
 
-// Destroys everything made so far unless released.
-class CreatedGuard {
-public:
-    explicit CreatedGuard(Registry& registry) noexcept : m_registry(registry) { }
-    ~CreatedGuard()
-    {
-        if (m_armed && !m_created.empty()) {
-            try {
-                DestroyEntitiesAndDescendants(m_registry, m_created);
-            } catch (const std::exception& e) {
-                LogError("Removing a half-built demo failed: ", e.what());
-            }
-        }
-    }
-    CreatedGuard(const CreatedGuard&) = delete;
-    CreatedGuard& operator=(const CreatedGuard&) = delete;
-
-    void Add(Entity entity) { m_created.push_back(entity); }
-    void Add(const std::vector<Entity>& entities) { m_created.insert(m_created.end(), entities.begin(), entities.end()); }
-    std::vector<Entity> Release() noexcept
-    {
-        m_armed = false;
-        return std::move(m_created);
-    }
-
-private:
-    Registry& m_registry;
-    std::vector<Entity> m_created;
-    bool m_armed = true;
-};
-
-void SetName(Registry& registry, Entity entity, std::string_view name)
-{
-    if (Name* existing = registry.TryGetComponent<Name>(entity)) {
-        existing->value = std::string(name);
-    } else {
-        registry.AddComponent<Name>(entity, Name{ std::string(name) });
-    }
-}
-
 HizDemoReport Fail(std::string message)
 {
-    LogError(message);
+    PresetLogError(kLogCategory, message);
     HizDemoReport report;
     report.message = std::move(message) + " The previous scene was kept.";
     return report;
@@ -279,20 +158,20 @@ HizDemoReport OpenImpl(Game& game, Renderer& renderer, DescriptorSetLayoutHandle
     // Old roots are listed before anything new exists, so the new scene is never part of them.
     const std::vector<Entity> oldRoots = GetChildren(registry, kInvalidEntity);
 
-    CreatedGuard created(registry);
+    CreatedEntityGuard created(registry, kLogCategory);
 
     const Entity camera = registry.CreateEntity();
     created.Add(camera);
     registry.AddComponent<Transform>(camera).position = layout.cameraPosition;
     registry.AddComponent<Camera>(camera).farZ = layout.cameraFarZ;
-    SetName(registry, camera, kCameraName);
+    SetEntityName(registry, camera, kCameraName);
 
     const Entity sun = game.CreateDirectionalLightEntity();
     created.Add(sun);
     if (Transform* sunTransform = registry.TryGetComponent<Transform>(sun)) {
         sunTransform->rotation = Quat::FromEulerDegrees(kSunPitchDegrees, kSunYawDegrees, 0.0f);
     }
-    SetName(registry, sun, kSunName);
+    SetEntityName(registry, sun, kSunName);
 
     const Entity wall = game.CreatePrimitiveEntity(renderer, PrimitiveType::Cube, sceneServicesSetLayout);
     created.Add(wall);
@@ -300,7 +179,7 @@ HizDemoReport OpenImpl(Game& game, Renderer& renderer, DescriptorSetLayoutHandle
         wallTransform->position = layout.wallPosition;
         wallTransform->scale = layout.wallScale;
     }
-    SetName(registry, wall, kWallName);
+    SetEntityName(registry, wall, kWallName);
 
     InstanceGridSpawnResult field = InstanceGridTestSpawner::Spawn(game, renderer, *services.grid, sanitized.count,
         sanitized.spacing, sceneServicesSetLayout, fieldCentre);
@@ -317,7 +196,10 @@ HizDemoReport OpenImpl(Game& game, Renderer& renderer, DescriptorSetLayoutHandle
         next.disabledFeatures = state.disabledFeatures;
     }
     SettingsChange change;
-    ChangeGuard changeGuard(services, change);
+    ScopeUndo changeGuard([&]() noexcept {
+        Undo(services, change.turnedOff, change.turnedOn,
+            change.settingsSet ? std::span<const fx::FeatureDebugArg>(change.before) : std::span<const fx::FeatureDebugArg>{});
+    });
     std::string applyError;
     if (!ApplySettings(services, parameters.profile, state.active, next, change, applyError)) {
         return Fail("Hi-Z demo settings failed: " + applyError + ".");
@@ -378,7 +260,7 @@ try
 {
     HizDemoReport report = OpenImpl(game, renderer, sceneServicesSetLayout, parameters, services);
     if (report.success) {
-        LogInfo(report.message);
+        PresetLogInfo(kLogCategory, report.message);
     }
     return report;
 }
@@ -405,18 +287,18 @@ try
     state = HizDemoState{};
     message = restored ? "Closed the Hi-Z demo."
                        : "Closed the Hi-Z demo, but restoring the settings was incomplete (see the log).";
-    LogInfo(message);
+    PresetLogInfo(kLogCategory, message);
     return restored;
 }
 catch (const std::exception& e)
 {
-    LogError("Closing the Hi-Z demo failed: ", e.what());
+    PresetLogError(kLogCategory, "Closing the Hi-Z demo failed: ", e.what());
     message = "Closing the Hi-Z demo failed (see the log).";
     return false;
 }
 catch (...)
 {
-    LogError("Closing the Hi-Z demo failed.");
+    PresetLogError(kLogCategory, "Closing the Hi-Z demo failed.");
     message = "Closing the Hi-Z demo failed (see the log).";
     return false;
 }

@@ -31,7 +31,8 @@ struct ToonCharacterSettings {
 
     float faceFlatten = 0.8f;     // 0..1, normal blend toward the head forward axis
 
-    // Outline: width in pixels at 720 p height, scaled by the view height; darkness scales the albedo.
+    // Outline: width in pixels at 720 p height, scaled by the view height. Darkness blends the class tint
+    // toward half strength.
     float outlineWidthPx = 1.6f;  // 0..8
     float outlineDarkness = 0.35f; // 0..1
 
@@ -47,14 +48,7 @@ struct ToonCharacterViewSnapshot {
     ToonCharacterFrameStatus status = ToonCharacterFrameStatus::NotRendered;
     std::uint64_t frameIndex = 0;
     std::uint32_t candidatePartCount = 0; // Mesh parts under a toon root.
-    std::uint32_t claimedEntityCount = 0; // Parts the surface pass took over from the main draw.
-    std::uint32_t drawnPartCount = 0;     // Parts the surface pass drew.
+    std::uint32_t claimedEntityCount = 0; // Parts the surface pass can draw and took over from the main draw.
 };
-
-// Shade and tint classes. Ids match the material class ids in the mesh catalog and the toon shaders.
-enum class ToonShadeClass : std::uint32_t {
-    Cloth = 0, Skin = 1, FaceSkin = 2, FaceLine = 3, Eye = 4, Hair = 5, HairOverlay = 6, Gem = 7, ClothBack = 8
-};
-inline constexpr std::uint32_t kToonShadeClassCount = 9;
 
 } // namespace gte

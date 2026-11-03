@@ -77,9 +77,8 @@ struct SceneLightingUniformData {
 static_assert(sizeof(SceneLightingUniformData) == 512);
 static_assert(std::is_trivially_copyable_v<SceneLightingUniformData>);
 
-// Packs sun, settings, eye, optional cascade data and the optional toon tail; a non-finite direction becomes up.
-// Sun illuminance and ambient intensity are scaled by `sunLight` (sanitized; null = identity).
-// No receiver, or zero material strength, zeroes every cascade field; the eye is always written.
+// Packs sun, eye, optional cascades, light modulation and toon tail. A non-finite sun direction becomes up.
+// No receiver or zero material strength zeroes the cascade fields.
 inline SceneLightingUniformData PackSceneLightingUniformData(const ResolvedDirectionalLight& sun,
     const SceneLightingSettings& settings, const Vec3& eye, const SunShadowReceiver* receiver = nullptr,
     const SunLightModulation* sunLight = nullptr, const ToonLook* toonLook = nullptr) noexcept

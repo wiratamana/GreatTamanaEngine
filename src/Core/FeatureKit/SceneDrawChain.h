@@ -4,6 +4,7 @@
 #include "Texture.h"
 #include "../../Math/Mat4.h"
 
+#include <cstdint>
 #include <memory>
 
 namespace gte::fx {
@@ -12,7 +13,6 @@ class SceneShaderSet;
 
 // One scene redraw into a depth (optionally colour) target; ended by Record(). Declares nothing while toggled off.
 //   f.SceneDraw("Map.Draw").Shaders(set).Camera(vp).ClearDepthTarget(map, 1.0f).CullToFrustum(0.25f).Record();
-//   f.SceneDraw("Look.Draw").Shaders(shaded).Camera(vp).Target(f.SceneTarget()).SceneServices().Only(sel).Claim().Record();
 class SceneDrawChain {
 public:
     ~SceneDrawChain();
@@ -29,8 +29,7 @@ public:
     // Draws into `target` as both color and depth, loading both (nothing is cleared). Use the view's scene target.
     SceneDrawChain& Target(Texture target);
 
-    // Binds the scene services set (lighting uniforms and published scene textures) of this view. Needed by every set made with
-    // SceneShaderSet::Shaded(). Refused in a shared frame.
+    // Binds the scene services set (lighting uniforms, scene textures) of this view. Needed by Shaded() sets. Not in a shared frame.
     SceneDrawChain& SceneServices();
 
     // Skips entities whose world bounds, grown by `paddingFraction` of their largest extent, miss the camera frustum.
@@ -44,13 +43,15 @@ public:
     // Draws only the entities of `selection`. An invalid selection draws nothing: Record() declares no pass.
     SceneDrawChain& Only(const EntitySelection& selection);
 
-    // Takes the selected entities over from the main draw of this view once the pass was declared, so they are
-    // drawn once. Needs Only(). Declares nothing (the main draw keeps them) in a shared frame and while a frame
-    // capture is armed for the primary view.
+    // After Record(), takes the selected entities this pass can draw over from the main draw. Needs Only().
+    // Declares nothing in a shared frame or while a frame capture is armed.
     SceneDrawChain& Claim();
 
     // False when nothing was declared.
     bool Record();
+
+    // Entities claimed by the last Record(); 0 without Claim().
+    std::uint32_t ClaimedCount() const noexcept;
 
 private:
     friend class Frame;

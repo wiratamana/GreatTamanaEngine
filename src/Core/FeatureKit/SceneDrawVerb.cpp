@@ -5,12 +5,15 @@
 #include "../ClusterClaim.h"
 #include "../Core.h"
 #include "../GpuSkinningKeys.h"
+#include "../../ECS/Components/MeshRenderer.h"
 #include "../../Game/Game.h"
+#include "../../Game/RenderSystem.h"
 #include "../../Game/SceneDrawPass.h"
 #include "../../Renderer/SceneServicesDescriptorSet.h"
 
 #include <array>
 #include <cassert>
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
@@ -43,6 +46,7 @@ struct SceneDrawChain::Impl {
     EntitySelection only;
     bool sceneServices = false;
     bool claim = false;
+    std::uint32_t claimedCount = 0;
 };
 
 SceneDrawChain Frame::SceneDraw(rg::StaticName passName)
@@ -288,9 +292,26 @@ bool SceneDrawChain::Record()
 
     const bool declared = pass.Draw();
     if (declared && impl.claim) {
-        core.ClaimEntities(context.scope, impl.only.entities);
+        // Claim only what this pass can draw; the rest stays on the main draw.
+        const RenderSystem& renderSystem = core.GetGame().GetRenderSystem();
+        const PipelineOverrideSet& overrides = detail::OverridesOf(*impl.shaders);
+        std::vector<Entity> drawable;
+        drawable.reserve(impl.only.entities.size());
+        for (const Entity entity : impl.only.entities) {
+            const MeshRenderer* renderer = core.GetRegistry().TryGetComponent<MeshRenderer>(entity);
+            if (renderer != nullptr && renderSystem.CanDrawWithOverrides(*renderer, overrides)) {
+                drawable.push_back(entity);
+            }
+        }
+        impl.claimedCount = static_cast<std::uint32_t>(drawable.size());
+        core.ClaimEntities(context.scope, drawable);
     }
     return declared;
+}
+
+std::uint32_t SceneDrawChain::ClaimedCount() const noexcept
+{
+    return m_impl ? m_impl->claimedCount : 0;
 }
 
 } // namespace gte::fx

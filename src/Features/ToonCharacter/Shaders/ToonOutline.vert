@@ -25,7 +25,7 @@ void main()
     int cls = ToonClassOf(uMaterial.pbr.y);
     outUv = inUv;
     outClass = cls;
-    if (uMaterial.pbr.w < 0.5 || ToonClassHasNoOutline(cls)) {
+    if (uMaterial.pbr.w < 0.5) {
         gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
         return;
     }

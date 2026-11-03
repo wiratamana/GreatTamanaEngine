@@ -84,9 +84,10 @@ set(GTE_COMMENT_RULE_SRC
     Network/ViewWireName.h Editor/SceneViewAxes.h Editor/SceneViewAxes.cpp Editor/Panels/SceneViewGizmo.h
     Editor/Panels/SceneViewGizmo.cpp Editor/TransformGizmo.h Editor/TransformGizmo.cpp Profiling/
     Features/SceneLighting/ Features/GpuDrivenScene/ Features/Bloom/ Features/ToonCharacter/ Game/Lighting/ToonLook.h
-    Game/Instantiation/ToonMaterialClass.h Game/Instantiation/ToonMaterialClass.cpp Editor/FurinaShowcaseLayout.h
-    Editor/FurinaShowcaseLayout.cpp Editor/FurinaShowcaseSceneOpener.h Editor/FurinaShowcaseSceneOpener.cpp
-    Editor/PresetFeatureSettings.h Editor/PresetFeatureSettings.cpp ECS/Components/ToonShading.h)
+    Game/Lighting/ToonClass.h Game/Instantiation/ToonMaterialClass.h Game/Instantiation/ToonMaterialClass.cpp
+    Editor/FurinaShowcaseLayout.h Editor/FurinaShowcaseLayout.cpp Editor/FurinaShowcaseSceneOpener.h
+    Editor/FurinaShowcaseSceneOpener.cpp Editor/PresetFeatureSettings.h Editor/PresetFeatureSettings.cpp
+    Editor/PresetSceneSupport.h Editor/PresetSceneSupport.cpp ECS/Components/ToonShading.h)
 
 set(GTE_COMMENT_RULE_TESTS
     Editor/SceneViewAxesTests.cpp Core/FeatureKit/ Core/GpuViewMetricsTests.cpp

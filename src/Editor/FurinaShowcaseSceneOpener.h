@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FurinaShowcaseLayout.h"
+#include "PresetFeatureSettings.h"
 #include "../Core/FeatureKit/FeatureDebug.h"
 #include "../Core/GraphicsHandles.h"
 #include "../Core/Plugins/RenderFeatureDebugEntry.h"
@@ -36,17 +37,17 @@ inline constexpr std::array<std::string_view, 5> kFurinaShowcaseFeaturePrefixesO
 // What the open scene changed, so closing it puts everything back.
 struct FurinaShowcaseState {
     bool active = false;
-    std::vector<Entity> created;                       // Model root, camera and sun.
-    std::vector<std::string> enabledByPreset;          // Registrations the preset switched on.
-    std::vector<std::string> disabledByPreset;         // Registrations the preset switched off.
-    std::vector<fx::FeatureDebugArg> savedToneMapping; // ToneMapping settings before the preset.
+    std::vector<Entity> created;                    // Model root, camera and sun.
+    std::vector<std::string> enabledByPreset;       // Registrations the preset switched on.
+    std::vector<std::string> disabledByPreset;      // Registrations the preset switched off.
+    std::vector<SavedFeatureSettings> savedSettings; // Feature settings before the preset.
 };
 
-// Non-owning handles the opener works through. `toneMapping` may be null; the tone settings are then left alone.
+// Non-owning handles the opener works through. A feature the lookup cannot find keeps its settings.
 struct FurinaShowcaseServices {
     FurinaShowcaseState* state = nullptr;
     RenderFeatureCompositor* compositor = nullptr;
-    fx::IFeatureDebugEndpoint* toneMapping = nullptr;
+    std::function<fx::IFeatureDebugEndpoint*(std::string_view)> findEndpoint; // By feature name; may be empty.
     std::function<void()> releasePrevious; // Called once the new scene is built, before any setting changes.
 };
 

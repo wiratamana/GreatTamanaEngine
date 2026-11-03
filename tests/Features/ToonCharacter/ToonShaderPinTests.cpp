@@ -1,10 +1,13 @@
 // Pins the toon shader contract: files, includes, bindings, class ids and the uniform block tail.
 
+#include "Game/Lighting/ToonClass.h"
+
 #include <gtest/gtest.h>
 
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <utility>
 
 namespace gte {
 namespace {
@@ -46,25 +49,49 @@ TEST(ToonShaderPinTest, SurfaceUsesTheSharedLightingAndTheSphereBinding)
     EXPECT_TRUE(Has(overlay, "layout(set = 0, binding = 5) uniform sampler2D uSphereTexture"));
 }
 
-TEST(ToonShaderPinTest, ClassIdsAndShadeFloorAreFixed)
+TEST(ToonShaderPinTest, ClassIdsMatchTheEnumAndShadeFloorLiftsTowardWhite)
 {
     const std::string common = ReadToonShader("ToonCommon.glsl");
-    EXPECT_TRUE(Has(common, "const int kToonCloth = 0;"));
-    EXPECT_TRUE(Has(common, "const int kToonSkin = 1;"));
-    EXPECT_TRUE(Has(common, "const int kToonFaceSkin = 2;"));
-    EXPECT_TRUE(Has(common, "const int kToonFaceLine = 3;"));
-    EXPECT_TRUE(Has(common, "const int kToonEye = 4;"));
-    EXPECT_TRUE(Has(common, "const int kToonHair = 5;"));
-    EXPECT_TRUE(Has(common, "const int kToonHairOverlay = 6;"));
-    EXPECT_TRUE(Has(common, "const int kToonGem = 7;"));
-    EXPECT_TRUE(Has(common, "const int kToonClothBack = 8;"));
+    const std::pair<const char*, ToonClass> ids[] = {
+        { "kToonCloth", ToonClass::Cloth }, { "kToonSkin", ToonClass::Skin },
+        { "kToonFaceSkin", ToonClass::FaceSkin }, { "kToonFaceLine", ToonClass::FaceLine },
+        { "kToonEye", ToonClass::Eye }, { "kToonHair", ToonClass::Hair },
+        { "kToonHairOverlay", ToonClass::HairOverlay }, { "kToonGem", ToonClass::Gem },
+        { "kToonClothBack", ToonClass::ClothBack } };
+    EXPECT_EQ(std::size(ids), kToonClassCount);
+    for (const auto& [name, id] : ids) {
+        const std::string line = std::string("const int ") + name + " = " + std::to_string(static_cast<int>(id)) + ";";
+        EXPECT_TRUE(Has(common, line.c_str())) << line;
+    }
     EXPECT_TRUE(Has(common, "const float kToonMinShadeLuma = 0.35;"));
+    EXPECT_FALSE(Has(common, "ToonClassHasNoOutline"));
+
+    const std::string frag = ReadToonShader("ToonSurface.frag");
+    EXPECT_TRUE(Has(frag, "tone = mix(tone, vec3(1.0), (kToonMinShadeLuma - toneLuma) / max(1.0 - toneLuma, 1e-4));"));
+    EXPECT_FALSE(Has(frag, "tone *="));
+}
+
+TEST(ToonShaderPinTest, ToonLookReaderLivesInTheToonHeaderOnly)
+{
+    const std::string common = ReadToonShader("ToonCommon.glsl");
+    EXPECT_TRUE(Has(common, "struct ToonLookParams"));
+    EXPECT_TRUE(Has(common, "ToonLookParams ReadToonLook()"));
+    const std::string lighting = ReadSrc("Shaders/DirectionalLighting.glsl");
+    EXPECT_FALSE(Has(lighting, "ToonLookParams"));
+    EXPECT_FALSE(Has(lighting, "ReadToonLook"));
+}
+
+TEST(ToonShaderPinTest, SurfaceAndOverlayShareAnInvariantPosition)
+{
+    EXPECT_TRUE(Has(ReadToonShader("ToonSurfaceVertex.glsl"), "invariant gl_Position;"));
+    EXPECT_TRUE(Has(ReadToonShader("ToonSurface.vert"), "#include \"ToonSurfaceVertex.glsl\""));
+    EXPECT_TRUE(Has(ReadToonShader("ToonOverlay.vert"), "#include \"ToonSurfaceVertex.glsl\""));
 }
 
 TEST(ToonShaderPinTest, OutlineReadsEdgeDataFromTheMaterialParams)
 {
     const std::string vert = ReadToonShader("ToonOutline.vert");
-    EXPECT_TRUE(Has(vert, "uMaterial.pbr.w"));
+    EXPECT_TRUE(Has(vert, "uMaterial.pbr.w < 0.5"));
     EXPECT_TRUE(Has(vert, "uMaterial.pbr.z"));
     EXPECT_TRUE(Has(vert, "gl_Position = vec4(2.0, 2.0, 2.0, 1.0);"));
     EXPECT_TRUE(Has(vert, "DIRECTIONAL_LIGHTING_NO_SHADOWS"));

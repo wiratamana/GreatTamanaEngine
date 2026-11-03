@@ -159,7 +159,6 @@ fx::FeatureDebugResult ToonCharacterDebugEndpoint::GetState() const
         Add(out, key("frameIndex"), Count(snapshot.frameIndex));
         Add(out, key("candidatePartCount"), static_cast<std::int64_t>(snapshot.candidatePartCount));
         Add(out, key("claimedEntityCount"), static_cast<std::int64_t>(snapshot.claimedEntityCount));
-        Add(out, key("drawnPartCount"), static_cast<std::int64_t>(snapshot.drawnPartCount));
     }
     return out;
 }

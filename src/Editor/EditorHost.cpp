@@ -570,13 +570,15 @@ FurinaShowcaseServices EditorHost::MakeFurinaShowcaseServices()
 {
     FurinaShowcaseServices services;
     services.compositor = m_core.GetRenderFeatureCompositor();
-    for (const std::unique_ptr<IEngineFeatureModule>& module : m_builtinFeatureModules) {
-        fx::Feature* feature = module ? fx::FindFeature(*module) : nullptr;
-        if (feature != nullptr && std::string_view(feature->Name()) == "ToneMapping") {
-            services.toneMapping = feature->DebugEndpoint();
-            break;
+    services.findEndpoint = [this](std::string_view name) -> fx::IFeatureDebugEndpoint* {
+        for (const std::unique_ptr<IEngineFeatureModule>& module : m_builtinFeatureModules) {
+            fx::Feature* feature = module ? fx::FindFeature(*module) : nullptr;
+            if (feature != nullptr && std::string_view(feature->Name()) == name) {
+                return feature->DebugEndpoint();
+            }
         }
-    }
+        return nullptr;
+    };
     return services;
 }
 
