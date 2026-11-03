@@ -18,7 +18,6 @@ const float kToonMinShadeLuma = 0.35;   // A shaded pixel keeps at least this sh
 const float kToonMaxRadiance = 8192.0;
 const vec3 kToonLuma = vec3(0.2126, 0.7152, 0.0722);
 const vec3 kToonRimTint = vec3(0.75, 0.90, 1.00);
-const vec3 kToonRingTint = vec3(0.45, 0.58, 0.85); // Hair ring base tone over the lit hair.
 
 // Per class: shade multiplier.
 const vec3 kToonShadeTint[9] = vec3[9](
@@ -91,14 +90,21 @@ ToonLookParams ReadToonLook()
                           uSceneLighting.toonLook3.z, max(uSceneLighting.toonLook3.w, 0.01));
 }
 
-// Matcap uv of a world normal in the camera basis (v grows downward).
-vec2 ToonMatcapUv(vec3 worldNormal)
+// Camera right and up axes in world space (y-up world).
+void ToonCameraAxes(out vec3 right, out vec3 up)
 {
     vec3 forward = uSceneLighting.cameraForwardAndFadeEnd.xyz;
     forward = (dot(forward, forward) > 1e-6) ? normalize(forward) : vec3(0.0, 0.0, 1.0);
-    vec3 right = cross(vec3(0.0, 1.0, 0.0), forward);
+    right = cross(vec3(0.0, 1.0, 0.0), forward);
     right = (dot(right, right) > 1e-6) ? normalize(right) : vec3(1.0, 0.0, 0.0);
-    vec3 up = cross(forward, right);
+    up = cross(forward, right);
+}
+
+// Matcap uv of a world normal in the camera basis (v grows downward).
+vec2 ToonMatcapUv(vec3 worldNormal)
+{
+    vec3 right, up;
+    ToonCameraAxes(right, up);
     return vec2(dot(worldNormal, right) * 0.5 + 0.5, 0.5 - dot(worldNormal, up) * 0.5);
 }
 

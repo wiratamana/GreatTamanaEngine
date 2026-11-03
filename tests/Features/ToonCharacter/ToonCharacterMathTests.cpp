@@ -76,7 +76,7 @@ TEST(ToonCharacterMathTest, SanitizeClampsEveryField)
     EXPECT_FLOAT_EQ(h.shadeBlend, 1.0f);
     EXPECT_FLOAT_EQ(h.rimStrength, 2.0f);
     EXPECT_FLOAT_EQ(h.rimWidth, 1.0f);
-    EXPECT_FLOAT_EQ(h.hairHighlight, 4.0f);
+    EXPECT_FLOAT_EQ(h.hairHighlight, 1.0f);
     EXPECT_FLOAT_EQ(h.emissiveBoost, 16.0f);
     EXPECT_FLOAT_EQ(h.faceFlatten, 1.0f);
     EXPECT_FLOAT_EQ(h.outlineWidthPx, 8.0f);
@@ -353,13 +353,6 @@ TEST(ToonCharacterMathTest, HairOutlineIsDarkBlueNotAsBrightAsTheHair)
     const float lineLuma = 0.2126f * linePx[0] + 0.7152f * linePx[1] + 0.0722f * linePx[2];
     EXPECT_LT(lineLuma, 0.35f * 240.0f);
     EXPECT_GT(lineLuma, 10.0f);
-}
-
-TEST(ToonCharacterMathTest, HairRingBandIsBluishAndDarkerThanWhiteHair)
-{
-    EXPECT_GT(kToonRingTint.b, kToonRingTint.g);
-    EXPECT_GT(kToonRingTint.g, kToonRingTint.r);
-    EXPECT_LT(ToonLuminance(kToonRingTint), 0.7f);
 }
 
 TEST(ToonCharacterMathTest, UnknownClassUsesTheClothTint)

@@ -24,7 +24,7 @@ struct ToonCharacterSettings {
     // Rim light, hair ring and glow.
     float rimStrength = 0.35f;    // 0..2
     float rimWidth = 0.60f;       // 0..1
-    float hairHighlight = 0.8f;   // 0..4, hair ring opacity (the shader clamps it to 1)
+    float hairHighlight = 0.8f;   // 0..1, hair ring band opacity
     float emissiveBoost = 3.0f;   // 0..16
     bool gemHeuristic = true;     // Bright cyan cloth glows like a gem.
     bool goldGlint = true;        // Gold trim gets a small specular glint.

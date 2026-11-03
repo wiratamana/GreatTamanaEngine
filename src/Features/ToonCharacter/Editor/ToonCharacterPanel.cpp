@@ -59,7 +59,7 @@ bool BuildToonCharacterPanel(
     ImGui::SeparatorText("Rim, hair and glow");
     changed |= ImGui::SliderFloat("Rim strength", &edit.rimStrength, 0.0f, 2.0f);
     changed |= ImGui::SliderFloat("Rim width", &edit.rimWidth, 0.0f, 1.0f);
-    changed |= ImGui::SliderFloat("Hair highlight", &edit.hairHighlight, 0.0f, 4.0f);
+    changed |= ImGui::SliderFloat("Hair highlight", &edit.hairHighlight, 0.0f, 1.0f);
     changed |= ImGui::SliderFloat("Emissive boost", &edit.emissiveBoost, 0.0f, 16.0f);
     changed |= ImGui::Checkbox("Gem heuristic", &edit.gemHeuristic);
     changed |= ImGui::Checkbox("Gold glint", &edit.goldGlint);

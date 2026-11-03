@@ -21,10 +21,6 @@ struct ToonRgb {
     float b = 1.0f;
 };
 
-// Hair ring base tone: the lit hair colour times this, blended over the hair; the sphere glint lifts it to white.
-// CPU reference of kToonRingTint in ToonCommon.glsl.
-inline constexpr ToonRgb kToonRingTint{ 0.45f, 0.58f, 0.85f };
-
 // Per-class multipliers on the lit color (linear). CPU reference of the tables in ToonCommon.glsl.
 struct ToonClassTint {
     ToonRgb shade;   // Tone below the band edge.

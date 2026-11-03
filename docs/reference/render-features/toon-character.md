@@ -37,7 +37,7 @@ Add `ToonShading { enabled = true }` to the root entity of the model.
 |---|---|---|---|
 | Surface | None (most PMX parts are double sided; the shader flips the normal on back faces) | Less, write on | Opaque |
 | Outline | Front | LessEqual, write on | Opaque |
-| Overlay | Back | LessEqual, write off | Alpha blend (`hairHighlight` is the opacity) |
+| Overlay | Back | LessEqual, write off | Alpha blend (`hairHighlight` is the opacity; scene alpha is kept) |
 
 ## Toon classes
 Each PMX material gets one class id when the mesh is built. The shader reads it from `MaterialParams`.
@@ -51,7 +51,7 @@ Code: `ClassifyToonMaterial` in `src/Game/Instantiation/ToonMaterialClass.cpp`.
 | 3 | `FaceLine` | Unlit. Albedo only |
 | 4 | `Eye` | Unlit. Albedo only |
 | 5 | `Hair` | Cool shade. Stronger rim (x1.5) |
-| 6 | `HairOverlay` | Skipped by Surface. Drawn by Overlay (alpha-blended bluish ring band, sphere-map glint) |
+| 6 | `HairOverlay` | Skipped by Surface. Drawn by Overlay (alpha-blended bluish-white band on the upper hair, masked by the camera-up normal, shadowed by the cascade shadow) |
 | 7 | `Gem` | Emissive (`emissiveBoost`) plus the sphere map |
 | 8 | `ClothBack` | Like cloth, no outline |
 
@@ -118,7 +118,7 @@ Route: `/feature_debug/{state,set,invoke}?name=ToonCharacter`. Panel: `ToonChara
 | `shadeBlend` | 1.0 | 0..1 | Strength of the coloured shade tint |
 | `rimStrength` | 0.35 | 0..2 | Rim light on the sun side |
 | `rimWidth` | 0.60 | 0..1 | Where the rim starts (fresnel) |
-| `hairHighlight` | 0.8 | 0..4 | Hair ring layer strength |
+| `hairHighlight` | 0.8 | 0..1 | Hair ring band opacity |
 | `emissiveBoost` | 3.0 | 0..16 | Gem glow multiplier. Bloom turns this into a halo |
 | `gemHeuristic` | true | bool | Bright cyan-blue cloth glows (x2) |
 | `goldGlint` | true | bool | Gold trim gets a narrow highlight |

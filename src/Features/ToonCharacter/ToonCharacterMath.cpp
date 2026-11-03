@@ -49,7 +49,7 @@ ToonCharacterSettings SanitizeToonCharacterSettings(const ToonCharacterSettings&
     s.shadeBlend = SanitizeFloat(in.shadeBlend, 0.0f, 1.0f, d.shadeBlend);
     s.rimStrength = SanitizeFloat(in.rimStrength, 0.0f, 2.0f, d.rimStrength);
     s.rimWidth = SanitizeFloat(in.rimWidth, 0.0f, 1.0f, d.rimWidth);
-    s.hairHighlight = SanitizeFloat(in.hairHighlight, 0.0f, 4.0f, d.hairHighlight);
+    s.hairHighlight = SanitizeFloat(in.hairHighlight, 0.0f, 1.0f, d.hairHighlight);
     s.emissiveBoost = SanitizeFloat(in.emissiveBoost, 0.0f, 16.0f, d.emissiveBoost);
     s.faceFlatten = SanitizeFloat(in.faceFlatten, 0.0f, 1.0f, d.faceFlatten);
     s.outlineWidthPx = SanitizeFloat(in.outlineWidthPx, 0.0f, 8.0f, d.outlineWidthPx);

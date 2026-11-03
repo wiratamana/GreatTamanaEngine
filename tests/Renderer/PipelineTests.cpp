@@ -203,6 +203,23 @@ TEST(ScenePipelineStateTest, FullscreenAdditiveBlendKeepsSourceAlphaFactor)
     EXPECT_EQ(ToVkBlendState(BlendMode::Additive).srcColorBlendFactor, VK_BLEND_FACTOR_SRC_ALPHA);
 }
 
+TEST(ScenePipelineStateTest, SceneBlendNeverRewritesDestinationAlphaForAlphaBlend)
+{
+    const VkPipelineColorBlendAttachmentState opaque = ToVkSceneBlendState(BlendMode::Opaque);
+    EXPECT_EQ(opaque.blendEnable, static_cast<VkBool32>(VK_FALSE));
+
+    const VkPipelineColorBlendAttachmentState alpha = ToVkSceneBlendState(BlendMode::AlphaBlend);
+    EXPECT_EQ(alpha.blendEnable, static_cast<VkBool32>(VK_TRUE));
+    EXPECT_EQ(alpha.srcColorBlendFactor, VK_BLEND_FACTOR_SRC_ALPHA);
+    EXPECT_EQ(alpha.dstColorBlendFactor, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
+    EXPECT_EQ(alpha.srcAlphaBlendFactor, VK_BLEND_FACTOR_ZERO);
+    EXPECT_EQ(alpha.dstAlphaBlendFactor, VK_BLEND_FACTOR_ONE);
+
+    // The fullscreen mapping is unchanged.
+    EXPECT_EQ(ToVkBlendState(BlendMode::AlphaBlend).srcAlphaBlendFactor, VK_BLEND_FACTOR_ONE);
+    EXPECT_EQ(ToVkBlendState(BlendMode::AlphaBlend).dstAlphaBlendFactor, VK_BLEND_FACTOR_ZERO);
+}
+
 TEST(PipelineTest, FixedStateFormBuildsWithFrontCullAdditiveLessEqual)
 {
     HeadlessRenderGraphFixture fixture;

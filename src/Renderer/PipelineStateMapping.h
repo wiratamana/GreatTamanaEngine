@@ -71,12 +71,15 @@ inline VkPipelineColorBlendAttachmentState ToVkBlendState(BlendMode mode) noexce
     return state;
 }
 
-// Scene pipeline blend: Additive is ONE + ONE on color and alpha; other modes match ToVkBlendState.
+// Scene pipeline blend: Additive is ONE + ONE; AlphaBlend keeps the destination alpha. Other modes match ToVkBlendState.
 inline VkPipelineColorBlendAttachmentState ToVkSceneBlendState(BlendMode mode) noexcept
 {
     VkPipelineColorBlendAttachmentState state = ToVkBlendState(mode);
     if (mode == BlendMode::Additive) {
         state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+    } else if (mode == BlendMode::AlphaBlend) {
+        state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
     }
     return state;
 }
