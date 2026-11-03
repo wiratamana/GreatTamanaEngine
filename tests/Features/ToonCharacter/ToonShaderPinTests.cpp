@@ -44,9 +44,6 @@ TEST(ToonShaderPinTest, SurfaceUsesTheSharedLightingAndTheSphereBinding)
     EXPECT_TRUE(Has(frag, "SunShadowAmount("));
     EXPECT_TRUE(Has(frag, "ShadeDirectionalLinear("));
     EXPECT_TRUE(Has(frag, "gl_FrontFacing"));
-
-    const std::string overlay = ReadToonShader("ToonOverlay.frag");
-    EXPECT_TRUE(Has(overlay, "layout(set = 0, binding = 5) uniform sampler2D uSphereTexture"));
 }
 
 TEST(ToonShaderPinTest, ClassIdsMatchTheEnumAndShadeFloorLiftsTowardWhite)
@@ -91,7 +88,9 @@ TEST(ToonShaderPinTest, HairRingIsAMaskedBandWithTheHighlightAsOpacity)
     EXPECT_TRUE(Has(overlay, "clamp(look.hairHighlight, 0.0, 1.0) * mask"));
     EXPECT_TRUE(Has(overlay, "if (alpha < 0.01) { discard; }"));
     EXPECT_TRUE(Has(overlay, "ShadeDirectionalLinear(vec3(1.0), normalize(SceneSunDirection()), true, inWorldPos)"));
-    EXPECT_FALSE(Has(overlay, "texture(uSphereTexture"));
+    EXPECT_TRUE(Has(overlay, "vec3 color = mix(texel.rgb, kToonRingBand, 0.8) * lit;"));
+    EXPECT_TRUE(Has(ReadToonShader("ToonCommon.glsl"), "const vec3 kToonRingBand = vec3(0.45, 0.65, 1.00);"));
+    EXPECT_FALSE(Has(overlay, "uSphereTexture"));
     EXPECT_FALSE(Has(overlay, "kToonRingTint"));
     EXPECT_TRUE(Has(ReadSrc("Features/ToonCharacter/ToonCharacterFeature.h"), "BlendMode::AlphaBlend"));
     EXPECT_FALSE(Has(ReadSrc("Features/ToonCharacter/ToonCharacterFeature.h"), "BlendMode::Additive"));

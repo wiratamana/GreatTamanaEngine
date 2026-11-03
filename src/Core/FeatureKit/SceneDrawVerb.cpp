@@ -295,16 +295,15 @@ bool SceneDrawChain::Record()
         // Claim only what this pass can draw; the rest stays on the main draw.
         const RenderSystem& renderSystem = core.GetGame().GetRenderSystem();
         const PipelineOverrideSet& overrides = detail::OverridesOf(*impl.shaders);
-        std::vector<Entity> drawable;
-        drawable.reserve(impl.only.entities.size());
+        std::uint32_t claimed = 0;
         for (const Entity entity : impl.only.entities) {
             const MeshRenderer* renderer = core.GetRegistry().TryGetComponent<MeshRenderer>(entity);
             if (renderer != nullptr && renderSystem.CanDrawWithOverrides(*renderer, overrides)) {
-                drawable.push_back(entity);
+                core.ClaimEntity(context.scope, entity);
+                ++claimed;
             }
         }
-        impl.claimedCount = static_cast<std::uint32_t>(drawable.size());
-        core.ClaimEntities(context.scope, drawable);
+        impl.claimedCount = claimed;
     }
     return declared;
 }

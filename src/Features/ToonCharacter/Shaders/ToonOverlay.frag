@@ -8,7 +8,6 @@
 #include "ToonCommon.glsl"
 
 layout(set = 0, binding = 0) uniform sampler2D uDiffuseTexture;
-layout(set = 0, binding = 5) uniform sampler2D uSphereTexture; // Not sampled; kept so the shared set layout stays valid.
 
 layout(location = 0) in vec3 inWorldNormal;
 layout(location = 1) in vec2 inUv;
@@ -37,6 +36,6 @@ void main()
 
     // Shadowed sun term: the band dims with the hair underneath.
     vec3 lit = ShadeDirectionalLinear(vec3(1.0), normalize(SceneSunDirection()), true, inWorldPos);
-    vec3 color = mix(texel.rgb, kToonRimTint, 0.5) * lit;
+    vec3 color = mix(texel.rgb, kToonRingBand, 0.8) * lit;
     outColor = vec4(min(color, vec3(kToonMaxRadiance)), alpha);
 }

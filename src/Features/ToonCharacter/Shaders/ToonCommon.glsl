@@ -17,7 +17,8 @@ const float kToonAlphaCutoff = 0.5;
 const float kToonMinShadeLuma = 0.35;   // A shaded pixel keeps at least this share of the lit luminance.
 const float kToonMaxRadiance = 8192.0;
 const vec3 kToonLuma = vec3(0.2126, 0.7152, 0.0722);
-const vec3 kToonRimTint = vec3(0.75, 0.90, 1.00);
+const vec3 kToonRimTint = vec3(0.75, 0.90, 1.00);   // Surface rim light.
+const vec3 kToonRingBand = vec3(0.45, 0.65, 1.00);  // Hair ring band, strongly blue so it reads on white hair.
 
 // Per class: shade multiplier.
 const vec3 kToonShadeTint[9] = vec3[9](

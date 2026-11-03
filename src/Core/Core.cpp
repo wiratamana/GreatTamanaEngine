@@ -433,6 +433,15 @@ void Core::ClaimEntities(rg::ViewScope scope, std::span<const Entity> entities)
     m_claimedEntities[rg::ViewScopeIndex(scope)].Insert(entities);
 }
 
+void Core::ClaimEntity(rg::ViewScope scope, Entity entity)
+{
+    assert(scope != rg::ViewScope::Shared && "ClaimEntity needs a per-view scope.");
+    if (scope == rg::ViewScope::Shared) {
+        return;
+    }
+    m_claimedEntities[rg::ViewScopeIndex(scope)].Insert(entity);
+}
+
 bool Core::SetSceneDrawCull(rg::ViewScope scope, const Mat4& viewProjection, float paddingFraction)
 {
     if (!SceneCullAllowed(ClusterClaimContext{ scope, m_captureArmedThisFrame })

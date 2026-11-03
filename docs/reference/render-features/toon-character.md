@@ -51,7 +51,7 @@ Code: `ClassifyToonMaterial` in `src/Game/Instantiation/ToonMaterialClass.cpp`.
 | 3 | `FaceLine` | Unlit. Albedo only |
 | 4 | `Eye` | Unlit. Albedo only |
 | 5 | `Hair` | Cool shade. Stronger rim (x1.5) |
-| 6 | `HairOverlay` | Skipped by Surface. Drawn by Overlay (alpha-blended bluish-white band on the upper hair, masked by the camera-up normal, shadowed by the cascade shadow) |
+| 6 | `HairOverlay` | Skipped by Surface. Drawn by Overlay (alpha-blended blue band `kToonRingBand` (0.45, 0.65, 1.00), mixed 0.8 into the hair texel, on the upper hair, masked by the camera-up normal, shadowed by the cascade shadow) |
 | 7 | `Gem` | Emissive (`emissiveBoost`) plus the sphere map |
 | 8 | `ClothBack` | Like cloth, no outline |
 

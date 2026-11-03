@@ -1,8 +1,7 @@
+// Helpers shared by the preset scene openers: non-throwing logging, entity naming, and scope guards.
 #pragma once
 
 #include "../ECS/Entity.h"
-
-// Helpers shared by the preset scene openers: non-throwing logging, entity naming, and scope guards.
 
 #include <string>
 #include <string_view>

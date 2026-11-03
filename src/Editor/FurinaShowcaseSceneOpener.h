@@ -1,3 +1,5 @@
+// Opens, and closes, the Furina showcase scene: the Furina model with the toon mark, one sun and one portrait
+// camera, with the render features set for a clean toon image.
 #pragma once
 
 #include "FurinaShowcaseLayout.h"
@@ -6,9 +8,6 @@
 #include "../Core/GraphicsHandles.h"
 #include "../Core/Plugins/RenderFeatureDebugEntry.h"
 #include "../ECS/Entity.h"
-
-// Opens, and closes, the Furina showcase scene: the Furina model with the toon mark, one sun and one portrait
-// camera, with the render features set for a clean toon image.
 
 #include <array>
 #include <cstdint>

@@ -219,6 +219,9 @@ public:
     // For kit verbs only, and only after every pass of the chain was declared (see ClusterClaim.h).
     void ClaimEntities(rg::ViewScope scope, std::span<const Entity> entities);
 
+    // Single-entity form of ClaimEntities.
+    void ClaimEntity(rg::ViewScope scope, Entity entity);
+
     // Asks the CPU scene draw of `scope` to skip entities whose padded bounds miss `viewProjection`. False when refused
     // (shared scope, captured primary frame, unusable matrix). The last request of a frame wins. Kit verbs only.
     bool SetSceneDrawCull(rg::ViewScope scope, const Mat4& viewProjection, float paddingFraction);
