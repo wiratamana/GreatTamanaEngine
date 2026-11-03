@@ -16,6 +16,7 @@ public:
     }
 
 protected:
+    void OnFrame(EditorFrame& frame) override;
     void OnGui(EditorFrame& frame) override;
 
 private:

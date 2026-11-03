@@ -3,6 +3,7 @@
 #include "../EditorContext.h"
 #include "../EditorFrame.h"
 #include "../ImGuiUniqueId.h"
+#include "ToonShadingInspectorLogic.h"
 #include "../../ECS/Components/Camera.h"
 #include "../../ECS/Components/DirectionalLight.h"
 #include "../../ECS/Components/DynamicChainRig.h"
@@ -539,6 +540,46 @@ void BuildModelPartInspector(Registry& registry, EditorContext& ctx, ModelRigCac
 }
 #endif
 
+// Enable button on a markable model root; otherwise the section with live feedback and Remove.
+void BuildToonShadingSection(Registry& registry, Entity entity, const ToonFeatureReport& report)
+{
+    ToonShading* toon = registry.TryGetComponent<ToonShading>(entity);
+    if (toon == nullptr) {
+        const ToonMarkVerdict verdict = EvaluateToonMark(registry, entity);
+        if (verdict == ToonMarkVerdict::CanMark) {
+            if (ImGui::Button("Enable Toon Shading")) {
+                EnableToonShading(registry, entity);
+            }
+        } else if (const char* hint = ToonMarkHint(verdict)) {
+            ImGui::TextDisabled("%s", hint);
+        }
+        return;
+    }
+    if (!ImGui::CollapsingHeader("Toon Shading", ImGuiTreeNodeFlags_DefaultOpen)) {
+        return;
+    }
+    ImGui::Checkbox("Enabled##ToonShading", &toon->enabled);
+
+    const ToonFeedback feedback = EvaluateToonFeedback(report, toon->enabled);
+    ImVec4 color(0.7f, 0.7f, 0.7f, 1.0f);
+    if (feedback.level == ToonFeedbackLevel::Ok) {
+        color = ImVec4(0.4f, 0.9f, 0.4f, 1.0f);
+    } else if (feedback.level == ToonFeedbackLevel::Warning) {
+        color = ImVec4(1.0f, 0.65f, 0.2f, 1.0f);
+    }
+    ImGui::PushStyleColor(ImGuiCol_Text, color);
+    ImGui::TextWrapped("%s", feedback.text);
+    ImGui::PopStyleColor();
+    if (report.published) {
+        ImGui::TextDisabled("Scene: %u toon parts found, %u drawn.", report.candidatePartCount, report.claimedEntityCount);
+    }
+
+    // Last: the component is gone after this call.
+    if (ImGui::Button("Remove##ToonShading")) {
+        RemoveToonShading(registry, entity);
+    }
+}
+
 #if GTE_ENABLE_PROJECT_PANEL
 void BuildEntityInspector(Registry& registry, EditorContext& ctx, BoneViewerWindow& boneViewer, PhysicsSystem& physicsSystem,
     MeshInstantiationSystem& meshInstantiationSystem)
@@ -643,12 +684,7 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx, PhysicsSystem&
         }
     }
 
-    if (ToonShading* toon = registry.TryGetComponent<ToonShading>(entity)) {
-        if (ImGui::CollapsingHeader("Toon Shading", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::Checkbox("Enabled", &toon->enabled);
-            ImGui::TextDisabled("Marks this entity and its children for the ToonCharacter feature.");
-        }
-    }
+    BuildToonShadingSection(registry, entity, ctx.toonFeature);
 
     // Shown only for a model root entity currently playing back a motion
     // (see Game::PlayAnimationOnEntity(), src/Game/Game.cpp) - a plain

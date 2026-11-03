@@ -5,6 +5,7 @@
 #include "HizDemoState.h"
 #include "InstanceGridTestSpawner.h"
 #include "Panels/HierarchyRows.h"
+#include "Panels/ToonShadingInspectorLogic.h"
 #include "RotationEulerEditCache.h"
 #include "RotationFieldProbe.h"
 #include "Selection.h"
@@ -144,6 +145,9 @@ struct EditorContext {
 
     // What that field drew last frame, for GET /inspector_state.
     RotationFieldProbe rotationProbe;
+
+    // Toon look state for the Inspector; filled each frame by the ToonCharacter window.
+    ToonFeatureReport toonFeature;
 };
 
 } // namespace gte

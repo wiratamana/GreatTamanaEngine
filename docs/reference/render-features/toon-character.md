@@ -12,7 +12,9 @@
 - Eyes stay open (no morph blending). The face has no shadow SDF.
 
 ## How to mark a character
-Add `ToonShading { enabled = true }` to the root entity of the model.
+In the Inspector, select the model root and click **Enable Toon Shading**. **Remove** deletes the component again. Or add `ToonShading { enabled = true }` in code.
+- The button shows only on a hierarchy root that has mesh parts inside, and only if no child part has its own mark. A child mark would override the root, so the Inspector refuses it. Select the root, not a part.
+- The section under the checkbox shows the real state from the feature: it warns when the feature is off (Render Features, or its own Enabled) or when no part was drawn. The counts are scene totals.
 - The feature walks each `MeshRenderer` up its parent chain (at most 64 steps). The nearest `ToonShading` decides. `enabled = false` turns it off for that subtree.
 - Only parts with a material texture count. A part with no texture stays on the main draw.
 - Scene with no `ToonShading` anywhere: one size check per frame, nothing else.

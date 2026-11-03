@@ -1,8 +1,5 @@
-// Vertex stage shared by the toon surface and overlay passes: world normal, uv, world position, head forward.
-// Include after DirectionalLighting.glsl, MaterialParams.glsl and ToonCommon.glsl.
-// TOON_SKIP_OVERLAY_CLASS: HairOverlay parts leave the clip volume (surface pass).
-// TOON_KEEP_ONLY_OVERLAY_CLASS: every other class leaves the clip volume (overlay pass).
-// TOON_DEPTH_NUDGE: NDC depth pulled toward the camera so a coplanar layer passes LESS_EQUAL.
+// Vertex stage of the toon surface and overlay passes. Include after DirectionalLighting, MaterialParams, ToonCommon.
+// Per-pass defines: *_OVERLAY_CLASS clips one class group; TOON_DEPTH_NUDGE pulls depth toward the camera.
 
 layout(push_constant) uniform PushConstants {
     mat4 model;

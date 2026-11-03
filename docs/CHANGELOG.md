@@ -48,6 +48,7 @@
 - **Preset `furina_showcase`.** `POST /open_preset_scene` builds the Furina model, one sun and a portrait camera fitted to the model height.
   `/close_preset_scene` restores the feature toggles and the ToneMapping values.
 - **`ToonShading` component.** Marks a model root. Saved with the scene.
+- **Inspector toggle.** The Inspector adds and removes `ToonShading` on a model root (button "Enable Toon Shading", "Remove") and shows the real ToonCharacter state.
 - **Toon material data.** `ClassifyToonMaterial` gives each PMX material a class (9 classes). `MaterialParams` carries class id, edge scale and draw-edge flag.
 - **Sixth material image role.** `MaterialImageRole::Sphere` (set 0, binding 5, sRGB, default black) carries the PMX sphere map. The material params block is
   now visible to the vertex stage, and the scene uniform block (binding 8) too. The scene block ends with `toonLook0..3` (512 bytes).

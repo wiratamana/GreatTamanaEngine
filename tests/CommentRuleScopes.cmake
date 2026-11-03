@@ -87,7 +87,8 @@ set(GTE_COMMENT_RULE_SRC
     Game/Lighting/ToonClass.h Game/Instantiation/ToonMaterialClass.h Game/Instantiation/ToonMaterialClass.cpp
     Editor/FurinaShowcaseLayout.h Editor/FurinaShowcaseLayout.cpp Editor/FurinaShowcaseSceneOpener.h
     Editor/FurinaShowcaseSceneOpener.cpp Editor/PresetFeatureSettings.h Editor/PresetFeatureSettings.cpp
-    Editor/PresetSceneSupport.h Editor/PresetSceneSupport.cpp ECS/Components/ToonShading.h)
+    Editor/PresetSceneSupport.h Editor/PresetSceneSupport.cpp ECS/Components/ToonShading.h
+    Editor/Panels/ToonShadingInspectorLogic.h Editor/Panels/ToonShadingInspectorLogic.cpp)
 
 set(GTE_COMMENT_RULE_TESTS
     Editor/SceneViewAxesTests.cpp Core/FeatureKit/ Core/GpuViewMetricsTests.cpp
@@ -141,4 +142,4 @@ set(GTE_COMMENT_RULE_TESTS
     Editor/ProfilerTableModelTests.cpp Editor/ProfilerGraphModelTests.cpp Editor/ProfilerPanelDataTests.cpp
     Features/Bloom/ Features/ToonCharacter/ Game/Instantiation/ToonMaterialClassTests.cpp
     Editor/FurinaShowcaseLayoutTests.cpp Editor/FurinaShowcaseSceneOpenerTests.cpp
-    ECS/Reflection/ToonShadingReflectionTests.cpp)
+    ECS/Reflection/ToonShadingReflectionTests.cpp Editor/ToonShadingInspectorLogicTests.cpp)
