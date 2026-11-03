@@ -1,9 +1,11 @@
 #pragma once
 
 #include "../../ECS/Entity.h"
+#include "../../Core/Plugins/RenderFeatureDebugEntry.h"
 #include "../../Features/ToonCharacter/ToonCharacterTypes.h"
 
 #include <cstdint>
+#include <span>
 
 namespace gte {
 
@@ -30,6 +32,10 @@ bool EnableToonShading(Registry& registry, Entity entity);
 
 // Removes the mark. False when the entity is dead or has none.
 bool RemoveToonShading(Registry& registry, Entity entity);
+
+// True when the ToonCharacter.Surface pass entry is on and runs in at least one view.
+// No such entry means false.
+bool ComputeToonGraphEnabled(std::span<const RenderFeatureDebugEntry> entries) noexcept;
 
 // What the ToonCharacter window publishes each frame. Counts are scene totals, not per entity.
 struct ToonFeatureReport {

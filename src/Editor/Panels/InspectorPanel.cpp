@@ -551,7 +551,9 @@ void BuildToonShadingSection(Registry& registry, Entity entity, const ToonFeatur
                 EnableToonShading(registry, entity);
             }
         } else if (const char* hint = ToonMarkHint(verdict)) {
-            ImGui::TextDisabled("%s", hint);
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+            ImGui::TextWrapped("%s", hint);
+            ImGui::PopStyleColor();
         }
         return;
     }
@@ -571,7 +573,9 @@ void BuildToonShadingSection(Registry& registry, Entity entity, const ToonFeatur
     ImGui::TextWrapped("%s", feedback.text);
     ImGui::PopStyleColor();
     if (report.published) {
-        ImGui::TextDisabled("Scene: %u toon parts found, %u drawn.", report.candidatePartCount, report.claimedEntityCount);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextWrapped("Scene: %u toon parts found, %u drawn.", report.candidatePartCount, report.claimedEntityCount);
+        ImGui::PopStyleColor();
     }
 
     // Last: the component is gone after this call.

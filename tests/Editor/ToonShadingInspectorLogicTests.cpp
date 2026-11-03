@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <vector>
 
 namespace gte {
 namespace {
@@ -208,6 +209,65 @@ TEST(ToonFeedbackTest, ADisabledComponentIsReportedBeforeTheFeatureState)
     report.graphEnabled = false;
     const ToonFeedback feedback = EvaluateToonFeedback(report, false);
     EXPECT_EQ(feedback.level, ToonFeedbackLevel::Info);
+}
+
+TEST(ToonFeedbackTest, SwitchedOffWarningNamesTheSurfacePass)
+{
+    ToonFeatureReport report = DrawingReport();
+    report.graphEnabled = false;
+    EXPECT_NE(std::string(EvaluateToonFeedback(report, true).text).find("ToonCharacter.Surface"), std::string::npos);
+}
+
+// Entries named like the live GET /render_graph output.
+RenderFeatureDebugEntry Entry(const char* name, bool enabled = true, bool primary = true, bool secondary = true)
+{
+    RenderFeatureDebugEntry entry;
+    entry.name = name;
+    entry.enabled = enabled;
+    entry.enabledPrimary = primary;
+    entry.enabledSecondary = secondary;
+    return entry;
+}
+
+TEST(ToonGraphEnabledTest, SurfaceEnabledInBothViewsIsOn)
+{
+    const std::vector<RenderFeatureDebugEntry> entries = { Entry("ToonCharacter.Look"), Entry("ToonCharacter.Surface"),
+        Entry("ToonCharacter.Outline"), Entry("ToonCharacter.Overlay") };
+    EXPECT_TRUE(ComputeToonGraphEnabled(entries));
+}
+
+TEST(ToonGraphEnabledTest, SurfaceDisabledIsOff)
+{
+    const std::vector<RenderFeatureDebugEntry> entries = { Entry("ToonCharacter.Look"),
+        Entry("ToonCharacter.Surface", false) };
+    EXPECT_FALSE(ComputeToonGraphEnabled(entries));
+}
+
+TEST(ToonGraphEnabledTest, OneViewFlagIsEnough)
+{
+    EXPECT_TRUE(ComputeToonGraphEnabled(std::vector{ Entry("ToonCharacter.Surface", true, true, false) }));
+    EXPECT_TRUE(ComputeToonGraphEnabled(std::vector{ Entry("ToonCharacter.Surface", true, false, true) }));
+    EXPECT_FALSE(ComputeToonGraphEnabled(std::vector{ Entry("ToonCharacter.Surface", true, false, false) }));
+}
+
+TEST(ToonGraphEnabledTest, OtherPassesAloneAreNotEnough)
+{
+    const std::vector<RenderFeatureDebugEntry> entries = { Entry("ToonCharacter.Look"), Entry("ToonCharacter.Outline"),
+        Entry("ToonCharacter.Overlay") };
+    EXPECT_FALSE(ComputeToonGraphEnabled(entries));
+}
+
+TEST(ToonGraphEnabledTest, NoToonEntryIsOff)
+{
+    EXPECT_FALSE(ComputeToonGraphEnabled(std::vector<RenderFeatureDebugEntry>{}));
+    EXPECT_FALSE(ComputeToonGraphEnabled(std::vector{ Entry("Atmosphere.Sky"), Entry("Bloom") }));
+}
+
+TEST(ToonGraphEnabledTest, BareFeatureNameIsNeitherRequiredNorEnough)
+{
+    EXPECT_FALSE(ComputeToonGraphEnabled(std::vector{ Entry("ToonCharacter") }));
+    EXPECT_TRUE(ComputeToonGraphEnabled(std::vector{ Entry("ToonCharacter", false), Entry("ToonCharacter.Surface") }));
+    EXPECT_FALSE(ComputeToonGraphEnabled(std::vector{ Entry("ToonCharacter.SurfaceX") }));
 }
 
 } // namespace

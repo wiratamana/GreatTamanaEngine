@@ -7,6 +7,7 @@
 #include "../../ECS/TransformHierarchy.h"
 
 #include <cstddef>
+#include <string_view>
 
 namespace gte {
 
@@ -86,6 +87,19 @@ bool RemoveToonShading(Registry& registry, Entity entity)
     return registry.IsAlive(entity) && registry.RemoveComponent<ToonShading>(entity);
 }
 
+bool ComputeToonGraphEnabled(std::span<const RenderFeatureDebugEntry> entries) noexcept
+{
+    constexpr std::string_view kBase = kToonCharacterFeatureName;
+    constexpr std::string_view kSurfaceSuffix = ".Surface";
+    for (const RenderFeatureDebugEntry& entry : entries) {
+        const std::string_view name = entry.name;
+        if (name.starts_with(kBase) && name.substr(kBase.size()) == kSurfaceSuffix) {
+            return entry.enabled && (entry.enabledPrimary || entry.enabledSecondary);
+        }
+    }
+    return false;
+}
+
 ToonFeedback EvaluateToonFeedback(const ToonFeatureReport& report, bool componentEnabled) noexcept
 {
     using Level = ToonFeedbackLevel;
@@ -96,12 +110,12 @@ ToonFeedback EvaluateToonFeedback(const ToonFeatureReport& report, bool componen
         return { Level::Warning, "The ToonCharacter feature is not loaded. No toon look." };
     }
     if (!report.graphEnabled) {
-        return { Level::Warning, "The ToonCharacter feature is switched off in Render Features. No toon look." };
+        return { Level::Warning, "The ToonCharacter.Surface pass is switched off in Render Features. No toon look." };
     }
     switch (report.status) {
     case ToonCharacterFrameStatus::Ok:
         return report.claimedEntityCount > 0
-            ? ToonFeedback{ Level::Ok, "Toon look is drawn." }
+            ? ToonFeedback{ Level::Ok, "ToonCharacter is drawing parts in this scene." }
             : ToonFeedback{ Level::Warning, "The ToonCharacter pass drew no parts." };
     case ToonCharacterFrameStatus::FeatureDisabled:
         return { Level::Warning, "ToonCharacter is disabled in its own window (Enabled). No toon look." };
