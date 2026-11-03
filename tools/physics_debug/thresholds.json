@@ -86,10 +86,10 @@
     { "id": "D4", "scenario": "S1", "field": "physics_ms.median", "op": "<=", "value": 1.15, "baseline": "S1_default", "repeat": 3, "note": "median of the medians of 3 runs" },
     { "id": "D4", "scenario": "S1", "field": "physics_ms.median", "op": "<=", "value": 2.5, "baseline": "S1_legacy", "repeat": 3, "note": "median of the medians of 3 runs" },
 
-    { "id": "D5", "scenario": "S1", "check": "identity", "baseline": "S1_legacy", "note": "run with -Preset legacy" },
-    { "id": "D5", "scenario": "S2", "check": "identity", "baseline": "S2_legacy", "note": "run with -Preset legacy" },
-    { "id": "D5", "scenario": "S3", "check": "identity", "baseline": "S3_legacy", "note": "run with -Preset legacy" },
-    { "id": "D5", "scenario": "S4", "check": "identity", "baseline": "S4_legacy", "note": "run with -Preset legacy" },
+    { "id": "D5", "scenario": "S1", "check": "identity", "baseline": "S1_legacy", "preset": "legacy", "note": "run with -Preset legacy" },
+    { "id": "D5", "scenario": "S2", "check": "identity", "baseline": "S2_legacy", "preset": "legacy", "note": "run with -Preset legacy" },
+    { "id": "D5", "scenario": "S3", "check": "identity", "baseline": "S3_legacy", "preset": "legacy", "note": "run with -Preset legacy" },
+    { "id": "D5", "scenario": "S4", "check": "identity", "baseline": "S4_legacy", "preset": "legacy", "note": "run with -Preset legacy" },
 
     { "id": "D6", "scenario": "S9", "check": "identity", "baseline": "S1_default", "note": "S1 with bend_joint_floor_degrees = 0" }
   ]

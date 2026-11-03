@@ -1,6 +1,6 @@
 # Glossary
 > One line per term used in the docs and the code. For anyone who meets a new word and wants the short answer.
-> Verified against code: 2026-11-02
+> Verified against code: 2026-11-03
 
 ## TL;DR
 - Terms are in A to Z order. The last column links to the doc that owns the term.

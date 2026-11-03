@@ -162,6 +162,7 @@ $scenarioDefs = @{
 }
 $repeats = @{ 'S1' = 1; 'S2' = 1; 'S3' = 1; 'S4' = 1 }
 foreach ($g in $gates) {
+    if ((Has-Prop $g 'preset') -and $g.preset -ne $Preset) { continue }
     $ids = @()
     if (Has-Prop $g 'scenarios') { $ids += @($g.scenarios) }
     if (Has-Prop $g 'scenario') { $ids += $g.scenario }
@@ -253,6 +254,7 @@ try {
     Write-Host ''
     Write-Host ('{0,-3} {1,-8} {2,-26} {3,12} {4,-10} {5,14} {6}' -f 'id', 'scenario', 'group', 'measured', 'op', 'limit', 'result')
     foreach ($gate in $gates) {
+        if ((Has-Prop $gate 'preset') -and $gate.preset -ne $Preset) { continue }
         if (Has-Prop $gate 'check') {
             if ($gate.check -eq 'determinism') {
                 $id = [string]$gate.scenario

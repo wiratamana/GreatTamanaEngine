@@ -100,6 +100,7 @@ C9 (joint rows), C11, D2 (covered by E4), D7 (same check as E9), D8, D9 and the 
 | `repeat` | Number of runs of the scenario. |
 | `check` | `determinism` (E9, D7) or `identity` (D5, D6). |
 | `except` | With `groups: ["*"]`: group keys to leave out (used by C6). |
+| `preset` | Optional. The gate is skipped (not printed, not counted) unless `-Preset` has this value (D5 uses `legacy`). |
 
 Group names are read from `thresholds.json` as UTF-8. The two hair groups are the PMX group keys `左F` and `右F` (the character for left and for right, then `F`). The script file itself is ASCII only. Keep `thresholds.json` saved as UTF-8 when you edit it.
 

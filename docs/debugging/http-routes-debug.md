@@ -1,6 +1,6 @@
 # HTTP routes: debug tools
 > Route reference for profiler, fault injection, feature debug, frame debugger, render graph control, project assembly and physics debug. For anyone who calls the editor's HTTP server.
-> Verified against code: 2026-11-02
+> Verified against code: 2026-11-03
 
 ## TL;DR
 - Server: `127.0.0.1:8080`, editor only. All JSON examples below are built from code, not from a live run.
