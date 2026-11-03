@@ -3149,6 +3149,7 @@ std::string BuildPhysicsDebugJointsResponseJson(const PhysicsJointsReport& repor
         row["group_bit"] = r.groupBit;
         row["collision_mask"] = PdMaskHex(r.collisionMask);
         row["bend_limit_deg"] = r.bendLimitDeg;
+        row["own_limit_with_floor_deg"] = r.ownLimitWithFloorDeg;
         row["cumulative_bend_limit_deg"] = r.cumulativeBendLimitDeg;
         row["effective_bend_limit_deg"] = r.effectiveBendLimitDeg;
         row["pmx_joint"] = r.pmxJointName;

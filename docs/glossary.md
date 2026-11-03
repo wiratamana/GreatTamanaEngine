@@ -1,6 +1,6 @@
 # Glossary
 > One line per term used in the docs and the code. For anyone who meets a new word and wants the short answer.
-> Verified against code: 2026-11-02
+> Verified against code: 2026-11-03
 
 ## TL;DR
 - Terms are in A to Z order. The last column links to the doc that owns the term.
@@ -10,7 +10,8 @@
 ## Terms
 | Term | Meaning | Owner doc |
 |---|---|---|
-| Bend limit | The largest angle a chain joint may bend away from the animated direction. It comes from the PMX joint rotation limits and adds up from the anchor down. | [Animation and physics](architecture/animation-physics.md) |
+| Bend floor | The setting `bend_joint_floor_degrees` (default 3). A minimum own bend limit for every chain joint that is not a root child. Strands with PMX limit 0 get a small cone and can sway. Root children are never floored. | [Physics debug](debugging/physics-debug.md) |
+| Bend limit | The largest angle a chain joint may bend away from the animated direction. It comes from the PMX joint rotation limits (raised to the bend floor for non-root joints) and adds up from the anchor down. | [Animation and physics](architecture/animation-physics.md) |
 | Blackboard | Per-frame key and value store. Passes publish data to it, later passes read it. Cleared every frame. | [Render graph](architecture/render-graph.md) |
 | Bridge | A one-slot mailbox between an HTTP thread and the main thread. A second request gets `503`. | [HTTP server](architecture/http-server.md) |
 | Browser guard | Check on a few POST routes. It answers `403` to requests that look like they come from a web page. | [HTTP server](architecture/http-server.md) |
@@ -63,7 +64,7 @@
 | Verdict | Profiler summary of what limits the frame: `cpu_limited`, `gpu_limited`, `present_limited`, `stalled`, `unreliable`. | [Profiling](debugging/profiling.md) |
 | Verlet chain | A bone chain moved by Verlet integration. Used for hair and skirts. Not a rigid-body engine. | [Animation and physics](architecture/animation-physics.md) |
 | View background | A sky or backdrop drawn by a fullscreen pass after the opaque scene. The Frame Debugger can replay it. | [Feature kit](reference/feature-kit.md) |
-| Weld | A chain joint with a bend limit of 0 on the anchor. It stays exactly on the animated pose. `/physics_debug/run` reports them as `welded_root_children`. | [Physics debug](debugging/physics-debug.md) |
+| Weld | A root child (a chain joint whose parent is the anchor) with an effective bend limit of 1 degree or less, usually an own limit of 0. It stays exactly on the animated pose. The bend floor never changes it. `/physics_debug/run` reports them as `welded_root_children`. | [Physics debug](debugging/physics-debug.md) |
 
 ## Related
 - [Documentation index](README.md) · [Troubleshooting](troubleshooting.md)

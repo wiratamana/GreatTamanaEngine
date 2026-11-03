@@ -1,6 +1,6 @@
 # Animation and physics
 > How a skinned MMD model gets its pose each frame: motion sampling, IK, Verlet hair physics, CPU or GPU skinning. For anyone touching pose, skinning or chain physics.
-> Verified against code: 2026-11-02
+> Verified against code: 2026-11-03
 
 ## TL;DR
 - Pose evaluation is pure CPU math in `src/Animation/`. It has no ECS, GPU or file code.
@@ -69,7 +69,8 @@ A chain is a tree of simulated bones hanging from a pinned anchor bone.
 | Diagnostics | Orphan bodies, cross-chain joints, duplicate bone assignments and joints without a PMX bend limit are reported, not silently lost. |
 | Anchor | The root bone is never written by physics. It always comes from the animated pose. |
 | Solver | `StepDynamicChain`: seed, Verlet integration with step-length damping, rods and extra constraints, goal pull, bend cone, then collision and bend cone alternating (at most 4 rounds, cone last) with the bind-pose fit, divergence guard. |
-| Bend limit | Each joint keeps its segment inside a cone around the animated direction. The half angle is the sum of the PMX joint limits from the anchor down. A limit of 0 on a root child is an exact weld. The cone pass rebuilds the chain parent first: each joint keeps its direction (clamped into the cone) at exactly its rest length. A welded joint skips collision. |
+| Bend limit | Each joint keeps its segment inside a cone around the animated direction. The half angle is the sum of the own limits from the anchor down (`ComputeCumulativeBendLimits`). A limit of 0 on a root child is an exact weld. The cone pass rebuilds the chain parent first: each joint keeps its direction (clamped into the cone) at exactly its rest length. A welded joint skips collision. |
+| Bend floor | PMX "limit 0" strands are an exact weld here, while Bullet solves such joints softly and they still sway. The floor is the engine's replacement: every joint that is not a root child uses `max(own limit, floor)` in the sum. Root children keep their own limit, so the top ring and the first joint of each strand stay on the body. Own limits above the floor do not change. Example: own limits 0, floor 3 degrees: cumulative 0, 3, 6, 9, 12 degrees, so the tip moves most. Floor 0 gives the old result. |
 | Divergence guard | A particle that is not finite, or farther from its animated spot than 10 times the longest root path (at least 100 units), reseeds the chain. It counts in `nan_count` and `reseed_count`. |
 | Colliders | Static PMX bodies become sphere, box or capsule colliders (`ModelColliderDetection`). All chains of a model share them. A joint inside a collider in the bind pose ignores that collider. A joint near one keeps half of its largest free radius, so resting contact is not pushed again every step (`FitJointCollisionToBindPose`). |
 | Wind | One world wind (`WindSettings`): direction, base strength, gust strength and frequency. Default is zero. |
@@ -87,6 +88,7 @@ Defaults:
 | Damping from PMX | `1 - exp(-d * rate / 60)`, rate 1.0 per second | `DynamicChainDetectionDefaults::pmxDampingRatePerSecond` |
 | Constraint iterations | 4 | `DynamicChainDefinition` |
 | Collision | on | `DynamicChainDefinition::collisionEnabled` |
+| Bend joint floor | 3 degrees (0..45) | `GlobalPhysicsSettings::bendJointFloorDegrees` |
 
 - The solver converts the step fractions to the real step length with `ScaleStepFraction`. Changing the step rate does not change the look.
 - Stiffness is low on purpose. An idle T-pose model sags where you can see it.
@@ -143,7 +145,9 @@ Defaults:
 - A hub with several joint children keeps the rotation of the last child only.
 - `DynamicAndBoneMerge` bodies get a translation written. PMX says they keep the bone position.
 - PMX spring factors are not read.
-- Chains made of fully locked PMX joints (limit 0) follow the body exactly, so hair and long strands look rigid. Knob: `bend_limit_min_degrees`.
+- The bend cone is a hard limit, not a soft constraint. The floor gives limit-0 strands a small cone, not the softness of Bullet. How much Bullet sways them is not measured.
+- The cone pass rebuilds each child from its parent. This removes part of the inertia (translation lag). Swing comes mainly from the animation rotating the strands.
+- The look of a cone-limited chain depends on the fixed step rate (default 120 Hz).
 - HTTP routes play a clip and edit physics (`/physics_debug/*`). There is still no route that sets the skinning mode.
 
 ## Related

@@ -20,6 +20,7 @@ void ConfigureFixedSixtyHz(PhysicsSystem& physics, bool interpolate)
     settings.fixedTimestepSeconds = 1.0f / 60.0f;
     settings.maxStepsPerFrame = 10;
     settings.bendLimitsEnabled = true;
+    settings.bendJointFloorDegrees = 0.0f; // these tests expect an exact weld.
     settings.interpolateOutput = interpolate;
 }
 

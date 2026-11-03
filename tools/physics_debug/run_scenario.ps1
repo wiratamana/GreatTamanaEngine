@@ -109,6 +109,25 @@ function Get-BaselineJson([string]$Stem) {
     return $obj
 }
 
+# Drops physics_ms and every bend_joint_floor_degrees key, recursively.
+function Remove-Volatile($Node) {
+    if ($null -eq $Node) { return }
+    if ($Node -is [System.Array]) { foreach ($e in $Node) { Remove-Volatile $e }; return }
+    if ($Node -isnot [System.Management.Automation.PSCustomObject]) { return }
+    foreach ($name in @('physics_ms', 'bend_joint_floor_degrees')) {
+        if (Has-Prop $Node $name) { $Node.PSObject.Properties.Remove($name) }
+    }
+    foreach ($p in @($Node.PSObject.Properties)) { Remove-Volatile $p.Value }
+}
+
+# True when both replies are equal except physics_ms and the bend floor key.
+function Test-JsonIdentical($A, $B) {
+    if ($null -eq $A -or $null -eq $B) { return $false }
+    Remove-Volatile $A
+    Remove-Volatile $B
+    return ((ConvertTo-Json $A -Depth 30 -Compress) -ceq (ConvertTo-Json $B -Depth 30 -Compress))
+}
+
 function Format-Num($Value) {
     if ($null -eq $Value) { return 'n/a' }
     return ([double]$Value).ToString('G6', $Inv)
@@ -138,9 +157,12 @@ $scenarioDefs = @{
     'S5' = @{ Frames = 204; Hz = 60; Warmup = 0; Settings = $null }
     'S6' = @{ Frames = 204; Hz = 60; Warmup = 0; Settings = @{ collision_enabled = $false } }
     'S7' = @{ Frames = 204; Hz = 60; Warmup = 0; Settings = @{ collision_fit_enabled = $false } }
+    'S8' = @{ Frames = 68; Hz = 20; Warmup = 0; Settings = $null }
+    'S9' = @{ Frames = 204; Hz = 60; Warmup = 0; Settings = @{ bend_joint_floor_degrees = 0 } }
 }
 $repeats = @{ 'S1' = 1; 'S2' = 1; 'S3' = 1; 'S4' = 1 }
 foreach ($g in $gates) {
+    if ((Has-Prop $g 'preset') -and $g.preset -ne $Preset) { continue }
     $ids = @()
     if (Has-Prop $g 'scenarios') { $ids += @($g.scenarios) }
     if (Has-Prop $g 'scenario') { $ids += $g.scenario }
@@ -224,7 +246,7 @@ try {
     $play = Invoke-Api -Method 'POST' -Path '/physics_debug/play' -Body $playBody
     if ($play.Status -ne 200) { throw ('physics_debug/play failed: ' + $play.Text) }
 
-    foreach ($id in @('S1', 'S2', 'S3', 'S5', 'S6', 'S7')) {
+    foreach ($id in @('S1', 'S2', 'S3', 'S5', 'S6', 'S7', 'S8', 'S9')) {
         if ($repeats.ContainsKey($id)) { Invoke-Scenario $id }
     }
 
@@ -232,19 +254,25 @@ try {
     Write-Host ''
     Write-Host ('{0,-3} {1,-8} {2,-26} {3,12} {4,-10} {5,14} {6}' -f 'id', 'scenario', 'group', 'measured', 'op', 'limit', 'result')
     foreach ($gate in $gates) {
+        if ((Has-Prop $gate 'preset') -and $gate.preset -ne $Preset) { continue }
         if (Has-Prop $gate 'check') {
             if ($gate.check -eq 'determinism') {
                 $id = [string]$gate.scenario
                 $same = $false
                 if ($rawFirst.ContainsKey($id) -and $rawSecond.ContainsKey($id)) {
-                    $a = ConvertTo-Obj $rawFirst[$id]
-                    $b = ConvertTo-Obj $rawSecond[$id]
-                    if ($null -ne $a -and $null -ne $b) {
-                        foreach ($o in @($a, $b)) { if (Has-Prop $o 'physics_ms') { $o.PSObject.Properties.Remove('physics_ms') } }
-                        $same = ((ConvertTo-Json $a -Depth 30 -Compress) -ceq (ConvertTo-Json $b -Depth 30 -Compress))
-                    }
+                    $same = Test-JsonIdentical (ConvertTo-Obj $rawFirst[$id]) (ConvertTo-Obj $rawSecond[$id])
                 }
                 Add-Row $gate.id $id '-' $null 'identical' 'run1==run2' $same
+            } elseif ($gate.check -eq 'identity') {
+                $id = [string]$gate.scenario
+                $same = $false
+                if ($rawFirst.ContainsKey($id) -and $Baseline -ne '') {
+                    $file = Join-Path $Baseline ([string]$gate.baseline + '.json')
+                    if (Test-Path $file) {
+                        $same = Test-JsonIdentical (ConvertTo-Obj $rawFirst[$id]) (ConvertTo-Obj ([System.IO.File]::ReadAllText($file, $Utf8)))
+                    }
+                }
+                Add-Row $gate.id $id '-' $null 'identical' ([string]$gate.baseline) $same
             }
             continue
         }
@@ -271,6 +299,10 @@ try {
             $groupList = @($groupList | Sort-Object)
         } elseif (Has-Prop $gate 'aggregate') { $groupList = @([string]$gate.aggregate) }
         elseif (Has-Prop $gate 'field') { $groupList = @([string]$gate.field) }
+        if ((Has-Prop $gate 'except') -and (Has-Prop $gate 'groups')) {
+            $except = @($gate.except | ForEach-Object { [string]$_ })
+            $groupList = @($groupList | Where-Object { $except -cnotcontains $_ })
+        }
 
         foreach ($group in $groupList) {
             $values = @()

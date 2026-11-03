@@ -1,6 +1,6 @@
 # Physics debug
 > Measure, change and look at the dynamic bone chains (skirt, hair, clothes) of a model over HTTP. For AI agents and developers who tune or debug chain physics.
-> Verified against code: 2026-11-02
+> Verified against code: 2026-11-03
 
 ## TL;DR
 - Routes live under `/physics_debug/*`. They use one bridge (`PhysicsDebugCommandBridge`). A busy bridge gives `503`.
@@ -115,12 +115,12 @@ Same body as `run` without `trace` and `snapshots`, from the recorded live frame
 ```json
 {"success":true,"total":260,"first":0,"rows":[{"i":0,"chain":0,"bone":"HB1_0_1","bone_index":120,"group":"HB1","parent_joint":-1,"parent_bone":"...",
  "rest_length":0.37,"rigid_body":"...","mass":40,"damping":0.0165,"pmx_linear_damping":1,"stiffness":0.02,"collision_radius":0.2,
- "collision_fit_radius":0.2,"ignored_colliders":[],"group_bit":1,"collision_mask":"0xffbf","bend_limit_deg":0,
+ "collision_fit_radius":0.2,"ignored_colliders":[],"group_bit":1,"collision_mask":"0xffbf","bend_limit_deg":0,"own_limit_with_floor_deg":0,
  "cumulative_bend_limit_deg":0,"effective_bend_limit_deg":0,"pmx_joint":"...","pmx_rot_lower_deg":[0,0,0],"pmx_rot_upper_deg":[0,0,0],
  "pmx_joint_found":true,"live":{"valid":true,"animated":[0,0,0],"display":[0,0,0],"particle":[0,0,0],"fk":[0,0,0],
  "dist_from_animated":0,"seg_dir_err_deg":0}}]}
 ```
-`bend_limit_deg` 180 means free.
+`bend_limit_deg` is the raw PMX own limit (180 means free). `own_limit_with_floor_deg` is the own limit after the floor (root children: unchanged). `cumulative_bend_limit_deg` and `effective_bend_limit_deg` include the floor.
 
 ### `GET /physics_debug/colliders?entity=N`
 ```json
@@ -192,6 +192,7 @@ One table, read by the solver every call. A change shows on the next frame. `def
 | `bend_limits_enabled` | bool | | true | false |
 | `bend_limit_scale` | float | 0..20 | 1 | 1 |
 | `bend_limit_min_degrees` | float | 0..180 | 0 | 0 |
+| `bend_joint_floor_degrees` | float | 0..45 | 3 | 0 |
 | `interpolate_output` | bool | | true | false |
 | `rig_enabled` | bool | needs `entity=N` | true | per entity, not in presets |
 | `rig_frozen` | bool | needs `entity=N` | false | per entity, not in presets |
@@ -199,6 +200,8 @@ One table, read by the solver every call. A change shows on the next frame. `def
 - Bool: exactly `true` or `false` (also `1` and `0`). Numbers must be finite, whole text, no leading `+`. Enum: exact case.
 - `collision_enabled` is ANDed with the `collisionEnabled` flag of each chain.
 - `effective bend limit = clamp(cumulative * bend_limit_scale + radians(bend_limit_min_degrees), 0, pi)`.
+- `cumulative` is the sum of the own limits from the root child down, capped at pi. Root children keep their own limit. Every other joint uses `max(own, bend_joint_floor_degrees)`. A free joint (180) stays free.
+- Example: a root child plus 4 joints, all own limits 0, floor 3: cumulative limits are 0, 3, 6, 9, 12 degrees. Floor 0 gives the old result exactly.
 
 ## Metrics in plain English
 Samples are taken after the physics update wrote the pose. Units are model units (PMX: about 8 cm).
@@ -248,6 +251,7 @@ Symptom to cause:
 |---|---|
 | `seg_dir_err_deg` p95 far above the cumulative limit, `limit_violation_deg` p95 > 3 | Bend limits off or not applied. Check `settings.bend_limits_enabled` and `joints[].effective_bend_limit_deg`. |
 | Root children `dist_from_animated` mean > 0.05 (limit 0 joints) | Weld not working. `effective_bend_limit_deg` of the root children must be 0. |
+| Strand welded / frozen although the PMX has joints | `bend_joint_floor_degrees` is 0, or the joint is the strand's root child (never floored). Look at `joints[].own_limit_with_floor_deg` and `effective_bend_limit_deg`. |
 | `accel_local` at 144 fps much larger than at 60 fps | Interpolation off or broken. Check `settings.interpolate_output`. |
 | `bind_pose_pushed_joints` > 0 or high `pushed_particles_per_frame` | Collision fit. `colliders.bind_pose_penetrations` names the pairs. |
 | `writeback_err` high on one group | Hub with several children or collision pushes (known limit). Look at that group in `joints`. |
@@ -284,7 +288,10 @@ Each run starts from a fresh physics state and restores everything it touched. U
 - `/physics_debug/image`, `/physics_debug/joints` and `/physics_debug/colliders` read the current frame through a zero-time probe step. The probe does not advance the animation or the simulation. The Scene and Game views do not need to be visible.
 - The live recorder is zero cost when off: one bool test per frame, no allocation, no extra matrix work.
 - Collision is a point plus a radius per joint. Cloth panels between joints do not collide.
-- Chains made of fully locked PMX joints (limit 0) follow the body exactly and look rigid. That is what the model data says. Knob: `bend_limit_min_degrees`.
+- PMX joints with every limit 0 are an exact weld here (the strand copies the animated pose). Non-root joints get a minimum own limit, `bend_joint_floor_degrees`, so the strand can sway. Knobs: `bend_joint_floor_degrees` (main), `bend_limit_scale`.
+- The floor never touches root children. Root children stay welded on purpose: the skirt top ring and the first joint of each strand stay on the body.
+- The floor does not change joints whose own limit is already larger (Q hem, HB1 rows, hat). Use `bend_limit_scale` to move those.
+- `bend_limit_min_degrees` adds a constant to every effective limit, root children included. It unwelds the skirt top. Avoid it.
 - After `504` the change may still apply. Read `state` before you retry.
 
 ## Related

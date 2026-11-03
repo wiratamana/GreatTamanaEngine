@@ -40,8 +40,10 @@ Needs `curl.exe` (ships with Windows 10 and later) and Windows PowerShell 5.1 or
 | S5 | S1 with the `legacy` preset. |
 | S6 | S1 with `collision_enabled=false`. |
 | S7 | S1 with `collision_fit_enabled=false`. |
+| S8 | Stress. Dance, 68 frames at 20 Hz (the clip moves 3 times faster per frame), 0 warmup. |
+| S9 | S1 with `bend_joint_floor_degrees=0` (D6). |
 
-S5, S6, S7 run only when a gate names them. The pictures are live frames of the editor (clip playing) taken right after the run. The exact frames of a run are in `snapshots` when you ask for `snapshot_frames`.
+S5, S6, S7, S8, S9 run only when a gate names them. The pictures are live frames of the editor (clip playing) taken right after the run. The exact frames of a run are in `snapshots` when you ask for `snapshot_frames`.
 
 ## Gates
 Gates are in `thresholds.json`. A gate whose JSON field does not exist counts as FAIL. It is never skipped.
@@ -56,8 +58,31 @@ Gates are in `thresholds.json`. A gate whose JSON field does not exist counts as
 | E6 | Stability. `nan_count` and `reseed_count` are 0 in S1 and S4. `abs_stretch` p99 per group <= max(1.1 x baseline p99, 0.10). S4 `dist_from_animated` max <= 6.0. |
 | E7 | Performance. S1 `physics_ms.median` <= 2.5 x baseline. The script uses the median of the medians of 3 runs. Run the editor with `--no-vsync`. |
 | E9 | Determinism. Two identical S1 runs are equal except `physics_ms`. |
+| C1 | Strands move. HB2, HB3, HB4, `左F`, `右F`: `dist_from_animated` mean in 0.15 .. 1.00. |
+| C2 | Strand tails move. Same groups: `dist_from_animated` p95 >= 0.40 and max <= 7.0. |
+| C3 | Strands bend. Same groups: `seg_dir_err_deg` p50 >= 2.0 and p95 >= 8.0. |
+| C4 | Hat decorations. DM `dist_from_animated` mean in 0.02 .. 0.50. |
+| C5 | Skirt rows under control. HB1 mean in 0.9 .. 1.8 x baseline, Q mean in 0.9 .. 1.1 x baseline (baseline `S1_default`). |
+| C6 | Unchanged groups. `帽D1`, `右CF`, `左CF`, `SZY親`: `dist_from_animated` mean within 10 percent of baseline `S1_default`. |
+| C7 | Weld stays. `welded_root_children.joints` == 15, mean <= 0.05, p95 <= 0.12. |
+| C8 | Limit adherence with the floor. Same numbers as E1. |
+| C10 | Idle. S4 has `nan_count` 0, `reseed_count` 0, `dist_from_animated` max <= 6.0, `abs_stretch` p99 <= 0.10 for every group. |
+| C12 | Stress. S8 has `nan_count` 0, `reseed_count` 0, `abs_stretch` p99 <= 0.10 for every group, `limit_violation_deg` max <= 12.0 for the seven E1 groups. |
+| D1 | Stability. S1, S2, S3: `nan_count` and `reseed_count` are 0. `abs_stretch` p99 <= max(1.1 x baseline `S1_default`, 0.10). |
+| D3 | Collision. S1 `pushed_particles_per_frame` <= 15.31 and <= 1.15 x baseline `S1_default`. |
+| D4 | Performance. S1 `physics_ms.median` <= 1.15 x baseline `S1_default` and <= 2.5 x baseline `S1_legacy` (3 runs). |
+| D5 | Legacy identity. Run with `-Preset legacy`. S1, S2, S3, S4 equal `S1_legacy.json` .. `S4_legacy.json` of the baseline in every field except `physics_ms` and the key `bend_joint_floor_degrees`. |
+| D6 | Floor-zero identity. S9 (S1 with `bend_joint_floor_degrees=0`, preset `default`) equals baseline `S1_default.json` except `physics_ms` and the key `bend_joint_floor_degrees`. |
 
 E8 (damping and goal pull at 60 Hz and 120 Hz) is a unit test, not a gate here. The live `GET /profiler/scope?name=PhysicsSystem::Update` median of E7 is checked by hand.
+
+The C and D gates are for `-Preset default`. They need the baseline file `S1_default.json` (S1 with the default preset on the code before the floor). D2 is covered by E4.
+
+`identity` and `determinism` checks compare the whole reply after removing `physics_ms` and `bend_joint_floor_degrees` at any depth. D5 and D6 need the baseline folder. Run D5 with `-Preset legacy -GateIds D5`. A missing baseline file is a FAIL.
+
+C6 uses `groups: ["*"]` with `except`: every group of the baseline file except HB1, HB2, HB3, HB4, Q, `左F`, `右F` and DM.
+
+C9 (joint rows), C11, D2 (covered by E4), D7 (same check as E9), D8, D9 and the floor sweep are not in the script. The DEBUG role computes them with a python script from saved JSON files.
 
 ### Gate fields
 | Field | Meaning |
@@ -73,7 +98,9 @@ E8 (damping and goal pull at 60 Hz and 120 Hz) is a unit test, not a gate here. 
 | `baseline` | File stem inside `-Baseline`. The limit is `value x baseline value`. |
 | `floor` | Lower bound of the limit. With `baseline` the limit is `max(value x baseline, floor)`. |
 | `repeat` | Number of runs of the scenario. |
-| `check` | `determinism` for E9. |
+| `check` | `determinism` (E9, D7) or `identity` (D5, D6). |
+| `except` | With `groups: ["*"]`: group keys to leave out (used by C6). |
+| `preset` | Optional. The gate is skipped (not printed, not counted) unless `-Preset` has this value (D5 uses `legacy`). |
 
 Group names are read from `thresholds.json` as UTF-8. The two hair groups are the PMX group keys `左F` and `右F` (the character for left and for right, then `F`). The script file itself is ASCII only. Keep `thresholds.json` saved as UTF-8 when you edit it.
 

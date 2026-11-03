@@ -1,6 +1,6 @@
 # HTTP debugging cheat sheet
 > One-page guide to the editor's HTTP debug server. For humans and AI agents who need to see, measure or poke a running editor.
-> Verified against code: 2026-11-01
+> Verified against code: 2026-11-03
 
 ## TL;DR
 - The editor runs a server on `http://127.0.0.1:8080`. Loopback only. The port is fixed.
@@ -76,7 +76,8 @@ More about threads and bridges: [HTTP server](../architecture/http-server.md).
 | Measure skirt or hair motion | `POST /physics_debug/run {"entity":"<n>","frames":204,"render_hz":60}` |
 | Change a physics setting, then measure | `GET /physics_debug/set?bend_limits_enabled=false` **W**, then `/physics_debug/run` |
 | See the cloth and hair as lines | `GET /physics_debug/image?entity=<n>&view=negz` **IMG** |
-| Read one row per physics joint | `GET /physics_debug/joints?entity=<n>&group=Q` |
+| Read one row per physics joint | `GET /physics_debug/joints?entity=<n>&group=Q` (`own_limit_with_floor_deg`, `effective_bend_limit_deg`) |
+| Make locked strands stiffer or floppier | `GET /physics_debug/set?bend_joint_floor_degrees=3` **W** (0..45), then `/physics_debug/run` |
 | Test a recovery path | `GET /debug/fault?kind=<kind>` **W** |
 
 ## 4. Status codes

@@ -31,6 +31,66 @@
 
     { "id": "E7", "scenario": "S1", "field": "physics_ms.median", "op": "<=", "value": 2.5, "baseline": "S1_legacy", "repeat": 3, "note": "median of the medians of 3 runs" },
 
-    { "id": "E9", "scenario": "S1", "check": "determinism", "note": "two identical runs equal except physics_ms" }
+    { "id": "E9", "scenario": "S1", "check": "determinism", "note": "two identical runs equal except physics_ms" },
+
+    { "id": "C1", "scenario": "S1", "groups": ["HB2","HB3","HB4","左F","右F"], "metric": "dist_from_animated", "stat": "mean", "op": ">=", "value": 0.15 },
+    { "id": "C1", "scenario": "S1", "groups": ["HB2","HB3","HB4","左F","右F"], "metric": "dist_from_animated", "stat": "mean", "op": "<=", "value": 1.00 },
+
+    { "id": "C2", "scenario": "S1", "groups": ["HB2","HB3","HB4","左F","右F"], "metric": "dist_from_animated", "stat": "p95", "op": ">=", "value": 0.40 },
+    { "id": "C2", "scenario": "S1", "groups": ["HB2","HB3","HB4","左F","右F"], "metric": "dist_from_animated", "stat": "max", "op": "<=", "value": 7.0 },
+
+    { "id": "C3", "scenario": "S1", "groups": ["HB2","HB3","HB4","左F","右F"], "metric": "seg_dir_err_deg", "stat": "p50", "op": ">=", "value": 2.0 },
+    { "id": "C3", "scenario": "S1", "groups": ["HB2","HB3","HB4","左F","右F"], "metric": "seg_dir_err_deg", "stat": "p95", "op": ">=", "value": 8.0 },
+
+    { "id": "C4", "scenario": "S1", "groups": ["DM"], "metric": "dist_from_animated", "stat": "mean", "op": ">=", "value": 0.02 },
+    { "id": "C4", "scenario": "S1", "groups": ["DM"], "metric": "dist_from_animated", "stat": "mean", "op": "<=", "value": 0.50 },
+
+    { "id": "C5", "scenario": "S1", "groups": ["HB1"], "metric": "dist_from_animated", "stat": "mean", "op": ">=", "value": 0.9, "baseline": "S1_default" },
+    { "id": "C5", "scenario": "S1", "groups": ["HB1"], "metric": "dist_from_animated", "stat": "mean", "op": "<=", "value": 1.8, "baseline": "S1_default" },
+    { "id": "C5", "scenario": "S1", "groups": ["Q"], "metric": "dist_from_animated", "stat": "mean", "op": ">=", "value": 0.9, "baseline": "S1_default" },
+    { "id": "C5", "scenario": "S1", "groups": ["Q"], "metric": "dist_from_animated", "stat": "mean", "op": "<=", "value": 1.1, "baseline": "S1_default" },
+
+    { "id": "C6", "scenario": "S1", "groups": ["*"], "except": ["HB1","HB2","HB3","HB4","Q","左F","右F","DM"], "metric": "dist_from_animated", "stat": "mean", "op": "within_rel", "value": 0.10, "baseline": "S1_default" },
+
+    { "id": "C7", "scenario": "S1", "field": "welded_root_children.joints", "op": "==", "value": 15 },
+    { "id": "C7", "scenario": "S1", "aggregate": "welded_root_children", "metric": "dist_from_animated", "stat": "mean", "op": "<=", "value": 0.05 },
+    { "id": "C7", "scenario": "S1", "aggregate": "welded_root_children", "metric": "dist_from_animated", "stat": "p95", "op": "<=", "value": 0.12 },
+
+    { "id": "C8", "scenario": "S1", "groups": ["Q","HB1","HB2","HB3","HB4","左F","右F"], "metric": "limit_violation_deg", "stat": "p95", "op": "<=", "value": 3.0 },
+    { "id": "C8", "scenario": "S1", "groups": ["Q","HB1","HB2","HB3","HB4","左F","右F"], "metric": "limit_violation_deg", "stat": "p99", "op": "<=", "value": 6.0 },
+    { "id": "C8", "scenario": "S1", "groups": ["Q","HB1","HB2","HB3","HB4","左F","右F"], "metric": "limit_violation_deg", "stat": "max", "op": "<=", "value": 12.0 },
+
+    { "id": "C10", "scenario": "S4", "field": "nan_count", "op": "==", "value": 0 },
+    { "id": "C10", "scenario": "S4", "field": "reseed_count", "op": "==", "value": 0 },
+    { "id": "C10", "scenario": "S4", "aggregate": "all", "metric": "dist_from_animated", "stat": "max", "op": "<=", "value": 6.0 },
+    { "id": "C10", "scenario": "S4", "groups": ["*"], "metric": "abs_stretch", "stat": "p99", "op": "<=", "value": 0.10 },
+
+    { "id": "C12", "scenario": "S8", "field": "nan_count", "op": "==", "value": 0 },
+    { "id": "C12", "scenario": "S8", "field": "reseed_count", "op": "==", "value": 0 },
+    { "id": "C12", "scenario": "S8", "groups": ["*"], "metric": "abs_stretch", "stat": "p99", "op": "<=", "value": 0.10 },
+    { "id": "C12", "scenario": "S8", "groups": ["Q","HB1","HB2","HB3","HB4","左F","右F"], "metric": "limit_violation_deg", "stat": "max", "op": "<=", "value": 12.0 },
+
+    { "id": "D1", "scenario": "S1", "field": "nan_count", "op": "==", "value": 0 },
+    { "id": "D1", "scenario": "S1", "field": "reseed_count", "op": "==", "value": 0 },
+    { "id": "D1", "scenario": "S2", "field": "nan_count", "op": "==", "value": 0 },
+    { "id": "D1", "scenario": "S2", "field": "reseed_count", "op": "==", "value": 0 },
+    { "id": "D1", "scenario": "S3", "field": "nan_count", "op": "==", "value": 0 },
+    { "id": "D1", "scenario": "S3", "field": "reseed_count", "op": "==", "value": 0 },
+    { "id": "D1", "scenario": "S1", "groups": ["*"], "metric": "abs_stretch", "stat": "p99", "op": "<=", "value": 1.1, "floor": 0.10, "baseline": "S1_default", "note": "limit = max(1.1 * baseline p99, 0.10)" },
+    { "id": "D1", "scenario": "S2", "groups": ["*"], "metric": "abs_stretch", "stat": "p99", "op": "<=", "value": 1.1, "floor": 0.10, "baseline": "S1_default", "note": "limit = max(1.1 * baseline p99, 0.10)" },
+    { "id": "D1", "scenario": "S3", "groups": ["*"], "metric": "abs_stretch", "stat": "p99", "op": "<=", "value": 1.1, "floor": 0.10, "baseline": "S1_default", "note": "limit = max(1.1 * baseline p99, 0.10)" },
+
+    { "id": "D3", "scenario": "S1", "field": "collision.pushed_particles_per_frame", "op": "<=", "value": 15.31 },
+    { "id": "D3", "scenario": "S1", "field": "collision.pushed_particles_per_frame", "op": "<=", "value": 1.15, "baseline": "S1_default" },
+
+    { "id": "D4", "scenario": "S1", "field": "physics_ms.median", "op": "<=", "value": 1.15, "baseline": "S1_default", "repeat": 3, "note": "median of the medians of 3 runs" },
+    { "id": "D4", "scenario": "S1", "field": "physics_ms.median", "op": "<=", "value": 2.5, "baseline": "S1_legacy", "repeat": 3, "note": "median of the medians of 3 runs" },
+
+    { "id": "D5", "scenario": "S1", "check": "identity", "baseline": "S1_legacy", "preset": "legacy", "note": "run with -Preset legacy" },
+    { "id": "D5", "scenario": "S2", "check": "identity", "baseline": "S2_legacy", "preset": "legacy", "note": "run with -Preset legacy" },
+    { "id": "D5", "scenario": "S3", "check": "identity", "baseline": "S3_legacy", "preset": "legacy", "note": "run with -Preset legacy" },
+    { "id": "D5", "scenario": "S4", "check": "identity", "baseline": "S4_legacy", "preset": "legacy", "note": "run with -Preset legacy" },
+
+    { "id": "D6", "scenario": "S9", "check": "identity", "baseline": "S1_default", "note": "S1 with bend_joint_floor_degrees = 0" }
   ]
 }

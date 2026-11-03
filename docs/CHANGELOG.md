@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [Bend floor for locked PMX strands](#bend-floor-for-locked-pmx-strands-branch-fixsmall-fixes-2026-11-03) | `fix/small-fixes` | 2026-11-03 |
 | [MMD-style chain physics and the physics debug toolbox](#mmd-style-chain-physics-and-the-physics-debug-toolbox-branch-fixsmall-fixes-2026-11-02) | `fix/small-fixes` | 2026-11-02 |
 | [Readable profiler](#readable-profiler-branch-fixsmall-fixes-2026-10-31) | `fix/small-fixes` | 2026-10-31 |
 | [GPU culling: two-phase Hi-Z, textured clusters, cheaper fixed cost](#gpu-culling-two-phase-hi-z-textured-clusters-cheaper-fixed-cost-branch-featuregpu-cull-impl-2026-10-28) | `feature/gpu-cull-impl` | 2026-10-28 |
@@ -36,6 +37,17 @@
 | [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+
+## Bend floor for locked PMX strands (branch `fix/small-fixes`, 2026-11-03)
+
+- **Locked strands sway.** Skirt strands, the ponytail and hat decorations have PMX joint limits of 0, which was an exact weld here.
+  New setting `bend_joint_floor_degrees` (0..45, default 3, legacy 0) gives every joint that is not a root child a minimum own bend limit.
+  Root children keep their own limit and stay welded. The cumulative limit is the sum of the floored own limits, so the tip moves most.
+  Floor 0 reproduces the old results exactly.
+- **One sum.** `ComputeCumulativeBendLimits` takes the floor and is the only place that sums the limits. The solver, the metrics,
+  the image cones and `/physics_debug/joints` read the same numbers.
+- **Joints report.** Rows have `own_limit_with_floor_deg`. `bend_limit_deg` is still the raw PMX own limit.
+- **Limits that stay.** The cone is a hard limit, not a soft constraint. The look depends on the fixed step rate. How much Bullet sways such strands is not measured.
 
 ## MMD-style chain physics and the physics debug toolbox (branch `fix/small-fixes`, 2026-11-02)
 
