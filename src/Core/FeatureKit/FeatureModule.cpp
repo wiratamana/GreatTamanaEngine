@@ -104,6 +104,7 @@ std::optional<View> BuildView(Core& core, rg::RenderViewId currentView)
     view.viewProjection = data->viewProjection;
     view.invViewProjection = camera.invViewProjection;
     view.invViewProjectionValid = camera.invViewProjectionValid;
+    view.jitterNdc = core.ViewJitterNdc(view.scope);
     return view;
 }
 

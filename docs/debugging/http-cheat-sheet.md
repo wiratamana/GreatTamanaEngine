@@ -1,6 +1,6 @@
 # HTTP debugging cheat sheet
 > One-page guide to the editor's HTTP debug server. For humans and AI agents who need to see, measure or poke a running editor.
-> Verified against code: 2026-11-03
+> Verified against code: 2026-11-04
 
 ## TL;DR
 - The editor runs a server on `http://127.0.0.1:8080`. Loopback only. The port is fixed.
@@ -317,9 +317,33 @@ curl.exe -X POST http://127.0.0.1:8080/close_preset_scene
 - `/get_game_view` returns only the Game view (no editor window). Save each try as `toon_NN.png`, then compare it with the reference picture side by side at the same size.
 - `debugView`: `0` off, `1` class colors, `2` band mask, `3` shadow amount, `4` outline only, `5` albedo only, `6` overlay magenta on every hair-ring fragment, `7` overlay mask test, `8` overlay camera-up normal. For exact pixel values set ToneMapping `mode=Clamp exposure=1 saturation=1 dither=0`.
 - Look at `game.status` (`Ok`), and `game.claimedEntityCount` in the state. `CaptureArmed` means the Frame Debugger is on. The toon passes are skipped then.
-- Toggle names: feature `ToonCharacter`, passes `ToonCharacter.Surface.Draw`, `.Outline.Draw`, `.Overlay.Draw`. Bloom has `Bloom.*` passes.
+- Toggle names: feature `ToonCharacter`, passes `ToonCharacter.Surface.Draw`, `.Outline.Draw`, `.Overlay.Draw`. Bloom has `Bloom.*` passes. TemporalAa has `TemporalAa.Resolve.Dispatch` and `TemporalAa.CopyToPrivateTarget` (see R12).
 - `/get_logs?category=FeatureKit` and `category=RenderFeatureCompositor` must stay empty.
 - Pages: [Toon character](../reference/render-features/toon-character.md), [Bloom](../reference/render-features/bloom.md).
+
+### R12. Anti-aliasing check (TemporalAa)
+```cmd
+curl.exe -X POST http://127.0.0.1:8080/clear_logs
+curl.exe "http://127.0.0.1:8080/feature_debug/state?name=TemporalAa"
+curl.exe http://127.0.0.1:8080/get_game_view -o taa_on.png
+curl.exe "http://127.0.0.1:8080/feature_debug/set?name=TemporalAa&enabled=false"
+curl.exe http://127.0.0.1:8080/get_game_view -o taa_off.png
+curl.exe "http://127.0.0.1:8080/feature_debug/set?name=TemporalAa&enabled=true&jitterScale=0"
+curl.exe "http://127.0.0.1:8080/feature_debug/set?name=TemporalAa&jitterScale=6&debugView=JitterOnly"
+curl.exe "http://127.0.0.1:8080/render_graph/set_pass_enabled?name=TemporalAa.Resolve.Dispatch&enabled=false"
+curl.exe "http://127.0.0.1:8080/render_graph/set_pass_enabled?name=TemporalAa.CopyToPrivateTarget&enabled=false"
+curl.exe "http://127.0.0.1:8080/render_graph/set_feature_enabled?name=TemporalAa&enabled=false&view=primary"
+curl.exe "http://127.0.0.1:8080/render_graph/set_feature_enabled?name=TemporalAa.Jitter&enabled=false&view=primary"
+curl.exe "http://127.0.0.1:8080/feature_debug/invoke?name=TemporalAa&action=reset_defaults"
+curl.exe "http://127.0.0.1:8080/get_logs?min_level=warning"
+```
+- Wait 10 frames, camera still, then read `state`. Good: `game.status` is `Ok`, `game.jitterDecision` is `Apply`, `game.jitterApplied` is `true`, `game.historyUsed` is `true`, `game.stableFrames` is 2 or more. `game.jitterPixelX/Y` change every frame and stay inside -0.5..0.5.
+- `scene.status` is `NotRendered` (or `ViewNotSupported` if you turned the Scene registration on). The Scene view is never jittered.
+- Compare `taa_on.png` with `taa_off.png`: the edges of the on picture are smooth. Freeze noise first: ToneMapping `dither=0`, Gtao, Ssgi and VolumetricLight `temporal=false`.
+- `jitterScale=0` with `enabled=true` must look like off. `debugView=JitterOnly` with a big scale shows the jittered frame: every drawn object must move together, outline attached to the surface.
+- Each way off gives its own result: `enabled=false` gives `Disabled`. One pass off gives `PassDisabled`. Both passes off give `NotRendered` (the callback is skipped), and the jitter decision reads `PassDisabled`. Registration off gives `NotRendered` and `NoHeartbeat` (one jittered frame is possible). A Frame Debugger capture gives `CaptureArmed`. Undo each switch. The AA is back in about 12 frames.
+- Logs of `FeatureKit`, `RenderFeatureCompositor`, `RenderPassHonesty` and `TemporalAa` must stay empty.
+- Page: [Temporal anti-aliasing](../reference/render-features/temporal-aa.md).
 
 ## 8. Gotchas
 - Only one editor can serve. A second editor has no HTTP (port 8080 busy).

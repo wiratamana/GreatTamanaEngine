@@ -96,7 +96,7 @@ ToonCharacterFeature::DrawOutcome ToonCharacterFeature::RecordDraw(
     }
 
     fx::SceneDrawChain chain = f.SceneDraw(passName);
-    chain.Shaders(shaders).Camera(f.View().viewProjection).Target(f.SceneTarget()).SceneServices().Only(view.selection);
+    chain.Shaders(shaders).Camera(f.View().DrawViewProjection()).Target(f.SceneTarget()).SceneServices().Only(view.selection);
     if (claim) {
         chain.Claim();
     }

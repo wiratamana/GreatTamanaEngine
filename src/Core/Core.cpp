@@ -32,6 +32,7 @@
 #include "FaultInjection.h"
 #include "GpuSkinningKeys.h"
 #include "FeatureKit/ClusterPartPlanning.h"
+#include "FeatureKit/ViewJitter.h"
 #include "../Jobs/JobDispatch.h"
 #include "../Jobs/JobSystem.h"
 #include "Logging.h"
@@ -453,6 +454,20 @@ bool Core::SetSceneDrawCull(rg::ViewScope scope, const Mat4& viewProjection, flo
     return true;
 }
 
+bool Core::SetViewJitter(rg::ViewScope scope, Vec2 ndc)
+{
+    if (scope == rg::ViewScope::Shared || !fx::IsValidViewJitter(ndc)) {
+        return false;
+    }
+    m_viewJitterThisFrame[rg::ViewScopeIndex(scope)] = ndc;
+    return true;
+}
+
+Vec2 Core::ViewJitterNdc(rg::ViewScope scope) const noexcept
+{
+    return scope == rg::ViewScope::Shared ? Vec2{} : m_viewJitterThisFrame[rg::ViewScopeIndex(scope)];
+}
+
 SceneCullCounts Core::LastSceneDrawCullCounts(rg::ViewScope scope, std::uint64_t currentFrameIndex) const noexcept
 {
     if (scope == rg::ViewScope::Shared) {
@@ -482,6 +497,7 @@ std::optional<fx::View> Core::PrimaryCameraView(float fallbackAspect)
         view.viewProjection = data->viewProjection;
         view.invViewProjection = camera.invViewProjection;
         view.invViewProjectionValid = camera.invViewProjectionValid;
+        view.jitterNdc = m_viewJitterThisFrame[rg::ViewScopeIndex(rg::ViewScope::Primary)];
     } else {
         view.eye = RenderSystem::ResolveActiveCameraWorldPosition(registry);
         view.viewProjection = RenderSystem::ResolveActiveCameraViewProjection(
@@ -892,7 +908,9 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             const rg::TextureHandle viewTarget = viewData->colorTarget;
             const float aspectWidthOverHeight = viewData->aspectWidthOverHeight;
             const bool isPrimaryView = (frame.currentView == rg::RenderViewId::Named(kPrimaryViewName));
-            const Mat4 viewProjectionOverride = viewData->viewProjection;
+            const Vec2 jitter = ViewJitterNdc(TranslateLegacyViewScope(frame.currentView));
+            const bool jittered = jitter != Vec2::Zero();
+            const Mat4 viewProjectionOverride = fx::ApplyClipJitter(viewData->viewProjection, jitter);
             IFrameDebuggerCaptureRecorder* frameDebuggerCapture =
                 isPrimaryView ? m_currentFrameDebuggerCaptureForOffscreenPipeline : nullptr;
 
@@ -923,7 +941,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             };
             const std::size_t claimScope = rg::ViewScopeIndex(TranslateLegacyViewScope(frame.currentView));
             const std::uint64_t frameIndex = frame.builder.FrameIndex();
-            desc.execute = [this, aspectWidthOverHeight, isPrimaryView, viewProjectionOverride, frameDebuggerCapture,
+            desc.execute = [this, aspectWidthOverHeight, isPrimaryView, viewProjectionOverride, jittered, frameDebuggerCapture,
                                 publishedServiceSlots, currentViewForServices, claimScope, frameIndex](rg::PassContext& ctx) {
                 std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolvedServiceSlots{};
                 for (std::uint32_t slotIndex = 0; slotIndex < kSceneServiceSlotCount; ++slotIndex) {
@@ -952,8 +970,8 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 }
                 if (isPrimaryView) {
                     rg::CommandBuffer cmd = ctx.Cmd();
-                    m_game.Render(m_renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture, std::nullopt,
-                        claimed, sceneServicesSet, &cmd, cull);
+                    m_game.Render(m_renderer, aspectWidthOverHeight, jittered ? &viewProjectionOverride : nullptr,
+                        frameDebuggerCapture, std::nullopt, claimed, sceneServicesSet, &cmd, cull);
                 } else {
                     const rg::SceneRecording recording(ctx);
                     m_game.Render(m_renderer, aspectWidthOverHeight, &viewProjectionOverride, nullptr, std::nullopt,
@@ -1239,6 +1257,7 @@ void Core::BuildFrame()
     for (std::optional<SceneCullRequest>& request : m_sceneCullThisFrame) {
         request.reset();
     }
+    m_viewJitterThisFrame.fill(Vec2{});
     m_clusterCandidates.clear();
     m_clusterRejections = fx::ClusterRejectCounts{};
     for (std::size_t i = 0; i < m_exclusionSetsUsed; ++i) {

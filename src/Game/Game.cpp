@@ -314,9 +314,9 @@ void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* v
     EnsureDefaultCameraExists();
 
     if (viewProjectionOverride != nullptr) {
-        // Secondary draw: no capture, draw cap or command buffer.
-        m_renderSystem.Draw(m_registry, renderer, *viewProjectionOverride, nullptr, std::nullopt, batchedEntities,
-            std::nullopt, sceneServicesSet, nullptr, cull);
+        // An explicit matrix replaces the camera one; the rest is forwarded as is.
+        m_renderSystem.Draw(m_registry, renderer, *viewProjectionOverride, frameDebuggerCapture, maxDrawCount,
+            batchedEntities, std::nullopt, sceneServicesSet, cmd, cull);
     } else {
         // Capture pointer and `cmd` are only forwarded, never dereferenced here.
         m_renderSystem.Draw(m_registry, renderer, aspectWidthOverHeight, frameDebuggerCapture, maxDrawCount,

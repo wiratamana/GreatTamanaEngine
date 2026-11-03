@@ -1,12 +1,12 @@
 # Writing a render feature
 > Step-by-step guide to add a built-in render feature to the engine. For engine developers.
-> Verified against code: 2026-11-03
+> Verified against code: 2026-11-04
 
 ## TL;DR
 - A feature is a folder `src/Features/<Name>/`, a class derived from `fx::Feature`, and one macro line.
 - No edit in CMake, `Core` or `Editor`. The root `CMakeLists.txt` finds the folder by itself.
 - Feature code uses only the kit (`gte::fx`). No Vulkan, no `Renderer`, no raw handles.
-- Ten features ship today. `ToneMapping` is the smallest. Copy it. `ToonCharacter` is the model for a colour redraw of chosen entities.
+- Eleven features ship today. `ToneMapping` is the smallest. Copy it. `ToonCharacter` is the model for a colour redraw of chosen entities. `TemporalAa` is the model for history and ping-pong targets.
 - A feature is compiled into the engine. There is no hot reload. Rebuild after each change.
 
 ## Before you start
@@ -180,7 +180,9 @@ If a channel or scene slot of yours is read by another pass that can be toggled 
 | Add a pass to my feature | New literal name. Add it to the registration's `Gate`. New verb chain, with `PassEnabled` first. If it publishes data, add a keep list and a risk rule |
 | Share data with another feature | Put a plain record in `src/Game/Lighting/`. Publish with `fx::Channel<T>`. Read with `fx::ChannelReader<T>` |
 | Let material shaders read my texture | `s.DeclareSceneSlot(name, kind, index)` in `Setup()`, then `f.PublishToScene(slot, tex)` each frame |
-| Redraw chosen entities in colour (toon, outline) | In an `Opaque` callback: `f.SelectEntities(span)`, then `f.SceneDraw("Pass").Shaders(fx::SceneShaderSet::Shaded("Base")).Camera(vp).Target(f.SceneTarget()).SceneServices().Only(sel).Claim().Record()`. `Claim()` makes the main draw skip them. See [Feature kit](../reference/feature-kit.md) |
+| Redraw chosen entities in colour (toon, outline) | In an `Opaque` callback: `f.SelectEntities(span)`, then `f.SceneDraw("Pass").Shaders(fx::SceneShaderSet::Shaded("Base")).Camera(f.View().DrawViewProjection()).Target(f.SceneTarget()).SceneServices().Only(sel).Claim().Record()`. `Claim()` makes the main draw skip them. See [Feature kit](../reference/feature-kit.md) |
+| Draw into the view's color or depth | Use `f.View().DrawViewProjection()`, not `viewProjection`. The view may be drawn with a sub-pixel jitter. For a cluster draw use `fx::ClusterDrawCameraOf(view)` |
+| Shift the view's draw projection (jitter) | In a `PreOpaque` callback call `f.SetViewJitter(ndc)`. Only when the matching resolve pass will run in the same frame. See [Temporal anti-aliasing](../reference/render-features/temporal-aa.md) |
 | Add a kit verb | New small `.cpp` in `src/Core/FeatureKit/`. Never hand a feature a raw handle |
 | Need a GPU feature the kit lacks | Add it inside `src/Renderer/` behind a Vulkan-free interface |
 | Use a 3D texture | See [Volumetric resources](../conventions/volumetric-resources.md) |
@@ -213,7 +215,7 @@ curl.exe "http://127.0.0.1:8080/get_logs?category=FeatureKit"
 
 ## Related
 - [Feature kit reference](../reference/feature-kit.md) — every verb and resource type
-- [Render features](../reference/render-features/README.md) — the ten shipped features
+- [Render features](../reference/render-features/README.md) — the eleven shipped features
 - [Render graph](../architecture/render-graph.md) — pass kinds, toggles, pools
 - [Render honesty](../conventions/render-honesty.md) — toggle and Frame Debugger rules
 - [Volumetric resources](../conventions/volumetric-resources.md) — 3D textures

@@ -1,0 +1,209 @@
+#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+
+// Member names and order match TemporalAaParamsGpu.
+layout(std430, binding = 0) readonly buffer TemporalAaParams {
+    mat4 invViewProjection;
+    mat4 prevViewProjection;
+    vec4 eye;
+    vec4 forward;
+    vec4 prevEye;
+    vec4 prevForward;
+    vec4 blend;   // x feedback min, y feedback max, z depth tolerance, w clip gamma.
+    vec4 look;    // x debug view (0 off, 1 jitter only), yzw reserved.
+    uvec4 counts; // x history valid, y width, z height, w reserved.
+} params;
+
+layout(binding = 1) uniform sampler2D sceneColor;
+layout(binding = 2) uniform sampler2D sceneDepth;
+layout(binding = 3) uniform sampler2D colorHistory;
+layout(binding = 4) uniform sampler2D depthHistory; // View depth of the previous frame, 0 = sky.
+layout(binding = 5, rgba16f) uniform writeonly image2D colorOutput;
+layout(binding = 6, r32f) uniform writeonly image2D depthOutput; // View depth, 0 = sky.
+
+#include "ScreenSpaceCommon.glsl"
+
+const float kMaxValue = 65000.0; // Largest finite half float, with margin.
+const float kSkyZ = 1e20;        // View depth stand-in for "no surface".
+const float kLumaFloor = 0.2;    // Same as kTemporalAaLumaFloor.
+
+float Luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+
+vec3 Sanitize(vec3 c)
+{
+    if (any(isnan(c)) || any(isinf(c))) { return vec3(0.0); }
+    return clamp(c, vec3(0.0), vec3(kMaxValue));
+}
+
+// Working space: a very bright pixel can not dominate the blend.
+vec3 ToWorking(vec3 c) { return c / (1.0 + Luma(c)); }
+vec3 FromWorking(vec3 w) { return min(w / max(1.0 - Luma(w), 1e-5), vec3(kMaxValue)); }
+
+vec3 RgbToYCoCg(vec3 c) { return vec3(0.25 * c.r + 0.5 * c.g + 0.25 * c.b, 0.5 * c.r - 0.5 * c.b, -0.25 * c.r + 0.5 * c.g - 0.25 * c.b); }
+vec3 YCoCgToRgb(vec3 c) { return vec3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z); }
+
+// Moves `q` along the line to the box center until it is inside the box.
+vec3 ClipToBox(vec3 center, vec3 extent, vec3 q)
+{
+    vec3 v = q - center;
+    vec3 a = abs(v) / max(extent, vec3(1e-4));
+    float m = max(a.x, max(a.y, a.z));
+    return m > 1.0 ? center + v / m : q;
+}
+
+// Catmull-Rom history sample, 12 taps (the 4 corners are dropped and the weights renormalized).
+vec3 SampleHistory(vec2 texel, ivec2 size)
+{
+    vec2 base = floor(texel);
+    vec2 f = texel - base;
+    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    vec2 w3 = f * f * (-0.5 + 0.5 * f);
+    float wx[4] = float[4](w0.x, w1.x, w2.x, w3.x);
+    float wy[4] = float[4](w0.y, w1.y, w2.y, w3.y);
+    vec3 sum = vec3(0.0);
+    float weightSum = 0.0;
+    for (int j = 0; j < 4; ++j) {
+        for (int i = 0; i < 4; ++i) {
+            if ((i == 0 || i == 3) && (j == 0 || j == 3)) { continue; }
+            ivec2 q = clamp(ivec2(base) + ivec2(i - 1, j - 1), ivec2(0), size - ivec2(1));
+            float w = wx[i] * wy[j];
+            sum += ToWorking(Sanitize(texelFetch(colorHistory, q, 0).rgb)) * w;
+            weightSum += w;
+        }
+    }
+    return max(sum / weightSum, vec3(0.0));
+}
+
+// 1 when the expected previous view depth fits the depth range of the 3x3 history texels, 0 when it does not.
+// A range (not one texel) keeps the silhouettes: jitter flips an edge texel between near and far every frame.
+float DepthConfidence(vec2 texel, float expectedZ, ivec2 size)
+{
+    ivec2 c = ivec2(floor(texel + 0.5));
+    float lo = 3.0e38;
+    float hi = 0.0;
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            float h = texelFetch(depthHistory, clamp(c + ivec2(dx, dy), ivec2(0), size - ivec2(1)), 0).r;
+            h = h > 0.0 ? h : kSkyZ;
+            lo = min(lo, h);
+            hi = max(hi, h);
+        }
+    }
+    float tolerance = params.blend.z;
+    float rel = max((lo - expectedZ) / lo, (expectedZ - hi) / hi);
+    return 1.0 - smoothstep(0.5 * tolerance, tolerance, max(rel, 0.0));
+}
+
+void main()
+{
+    ivec2 size = imageSize(colorOutput);
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= size.x || p.y >= size.y) { return; }
+    // Sizes come from the real textures: a resize applies one frame late, so they may differ for one frame.
+    ivec2 colorSize = textureSize(sceneColor, 0);
+    ivec2 depthSize = textureSize(sceneDepth, 0);
+    ivec2 historySize = textureSize(colorHistory, 0);
+    ivec2 historyDepthSize = textureSize(depthHistory, 0);
+    vec2 depthSizeF = vec2(depthSize);
+
+    // 3x3 neighborhood: working-space colors and the closest depth.
+    vec3 samples[9];
+    float closestDepth = 2.0;
+    ivec2 closestPixel = p;
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            ivec2 o = ivec2(dx, dy);
+            samples[(dy + 1) * 3 + (dx + 1)] = RgbToYCoCg(ToWorking(Sanitize(texelFetch(sceneColor, clamp(p + o, ivec2(0), colorSize - ivec2(1)), 0).rgb)));
+            ivec2 dq = clamp(p + o, ivec2(0), depthSize - ivec2(1));
+            float d = texelFetch(sceneDepth, dq, 0).r;
+            if (d < closestDepth) { closestDepth = d; closestPixel = dq; }
+        }
+    }
+    vec3 currentYCoCg = samples[4];
+    vec3 currentRaw = Sanitize(texelFetch(sceneColor, clamp(p, ivec2(0), colorSize - ivec2(1)), 0).rgb);
+
+    // Own view depth for the next frame (0 = sky).
+    float ownDepth = FetchDepth(sceneDepth, p);
+    float ownZ = 0.0;
+    if (ownDepth < kClearDepthThreshold) {
+        ownZ = dot(UnprojectDepth(params.invViewProjection, p, ownDepth, depthSize) - params.eye.xyz, params.forward.xyz);
+    }
+    imageStore(depthOutput, p, vec4(ownZ, 0.0, 0.0, 0.0));
+
+    // Debug view: the jittered picture as it is, no history.
+    if (params.look.x > 0.5) {
+        imageStore(colorOutput, p, vec4(currentRaw, 1.0));
+        return;
+    }
+
+    // Where was this pixel in the previous frame? Uses the motion of the closest surface of the 3x3.
+    bool haveHistory = false;
+    vec2 historyTexel = vec2(0.0);
+    float expectedZ = kSkyZ;
+    if (params.counts.x != 0u) {
+        if (closestDepth >= kClearDepthThreshold) {
+            // Sky: only the view direction counts, so it is projected with w = 0.
+            vec3 dir = UnprojectDepth(params.invViewProjection, closestPixel, closestDepth, depthSize) - params.eye.xyz;
+            vec4 prevClip = params.prevViewProjection * vec4(dir, 0.0);
+            if (prevClip.w > 1e-6) {
+                vec2 prevUv = prevClip.xy / prevClip.w * 0.5 + 0.5;
+                vec2 closestUv = (vec2(closestPixel) + 0.5) / depthSizeF;
+                historyTexel = vec2(p) + (prevUv - closestUv) * depthSizeF;
+                haveHistory = true;
+            }
+        } else {
+            vec3 world = UnprojectDepth(params.invViewProjection, closestPixel, closestDepth, depthSize);
+            float viewZ = dot(world - params.eye.xyz, params.forward.xyz);
+            vec2 closestHistoryTexel;
+            float prevZ;
+            if (ReprojectToHistory(params.invViewProjection, params.prevViewProjection, params.eye.xyz, params.forward.xyz,
+                    params.prevEye.xyz, params.prevForward.xyz, closestPixel, 1.0, depthSizeF, viewZ, closestHistoryTexel, prevZ)) {
+                historyTexel = vec2(p) + (closestHistoryTexel - vec2(closestPixel));
+                expectedZ = prevZ;
+                haveHistory = true;
+            }
+        }
+    }
+    if (haveHistory) {
+        vec2 hs = vec2(historySize);
+        haveHistory = all(greaterThan(historyTexel, vec2(-0.5))) && all(lessThan(historyTexel, hs - vec2(0.5)))
+            && historySize == size && historyDepthSize == size;
+    }
+
+    vec3 resultYCoCg = currentYCoCg;
+    if (haveHistory) {
+        // Clip box of the neighborhood: variance box cut by the min/max box.
+        vec3 m1 = vec3(0.0);
+        vec3 m2 = vec3(0.0);
+        vec3 lo = vec3(1e30);
+        vec3 hi = vec3(-1e30);
+        for (int i = 0; i < 9; ++i) {
+            m1 += samples[i];
+            m2 += samples[i] * samples[i];
+            lo = min(lo, samples[i]);
+            hi = max(hi, samples[i]);
+        }
+        m1 /= 9.0;
+        m2 /= 9.0;
+        vec3 sigma = sqrt(max(m2 - m1 * m1, vec3(0.0)));
+        vec3 boxLo = max(m1 - params.blend.w * sigma, lo);
+        vec3 boxHi = min(m1 + params.blend.w * sigma, hi);
+        vec3 center = 0.5 * (boxLo + boxHi);
+        vec3 extent = 0.5 * (boxHi - boxLo);
+
+        vec3 history = RgbToYCoCg(SampleHistory(historyTexel, historySize));
+        vec3 clipped = ClipToBox(center, extent, history);
+
+        float diff = abs(currentYCoCg.x - clipped.x) / max(max(currentYCoCg.x, clipped.x), kLumaFloor);
+        float k = 1.0 - diff;
+        float feedback = mix(params.blend.x, params.blend.y, k * k);
+        float confidence = DepthConfidence(historyTexel, expectedZ, historyDepthSize);
+        resultYCoCg = mix(currentYCoCg, clipped, feedback * confidence);
+    }
+
+    vec3 result = FromWorking(YCoCgToRgb(resultYCoCg));
+    if (any(isnan(result)) || any(isinf(result))) { result = currentRaw; }
+    imageStore(colorOutput, p, vec4(max(result, vec3(0.0)), 1.0));
+}

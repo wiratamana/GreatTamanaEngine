@@ -106,6 +106,9 @@ struct ClusterCamera {
 // Camera data of `view`. Orthographic when the last matrix row is (0, 0, 0, 1).
 ClusterCamera ClusterCameraOf(const View& view);
 
+// Camera the view's scene was drawn with (includes jitter).
+ClusterCamera ClusterDrawCameraOf(const View& view);
+
 // Camera from a bare view-projection. `eye` is used only for a perspective matrix.
 ClusterCamera MakeClusterCamera(const Mat4& viewProjection, const Vec3& eye);
 

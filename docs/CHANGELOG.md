@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [Temporal anti-aliasing](#temporal-anti-aliasing-branch-featuretoon-shading-impl-2026-11-04) | `feature/toon-shading-impl` | 2026-11-04 |
 | [Toon character, Bloom and the Furina showcase](#toon-character-bloom-and-the-furina-showcase-branch-featuretoon-shading-impl-2026-11-03) | `feature/toon-shading-impl` | 2026-11-03 |
 | [Bend floor for locked PMX strands](#bend-floor-for-locked-pmx-strands-branch-fixsmall-fixes-2026-11-03) | `fix/small-fixes` | 2026-11-03 |
 | [MMD-style chain physics and the physics debug toolbox](#mmd-style-chain-physics-and-the-physics-debug-toolbox-branch-fixsmall-fixes-2026-11-02) | `fix/small-fixes` | 2026-11-02 |
@@ -38,6 +39,23 @@
 | [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+
+## Temporal anti-aliasing (branch `feature/toon-shading-impl`, 2026-11-04)
+
+- **New feature `TemporalAa`.** Game view only. A Halton jitter shifts the draw projection. A compute resolve at PostComposite -150 (`Replace`) blends the
+  frame with the history, before Bloom and ToneMapping. Registrations: `TemporalAa.FrameStamp` (PreOpaque 47), `TemporalAa.Jitter` (PreOpaque 48),
+  `TemporalAa` (PostComposite -150). Passes: `TemporalAa.Resolve.Dispatch`, `TemporalAa.CopyToPrivateTarget`. See [Temporal anti-aliasing](reference/render-features/temporal-aa.md).
+- **Jitter service in the engine.** `fx::View::jitterNdc` and `View::DrawViewProjection()`. `viewProjection` stays unjittered. `PreOpaqueFrame::SetViewJitter`
+  stores the shift in `Core` (reset every frame). The `RenderOpaque` provider draws the Game view with it. With zero jitter the draw is the same call as before.
+- **Draw sites.** The cluster draw uses `ClusterDrawCameraOf`. `ToonCharacter` Surface, Outline and Overlay use `DrawViewProjection()`.
+  `Game::Render` now forwards the capture pointer, draw cap and command buffer when it gets an explicit matrix.
+- **Safe on and off.** Jitter needs a resolve in the previous frame (heartbeat). Setting, pass toggles and a Frame Debugger capture turn it off in the same frame.
+  Switching off the `TemporalAa` registration can leave one jittered, unresolved frame.
+- **Editor and HTTP.** Panel `TemporalAa`. `/feature_debug` keys `enabled`, `jitterSampleCount`, `jitterScale`, `feedbackMin`, `feedbackMax`, `clipGamma`,
+  `depthTolerance`, `debugView`, action `reset_defaults`. HTTP cheat sheet has recipe R12.
+- **Docs.** Render feature count is 11.
+- **Known limits.** No per-object motion vectors, so animated objects can ghost a little. The picture is a bit softer. The Scene view stays aliased.
+  Cost is 24 bytes per pixel per view.
 
 ## Toon character, Bloom and the Furina showcase (branch `feature/toon-shading-impl`, 2026-11-03)
 

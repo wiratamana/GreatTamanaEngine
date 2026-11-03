@@ -23,7 +23,7 @@ CullPlan PlanCull(fx::OpaqueFrame& f, const GpuDrivenSceneSettings& cfg, bool se
 {
     CullPlan plan;
     const fx::View& view = f.View();
-    plan.live = fx::ClusterCameraOf(view);
+    plan.live = fx::ClusterDrawCameraOf(view);
 
     // Without an active camera the view matrix is identity and must not cull.
     std::optional<fx::View> primaryView;
@@ -34,7 +34,7 @@ CullPlan PlanCull(fx::OpaqueFrame& f, const GpuDrivenSceneSettings& cfg, bool se
     fx::ClusterCamera primary;
     primary.valid = false;
     if (secondary && primaryView) {
-        primary = fx::ClusterCameraOf(*primaryView);
+        primary = fx::ClusterDrawCameraOf(*primaryView);
     }
 
     plan.source = ChooseCullCamera(secondary, cfg.mode, primary.valid, plan.live.valid && primaryView.has_value());

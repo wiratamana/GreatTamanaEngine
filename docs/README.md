@@ -1,6 +1,6 @@
 # Documentation index
 > Every doc of GreatTamanaEngine in one place. Pick by folder, or use the reading paths below.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-11-04
 
 ## Reading paths
 | You are... | Read in this order |
@@ -72,7 +72,7 @@
 | Doc | What it gives you | Who |
 |---|---|---|
 | [Feature kit](reference/feature-kit.md) | `gte::fx` verbs, resources, channels | Feature authors |
-| [Render features](reference/render-features/README.md) | Master table of the 10 features | Everyone |
+| [Render features](reference/render-features/README.md) | Master table of the 11 features | Everyone |
 | [Atmosphere](reference/render-features/atmosphere.md) | Sky, aerial perspective, sun tint | Tuning, debugging |
 | [Shadow](reference/render-features/shadow.md) | Sun cascade shadows | Tuning, debugging |
 | [Scene lighting](reference/render-features/scene-lighting.md) | Sun and ambient data for materials | Tuning, debugging |
@@ -83,6 +83,7 @@
 | [GPU-driven scene](reference/render-features/gpu-driven-scene.md) | Culling feature, "Culling" panel | Tuning, debugging |
 | [Bloom](reference/render-features/bloom.md) | Glow around very bright pixels | Tuning, debugging |
 | [Toon character](reference/render-features/toon-character.md) | Cel shading and outline for marked characters | Tuning, debugging |
+| [Temporal anti-aliasing](reference/render-features/temporal-aa.md) | Jitter and history resolve for the Game view | Tuning, debugging |
 
 ## Tools
 | Tool | What it does |

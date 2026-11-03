@@ -94,6 +94,7 @@ gte_test_path_defines(GreatTamanaEngineTests "${CMAKE_BINARY_DIR}/shaders"
     GTE_TEST_VOLUMETRIC_INTEGRATE_SPV_PATH=VolumetricLightIntegrate.comp.spv
     GTE_TEST_VOLUMETRIC_COMPOSITE_SPV_PATH=VolumetricLightComposite.comp.spv
     GTE_TEST_TONEMAPPING_SPV_PATH=ToneMapping.comp.spv
+    GTE_TEST_TEMPORALAA_RESOLVE_SPV_PATH=TemporalAaResolve.comp.spv
     GTE_TEST_RENDER_FEATURE_BLEND_SPV_PATH=RenderFeatureBlend.comp.spv
     GTE_TEST_SKIN_SPV_PATH=SkinVerticesPositionNormal.comp.spv
     GTE_TEST_SKIN_UV_SPV_PATH=SkinVerticesPositionNormalUv.comp.spv
@@ -121,7 +122,8 @@ gte_test_path_defines(GreatTamanaEngineTests "${CMAKE_SOURCE_DIR}/src"
     GTE_TEST_HIZ_BUILD_TOP_SHADER_PATH=Shaders/HizBuildTop.comp
     GTE_TEST_SSGI_COMMON_GLSL_PATH=Features/Ssgi/Shaders/SsgiCommon.glsl
     GTE_TEST_SSGI_COMPOSITE_GLSL_PATH=Features/Ssgi/Shaders/SsgiComposite.frag
-    GTE_TEST_TONEMAPPING_GLSL_PATH=Features/ToneMapping/Shaders/ToneMapping.comp)
+    GTE_TEST_TONEMAPPING_GLSL_PATH=Features/ToneMapping/Shaders/ToneMapping.comp
+    GTE_TEST_TEMPORALAA_RESOLVE_GLSL_PATH=Features/TemporalAa/Shaders/TemporalAaResolve.comp)
 gte_test_path_defines(GreatTamanaEngineTests "${CMAKE_BINARY_DIR}/shaders"
     GTE_TEST_CLUSTER_CULL_CONSTANTS_GLSL_PATH=gen/ClusterCullConstants.glsl)
 

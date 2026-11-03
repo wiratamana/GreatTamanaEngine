@@ -1,6 +1,6 @@
 # Feature kit reference
 > Look-up tables for `gte::fx`, the Vulkan-free kit that render features are written against.
-> Verified against code: 2026-11-03
+> Verified against code: 2026-11-04
 
 ## TL;DR
 - Include `src/Core/FeatureKit/FeatureKit.h`. It is the one umbrella header.
@@ -29,13 +29,17 @@ Blend (`fx::Blend`): `Replace` writes over the view (ToneMapping, last). `AlphaO
 
 | Type | Stage | Extra members |
 |---|---|---|
-| `PreOpaqueFrame` | `PreOpaque` | none |
+| `PreOpaqueFrame` | `PreOpaque` | `SetViewJitter(ndc)` |
 | `OpaqueFrame` | `Opaque` | `SceneTarget()` color + depth (load, never clear), `SceneDepth()` |
 | `PostOpaqueFrame` | `PostOpaque`, `PostTransparent` | `SceneColor()`, `SceneDepth()`, `ViewBackground()` |
 | `CompositeFrame` | `PostComposite`, `PreUI` | `PrivateTarget()`, `Extent()`, plus `PostOpaqueFrame` members |
 | `SharedFrame` | `PreOpaqueShared` | none. `View()` is empty and `Scope()` is `Shared` |
 
-`fx::View` (`f.View()`) holds `scope`, `extent`, `eye`, `viewProjection`, `invViewProjection`, `invViewProjectionValid`.
+`fx::View` (`f.View()`) holds `scope`, `extent`, `eye`, `viewProjection`, `invViewProjection`, `invViewProjectionValid`, `jitterNdc`.
+- `viewProjection` and `invViewProjection` are never jittered. Camera math and history use them.
+- `jitterNdc` is the clip-space shift of this view's main scene draw this frame. `(0, 0)` when none.
+- `DrawViewProjection()` is the matrix the view's scene color and depth were drawn with. It equals `viewProjection` when there is no jitter.
+- Anything that draws into the view's scene color or depth must use `DrawViewProjection()`, not `viewProjection`.
 
 ## Frame verbs (on every frame)
 
@@ -60,8 +64,11 @@ Blend (`fx::Blend`): `Replace` writes over the view (ToneMapping, last). `AlphaO
 | `PrimaryCamera(fallbackAspect)` | `optional<View>` | Game camera, even when the Game view does not render this frame |
 | `ViewCaptureArmed()` | `bool` | True in the Game view while its frame is captured. Takeovers are refused then |
 | `ReportOnce`, `ReportWarningOnce` | void | Log once per distinct text |
+| `PreOpaqueFrame::SetViewJitter(ndc)` | `bool` | PreOpaque callbacks only. Shifts this view's scene draw projection by `ndc` (NDC, at most 0.5). False: no engine context, shared scope or invalid value, and no jitter. Reset to zero every frame. Call it at most once |
 
 Also on `Frame`: `Owns(texture)`, `Stamp(handle)`, `ChannelHasEmptyViewReaders(channel)`, `CullSceneDraw(vp, padding)`, `LastSceneDrawCullCounts()`. The cluster queries are `ClusterCandidates()`, `ClusterCandidateBounds()`, `ClusterCandidateEntities()`, `ClusterCandidateUnion()`, `ClusterRejections()`, `ClusterPathSupported()`.
+
+`ClusterCameraOf(view)` uses the unjittered `viewProjection`. `ClusterDrawCameraOf(view)` uses `DrawViewProjection()`. A cluster draw that writes the view's scene depth must use `ClusterDrawCameraOf`.
 
 ## Chains
 
@@ -188,7 +195,7 @@ For each view, the compositor copies the view target into a seed. Then, for each
 2. The callback sees the running result as `SceneColor()`.
 3. One blend pass mixes the private target into the running result.
 
-The last blend writes the real view target. A callback that declares nothing is skipped. Each entry costs about two full-size RGBA16F targets per view. Today's order by priority: Ssgi -1600, Gtao -1500, Atmosphere -1000, Shadow -500, VolumetricLight -250, ToneMapping +1000.
+The last blend writes the real view target. A callback that declares nothing is skipped. Each entry costs about two full-size RGBA16F targets per view. Today's order by priority: Ssgi -1600, Gtao -1500, Atmosphere -1000, Shadow -500, VolumetricLight -250, TemporalAa -150 (`Replace`), Bloom -100, ToneMapping +1000.
 
 ## Buffer rules
 
@@ -214,7 +221,8 @@ The last blend writes the real view target. A callback that declares nothing is 
 | `EnumTable.h` | `EnumName`, `ParseEnum`, `EnumKnown` for debug endpoints |
 | `FeatureDebug.h` | `IFeatureDebugEndpoint`, `ParseDebugBool/Unsigned/Float` |
 | `SnapshotAge.h` | `SnapshotIsStale(frame, newest)`: true after 2 frames without a render |
-| `ScreenSpaceView.h` | `DeriveCameraBasis`, `TemporalHistory`, `HistoryUsable`, `TemporalResolveParamsGpu`, `ScaledExtent`. Shared by Gtao and Ssgi |
+| `ScreenSpaceView.h` | `DeriveCameraBasis`, `TemporalHistory`, `HistoryUsable`, `TemporalResolveParamsGpu`, `ScaledExtent`. Shared by Gtao, Ssgi and TemporalAa |
+| `ViewJitter.h` | `IsValidViewJitter`, `ApplyClipJitter` (zero jitter returns the matrix unchanged), `kMaxViewJitterNdc` |
 | `SharedOncePerFrame.h`, `OncePerFrame.h` | Once-per-frame guards |
 
 ## Related

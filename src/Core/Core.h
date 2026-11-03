@@ -9,6 +9,7 @@
 #include "../ECS/EntityMarkSet.h"
 #include "../Game/Game.h"
 #include "../Game/SceneQuery.h"
+#include "../Math/Vec2.h"
 #include "../Profiling/ScopeAggregate.h"
 #include "../Renderer/Culling/ClusterCullMath.h"
 #include "../Renderer/MeshHandle.h"
@@ -226,6 +227,13 @@ public:
     // (shared scope, captured primary frame, unusable matrix). The last request of a frame wins. Kit verbs only.
     bool SetSceneDrawCull(rg::ViewScope scope, const Mat4& viewProjection, float paddingFraction);
 
+    // Shifts the draw projection of `scope` for this frame by `ndc`. False, and no change, for a shared scope or an
+    // invalid value. Kit verbs only.
+    bool SetViewJitter(rg::ViewScope scope, Vec2 ndc);
+
+    // Jitter set for `scope` this frame; (0, 0) when none.
+    Vec2 ViewJitterNdc(rg::ViewScope scope) const noexcept;
+
     // Counts of the last CPU scene draw of `scope`; zeros unless it ran in the previous frame or in `currentFrameIndex`.
     SceneCullCounts LastSceneDrawCullCounts(rg::ViewScope scope, std::uint64_t currentFrameIndex) const noexcept;
 
@@ -365,6 +373,8 @@ private:
         bool valid = false; // False until a draw of this scope has stored its counts.
     };
     std::array<std::optional<SceneCullRequest>, rg::kViewScopeCount> m_sceneCullThisFrame;
+    // Reset at the start of each BuildFrame().
+    std::array<Vec2, rg::kViewScopeCount> m_viewJitterThisFrame{};
     std::array<SceneCullResult, rg::kViewScopeCount> m_sceneCullCountsLast;
 
     // Cluster-ready instances and entity exclusion sets of this frame, cleared at the start of BuildFrame().

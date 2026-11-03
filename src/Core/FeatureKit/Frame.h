@@ -233,6 +233,10 @@ private:
 class PreOpaqueFrame : public Frame {
 public:
     using Frame::Frame;
+
+    // Shifts this view's scene draw projection by `ndc` (NDC units) for this frame. Call at most once, in a PreOpaque callback.
+    // False when refused: no engine context, shared scope, or an invalid value. Refused means no jitter.
+    bool SetViewJitter(Vec2 ndc);
 };
 
 // During opaque geometry: passes declared here write the view's own color and depth (load, never clear).

@@ -19,4 +19,9 @@ ClusterCamera ClusterCameraOf(const View& view)
     return MakeClusterCamera(view.viewProjection, view.eye);
 }
 
+ClusterCamera ClusterDrawCameraOf(const View& view)
+{
+    return MakeClusterCamera(view.DrawViewProjection(), view.eye);
+}
+
 } // namespace gte::fx

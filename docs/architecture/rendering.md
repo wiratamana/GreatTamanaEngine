@@ -1,11 +1,12 @@
 # Rendering
 > One-page overview of how a frame is drawn: layers, frame flow, formats and materials. Read this first, then the deep docs.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-11-04
 
 ## TL;DR
 - Only `src/Renderer/` touches Vulkan. Everything else uses `gte::rg` (render graph) and `gte::fx` (feature kit).
 - Each frame is two render graphs. The offscreen graph draws the views. The present graph blits and draws the UI.
 - Scene color is linear HDR `RGBA16_Float`. The `ToneMapping` feature makes display colors at the end.
+- A PreOpaque callback may shift the Game view's draw projection by a sub-pixel jitter (`SetViewJitter`). `Core` stores it per frame and the `RenderOpaque` provider draws with it. `fx::View::viewProjection` stays unjittered. Draws into the view's color or depth use `View::DrawViewProjection()`. See [Temporal anti-aliasing](../reference/render-features/temporal-aa.md).
 - Rendering uses Vulkan 1.3 dynamic rendering. There is no `VkRenderPass` and no `VkFramebuffer`.
 - Two views exist: Primary (Game) and Secondary (Scene). Renderer code says `Primary` / `Secondary`. The editor says Game / Scene.
 
@@ -62,7 +63,7 @@ Per view, the shipped features run like this:
 
 | Stage | What runs |
 |---|---|
-| PreOpaque | Frame stamps, Atmosphere LUTs, sun light, shadow cascades, scene lighting uniforms |
+| PreOpaque | Frame stamps, Atmosphere LUTs, sun light, shadow cascades, scene lighting uniforms, view jitter |
 | Opaque | `RenderOpaque` (scene draw), `GpuDrivenScene` passes |
 | PostOpaque | Sky background, aerial volume, shadow mask, GTAO, SSGI trace, volumetric volume |
 | PostComposite | Blend chain by priority. See below. |
@@ -76,6 +77,8 @@ PostComposite chain, in linear HDR, lowest priority first:
 | -1000 | `AtmosphereComposite` |
 | -500 | `Shadow.Composite` |
 | -250 | `VolumetricLight.Composite` |
+| -150 | `TemporalAa` (resolve, `Replace`) |
+| -100 | `Bloom` |
 | +1000 | `ToneMapping` (last) |
 
 - `ToneMapping` is the display transform. It does exposure, saturation, curve, sRGB encode and dither.
