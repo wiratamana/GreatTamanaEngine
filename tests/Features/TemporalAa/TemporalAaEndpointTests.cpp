@@ -157,13 +157,17 @@ TEST_F(TemporalAaEndpointTest, BadRequestsFailAndKeepTheOldState)
 
 TEST_F(TemporalAaEndpointTest, InvokeResetsDefaultsAndRefusesBadCalls)
 {
-    ASSERT_TRUE(Set({ { "jitterScale", "3" }, { "debugView", "JitterOnly" }, { "jitterSampleCount", "4" } }).ok);
+    ASSERT_TRUE(Set({ { "jitterScale", "3" }, { "debugView", "JitterOnly" }, { "jitterSampleCount", "4" },
+        { "feedbackMin", "0.2" }, { "feedbackMax", "0.3" }, { "clipGamma", "3" } }).ok);
 
     const fx::FeatureDebugResult reset = endpoint->Invoke("reset_defaults", {});
     ASSERT_TRUE(reset.ok);
     const TemporalAaSettings defaults{};
     EXPECT_DOUBLE_EQ(NumberOf(reset, "jitterScale"), defaults.jitterScale);
     EXPECT_DOUBLE_EQ(NumberOf(reset, "jitterSampleCount"), static_cast<double>(defaults.jitterSampleCount));
+    EXPECT_NEAR(NumberOf(reset, "feedbackMin"), defaults.feedbackMin, 1e-6);
+    EXPECT_NEAR(NumberOf(reset, "feedbackMax"), defaults.feedbackMax, 1e-6);
+    EXPECT_NEAR(NumberOf(reset, "clipGamma"), defaults.clipGamma, 1e-6);
     EXPECT_EQ(TextOf(reset, "debugView"), "Off");
     EXPECT_TRUE(BoolOf(reset, "enabled"));
 

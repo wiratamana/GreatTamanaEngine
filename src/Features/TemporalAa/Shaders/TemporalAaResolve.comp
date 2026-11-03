@@ -26,6 +26,15 @@ layout(binding = 6, r32f) uniform writeonly image2D depthOutput; // View depth, 
 const float kMaxValue = 65000.0; // Largest finite half float, with margin.
 const float kSkyZ = 1e20;        // View depth stand-in for "no surface".
 const float kLumaFloor = 0.2;    // Same as kTemporalAaLumaFloor.
+const float kStaleCut = 0.6;     // Largest feedback share removed when the clip had to pull the history far.
+
+const int kGroupSide = 8;
+const int kTileSide = kGroupSide + 2; // The group plus a 1 pixel border.
+const int kTileTexels = kTileSide * kTileSide;
+
+// Working-space color (YCoCg) and raw depth of the group tile, filled once per group.
+shared vec3 tileColor[kTileTexels];
+shared float tileDepth[kTileTexels];
 
 float Luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 
@@ -51,46 +60,73 @@ vec3 ClipToBox(vec3 center, vec3 extent, vec3 q)
     return m > 1.0 ? center + v / m : q;
 }
 
-// Catmull-Rom history sample, 12 taps (the 4 corners are dropped and the weights renormalized).
-vec3 SampleHistory(vec2 texel, ivec2 size)
+// Every thread of the group takes part, also those outside the image: the barrier needs all of them.
+void LoadTile(ivec2 colorSize, ivec2 depthSize)
 {
-    vec2 base = floor(texel);
-    vec2 f = texel - base;
-    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
-    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
-    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
-    vec2 w3 = f * f * (-0.5 + 0.5 * f);
-    float wx[4] = float[4](w0.x, w1.x, w2.x, w3.x);
-    float wy[4] = float[4](w0.y, w1.y, w2.y, w3.y);
-    vec3 sum = vec3(0.0);
-    float weightSum = 0.0;
-    for (int j = 0; j < 4; ++j) {
-        for (int i = 0; i < 4; ++i) {
-            if ((i == 0 || i == 3) && (j == 0 || j == 3)) { continue; }
-            ivec2 q = clamp(ivec2(base) + ivec2(i - 1, j - 1), ivec2(0), size - ivec2(1));
-            float w = wx[i] * wy[j];
-            sum += ToWorking(Sanitize(texelFetch(colorHistory, q, 0).rgb)) * w;
-            weightSum += w;
-        }
+    ivec2 origin = ivec2(gl_WorkGroupID.xy) * kGroupSide - ivec2(1);
+    for (int i = int(gl_LocalInvocationIndex); i < kTileTexels; i += kGroupSide * kGroupSide) {
+        ivec2 q = origin + ivec2(i % kTileSide, i / kTileSide);
+        tileColor[i] = RgbToYCoCg(ToWorking(Sanitize(texelFetch(sceneColor, clamp(q, ivec2(0), colorSize - ivec2(1)), 0).rgb)));
+        tileDepth[i] = texelFetch(sceneDepth, clamp(q, ivec2(0), depthSize - ivec2(1)), 0).r;
     }
-    return max(sum / weightSum, vec3(0.0));
+    memoryBarrierShared();
+    barrier();
 }
 
-// 1 when the expected previous view depth fits the depth range of the 3x3 history texels, 0 when it does not.
+// Catmull-Rom history sample in 5 bilinear taps (the 4 corners are dropped and the weights renormalized).
+// `texel` is in texel units, an integer is a texel center. The history is finite and non-negative by construction.
+vec3 SampleHistory(vec2 texel, ivec2 size)
+{
+    vec2 pos = texel + 0.5;
+    vec2 tc = floor(pos - 0.5) + 0.5;
+    vec2 f = pos - tc;
+    vec2 f2 = f * f;
+    vec2 f3 = f2 * f;
+    vec2 w0 = -0.5 * f3 + f2 - 0.5 * f;
+    vec2 w1 = 1.5 * f3 - 2.5 * f2 + 1.0;
+    vec2 w2 = -1.5 * f3 + 2.0 * f2 + 0.5 * f;
+    vec2 w3 = 0.5 * f3 - 0.5 * f2;
+    vec2 w12 = w1 + w2;
+    vec2 tc12 = tc + w2 / w12;
+    vec2 tc0 = tc - 1.0;
+    vec2 tc3 = tc + 2.0;
+    vec2 inv = 1.0 / vec2(size);
+
+    float wTop = w12.x * w0.y;
+    float wLeft = w0.x * w12.y;
+    float wMid = w12.x * w12.y;
+    float wRight = w3.x * w12.y;
+    float wBottom = w12.x * w3.y;
+    vec3 sum = texture(colorHistory, vec2(tc12.x, tc0.y) * inv).rgb * wTop
+             + texture(colorHistory, vec2(tc0.x, tc12.y) * inv).rgb * wLeft
+             + texture(colorHistory, tc12 * inv).rgb * wMid
+             + texture(colorHistory, vec2(tc3.x, tc12.y) * inv).rgb * wRight
+             + texture(colorHistory, vec2(tc12.x, tc3.y) * inv).rgb * wBottom;
+    return max(sum / (wTop + wLeft + wMid + wRight + wBottom), vec3(0.0));
+}
+
+void GrowRange(vec4 h, inout float lo, inout float hi)
+{
+    for (int i = 0; i < 4; ++i) {
+        float v = h[i] > 0.0 ? h[i] : kSkyZ;
+        lo = min(lo, v);
+        hi = max(hi, v);
+    }
+}
+
+// 1 when the expected previous view depth fits the depth range around the history texel, 0 when it does not.
 // A range (not one texel) keeps the silhouettes: jitter flips an edge texel between near and far every frame.
+// 4 gathers cover the 4x4 texels around the history position.
 float DepthConfidence(vec2 texel, float expectedZ, ivec2 size)
 {
-    ivec2 c = ivec2(floor(texel + 0.5));
+    vec2 base = floor(texel);
+    vec2 inv = 1.0 / vec2(size);
     float lo = 3.0e38;
     float hi = 0.0;
-    for (int dy = -1; dy <= 1; ++dy) {
-        for (int dx = -1; dx <= 1; ++dx) {
-            float h = texelFetch(depthHistory, clamp(c + ivec2(dx, dy), ivec2(0), size - ivec2(1)), 0).r;
-            h = h > 0.0 ? h : kSkyZ;
-            lo = min(lo, h);
-            hi = max(hi, h);
-        }
-    }
+    GrowRange(textureGather(depthHistory, (base + vec2(0.0, 0.0)) * inv, 0), lo, hi);
+    GrowRange(textureGather(depthHistory, (base + vec2(2.0, 0.0)) * inv, 0), lo, hi);
+    GrowRange(textureGather(depthHistory, (base + vec2(0.0, 2.0)) * inv, 0), lo, hi);
+    GrowRange(textureGather(depthHistory, (base + vec2(2.0, 2.0)) * inv, 0), lo, hi);
     float tolerance = params.blend.z;
     float rel = max((lo - expectedZ) / lo, (expectedZ - hi) / hi);
     return 1.0 - smoothstep(0.5 * tolerance, tolerance, max(rel, 0.0));
@@ -100,32 +136,35 @@ void main()
 {
     ivec2 size = imageSize(colorOutput);
     ivec2 p = ivec2(gl_GlobalInvocationID.xy);
-    if (p.x >= size.x || p.y >= size.y) { return; }
     // Sizes come from the real textures: a resize applies one frame late, so they may differ for one frame.
     ivec2 colorSize = textureSize(sceneColor, 0);
     ivec2 depthSize = textureSize(sceneDepth, 0);
+
+    LoadTile(colorSize, depthSize);
+    if (p.x >= size.x || p.y >= size.y) { return; }
+
     ivec2 historySize = textureSize(colorHistory, 0);
     ivec2 historyDepthSize = textureSize(depthHistory, 0);
     vec2 depthSizeF = vec2(depthSize);
 
-    // 3x3 neighborhood: working-space colors and the closest depth.
+    // 3x3 neighborhood from the tile: working-space colors and the closest depth.
+    ivec2 lp = ivec2(gl_LocalInvocationID.xy) + ivec2(1);
     vec3 samples[9];
     float closestDepth = 2.0;
-    ivec2 closestPixel = p;
+    ivec2 closestOffset = ivec2(0);
     for (int dy = -1; dy <= 1; ++dy) {
         for (int dx = -1; dx <= 1; ++dx) {
-            ivec2 o = ivec2(dx, dy);
-            samples[(dy + 1) * 3 + (dx + 1)] = RgbToYCoCg(ToWorking(Sanitize(texelFetch(sceneColor, clamp(p + o, ivec2(0), colorSize - ivec2(1)), 0).rgb)));
-            ivec2 dq = clamp(p + o, ivec2(0), depthSize - ivec2(1));
-            float d = texelFetch(sceneDepth, dq, 0).r;
-            if (d < closestDepth) { closestDepth = d; closestPixel = dq; }
+            int t = (lp.y + dy) * kTileSide + lp.x + dx;
+            samples[(dy + 1) * 3 + (dx + 1)] = tileColor[t];
+            float d = tileDepth[t];
+            if (d < closestDepth) { closestDepth = d; closestOffset = ivec2(dx, dy); }
         }
     }
+    ivec2 closestPixel = clamp(p + closestOffset, ivec2(0), depthSize - ivec2(1));
     vec3 currentYCoCg = samples[4];
-    vec3 currentRaw = Sanitize(texelFetch(sceneColor, clamp(p, ivec2(0), colorSize - ivec2(1)), 0).rgb);
 
     // Own view depth for the next frame (0 = sky).
-    float ownDepth = FetchDepth(sceneDepth, p);
+    float ownDepth = tileDepth[lp.y * kTileSide + lp.x];
     float ownZ = 0.0;
     if (ownDepth < kClearDepthThreshold) {
         ownZ = dot(UnprojectDepth(params.invViewProjection, p, ownDepth, depthSize) - params.eye.xyz, params.forward.xyz);
@@ -134,7 +173,7 @@ void main()
 
     // Debug view: the jittered picture as it is, no history.
     if (params.look.x > 0.5) {
-        imageStore(colorOutput, p, vec4(currentRaw, 1.0));
+        imageStore(colorOutput, p, vec4(Sanitize(texelFetch(sceneColor, clamp(p, ivec2(0), colorSize - ivec2(1)), 0).rgb), 1.0));
         return;
     }
 
@@ -193,17 +232,21 @@ void main()
         vec3 center = 0.5 * (boxLo + boxHi);
         vec3 extent = 0.5 * (boxHi - boxLo);
 
-        vec3 history = RgbToYCoCg(SampleHistory(historyTexel, historySize));
+        vec3 history = RgbToYCoCg(ToWorking(SampleHistory(historyTexel, historySize)));
         vec3 clipped = ClipToBox(center, extent, history);
 
         float diff = abs(currentYCoCg.x - clipped.x) / max(max(currentYCoCg.x, clipped.x), kLumaFloor);
         float k = 1.0 - diff;
         float feedback = mix(params.blend.x, params.blend.y, k * k);
+        // History the clip had to pull far is stale (moving content): trust it less.
+        feedback *= 1.0 - kStaleCut * smoothstep(0.03, 0.25, length(history - clipped));
         float confidence = DepthConfidence(historyTexel, expectedZ, historyDepthSize);
         resultYCoCg = mix(currentYCoCg, clipped, feedback * confidence);
     }
 
     vec3 result = FromWorking(YCoCgToRgb(resultYCoCg));
-    if (any(isnan(result)) || any(isinf(result))) { result = currentRaw; }
+    if (any(isnan(result)) || any(isinf(result))) {
+        result = Sanitize(texelFetch(sceneColor, clamp(p, ivec2(0), colorSize - ivec2(1)), 0).rgb);
+    }
     imageStore(colorOutput, p, vec4(max(result, vec3(0.0)), 1.0));
 }

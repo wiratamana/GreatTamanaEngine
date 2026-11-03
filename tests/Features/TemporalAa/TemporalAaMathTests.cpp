@@ -75,6 +75,18 @@ TEST(TemporalAaMathTest, SanitizeLiftsFeedbackMaxToFeedbackMin)
     EXPECT_EQ(safe.feedbackMax, 0.9f);
 }
 
+TEST(TemporalAaMathTest, DefaultsAreInsideTheSanitizerRanges)
+{
+    const TemporalAaSettings d{};
+    EXPECT_EQ(d.feedbackMin, 0.7f);
+    EXPECT_EQ(d.feedbackMax, 0.9f);
+    EXPECT_EQ(d.clipGamma, 0.75f);
+    const TemporalAaSettings safe = SanitizeTemporalAaSettings(d);
+    EXPECT_EQ(safe.feedbackMin, d.feedbackMin);
+    EXPECT_EQ(safe.feedbackMax, d.feedbackMax);
+    EXPECT_EQ(safe.clipGamma, d.clipGamma);
+}
+
 TEST(TemporalAaMathTest, SanitizeClampsSampleCountAndDebugView)
 {
     TemporalAaSettings s;

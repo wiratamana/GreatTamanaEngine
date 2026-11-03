@@ -72,7 +72,9 @@ TEST(TemporalAaShaderNamesTest, GlslConstantsMatchTheCpuReference)
     EXPECT_NE(source.find("#include \"ScreenSpaceCommon.glsl\""), std::string::npos);
     EXPECT_NE(source.find("kLumaFloor = 0.2"), std::string::npos);
     EXPECT_NE(source.find("1.0 + Luma(c)"), std::string::npos);
-    EXPECT_NE(source.find("-2.5 + 1.5 * f"), std::string::npos);
+    EXPECT_NE(source.find("1.5 * f3 - 2.5 * f2 + 1.0"), std::string::npos);
+    EXPECT_NE(source.find("textureGather(depthHistory"), std::string::npos);
+    EXPECT_NE(source.find("shared vec3 tileColor"), std::string::npos);
 }
 
 } // namespace

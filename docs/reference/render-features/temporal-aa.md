@@ -41,14 +41,16 @@
 | `enabled` | true | bool | Off: no jitter, no pass, no history |
 | `jitterSampleCount` | 8 | 2..16 | Length of the Halton cycle |
 | `jitterScale` | 1.0 | 0..8 | 1 = +/-0.5 pixel. 0 = no jitter. Above 1 is for debugging |
-| `feedbackMin` | 0.85 | 0..0.99 | History share when current and history differ a lot |
-| `feedbackMax` | 0.96 | `feedbackMin`..0.99 | History share when they agree |
-| `clipGamma` | 1.0 | 0.25..4 | Size of the color clip box in sigmas |
+| `feedbackMin` | 0.7 | 0..0.99 | History share when current and history differ a lot |
+| `feedbackMax` | 0.9 | `feedbackMin`..0.99 | History share when they agree |
+| `clipGamma` | 0.75 | 0.25..4 | Size of the color clip box in sigmas |
 | `depthTolerance` | 0.03 | 0.001..0.5 | Relative view depth tolerance of the history depth check |
 | `debugView` | `Off` | `Off`, `JitterOnly` | `JitterOnly`: jitter on, history ignored |
 
-- Resolve steps: 3x3 neighborhood in `c / (1 + luma)` space and YCoCg, clip box (mean +/- gamma * sigma, cut by min/max), closest-depth reprojection, Catmull-Rom history (12 taps), 3x3 history depth range check, clip, luma based feedback, blend.
-- The depth check uses a range of 3x3 history texels, not one texel. A single texel would kill the AA at silhouettes.
+- Resolve steps: the 3x3 color and depth neighborhood of the 8x8 group is loaded once into a 10x10 shared tile. Then: working space `c / (1 + luma)` and YCoCg, clip box (mean +/- gamma * sigma, cut by min/max), closest-depth reprojection, 5-tap bilinear Catmull-Rom history, history depth range check (4 gathers, 4x4 texels), clip, luma based feedback, stale cut, blend.
+- Texture instructions per pixel: about 12 (1.6 color + 1.6 depth tile loads, 5 history taps, 4 depth gathers). The first version used 41.
+- Stale cut: when the clip had to pull the history far (moving content, no motion vectors), the feedback is lowered by up to 60 percent. `TemporalAaFeedback()` is the CPU reference of the luma part only.
+- The depth check uses a range of texels, not one texel. A single texel would kill the AA at silhouettes.
 - Non-finite values become the default. Values are clamped. `feedbackMax` is lifted to `feedbackMin` if lower.
 
 ## Debug keys

@@ -31,9 +31,9 @@ struct TemporalAaSettings {
     bool enabled = true;
     std::uint32_t jitterSampleCount = 8; // 2..16, length of the Halton cycle.
     float jitterScale = 1.0f;            // 0..8. 1 = +/-0.5 pixel. 0 = no jitter. Above 1 is for debugging only.
-    float feedbackMin = 0.85f;           // 0..0.99, history share when current and history differ a lot.
-    float feedbackMax = 0.96f;           // feedbackMin..0.99, history share when they agree.
-    float clipGamma = 1.0f;              // 0.25..4, size of the color clip box in sigmas.
+    float feedbackMin = 0.7f;            // 0..0.99, history share when current and history differ a lot.
+    float feedbackMax = 0.9f;            // feedbackMin..0.99, history share when they agree.
+    float clipGamma = 0.75f;             // 0.25..4, size of the color clip box in sigmas.
     float depthTolerance = 0.03f;        // 0.001..0.5, relative view depth tolerance of the history depth check.
     TemporalAaDebugView debugView = TemporalAaDebugView::Off;
 };
