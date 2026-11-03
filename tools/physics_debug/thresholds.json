@@ -50,7 +50,7 @@
     { "id": "C5", "scenario": "S1", "groups": ["Q"], "metric": "dist_from_animated", "stat": "mean", "op": ">=", "value": 0.9, "baseline": "S1_default" },
     { "id": "C5", "scenario": "S1", "groups": ["Q"], "metric": "dist_from_animated", "stat": "mean", "op": "<=", "value": 1.1, "baseline": "S1_default" },
 
-    { "id": "C6", "scenario": "S1", "groups": ["帽D1","右CF","左CF","SZY親"], "metric": "dist_from_animated", "stat": "mean", "op": "within_rel", "value": 0.10, "baseline": "S1_default" },
+    { "id": "C6", "scenario": "S1", "groups": ["*"], "except": ["HB1","HB2","HB3","HB4","Q","左F","右F","DM"], "metric": "dist_from_animated", "stat": "mean", "op": "within_rel", "value": 0.10, "baseline": "S1_default" },
 
     { "id": "C7", "scenario": "S1", "field": "welded_root_children.joints", "op": "==", "value": 15 },
     { "id": "C7", "scenario": "S1", "aggregate": "welded_root_children", "metric": "dist_from_animated", "stat": "mean", "op": "<=", "value": 0.05 },
@@ -84,6 +84,13 @@
     { "id": "D3", "scenario": "S1", "field": "collision.pushed_particles_per_frame", "op": "<=", "value": 1.15, "baseline": "S1_default" },
 
     { "id": "D4", "scenario": "S1", "field": "physics_ms.median", "op": "<=", "value": 1.15, "baseline": "S1_default", "repeat": 3, "note": "median of the medians of 3 runs" },
-    { "id": "D4", "scenario": "S1", "field": "physics_ms.median", "op": "<=", "value": 2.5, "baseline": "S1_legacy", "repeat": 3, "note": "median of the medians of 3 runs" }
+    { "id": "D4", "scenario": "S1", "field": "physics_ms.median", "op": "<=", "value": 2.5, "baseline": "S1_legacy", "repeat": 3, "note": "median of the medians of 3 runs" },
+
+    { "id": "D5", "scenario": "S1", "check": "identity", "baseline": "S1_legacy", "note": "run with -Preset legacy" },
+    { "id": "D5", "scenario": "S2", "check": "identity", "baseline": "S2_legacy", "note": "run with -Preset legacy" },
+    { "id": "D5", "scenario": "S3", "check": "identity", "baseline": "S3_legacy", "note": "run with -Preset legacy" },
+    { "id": "D5", "scenario": "S4", "check": "identity", "baseline": "S4_legacy", "note": "run with -Preset legacy" },
+
+    { "id": "D6", "scenario": "S9", "check": "identity", "baseline": "S1_default", "note": "S1 with bend_joint_floor_degrees = 0" }
   ]
 }

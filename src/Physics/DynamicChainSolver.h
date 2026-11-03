@@ -38,6 +38,10 @@ struct StepOptions {
 // flooredOwnOut, when set, receives the per-joint own limit after the floor.
 void ComputeCumulativeBendLimits(
     const DynamicChainDefinition& definition, float floorRadians, std::vector<float>& out, std::vector<float>* flooredOwnOut = nullptr);
+
+// Effective bend limit per joint in radians (pi = free):
+// clamp(cumulativeOwnLimits * scale + minRadians, 0, pi). All pi when limits are disabled.
+void ComputeEffectiveBendLimits(const DynamicChainDefinition& definition, const StepOptions& options, std::vector<float>& out);
 std::vector<float> ComputeEffectiveBendLimits(const DynamicChainDefinition& definition, const StepOptions& options);
 
 // Advances one chain by one fixed step. Root, animated and collider positions are world space.

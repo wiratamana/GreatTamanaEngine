@@ -41,8 +41,9 @@ Needs `curl.exe` (ships with Windows 10 and later) and Windows PowerShell 5.1 or
 | S6 | S1 with `collision_enabled=false`. |
 | S7 | S1 with `collision_fit_enabled=false`. |
 | S8 | Stress. Dance, 68 frames at 20 Hz (the clip moves 3 times faster per frame), 0 warmup. |
+| S9 | S1 with `bend_joint_floor_degrees=0` (D6). |
 
-S5, S6, S7, S8 run only when a gate names them. The pictures are live frames of the editor (clip playing) taken right after the run. The exact frames of a run are in `snapshots` when you ask for `snapshot_frames`.
+S5, S6, S7, S8, S9 run only when a gate names them. The pictures are live frames of the editor (clip playing) taken right after the run. The exact frames of a run are in `snapshots` when you ask for `snapshot_frames`.
 
 ## Gates
 Gates are in `thresholds.json`. A gate whose JSON field does not exist counts as FAIL. It is never skipped.
@@ -70,11 +71,18 @@ Gates are in `thresholds.json`. A gate whose JSON field does not exist counts as
 | D1 | Stability. S1, S2, S3: `nan_count` and `reseed_count` are 0. `abs_stretch` p99 <= max(1.1 x baseline `S1_default`, 0.10). |
 | D3 | Collision. S1 `pushed_particles_per_frame` <= 15.31 and <= 1.15 x baseline `S1_default`. |
 | D4 | Performance. S1 `physics_ms.median` <= 1.15 x baseline `S1_default` and <= 2.5 x baseline `S1_legacy` (3 runs). |
+| D5 | Legacy identity. Run with `-Preset legacy`. S1, S2, S3, S4 equal `S1_legacy.json` .. `S4_legacy.json` of the baseline in every field except `physics_ms` and the key `bend_joint_floor_degrees`. |
+| D6 | Floor-zero identity. S9 (S1 with `bend_joint_floor_degrees=0`, preset `default`) equals baseline `S1_default.json` except `physics_ms` and the key `bend_joint_floor_degrees`. |
 
 E8 (damping and goal pull at 60 Hz and 120 Hz) is a unit test, not a gate here. The live `GET /profiler/scope?name=PhysicsSystem::Update` median of E7 is checked by hand.
 
 The C and D gates are for `-Preset default`. They need the baseline file `S1_default.json` (S1 with the default preset on the code before the floor). D2 is covered by E4.
-C9 (joint rows), D5 (legacy identity), D6 (floor-zero identity), D7 and the floor sweep are not in the script. Compute them with a python script from saved JSON files.
+
+`identity` and `determinism` checks compare the whole reply after removing `physics_ms` and `bend_joint_floor_degrees` at any depth. D5 and D6 need the baseline folder. Run D5 with `-Preset legacy -GateIds D5`. A missing baseline file is a FAIL.
+
+C6 uses `groups: ["*"]` with `except`: every group of the baseline file except HB1, HB2, HB3, HB4, Q, `左F`, `右F` and DM.
+
+C9 (joint rows), C11, D2 (covered by E4), D7 (same check as E9), D8, D9 and the floor sweep are not in the script. The DEBUG role computes them with a python script from saved JSON files.
 
 ### Gate fields
 | Field | Meaning |
@@ -90,7 +98,8 @@ C9 (joint rows), D5 (legacy identity), D6 (floor-zero identity), D7 and the floo
 | `baseline` | File stem inside `-Baseline`. The limit is `value x baseline value`. |
 | `floor` | Lower bound of the limit. With `baseline` the limit is `max(value x baseline, floor)`. |
 | `repeat` | Number of runs of the scenario. |
-| `check` | `determinism` for E9. |
+| `check` | `determinism` (E9, D7) or `identity` (D5, D6). |
+| `except` | With `groups: ["*"]`: group keys to leave out (used by C6). |
 
 Group names are read from `thresholds.json` as UTF-8. The two hair groups are the PMX group keys `左F` and `右F` (the character for left and for right, then `F`). The script file itself is ASCII only. Keep `thresholds.json` saved as UTF-8 when you edit it.
 

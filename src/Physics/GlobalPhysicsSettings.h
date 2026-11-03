@@ -31,6 +31,7 @@ struct GlobalPhysicsSettings {
     bool bendLimitsEnabled = true;
     float bendLimitScale = 1.0f;
     float bendLimitMinDegrees = 0.0f;
+    // Minimum own bend limit of every non-root-child joint, in degrees.
     float bendJointFloorDegrees = 3.0f;
 
     // Interpolate the written pose between the last two fixed steps.
