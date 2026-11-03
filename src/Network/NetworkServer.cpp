@@ -2060,6 +2060,43 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
             "application/json");
     });
 
+    // GET/POST /skinning_mode: reads or sets the CPU/GPU skinning mode on the main thread (same as the Jobs panel combo).
+    const auto skinningModeRoute = [commandBridge](bool apply, bool gpu, httplib::Response& res) {
+        if (commandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("engine command bridge not available"), "application/json");
+            return;
+        }
+        EngineCommandRequest request;
+        request.kind = EngineCommandKind::SkinningMode;
+        request.skinningMode.apply = apply;
+        request.skinningMode.gpu = gpu;
+        const EngineCommandBridge::SubmitResult submit = commandBridge->SubmitAndWait(request);
+        if (submit.alreadyPending) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("another engine command is already in progress"), "application/json");
+            return;
+        }
+        if (submit.timedOut) {
+            res.status = 504;
+            res.set_content(BuildGenericErrorResponseJson("engine command timed out"), "application/json");
+            return;
+        }
+        res.set_content(BuildSkinningModeResponseJson(submit.result->skinningMode.gpu), "application/json");
+    };
+    server.Get("/skinning_mode", [skinningModeRoute](const httplib::Request&, httplib::Response& res) {
+        skinningModeRoute(false, false, res);
+    });
+    server.Post("/skinning_mode", [skinningModeRoute](const httplib::Request& req, httplib::Response& res) {
+        const ParsedSkinningModeRequest parsed = ParseSkinningModeRequest(req.body, req.get_param_value("mode"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        skinningModeRoute(true, parsed.gpu, res);
+    });
+
     // GET /hiz_demo/geometry_only_features: the one list of fixed-cost feature prefixes the demo profile turns off.
     // Constant data, so no engine bridge is needed.
     server.Get("/hiz_demo/geometry_only_features", [](const httplib::Request&, httplib::Response& res) {

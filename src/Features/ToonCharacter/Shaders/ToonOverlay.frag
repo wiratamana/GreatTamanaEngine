@@ -1,6 +1,7 @@
 #version 450
 
-// Toon additive overlay: hair highlight ring from the sphere map. Only the HairOverlay class draws.
+// Toon hair ring: alpha-blended over the hair. A bluish band whose sphere-map glint turns white.
+// Only the HairOverlay class draws; hairHighlight is the band opacity.
 
 #include "DirectionalLighting.glsl"
 #include "MaterialParams.glsl"
@@ -27,6 +28,8 @@ void main()
     if (texel.a < kToonAlphaCutoff) { discard; }
 
     vec3 n = normalize(gl_FrontFacing ? inWorldNormal : -inWorldNormal);
-    vec3 ring = texture(uSphereTexture, ToonMatcapUv(n)).rgb * texel.rgb;
-    outColor = vec4(min(ring * look.hairHighlight, vec3(kToonMaxRadiance)), 1.0);
+    vec3 whiteLit = ShadeDirectionalLinear(vec3(1.0), normalize(SceneSunDirection()), false, inWorldPos);
+    float glint = smoothstep(0.4, 0.9, dot(texture(uSphereTexture, ToonMatcapUv(n)).rgb, kToonLuma));
+    vec3 color = texel.rgb * whiteLit * mix(kToonRingTint, vec3(1.0), glint);
+    outColor = vec4(min(color, vec3(kToonMaxRadiance)), clamp(look.hairHighlight, 0.0, 1.0));
 }

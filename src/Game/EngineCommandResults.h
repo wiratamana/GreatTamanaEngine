@@ -275,6 +275,11 @@ struct ClosePresetSceneOutcome {
     std::string message;
 };
 
+// Skinning mode after one SkinningMode command ran.
+struct SkinningModeOutcome {
+    bool gpu = false;
+};
+
 // editor-core-separation-12 campaign, PHASE1 (Project Assembly Hot Reload
 // plan, BIG-STEP 1) - outcome of one
 // IHotReloadDebugCapability::BuildSceneSnapshotJson(Game&) call, wrapped for

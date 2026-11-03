@@ -4,7 +4,7 @@
 
 ## TL;DR
 - Server: `127.0.0.1:8080`, editor only. All JSON examples below are built from code, not from a live run.
-- Almost every route is `GET`. Exceptions: `/profiler/set`, `/profiler/export`, `/project_assembly/*` writes.
+- Almost every route is `GET`. Exceptions: `/profiler/set`, `/profiler/export`, `/skinning_mode` (set), `/project_assembly/*` writes.
 - `503` = another request holds the bridge. `504` = main thread did not answer in time. The change may still apply.
 - Profiler numbers are metric objects. Read `status` before `value`. `null` is never `0`.
 - Capture, logs, scene, assets and camera routes: see [HTTP routes](http-routes.md).
@@ -480,6 +480,21 @@ Measure, change and look at the dynamic bone chains (skirt, hair) of a model. Fu
 - Errors: `400` bad input (the body names the key), `404` unknown entity, `409` state conflict, `503` bridge busy, `504` main thread too slow. Read the state before you repeat a write after `504`.
 - All settings are in memory. A restart resets them. `GET /physics_debug/preset?name=default` restores them.
 - Bend settings: `bend_limits_enabled`, `bend_limit_scale`, `bend_limit_min_degrees`, `bend_joint_floor_degrees` (0..45, default 3, legacy 0; minimum own limit of non-root joints).
+
+## Skinning mode
+Source: `src/Network/NetworkServer.cpp`. Same switch as the Jobs panel combo, set on the main thread. The mode is in memory only.
+
+| Route | Input | Reply |
+|---|---|---|
+| `GET /skinning_mode` | none | `{"success":true,"mode":"cpu"\|"gpu"}` |
+| `POST /skinning_mode` **MUT** | JSON body `{"mode":"cpu"\|"gpu"}`, or query `mode=cpu\|gpu` (the query wins) | same, with the new mode |
+
+- Errors: `400` missing or unknown `mode`, `503` bridge busy, `504` main thread too slow.
+- Test order for a skinning A/B: `POST` `gpu`, wait a few frames, capture, then `POST` `cpu`.
+
+```text
+curl.exe -X POST http://127.0.0.1:8080/skinning_mode -d "{\"mode\":\"gpu\"}"
+```
 
 ## Related
 - [HTTP cheat sheet](http-cheat-sheet.md) · [HTTP routes](http-routes.md) · [HTTP server](../architecture/http-server.md)

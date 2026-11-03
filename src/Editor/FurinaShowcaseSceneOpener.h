@@ -34,6 +34,27 @@ inline constexpr std::array<std::string_view, 8> kFurinaShowcaseFeaturesOff{ "At
 inline constexpr std::array<std::string_view, 5> kFurinaShowcaseFeaturePrefixesOn{
     "Shadow", "SceneLighting", "ToonCharacter", "Bloom", "ToneMapping" };
 
+// One feature debug key the showcase writes, as the text Set() takes.
+struct FurinaLookSetting {
+    std::string_view key;
+    std::string_view value;
+};
+
+// Debug settings of one feature the showcase writes. The old values are saved first and restored on close.
+struct FurinaFeatureLook {
+    std::string_view feature;
+    std::span<const FurinaLookSetting> settings;
+};
+
+inline constexpr std::array<FurinaLookSetting, 3> kFurinaToneMappingLook{
+    { { "mode", "PbrNeutral" }, { "exposure", "1.4" }, { "saturation", "1.2" } } };
+inline constexpr std::array<FurinaLookSetting, 2> kFurinaToonCharacterLook{ { { "enabled", "true" }, { "debugView", "0" } } };
+// Threshold above the lit white hair, so only the gems glow.
+inline constexpr std::array<FurinaLookSetting, 3> kFurinaBloomLook{
+    { { "enabled", "true" }, { "threshold", "2.5" }, { "intensity", "0.5" } } };
+inline constexpr std::array<FurinaFeatureLook, 3> kFurinaShowcaseLooks{ { { "ToneMapping", kFurinaToneMappingLook },
+    { "ToonCharacter", kFurinaToonCharacterLook }, { "Bloom", kFurinaBloomLook } } };
+
 // What the open scene changed, so closing it puts everything back.
 struct FurinaShowcaseState {
     bool active = false;

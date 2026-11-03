@@ -1,4 +1,5 @@
-// Tests for the pure parts of the Furina showcase opener: feature plan, model measuring and reply keys. No device.
+// Tests for the pure parts of the Furina showcase opener: feature plan, look values, model measuring, reply keys and
+// settings release. No device.
 
 #include "Editor/FurinaShowcaseSceneOpener.h"
 #include "Game/Animation/SkeletalRigCache.h"
@@ -7,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cmath>
+#include <cstdint>
 #include <span>
 #include <string>
 #include <string_view>
@@ -103,7 +105,7 @@ TEST(FurinaReplyTest, DetailsCarryEveryDocumentedKey)
 
     const nlohmann::json json = nlohmann::json::parse(BuildFurinaShowcaseDetailsJson(report));
     ASSERT_TRUE(json.is_object());
-    EXPECT_EQ(json.size(), 6u);
+    EXPECT_EQ(json.size(), 7u);
     EXPECT_EQ(json["entities"].size(), 3u);
     EXPECT_EQ(json["entities"]["model"], "2/1");
     EXPECT_EQ(json["entities"]["camera"], "3/0");
@@ -181,6 +183,99 @@ TEST(FurinaReleaseTest, ReleaseReportsAMissingFeatureButStillRestoresTheOthers)
     EXPECT_FALSE(ReleaseFurinaShowcaseSettings(services));
     EXPECT_EQ(bloom.setCount, 1);
     EXPECT_FALSE(state.active);
+}
+
+// Looks up the written value of `key` in the showcase look of `feature`; empty when it is not written.
+std::string_view LookValue(std::string_view feature, std::string_view key)
+{
+    for (const FurinaFeatureLook& look : kFurinaShowcaseLooks) {
+        if (look.feature != feature) {
+            continue;
+        }
+        for (const FurinaLookSetting& setting : look.settings) {
+            if (setting.key == key) {
+                return setting.value;
+            }
+        }
+    }
+    return {};
+}
+
+TEST(FurinaLookTest, ToneMappingExposureIsOnePointFour)
+{
+    EXPECT_EQ(LookValue("ToneMapping", "exposure"), "1.4");
+    EXPECT_EQ(LookValue("ToneMapping", "mode"), "PbrNeutral");
+    EXPECT_EQ(LookValue("ToneMapping", "saturation"), "1.2");
+}
+
+TEST(FurinaLookTest, BloomIsEnabledWithAThresholdAboveTheWhiteHair)
+{
+    EXPECT_EQ(LookValue("Bloom", "enabled"), "true");
+    EXPECT_EQ(LookValue("Bloom", "threshold"), "2.5");
+    EXPECT_EQ(LookValue("Bloom", "intensity"), "0.5");
+}
+
+// Reports fixed state fields, so a snapshot has something to read.
+class StateEndpoint final : public fx::IFeatureDebugEndpoint {
+public:
+    fx::FeatureDebugResult GetState() const override
+    {
+        fx::FeatureDebugResult state;
+        state.fields = { { "enabled", false }, { "threshold", 1.0 }, { "intensity", 0.3 }, { "levels", std::int64_t{ 5 } } };
+        return state;
+    }
+    fx::FeatureDebugResult Set(std::span<const fx::FeatureDebugArg> args) override
+    {
+        received.assign(args.begin(), args.end());
+        return {};
+    }
+    fx::FeatureDebugResult Invoke(std::string_view, std::span<const fx::FeatureDebugArg>) override { return {}; }
+
+    std::vector<fx::FeatureDebugArg> received;
+};
+
+TEST(FurinaLookTest, EveryBloomKeyTheShowcaseWritesIsSavedAndWrittenBack)
+{
+    StateEndpoint bloom;
+    std::vector<std::string_view> keys;
+    for (const FurinaFeatureLook& look : kFurinaShowcaseLooks) {
+        if (look.feature == "Bloom") {
+            for (const FurinaLookSetting& setting : look.settings) {
+                keys.push_back(setting.key);
+            }
+        }
+    }
+    const std::vector<fx::FeatureDebugArg> saved = SnapshotFeatureSettings(bloom, keys);
+    ASSERT_EQ(saved.size(), 3u); // enabled, threshold, intensity; levels is not written.
+
+    EXPECT_TRUE(RestoreFeatureSettings(&bloom, "Test", "Bloom", saved));
+    ASSERT_EQ(bloom.received.size(), 3u);
+    for (const fx::FeatureDebugArg& arg : bloom.received) {
+        EXPECT_NE(arg.key, "levels");
+        if (arg.key == "enabled") {
+            EXPECT_EQ(arg.value, "false");
+        }
+    }
+}
+
+TEST(FurinaReleaseTest, ReleaseWritesBackTheSavedBloomThresholdAndIntensity)
+{
+    RecordingEndpoint bloom;
+    FurinaShowcaseState state;
+    state.active = true;
+    state.savedSettings = { { "Bloom", { { "enabled", "false" }, { "threshold", "1" }, { "intensity", "0.3" } } } };
+    FurinaShowcaseServices services;
+    services.state = &state;
+    services.findEndpoint = [&](std::string_view name) -> fx::IFeatureDebugEndpoint* {
+        return name == "Bloom" ? &bloom : nullptr;
+    };
+
+    EXPECT_TRUE(ReleaseFurinaShowcaseSettings(services));
+    ASSERT_EQ(bloom.received.size(), 3u);
+    EXPECT_EQ(bloom.received[1].key, "threshold");
+    EXPECT_EQ(bloom.received[1].value, "1");
+    EXPECT_EQ(bloom.received[2].key, "intensity");
+    EXPECT_EQ(bloom.received[2].value, "0.3");
 }
 
 } // namespace

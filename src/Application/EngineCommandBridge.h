@@ -30,6 +30,7 @@ enum class EngineCommandKind {
     SetProbeHotReloadMarkerValueForTesting,
     OpenPresetScene,
     ClosePresetScene, // No payload.
+    SkinningMode,
 };
 
 // Plain request payload for one InstantiatePrimitive command.
@@ -74,6 +75,12 @@ struct OpenPresetSceneCommand {
     PresetParameters parameters;
 };
 
+// Reads the skinning mode, or sets it first when `apply` is true.
+struct SkinningModeCommand {
+    bool apply = false;
+    bool gpu = false;
+};
+
 // One pending engine command, tagged by `kind` - only the field matching
 // `kind` is meaningful.
 struct EngineCommandRequest {
@@ -88,6 +95,7 @@ struct EngineCommandRequest {
     GetSceneSnapshotCommand getSceneSnapshot;
     SetProbeHotReloadMarkerValueForTestingCommand setProbeHotReloadMarkerValueForTesting;
     OpenPresetSceneCommand openPresetScene;
+    SkinningModeCommand skinningMode;
 };
 
 // The completed result of one EngineCommandRequest - `kind` mirrors the
@@ -105,6 +113,7 @@ struct EngineCommandResult {
     SetProbeHotReloadMarkerValueForTestingOutcome setProbeHotReloadMarkerValueForTesting;
     OpenPresetSceneOutcome openPresetScene;
     ClosePresetSceneOutcome closePresetScene;
+    SkinningModeOutcome skinningMode;
 };
 
 class EngineCommandBridge : public SyncCommandBridge<EngineCommandRequest, EngineCommandResult> {

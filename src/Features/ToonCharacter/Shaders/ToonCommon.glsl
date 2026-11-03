@@ -18,23 +18,27 @@ const float kToonMinShadeLuma = 0.35;   // A shaded pixel keeps at least this sh
 const float kToonMaxRadiance = 8192.0;
 const vec3 kToonLuma = vec3(0.2126, 0.7152, 0.0722);
 const vec3 kToonRimTint = vec3(0.75, 0.90, 1.00);
+const vec3 kToonRingTint = vec3(0.45, 0.58, 0.85); // Hair ring base tone over the lit hair.
 
-// Per class: shade multiplier, deep-shade multiplier, outline tint, debug colour.
+// Per class: shade multiplier.
 const vec3 kToonShadeTint[9] = vec3[9](
-    vec3(0.42, 0.48, 0.82), vec3(0.92, 0.74, 0.72), vec3(0.97, 0.86, 0.84),
+    vec3(0.65, 0.62, 0.83), vec3(0.92, 0.74, 0.72), vec3(0.97, 0.86, 0.84),
     vec3(1.0), vec3(1.0), vec3(0.62, 0.70, 0.93),
-    vec3(1.0), vec3(1.0), vec3(0.42, 0.48, 0.82));
+    vec3(1.0), vec3(1.0), vec3(0.65, 0.62, 0.83));
 
+// Per class: deep-shade multiplier.
 const vec3 kToonDeepTint[9] = vec3[9](
     vec3(0.80, 0.82, 0.92), vec3(1.0), vec3(1.0),
     vec3(1.0), vec3(1.0), vec3(0.85, 0.88, 0.95),
     vec3(1.0), vec3(1.0), vec3(0.80, 0.82, 0.92));
 
+// Per class: outline colour as a multiplier on the albedo.
 const vec3 kToonOutlineTint[9] = vec3[9](
     vec3(0.30, 0.36, 0.62), vec3(0.55, 0.36, 0.34), vec3(0.55, 0.36, 0.34),
-    vec3(0.30, 0.36, 0.62), vec3(0.30, 0.36, 0.62), vec3(0.45, 0.55, 0.78),
+    vec3(0.30, 0.36, 0.62), vec3(0.30, 0.36, 0.62), vec3(0.03, 0.05, 0.14),
     vec3(0.30, 0.36, 0.62), vec3(0.30, 0.36, 0.62), vec3(0.30, 0.36, 0.62));
 
+// Per class: debug view colour.
 const vec3 kToonClassDebugColor[9] = vec3[9](
     vec3(0.0, 0.0, 1.0), vec3(1.0, 0.8, 0.6), vec3(1.0, 0.5, 0.5),
     vec3(0.5, 0.0, 0.0), vec3(0.0, 1.0, 0.0), vec3(1.0, 1.0, 1.0),

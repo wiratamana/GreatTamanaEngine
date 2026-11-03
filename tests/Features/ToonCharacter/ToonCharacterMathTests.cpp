@@ -13,6 +13,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
@@ -271,19 +273,21 @@ TEST(ToonCharacterMathTest, SceneUniformBlockInTheShaderEndsWithTheToonLookVecto
 #endif
 }
 
-TEST(ToonCharacterMathTest, TintTableHoldsTheSpecValues)
+TEST(ToonCharacterMathTest, TintTableHoldsTheTunedValues)
 {
     const ToonClassTint& cloth = ToonTintOf(ToonClass::Cloth);
-    EXPECT_FLOAT_EQ(cloth.shade.r, 0.42f);
-    EXPECT_FLOAT_EQ(cloth.shade.g, 0.48f);
-    EXPECT_FLOAT_EQ(cloth.shade.b, 0.82f);
+    EXPECT_FLOAT_EQ(cloth.shade.r, 0.65f);
+    EXPECT_FLOAT_EQ(cloth.shade.g, 0.62f);
+    EXPECT_FLOAT_EQ(cloth.shade.b, 0.83f);
     EXPECT_FLOAT_EQ(cloth.deep.r, 0.80f);
     EXPECT_FLOAT_EQ(cloth.outline.b, 0.62f);
 
     const ToonClassTint& hair = ToonTintOf(ToonClass::Hair);
     EXPECT_FLOAT_EQ(hair.shade.r, 0.62f);
     EXPECT_FLOAT_EQ(hair.shade.b, 0.93f);
-    EXPECT_FLOAT_EQ(hair.outline.g, 0.55f);
+    EXPECT_FLOAT_EQ(hair.outline.r, 0.03f);
+    EXPECT_FLOAT_EQ(hair.outline.g, 0.05f);
+    EXPECT_FLOAT_EQ(hair.outline.b, 0.14f);
 
     const ToonClassTint& skin = ToonTintOf(ToonClass::Skin);
     EXPECT_FLOAT_EQ(skin.shade.g, 0.74f);
@@ -291,6 +295,71 @@ TEST(ToonCharacterMathTest, TintTableHoldsTheSpecValues)
 
     EXPECT_FLOAT_EQ(ToonTintOf(ToonClass::FaceSkin).shade.r, 0.97f);
     EXPECT_FLOAT_EQ(ToonTintOf(ToonClass::ClothBack).shade.b, cloth.shade.b);
+}
+
+// The showcase display chain: exposure 1.4, saturation 1.2, PbrNeutral, sRGB encode. Returns 0..255 per channel.
+std::array<float, 3> ShowcaseDisplay(const ToonRgb& c)
+{
+    const auto encode = [](float v) {
+        v = std::clamp(v, 0.0f, 1.0f);
+        return 255.0f * (v <= 0.0031308f ? v * 12.92f : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f);
+    };
+    std::array<float, 3> v{ c.r * 1.4f, c.g * 1.4f, c.b * 1.4f };
+    const float luma = 0.2126f * v[0] + 0.7152f * v[1] + 0.0722f * v[2];
+    for (float& x : v) {
+        x = std::max(luma + (x - luma) * 1.2f, 0.0f);
+    }
+    const float lowest = std::min({ v[0], v[1], v[2] });
+    const float offset = lowest < 0.08f ? lowest - 6.25f * lowest * lowest : 0.04f;
+    for (float& x : v) {
+        x -= offset;
+    }
+    const float peak = std::max({ v[0], v[1], v[2] });
+    constexpr float kStart = 0.76f;
+    if (peak >= kStart) {
+        constexpr float d = 1.0f - kStart;
+        const float newPeak = 1.0f - d * d / (peak + d - kStart);
+        const float desat = 1.0f - 1.0f / (0.15f * (peak - newPeak) + 1.0f);
+        for (float& x : v) {
+            x *= newPeak / peak;
+            x += (newPeak - x) * desat;
+        }
+    }
+    return { encode(v[0]), encode(v[1]), encode(v[2]) };
+}
+
+TEST(ToonCharacterMathTest, ClothShadeToLitRatioOnScreenMatchesTheTarget)
+{
+    // Lit coat radiance that displays as about (82, 106, 181).
+    const ToonRgb lit{ 0.0972f, 0.1327f, 0.3220f };
+    const ToonRgb tint = ToonTintOf(ToonClass::Cloth).shade;
+    const auto litPx = ShowcaseDisplay(lit);
+    const auto shadePx = ShowcaseDisplay(ToonRgb{ lit.r * tint.r, lit.g * tint.g, lit.b * tint.b });
+    const float target[3] = { 0.67f, 0.71f, 0.92f };
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_NEAR(shadePx[i] / litPx[i], target[i], 0.06f) << "channel " << i;
+    }
+    EXPECT_GE(shadePx[2] / litPx[2] - shadePx[0] / litPx[0], 0.15f);
+}
+
+TEST(ToonCharacterMathTest, HairOutlineIsDarkBlueNotAsBrightAsTheHair)
+{
+    const ToonRgb outline = ToonTintOf(ToonClass::Hair).outline;
+    EXPECT_GT(outline.b, outline.g);
+    EXPECT_GT(outline.g, outline.r);
+    // White hair against its outline at the default darkness, on screen.
+    const float k = 0.825f;
+    const auto linePx = ShowcaseDisplay(ToonRgb{ 0.9f * outline.r * k, 0.9f * outline.g * k, 0.9f * outline.b * k });
+    const float lineLuma = 0.2126f * linePx[0] + 0.7152f * linePx[1] + 0.0722f * linePx[2];
+    EXPECT_LT(lineLuma, 0.35f * 240.0f);
+    EXPECT_GT(lineLuma, 10.0f);
+}
+
+TEST(ToonCharacterMathTest, HairRingBandIsBluishAndDarkerThanWhiteHair)
+{
+    EXPECT_GT(kToonRingTint.b, kToonRingTint.g);
+    EXPECT_GT(kToonRingTint.g, kToonRingTint.r);
+    EXPECT_LT(ToonLuminance(kToonRingTint), 0.7f);
 }
 
 TEST(ToonCharacterMathTest, UnknownClassUsesTheClothTint)
@@ -328,7 +397,7 @@ TEST(ToonCharacterMathTest, ClothShadeIsColouredAndTheDeepBandIsDarker)
 {
     const ToonRgb shade = ToonShadeTone(ToonClass::Cloth, false);
     const ToonRgb deep = ToonShadeTone(ToonClass::Cloth, true);
-    EXPECT_FLOAT_EQ(shade.r, 0.42f);
+    EXPECT_FLOAT_EQ(shade.r, 0.65f);
     EXPECT_GT(shade.b - shade.r, 0.15f);
     EXPECT_LT(ToonLuminance(deep), ToonLuminance(shade));
     // A class without a deep band ignores the deep request.
@@ -494,6 +563,22 @@ TEST(ToonPartCollectorTest, AppendsAndKeepsEarlierEntries)
     CollectToonParts(registry, parts);
     ASSERT_EQ(parts.size(), 2u);
     EXPECT_EQ(parts[1], part);
+}
+
+TEST(ToonSurfaceStatusTest, DisabledFeatureWinsOverTheDrawResult)
+{
+    using S = ToonCharacterFrameStatus;
+    EXPECT_EQ(ResolveToonSurfaceStatus(S::FeatureDisabled, S::NoToonParts, 0), S::FeatureDisabled);
+    EXPECT_EQ(ResolveToonSurfaceStatus(S::FeatureDisabled, S::Ok, 5), S::FeatureDisabled);
+}
+
+TEST(ToonSurfaceStatusTest, OkNeedsAtLeastOneClaimedPart)
+{
+    using S = ToonCharacterFrameStatus;
+    EXPECT_EQ(ResolveToonSurfaceStatus(S::NotRendered, S::Ok, 0), S::DrawRefused);
+    EXPECT_EQ(ResolveToonSurfaceStatus(S::NotRendered, S::Ok, 32), S::Ok);
+    EXPECT_EQ(ResolveToonSurfaceStatus(S::NotRendered, S::CaptureArmed, 0), S::CaptureArmed);
+    EXPECT_EQ(ResolveToonSurfaceStatus(S::NoToonParts, S::NoToonParts, 0), S::NoToonParts);
 }
 
 } // namespace

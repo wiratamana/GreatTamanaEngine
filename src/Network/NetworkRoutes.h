@@ -1051,6 +1051,17 @@ std::string BuildPanelVisibleResponseJson(const std::string& name, bool visible)
 // Success shape of POST /close_preset_scene: {"success":true,"message":"<text>"}. Failures use BuildGenericErrorResponseJson().
 std::string BuildClosePresetSceneResponseJson(const std::string& message);
 
+// Parsed POST /skinning_mode: body {"mode":"cpu"|"gpu"}, or the `mode` query value when the body is empty.
+struct ParsedSkinningModeRequest {
+    bool valid = false;
+    std::string errorMessage;
+    bool gpu = false;
+};
+ParsedSkinningModeRequest ParseSkinningModeRequest(const std::string& jsonBody, const std::string& queryMode);
+
+// Success shape of GET/POST /skinning_mode: {"success":true,"mode":"cpu"|"gpu"}.
+std::string BuildSkinningModeResponseJson(bool gpu);
+
 // Parsed POST /hierarchy_action body: {"kind":"reparent"|"reorder"|"toggle","dragged","target","insertAfter"?}.
 // An entity is {"index","generation"} or "<index>/<generation>". Toggle needs only "target".
 struct ParsedHierarchyActionRequest {

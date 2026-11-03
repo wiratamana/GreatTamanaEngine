@@ -1499,6 +1499,40 @@ std::string BuildClosePresetSceneResponseJson(const std::string& message)
     return body.dump();
 }
 
+ParsedSkinningModeRequest ParseSkinningModeRequest(const std::string& jsonBody, const std::string& queryMode)
+{
+    ParsedSkinningModeRequest result;
+    std::string mode = queryMode;
+    if (mode.empty() && !jsonBody.empty()) {
+        const nlohmann::json body = nlohmann::json::parse(jsonBody, nullptr, false);
+        if (!body.is_object()) {
+            result.errorMessage = "request body must be a JSON object: {\"mode\":\"cpu\"|\"gpu\"}";
+            return result;
+        }
+        const auto it = body.find("mode");
+        if (it == body.end() || !it->is_string()) {
+            result.errorMessage = "missing or invalid field: mode - must be the string \"cpu\" or \"gpu\"";
+            return result;
+        }
+        mode = it->get<std::string>();
+    }
+    if (mode != "cpu" && mode != "gpu") {
+        result.errorMessage = "missing or invalid mode - must be \"cpu\" or \"gpu\"";
+        return result;
+    }
+    result.gpu = mode == "gpu";
+    result.valid = true;
+    return result;
+}
+
+std::string BuildSkinningModeResponseJson(bool gpu)
+{
+    nlohmann::json body;
+    body["success"] = true;
+    body["mode"] = gpu ? "gpu" : "cpu";
+    return body.dump();
+}
+
 namespace {
 
 // An entity is {"index","generation"} or the "<index>/<generation>" text of GET /hierarchy_state; generation is non-zero.

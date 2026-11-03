@@ -37,22 +37,6 @@ constexpr const char* kClipFile = "ChatanyaraKuushanku_bassui260717a.gta";
 constexpr std::string_view kHipBoneName = "\xE4\xB8\x8B\xE5\x8D\x8A\xE8\xBA\xAB";
 constexpr std::string_view kHipBoneEnglishName = "lower body";
 
-// Feature settings the showcase writes. The old values are saved first and restored on close.
-struct LookSetting {
-    std::string_view key;
-    std::string_view value;
-};
-struct FeatureLook {
-    std::string_view feature;
-    std::span<const LookSetting> settings;
-};
-
-constexpr std::array<LookSetting, 3> kToneMappingLook{ { { "mode", "PbrNeutral" }, { "exposure", "0.9" }, { "saturation", "1.2" } } };
-constexpr std::array<LookSetting, 2> kToonCharacterLook{ { { "enabled", "true" }, { "debugView", "0" } } };
-constexpr std::array<LookSetting, 1> kBloomLook{ { { "enabled", "true" } } };
-constexpr std::array<FeatureLook, 3> kLooks{ { { "ToneMapping", kToneMappingLook }, { "ToonCharacter", kToonCharacterLook },
-    { "Bloom", kBloomLook } } };
-
 fx::IFeatureDebugEndpoint* FindEndpoint(const FurinaShowcaseServices& services, std::string_view feature)
 {
     return services.findEndpoint ? services.findEndpoint(feature) : nullptr;
@@ -83,18 +67,18 @@ struct SettingsChange {
 bool ApplySettings(const FurinaShowcaseServices& services, bool haveBaseline, FurinaShowcaseState& next,
     SettingsChange& change, std::string& error)
 {
-    change.before.reserve(kLooks.size());
+    change.before.reserve(kFurinaShowcaseLooks.size());
     if (!haveBaseline) {
-        next.savedSettings.reserve(kLooks.size());
+        next.savedSettings.reserve(kFurinaShowcaseLooks.size());
     }
-    for (const FeatureLook& look : kLooks) {
+    for (const FurinaFeatureLook& look : kFurinaShowcaseLooks) {
         fx::IFeatureDebugEndpoint* endpoint = FindEndpoint(services, look.feature);
         if (endpoint == nullptr) {
             continue;
         }
         std::vector<std::string_view> keys;
         std::vector<fx::FeatureDebugArg> values;
-        for (const LookSetting& setting : look.settings) {
+        for (const FurinaLookSetting& setting : look.settings) {
             keys.push_back(setting.key);
             values.push_back({ std::string(setting.key), std::string(setting.value) });
         }

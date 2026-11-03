@@ -138,6 +138,16 @@ EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneI
         }
         break;
     }
+    // Reads the skinning mode, applying a new one first when asked.
+    case EngineCommandKind::SkinningMode: {
+        const SkinningModeCommand& cmd = request.skinningMode;
+        if (cmd.apply) {
+            game.SetSkinningMode(cmd.gpu ? AnimationSystem::SkinningMode::GpuCompute
+                                         : AnimationSystem::SkinningMode::CpuJobSystem);
+        }
+        result.skinningMode.gpu = game.GetSkinningMode() == AnimationSystem::SkinningMode::GpuCompute;
+        break;
+    }
     }
     return result;
 }

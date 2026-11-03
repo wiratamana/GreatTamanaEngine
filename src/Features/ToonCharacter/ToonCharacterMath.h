@@ -21,11 +21,15 @@ struct ToonRgb {
     float b = 1.0f;
 };
 
-// Per-class multipliers on the lit color (linear). CPU reference of the tables in ToonSurface.frag and ToonOutline.frag.
+// Hair ring base tone: the lit hair colour times this, blended over the hair; the sphere glint lifts it to white.
+// CPU reference of kToonRingTint in ToonCommon.glsl.
+inline constexpr ToonRgb kToonRingTint{ 0.45f, 0.58f, 0.85f };
+
+// Per-class multipliers on the lit color (linear). CPU reference of the tables in ToonCommon.glsl.
 struct ToonClassTint {
     ToonRgb shade;   // Tone below the band edge.
     ToonRgb deep;    // Extra tone below the deep edge; white when the class has no deep band.
-    ToonRgb outline; // Outline color multiplier on the albedo.
+    ToonRgb outline; // Outline color: the albedo times this.
 };
 
 // Clamps every field into its valid range. A non-finite float becomes its default.
@@ -49,5 +53,18 @@ float ToonLuminance(const ToonRgb& color) noexcept;
 // The shade tone of `shadeClass` (`deepBand` multiplies the deep tint in), lifted toward white when its
 // luminance would fall below kToonMinShadeLuminance.
 ToonRgb ToonShadeTone(ToonClass shadeClass, bool deepBand) noexcept;
+
+// Status the surface pass reports. A disabled feature wins; a draw that claimed no part is a refusal, not Ok.
+inline constexpr ToonCharacterFrameStatus ResolveToonSurfaceStatus(
+    ToonCharacterFrameStatus lookStatus, ToonCharacterFrameStatus drawStatus, std::uint32_t claimedCount) noexcept
+{
+    if (lookStatus == ToonCharacterFrameStatus::FeatureDisabled) {
+        return ToonCharacterFrameStatus::FeatureDisabled;
+    }
+    if (drawStatus == ToonCharacterFrameStatus::Ok && claimedCount == 0) {
+        return ToonCharacterFrameStatus::DrawRefused;
+    }
+    return drawStatus;
+}
 
 } // namespace gte

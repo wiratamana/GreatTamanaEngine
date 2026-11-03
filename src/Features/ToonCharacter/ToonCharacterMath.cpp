@@ -15,8 +15,10 @@ float SanitizeFloat(float value, float lo, float hi, float fallback) noexcept
 
 constexpr ToonRgb kWhite{ 1.0f, 1.0f, 1.0f };
 
-constexpr ToonClassTint kClothTint{ { 0.42f, 0.48f, 0.82f }, { 0.80f, 0.82f, 0.92f }, { 0.30f, 0.36f, 0.62f } };
-constexpr ToonClassTint kHairTint{ { 0.62f, 0.70f, 0.93f }, { 0.85f, 0.88f, 0.95f }, { 0.45f, 0.55f, 0.78f } };
+// Cloth shade reads about 0.67 / 0.71 / 0.92 of the lit colour on screen (PbrNeutral, exposure 1.4, saturation 1.2).
+constexpr ToonClassTint kClothTint{ { 0.65f, 0.62f, 0.83f }, { 0.80f, 0.82f, 0.92f }, { 0.30f, 0.36f, 0.62f } };
+// Hair outline is an absolute dark blue: white hair would otherwise outline almost as bright as itself.
+constexpr ToonClassTint kHairTint{ { 0.62f, 0.70f, 0.93f }, { 0.85f, 0.88f, 0.95f }, { 0.03f, 0.05f, 0.14f } };
 constexpr ToonClassTint kSkinTint{ { 0.92f, 0.74f, 0.72f }, kWhite, { 0.55f, 0.36f, 0.34f } };
 constexpr ToonClassTint kFaceSkinTint{ { 0.97f, 0.86f, 0.84f }, kWhite, { 0.55f, 0.36f, 0.34f } };
 constexpr ToonClassTint kNeutralTint{ kWhite, kWhite, { 0.30f, 0.36f, 0.62f } };

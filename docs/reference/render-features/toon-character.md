@@ -25,7 +25,7 @@ Add `ToonShading { enabled = true }` to the root entity of the model.
 | `ToonCharacter.Look` | PreOpaque, 15 | Collects the toon parts. Publishes the `ToonLook` record | none (`Always`) |
 | `ToonCharacter.Surface` | Opaque, 100 | Cel shading. Claims the parts from the main draw | `ToonCharacter.Surface.Draw` |
 | `ToonCharacter.Outline` | Opaque, 110 | Inverted hull outline | `ToonCharacter.Outline.Draw` |
-| `ToonCharacter.Overlay` | Opaque, 120 | Additive hair ring layer | `ToonCharacter.Overlay.Draw` |
+| `ToonCharacter.Overlay` | Opaque, 120 | Hair ring band layer | `ToonCharacter.Overlay.Draw` |
 
 - Look runs before `SceneLighting.Uniforms` (20). SceneLighting copies the record into the last 64 bytes of the scene uniform block (`toonLook0..3`, binding 8).
 - `ToonLook` (`src/Game/Lighting/ToonLook.h`) is 4 x vec4 = 64 bytes. Channel `ToonCharacter` / `Look`. Zero `v0.x` means "never published": shaders use built-in defaults.
@@ -37,7 +37,7 @@ Add `ToonShading { enabled = true }` to the root entity of the model.
 |---|---|---|---|
 | Surface | None (most PMX parts are double sided; the shader flips the normal on back faces) | Less, write on | Opaque |
 | Outline | Front | LessEqual, write on | Opaque |
-| Overlay | Back | LessEqual, write off | Additive |
+| Overlay | Back | LessEqual, write off | Alpha blend (`hairHighlight` is the opacity) |
 
 ## Toon classes
 Each PMX material gets one class id when the mesh is built. The shader reads it from `MaterialParams`.
@@ -45,13 +45,13 @@ Code: `ClassifyToonMaterial` in `src/Game/Instantiation/ToonMaterialClass.cpp`.
 
 | Id | Class | Look |
 |---|---|---|
-| 0 | `Cloth` | Two bands plus a deep band. Blue-ish shade tint |
+| 0 | `Cloth` | Two bands plus a deep band. Blue-ish shade tint (0.65, 0.62, 0.83) |
 | 1 | `Skin` | Warm pink shade. No deep band |
 | 2 | `FaceSkin` | Like skin, but the normal is flattened toward the head forward axis |
 | 3 | `FaceLine` | Unlit. Albedo only |
 | 4 | `Eye` | Unlit. Albedo only |
 | 5 | `Hair` | Cool shade. Stronger rim (x1.5) |
-| 6 | `HairOverlay` | Skipped by Surface. Drawn by Overlay (additive sphere-map ring) |
+| 6 | `HairOverlay` | Skipped by Surface. Drawn by Overlay (alpha-blended bluish ring band, sphere-map glint) |
 | 7 | `Gem` | Emissive (`emissiveBoost`) plus the sphere map |
 | 8 | `ClothBack` | Like cloth, no outline |
 
@@ -101,7 +101,7 @@ Toon data is carried by the normal material set. No new binding is needed for it
 - Width in pixels = `outlineWidthPx * viewHeight / 720`. The record carries `outlineNdcY = widthPx * 2 / viewHeight` and the view aspect.
 - Per part width = `outlineWidthPx` x `edgeWidthScale`.
 - Parts without an edge are moved outside the clip volume in the vertex shader. They are not discarded.
-- Colour = albedo x class tint, never black. Tints: cloth (0.30, 0.36, 0.62), hair (0.45, 0.55, 0.78), skin and face (0.55, 0.36, 0.34). `outlineDarkness` mixes the tint toward half strength.
+- Colour = albedo x class tint, never black. Tints: cloth (0.30, 0.36, 0.62), hair (0.03, 0.05, 0.14, dark blue so it reads on white hair), skin and face (0.55, 0.36, 0.34). `outlineDarkness` mixes the tint toward half strength.
 - Texels with alpha below 0.5 are discarded in all three fragment shaders.
 
 ## Settings and debug keys
@@ -129,7 +129,7 @@ Route: `/feature_debug/{state,set,invoke}?name=ToonCharacter`. Panel: `ToonChara
 
 Action: `reset_defaults` (no arguments).
 Read-only, per view with prefix `game.` or `scene.`: `status`, `frameIndex`, `candidatePartCount`, `claimedEntityCount` (parts the surface pass can draw and took from the main draw).
-`status`: `NotRendered`, `Ok`, `FeatureDisabled`, `NoToonParts`, `PassDisabled`, `CaptureArmed`, `DrawRefused`.
+`status`: `NotRendered`, `Ok`, `FeatureDisabled`, `NoToonParts`, `PassDisabled`, `CaptureArmed`, `DrawRefused`. `FeatureDisabled` wins when `enabled` is false. `DrawRefused` is reported when parts exist but the chain claimed none.
 
 | `debugView` | Writes |
 |---|---|
@@ -165,7 +165,7 @@ curl.exe http://127.0.0.1:8080/get_game_view -o toon.png
 - Camera: vertical FOV 28 degrees, pitched 6.5 degrees up. Distance and height are solved from the bind-pose height so the hat top sits 3% from the top and the hips 85% from the top of a 9:16 frame.
 - Sun: pitch 40 degrees, yaw 35 degrees, colour (1.0, 0.96, 0.90). The sun is on the camera-left side.
 - Features switched off: `AtmosphereAerialVolume`, `AtmosphereComposite`, `Gtao.*`, `Ssgi.*`, `VolumetricLight.*`. Switched on if they were off: Shadow, SceneLighting, ToonCharacter, Bloom, ToneMapping.
-- ToneMapping is set to `PbrNeutral`, exposure 0.9, saturation 1.2. ToonCharacter is set to `enabled=true`, `debugView=0`. Bloom is set to `enabled=true`. The old values of these keys come back on close.
+- ToneMapping is set to `PbrNeutral`, exposure 1.4, saturation 1.2. ToonCharacter is set to `enabled=true`, `debugView=0`. Bloom is set to `enabled=true`, `threshold=2.5`, `intensity=0.5` (the white hair and the face stay below the threshold; only the gem glows). The old values of these keys come back on close.
 - If `ChatanyaraKuushanku_bassui260717a.gta` is next to the model, it is played. If not, the model stands in T-pose.
 - `POST /close_preset_scene` removes the preset entities and restores the feature toggles and the saved settings above. It cannot bring back the scene that was open before.
 - Preset code: `src/Editor/FurinaShowcaseSceneOpener.*`, layout maths in `FurinaShowcaseLayout.*`.
@@ -180,6 +180,21 @@ curl.exe http://127.0.0.1:8080/get_game_view -o toon.png
 - Materials 28..30 of Furina (the `+` skirt layers) draw like cloth with no outline.
 - The cyan and gold tricks are colour heuristics, not material data.
 - The sun disc must stay out of the frame when Bloom is on. Bloom clamps its input to 64.
+
+## Cost
+Measured live at 1264x629 (Release, `furina_showcase`, 32 parts, 39037 triangles). The 1080p cost was not measured and is higher.
+
+| Pass | GPU ms |
+|---|---|
+| `ToonCharacter.Surface` | 1.60 |
+| `ToonCharacter.Outline` | 0.09 |
+| `ToonCharacter.Overlay` | 0.11 |
+| `Bloom` total | 0.73 (CopyToPrivateTarget 0.22, Prefilter 0.25, Down/Up 0.26) |
+
+- Total 2.53 ms. For comparison the main opaque draw needed 1.08 ms for the same 32 parts.
+- Likely reasons for Surface (not profiled per instruction): per pixel cascade shadow reads, ramp and sphere map reads, and double-sided parts. No cheap fix was found.
+- Bloom is a fixed cost of 5 down and 5 up compute passes plus one full-resolution copy to the feature target. The prefilter already does only 4 fetches per half-resolution texel. No cheap win is left without cutting quality or adding a new Bloom structure.
+- If the budget matters, turn off `Bloom` first (it is a global post effect), then `ToonCharacter.Overlay.Draw`.
 
 ## Related
 - [Render features](README.md) · [Bloom](bloom.md) · [Scene lighting](scene-lighting.md) · [Shadow](shadow.md) · [Tone mapping](tone-mapping.md)

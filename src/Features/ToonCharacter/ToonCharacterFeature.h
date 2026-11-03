@@ -20,7 +20,7 @@ struct ToonCharacterViewState {
 };
 
 // Cel-shaded redraw of marked characters: surface (takes the parts over from the main draw), outline hull and
-// additive overlay. Shadow cascades still draw the parts, so toon characters cast shadows; the surface shader receives them.
+// blended hair ring. Shadow cascades still draw the parts, so toon characters cast shadows; the surface shader receives them.
 class ToonCharacterFeature final : public fx::Feature {
 public:
     explicit ToonCharacterFeature(fx::FeatureHost& host);
@@ -53,13 +53,13 @@ private:
     fx::PerView<ToonCharacterViewState> m_views;
     fx::Channel<ToonLook> m_look{ kToonLookChannel };
 
-    // Shaders/<name>.vert and .frag. The hull is front-culled; the overlay adds light and writes no depth.
+    // Shaders/<name>.vert and .frag. The hull is front-culled; the overlay blends over the hair and writes no depth.
     fx::SceneShaderSet m_surfaceShaders{ fx::SceneShaderSet::Shaded("ToonSurface",
         { .cull = CullMode::None, .depthCompare = CompareOp::Less, .depthWrite = true, .blend = BlendMode::Opaque }) };
     fx::SceneShaderSet m_outlineShaders{ fx::SceneShaderSet::Shaded("ToonOutline",
         { .cull = CullMode::Front, .depthCompare = CompareOp::LessEqual, .depthWrite = true, .blend = BlendMode::Opaque }) };
     fx::SceneShaderSet m_overlayShaders{ fx::SceneShaderSet::Shaded("ToonOverlay",
-        { .cull = CullMode::Back, .depthCompare = CompareOp::LessEqual, .depthWrite = false, .blend = BlendMode::Additive }) };
+        { .cull = CullMode::Back, .depthCompare = CompareOp::LessEqual, .depthWrite = false, .blend = BlendMode::AlphaBlend }) };
 };
 
 } // namespace gte

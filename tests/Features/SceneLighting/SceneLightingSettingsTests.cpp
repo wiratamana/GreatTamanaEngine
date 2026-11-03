@@ -341,7 +341,7 @@ TEST(SceneLightingSettingsTest, PackScalesTheSunAndAmbientByTheRecord)
     EXPECT_FLOAT_EQ(data.skyAmbientAndIntensity[2], d.skyAmbientB);
     EXPECT_FLOAT_EQ(data.groundAmbientAndMaterialDebugView[1], d.groundAmbientG);
     EXPECT_FLOAT_EQ(data.groundAmbientAndMaterialDebugView[3], 0.0f);
-    EXPECT_EQ(sizeof(data), 448u);
+    EXPECT_EQ(sizeof(data), 512u); // Scene uniform block: lighting data plus the 64-byte toon look tail.
 }
 
 TEST(SceneLightingSettingsTest, PackIgnoresAnInactiveRecord)

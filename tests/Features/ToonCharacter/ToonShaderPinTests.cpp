@@ -71,6 +71,27 @@ TEST(ToonShaderPinTest, ClassIdsMatchTheEnumAndShadeFloorLiftsTowardWhite)
     EXPECT_FALSE(Has(frag, "tone *="));
 }
 
+TEST(ToonShaderPinTest, TintTablesMatchTheCpuTable)
+{
+    const std::string common = ReadToonShader("ToonCommon.glsl");
+    EXPECT_TRUE(Has(common, "vec3(0.65, 0.62, 0.83), vec3(0.92, 0.74, 0.72), vec3(0.97, 0.86, 0.84),"));
+    EXPECT_TRUE(Has(common, "vec3(1.0), vec3(1.0), vec3(0.62, 0.70, 0.93),"));
+    EXPECT_TRUE(Has(common, "vec3(1.0), vec3(1.0), vec3(0.65, 0.62, 0.83));"));
+    EXPECT_TRUE(Has(common, "vec3(0.80, 0.82, 0.92), vec3(1.0), vec3(1.0),"));
+    EXPECT_TRUE(Has(common, "vec3(1.0), vec3(1.0), vec3(0.85, 0.88, 0.95),"));
+    EXPECT_TRUE(Has(common, "vec3(0.30, 0.36, 0.62), vec3(0.30, 0.36, 0.62), vec3(0.03, 0.05, 0.14),"));
+    EXPECT_TRUE(Has(common, "const vec3 kToonRingTint = vec3(0.45, 0.58, 0.85);"));
+}
+
+TEST(ToonShaderPinTest, HairRingBlendsOverTheHairWithTheHighlightAsOpacity)
+{
+    const std::string overlay = ReadToonShader("ToonOverlay.frag");
+    EXPECT_TRUE(Has(overlay, "mix(kToonRingTint, vec3(1.0), glint)"));
+    EXPECT_TRUE(Has(overlay, "clamp(look.hairHighlight, 0.0, 1.0)"));
+    EXPECT_TRUE(Has(ReadSrc("Features/ToonCharacter/ToonCharacterFeature.h"), "BlendMode::AlphaBlend"));
+    EXPECT_FALSE(Has(ReadSrc("Features/ToonCharacter/ToonCharacterFeature.h"), "BlendMode::Additive"));
+}
+
 TEST(ToonShaderPinTest, ToonLookReaderLivesInTheToonHeaderOnly)
 {
     const std::string common = ReadToonShader("ToonCommon.glsl");

@@ -112,13 +112,19 @@ ToonCharacterFeature::DrawOutcome ToonCharacterFeature::RecordDraw(
 void ToonCharacterFeature::SurfacePass(fx::OpaqueFrame& f)
 {
     ToonCharacterViewSnapshot& snapshot = m_views.For(f.Scope()).snapshot;
-    switch (RecordDraw(f, kSurfaceDraw, m_surfaceShaders, true)) {
-    case DrawOutcome::Drawn: snapshot.status = ToonCharacterFrameStatus::Ok; break;
-    case DrawOutcome::PassDisabled: snapshot.status = ToonCharacterFrameStatus::PassDisabled; break;
-    case DrawOutcome::NoParts: snapshot.status = ToonCharacterFrameStatus::NoToonParts; break;
-    case DrawOutcome::CaptureArmed: snapshot.status = ToonCharacterFrameStatus::CaptureArmed; break;
-    case DrawOutcome::Refused: snapshot.status = ToonCharacterFrameStatus::DrawRefused; break;
+    if (!m_settings.enabled) {
+        snapshot.status = ToonCharacterFrameStatus::FeatureDisabled;
+        return;
     }
+    ToonCharacterFrameStatus drawStatus = ToonCharacterFrameStatus::DrawRefused;
+    switch (RecordDraw(f, kSurfaceDraw, m_surfaceShaders, true)) {
+    case DrawOutcome::Drawn: drawStatus = ToonCharacterFrameStatus::Ok; break;
+    case DrawOutcome::PassDisabled: drawStatus = ToonCharacterFrameStatus::PassDisabled; break;
+    case DrawOutcome::NoParts: drawStatus = ToonCharacterFrameStatus::NoToonParts; break;
+    case DrawOutcome::CaptureArmed: drawStatus = ToonCharacterFrameStatus::CaptureArmed; break;
+    case DrawOutcome::Refused: break;
+    }
+    snapshot.status = ResolveToonSurfaceStatus(snapshot.status, drawStatus, snapshot.claimedEntityCount);
 }
 
 void ToonCharacterFeature::OutlinePass(fx::OpaqueFrame& f)

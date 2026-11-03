@@ -1820,6 +1820,41 @@ TEST(ParseOpenPresetSceneRequestTests, RejectsBadBodies)
     EXPECT_FALSE(ParseOpenPresetSceneRequest(R"({"preset":"hiz_demo","count":4294967296})").valid);
 }
 
+TEST(ParseSkinningModeRequestTests, AcceptsBodyOrQueryAndQueryWins)
+{
+    using gte::Network::ParseSkinningModeRequest;
+    const auto cpu = ParseSkinningModeRequest(R"({"mode":"cpu"})", "");
+    EXPECT_TRUE(cpu.valid);
+    EXPECT_FALSE(cpu.gpu);
+    const auto gpu = ParseSkinningModeRequest(R"({"mode":"gpu"})", "");
+    EXPECT_TRUE(gpu.valid);
+    EXPECT_TRUE(gpu.gpu);
+    const auto query = ParseSkinningModeRequest("", "gpu");
+    EXPECT_TRUE(query.valid);
+    EXPECT_TRUE(query.gpu);
+    EXPECT_FALSE(ParseSkinningModeRequest(R"({"mode":"gpu"})", "cpu").gpu);
+}
+
+TEST(ParseSkinningModeRequestTests, RejectsMissingOrUnknownMode)
+{
+    using gte::Network::ParseSkinningModeRequest;
+    for (const char* body : { "", "{}", "[]", "nope", R"({"mode":1})", R"({"mode":"GPU"})", R"({"mode":"both"})" }) {
+        const auto parsed = ParseSkinningModeRequest(body, "");
+        EXPECT_FALSE(parsed.valid) << body;
+        EXPECT_FALSE(parsed.errorMessage.empty()) << body;
+    }
+    EXPECT_FALSE(ParseSkinningModeRequest("", "auto").valid);
+}
+
+TEST(BuildSkinningModeResponseJsonTests, ReportsTheModeName)
+{
+    using gte::Network::BuildSkinningModeResponseJson;
+    const nlohmann::json gpu = nlohmann::json::parse(BuildSkinningModeResponseJson(true));
+    EXPECT_EQ(gpu["success"], true);
+    EXPECT_EQ(gpu["mode"], "gpu");
+    EXPECT_EQ(nlohmann::json::parse(BuildSkinningModeResponseJson(false))["mode"], "cpu");
+}
+
 } // namespace
 
 namespace {

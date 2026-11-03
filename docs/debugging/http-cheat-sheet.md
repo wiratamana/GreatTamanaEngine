@@ -133,6 +133,7 @@ Full params and responses: [HTTP routes](http-routes.md) and [HTTP routes (debug
 | Scene | `POST /delete_entity` | `name` | **W** |
 | Scene | `POST /save_scene`, `/load_scene` | `path` (optional) | **W** |
 | Scene | `POST /open_preset_scene`, `/close_preset_scene` | `preset=sponza\|hiz_demo\|furina_showcase`, `count`, `spacing`, `profile` (`count`, `spacing`, `profile` are for `hiz_demo`) | **W** |
+| Anim | `/skinning_mode`, `POST /skinning_mode` | none = read. POST `mode=cpu\|gpu` (JSON body or query) | **W** (POST) |
 | Scene | `POST /spawn_instance_grid` | `count`, `spacing` | **W** |
 | Camera | `/scene_camera/state`, `/scene_camera/pose` | none | |
 | Camera | `/scene_camera/set_pose` | `x`, `y`, `z`, `yaw`, `pitch` (all 5) | **W** |
