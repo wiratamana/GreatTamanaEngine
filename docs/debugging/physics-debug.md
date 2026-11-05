@@ -1,6 +1,6 @@
 # Physics debug
 > Measure, change and look at the dynamic bone chains (skirt, hair, clothes) of a model over HTTP. For AI agents and developers who tune or debug chain physics.
-> Verified against code: 2026-11-03
+> Verified against code: 2026-11-05
 
 ## TL;DR
 - Routes live under `/physics_debug/*`. They use one bridge (`PhysicsDebugCommandBridge`). A busy bridge gives `503`.
@@ -231,7 +231,7 @@ Statistics: `p50`, `p95`, `p99` are nearest rank (`index = ceil(p * n) - 1` in t
 ## Agent playbook
 Setup (once per session):
 1. `run_app_background build\GreatTamanaEditor.exe --no-vsync`. Poll `GET /http_hello_world`.
-2. `POST /instantiate_asset {"gta_path":"<FURINA>"}`. Remember `name`.
+2. `POST /instantiate_asset {"gta_path":"<FURINA>","name":"Furina_0"}`. Remember the returned `name`.
 3. `POST /physics_debug/play {"entity":"<name>","animation_gta_path":"<CLIP>","frame":0,"speed":1,"loop":true}`.
 4. `GET /physics_debug/state?entity=<name>`. Check chains and settings. `GET /physics_debug/preset?name=default` if unsure.
 

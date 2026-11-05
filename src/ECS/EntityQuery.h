@@ -55,4 +55,17 @@ bool IsEntityNameInUse(Registry& registry, const std::string& name);
 // simplicity.
 std::string MakeUniqueEntityName(Registry& registry, const std::string& baseName);
 
+// Like the 2-argument form, but `ignoredEntity`'s own Name never counts as a collision.
+std::string MakeUniqueEntityName(Registry& registry, const std::string& baseName, Entity ignoredEntity);
+
+struct AssignedEntityName {
+    std::string name;      // Final Name value now stored on the entity.
+    bool adjusted = false; // True when `name` differs from the base that was asked for.
+};
+
+// Gives `entity` a unique Name. Base = `requestedBase` if non-empty, else the entity's
+// current Name, else "Entity". Creates the Name component if missing. The entity's own
+// old name never counts as a collision. A dead entity returns {"", false} and is untouched.
+AssignedEntityName AssignUniqueEntityName(Registry& registry, Entity entity, const std::string& requestedBase);
+
 } // namespace gte

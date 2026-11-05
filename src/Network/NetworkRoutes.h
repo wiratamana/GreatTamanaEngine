@@ -729,12 +729,15 @@ std::string BuildImportAssetResponseJson(const ImportedAssetResponseView& view);
 // this file.
 
 // Parsed, VALIDATED result of a POST /instantiate_asset request body:
-// {"gta_path": "..."}. `valid == false` means `errorMessage` explains
+// {"gta_path": "...", "name": "..."(optional)}. `valid == false` means `errorMessage` explains
 // exactly why - every other field is meaningless in that case.
+inline constexpr std::size_t kMaxInstantiateNameBytes = 128;
+
 struct ParsedInstantiateAssetRequest {
     bool valid = false;
     std::string errorMessage;
     std::string gtaPath;
+    std::string requestedName; // Trimmed base name; empty = use the asset stem.
 };
 
 // Parses `jsonBody` (the raw POST body) for POST /instantiate_asset.
@@ -754,6 +757,11 @@ struct ParsedInstantiateAssetRequest {
 //      its own errorMessage, mapped to a 400 by this endpoint's route
 //      handler exactly like every other "well-formed request, semantic
 //      failure downstream" case in this file.
+//   3. "name" is optional. Absent, null, or blank after trimming ASCII whitespace
+//      means "use the asset stem" (valid). A non-string gives "name must be a
+//      string"; a control character gives "name must not contain control
+//      characters"; more than kMaxInstantiateNameBytes gives "name must be at
+//      most 128 bytes".
 // Unrecognized extra JSON fields are silently ignored.
 ParsedInstantiateAssetRequest ParseInstantiateAssetRequest(const std::string& jsonBody);
 
@@ -761,9 +769,10 @@ ParsedInstantiateAssetRequest ParseInstantiateAssetRequest(const std::string& js
 // (failures reuse BuildGenericErrorResponseJson() directly at the route
 // handler's own call site, exactly like BuildSetEntityTrsResponseJson()'s
 // own documented split):
-//   {"success":true,"entity":{"index":<uint>,"generation":<uint>},"name":"<resolvedName>"}
+//   {"success":true,"entity":{"index":<uint>,"generation":<uint>},"name":"<resolvedName>","name_adjusted":<bool>}
 std::string BuildInstantiateAssetResponseJson(
-    std::uint32_t entityIndex, std::uint32_t entityGeneration, const std::string& resolvedName);
+    std::uint32_t entityIndex, std::uint32_t entityGeneration, const std::string& resolvedName,
+    bool nameAdjusted = false);
 
 // --- task_manager/scene-serialization-2 campaign, PHASE5
 // (PHASE5_NETWORK_SAVE_LOAD_SCENE_ENDPOINTS.md) - POST /save_scene and

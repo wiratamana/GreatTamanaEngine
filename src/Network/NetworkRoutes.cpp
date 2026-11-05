@@ -824,17 +824,45 @@ ParsedInstantiateAssetRequest ParseInstantiateAssetRequest(const std::string& js
     }
     result.gtaPath = parsed["gta_path"].get<std::string>();
 
+    // Optional "name": absent, null, or blank means "use the asset stem".
+    if (parsed.contains("name") && !parsed["name"].is_null()) {
+        if (!parsed["name"].is_string()) {
+            result.errorMessage = "name must be a string";
+            return result;
+        }
+        const std::string raw = parsed["name"].get<std::string>();
+        constexpr const char* kBlank = " \t\r\n";
+        const std::size_t first = raw.find_first_not_of(kBlank);
+        if (first != std::string::npos) {
+            const std::size_t last = raw.find_last_not_of(kBlank);
+            const std::string trimmed = raw.substr(first, last - first + 1);
+            for (const char ch : trimmed) {
+                const auto byte = static_cast<unsigned char>(ch);
+                if (byte < 0x20 || byte == 0x7F) {
+                    result.errorMessage = "name must not contain control characters";
+                    return result;
+                }
+            }
+            if (trimmed.size() > kMaxInstantiateNameBytes) {
+                result.errorMessage = "name must be at most 128 bytes";
+                return result;
+            }
+            result.requestedName = trimmed;
+        }
+    }
+
     result.valid = true;
     return result;
 }
 
 std::string BuildInstantiateAssetResponseJson(
-    std::uint32_t entityIndex, std::uint32_t entityGeneration, const std::string& resolvedName)
+    std::uint32_t entityIndex, std::uint32_t entityGeneration, const std::string& resolvedName, bool nameAdjusted)
 {
     nlohmann::json body;
     body["success"] = true;
     body["entity"] = nlohmann::json::object({ { "index", entityIndex }, { "generation", entityGeneration } });
     body["name"] = resolvedName;
+    body["name_adjusted"] = nameAdjusted;
     return body.dump();
 }
 

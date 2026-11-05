@@ -95,6 +95,13 @@ public:
         m_nextOutcome = outcome;
     }
 
+    // The last InstantiateMeshAsset request this stand-in fulfilled, if any.
+    std::optional<InstantiateMeshAssetCommand> LastRequest()
+    {
+        std::lock_guard<std::mutex> lock(m_outcomeMutex);
+        return m_lastRequest;
+    }
+
 private:
     void Run()
     {
@@ -106,6 +113,7 @@ private:
                     result.kind = request->kind;
                     if (request->kind == EngineCommandKind::InstantiateMeshAsset) {
                         std::lock_guard<std::mutex> lock(m_outcomeMutex);
+                        m_lastRequest = request->instantiateMeshAsset;
                         result.instantiateMeshAsset = m_nextOutcome;
                     }
                     m_bridge.FulfillCommand(pending->id, result);
@@ -119,6 +127,7 @@ private:
     std::atomic<bool> m_gated{ false };
     std::atomic<bool> m_stop{ false };
     std::mutex m_outcomeMutex;
+    std::optional<InstantiateMeshAssetCommand> m_lastRequest;
     InstantiateMeshAssetOutcome m_nextOutcome = [] {
         InstantiateMeshAssetOutcome outcome;
         outcome.success = true;
@@ -255,6 +264,63 @@ TEST_F(InstantiateAssetEndpointEndToEndTest, TimedOutSubmissionIsWhatTheHttpRout
     EXPECT_FALSE(result.result.has_value());
 
     m_standIn->SetGated(false);
+}
+
+TEST_F(InstantiateAssetEndpointEndToEndTest, NameInBodyReachesTheBridge)
+{
+    const httplib::Result res = m_client->Post(
+        "/instantiate_asset", R"({"gta_path":"C:\\a.gta","name":"Hero"})", "application/json");
+
+    ASSERT_TRUE(res != nullptr);
+    EXPECT_EQ(res->status, 200);
+    const auto recorded = m_standIn->LastRequest();
+    ASSERT_TRUE(recorded.has_value());
+    EXPECT_EQ(recorded->requestedName, "Hero");
+    EXPECT_EQ(recorded->absoluteGtaPath, "C:\\a.gta");
+}
+
+TEST_F(InstantiateAssetEndpointEndToEndTest, NoNameMeansEmptyRequestedName)
+{
+    const httplib::Result res =
+        m_client->Post("/instantiate_asset", R"({"gta_path":"C:\\a.gta"})", "application/json");
+
+    ASSERT_TRUE(res != nullptr);
+    EXPECT_EQ(res->status, 200);
+    const auto recorded = m_standIn->LastRequest();
+    ASSERT_TRUE(recorded.has_value());
+    EXPECT_TRUE(recorded->requestedName.empty());
+}
+
+TEST_F(InstantiateAssetEndpointEndToEndTest, InvalidNameReturns400AndNothingIsSubmitted)
+{
+    const httplib::Result res = m_client->Post(
+        "/instantiate_asset", R"({"gta_path":"C:\\a.gta","name":42})", "application/json");
+
+    ASSERT_TRUE(res != nullptr);
+    EXPECT_EQ(res->status, 400);
+    const nlohmann::json parsed = nlohmann::json::parse(res->body);
+    EXPECT_EQ(parsed["success"], false);
+    EXPECT_EQ(parsed["error"], "name must be a string");
+    EXPECT_FALSE(m_standIn->LastRequest().has_value());
+}
+
+TEST_F(InstantiateAssetEndpointEndToEndTest, NameAdjustedFlagIsForwarded)
+{
+    InstantiateMeshAssetOutcome outcome;
+    outcome.success = true;
+    outcome.entityIndex = 9;
+    outcome.resolvedName = "Furina (1)";
+    outcome.nameAdjusted = true;
+    m_standIn->SetNextOutcome(outcome);
+
+    const httplib::Result res =
+        m_client->Post("/instantiate_asset", R"({"gta_path":"C:\\Furina.gta"})", "application/json");
+
+    ASSERT_TRUE(res != nullptr);
+    EXPECT_EQ(res->status, 200);
+    const nlohmann::json parsed = nlohmann::json::parse(res->body);
+    EXPECT_EQ(parsed["name"], "Furina (1)");
+    EXPECT_EQ(parsed["name_adjusted"], true);
 }
 
 // A NetworkServer constructed with commandBridge == nullptr (mirrors

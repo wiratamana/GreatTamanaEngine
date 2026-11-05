@@ -1,4 +1,6 @@
 #pragma once
+#include "ColliderBounds.h"
+#include "../Animation/BoneWorldCache.h"
 #include "VerletParticle.h"
 #include "../Math/Mat4.h"
 #include "../Math/Vec3.h"
@@ -7,6 +9,14 @@
 #include <vector>
 
 namespace gte {
+
+// Last result of ScaleStepFraction() for one joint; reused while its three inputs are unchanged.
+struct StepFractionMemo {
+    float base = -1.0f;
+    float stepSeconds = -1.0f;
+    float multiplier = -1.0f;
+    float result = 0.0f;
+};
 
 // Per-instance simulation memory of one DynamicChainDefinition (never shared between entities).
 struct DynamicChainRuntimeState {
@@ -40,6 +50,12 @@ struct DynamicChainRuntimeState {
     std::vector<Vec3> scratchPositions;
     std::vector<Vec3> scratchTargets;
     std::vector<Vec3> scratchAnimatedLocal;
+    ColliderReachSet scratchReach;
+    std::vector<StepFractionMemo> scratchDampingFractions;
+    std::vector<StepFractionMemo> scratchStiffnessFractions;
+
+    // Bone world matrices of the entity pose, valid within one frame of this chain.
+    BoneWorldCache boneCache;
 };
 
 } // namespace gte

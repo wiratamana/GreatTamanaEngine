@@ -10,6 +10,8 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <string>
+
 namespace {
 
 using gte::Network::BuildGenericErrorResponseJson;
@@ -67,6 +69,107 @@ TEST(ParseInstantiateAssetRequestTests, ExtraUnrecognizedFieldIsIgnored)
         ParseInstantiateAssetRequest(R"({"gta_path":"C:\\terrain.gta","some_future_field":123})");
     ASSERT_TRUE(result.valid) << result.errorMessage;
     EXPECT_EQ(result.gtaPath, "C:\\terrain.gta");
+}
+
+ParsedInstantiateAssetRequest ParseWithName(const std::string& nameJson)
+{
+    return ParseInstantiateAssetRequest(R"({"gta_path":"C:\\a.gta","name":)" + nameJson + "}");
+}
+
+TEST(ParseInstantiateAssetRequestTests, ValidPayloadWithNameParsesRequestedName)
+{
+    const ParsedInstantiateAssetRequest result = ParseWithName(R"("Hero")");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.requestedName, "Hero");
+}
+
+TEST(ParseInstantiateAssetRequestTests, NameAbsentGivesEmpty)
+{
+    const ParsedInstantiateAssetRequest result = ParseInstantiateAssetRequest(R"({"gta_path":"C:\\a.gta"})");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_TRUE(result.requestedName.empty());
+}
+
+TEST(ParseInstantiateAssetRequestTests, NameNullGivesEmpty)
+{
+    const ParsedInstantiateAssetRequest result = ParseWithName("null");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_TRUE(result.requestedName.empty());
+}
+
+TEST(ParseInstantiateAssetRequestTests, NameEmptyStringGivesEmptyAndValid)
+{
+    const ParsedInstantiateAssetRequest result = ParseWithName(R"("")");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_TRUE(result.requestedName.empty());
+}
+
+TEST(ParseInstantiateAssetRequestTests, NameWhitespaceOnlyGivesEmptyAndValid)
+{
+    const ParsedInstantiateAssetRequest result = ParseWithName(R"("  \t\n ")");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_TRUE(result.requestedName.empty());
+}
+
+TEST(ParseInstantiateAssetRequestTests, NameIsTrimmed)
+{
+    const ParsedInstantiateAssetRequest result = ParseWithName(R"("  Hero  ")");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.requestedName, "Hero");
+}
+
+TEST(ParseInstantiateAssetRequestTests, NameNumberFails)
+{
+    const ParsedInstantiateAssetRequest result = ParseWithName("42");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "name must be a string");
+}
+
+TEST(ParseInstantiateAssetRequestTests, NameWithNewlineInsideFails)
+{
+    const ParsedInstantiateAssetRequest result = ParseWithName(R"("a\nb")");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "name must not contain control characters");
+}
+
+TEST(ParseInstantiateAssetRequestTests, NameExactly128BytesIsValid)
+{
+    const ParsedInstantiateAssetRequest result = ParseWithName("\"" + std::string(128, 'a') + "\"");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.requestedName.size(), 128u);
+}
+
+TEST(ParseInstantiateAssetRequestTests, Name129BytesFails)
+{
+    const ParsedInstantiateAssetRequest result = ParseWithName("\"" + std::string(129, 'a') + "\"");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "name must be at most 128 bytes");
+}
+
+TEST(ParseInstantiateAssetRequestTests, NameWithSpacesAndParenthesesIsKept)
+{
+    const ParsedInstantiateAssetRequest result = ParseWithName(R"j("Furina (1)")j");
+    ASSERT_TRUE(result.valid) << result.errorMessage;
+    EXPECT_EQ(result.requestedName, "Furina (1)");
+}
+
+TEST(ParseInstantiateAssetRequestTests, GtaPathErrorIsReportedBeforeNameError)
+{
+    const ParsedInstantiateAssetRequest result = ParseInstantiateAssetRequest(R"({"gta_path":"","name":42})");
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.errorMessage, "missing or invalid required field: gta_path");
+}
+
+TEST(BuildInstantiateAssetResponseJsonTests, NameAdjustedFlagIsEmitted)
+{
+    const nlohmann::json adjusted = nlohmann::json::parse(BuildInstantiateAssetResponseJson(1, 0, "Furina (1)", true));
+    EXPECT_EQ(adjusted["name_adjusted"], true);
+
+    const nlohmann::json plain = nlohmann::json::parse(BuildInstantiateAssetResponseJson(1, 0, "Furina", false));
+    EXPECT_EQ(plain["name_adjusted"], false);
+
+    const nlohmann::json defaulted = nlohmann::json::parse(BuildInstantiateAssetResponseJson(1, 0, "Furina"));
+    EXPECT_EQ(defaulted["name_adjusted"], false);
 }
 
 TEST(BuildInstantiateAssetResponseJsonTests, ExactJsonShape)

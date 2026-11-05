@@ -144,7 +144,7 @@ void ScenePanel::OnGui(EditorFrame& frame)
     if (ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kProjectAssetDragDropPayloadType)) {
             const std::string absolutePath(static_cast<const char*>(payload->Data));
-            const Entity spawned = game.CreateMeshEntityFromGtaFile(renderer, absolutePath, sceneServicesSetLayout);
+            const Entity spawned = game.CreateUniquelyNamedMeshEntityFromGtaFile(renderer, absolutePath, sceneServicesSetLayout);
             if (spawned.IsValid()) {
                 ctx.selection.SelectEntity(spawned);
             }

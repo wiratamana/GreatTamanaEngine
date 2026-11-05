@@ -209,26 +209,19 @@ struct InstantiateLightOutcome {
     std::string requestedParentName;
 };
 
-// task_manager/stl-parser-2 campaign, PHASE3 - outcome of one
-// Game::InstantiateMeshAssetFromGtaFile() call. Deliberately the SAME
-// SHAPE as InstantiatePrimitiveOutcome (success/errorMessage/entityIndex/
-// entityGeneration/resolvedName) minus the parenting fields - this method
-// never parents/positions/renames anything beyond what
-// CreateMeshEntityFromGtaFile() already does today (PHASE0's Locked
-// Design Decision #4 - "bare-bones wrapper", no world_position/name/parent
-// input of any kind).
+// Outcome of one Game::InstantiateMeshAssetFromGtaFile() call. Same shape as
+// InstantiatePrimitiveOutcome minus the parenting fields. The request may carry
+// a base name for the root; the engine always returns a unique one.
 struct InstantiateMeshAssetOutcome {
     bool success = false;
     std::string errorMessage;
 
     std::uint32_t entityIndex = 0;
     std::uint32_t entityGeneration = 0;
-    // The spawned ROOT entity's actual Name component value (the source
-    // file's own stem, e.g. "terrain" for "terrain.gta") - empty if the
-    // root somehow has no Name component at all (should not happen in
-    // practice - MeshInstantiationSystem::SpawnMeshAsset() always assigns
-    // one - but defensively read back rather than assumed).
+    // The spawned ROOT entity's final, unique Name (requested base or asset stem, plus " (N)" if taken).
     std::string resolvedName;
+    // True when `resolvedName` differs from the requested/default base name.
+    bool nameAdjusted = false;
 };
 
 // task_manager/scene-serialization-2 campaign, PHASE5

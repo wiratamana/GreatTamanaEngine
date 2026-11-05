@@ -103,12 +103,28 @@ Entity Game::CreateMeshEntityFromGtaFile(
     return root;
 }
 
-InstantiateMeshAssetOutcome Game::InstantiateMeshAssetFromGtaFile(
-    Renderer& renderer, const std::string& absoluteGtaPath, DescriptorSetLayoutHandle sceneServicesSetLayout)
+Entity Game::CreateUniquelyNamedMeshEntityFromGtaFile(Renderer& renderer, const std::string& absoluteGtaPath,
+    DescriptorSetLayoutHandle sceneServicesSetLayout, const std::string& requestedName, AssignedEntityName* nameOut)
+{
+    const Entity root = CreateMeshEntityFromGtaFile(renderer, absoluteGtaPath, sceneServicesSetLayout);
+    if (root == kInvalidEntity) {
+        return root;
+    }
+    const AssignedEntityName assigned = AssignUniqueEntityName(m_registry, root, requestedName);
+    if (nameOut != nullptr) {
+        *nameOut = assigned;
+    }
+    return root;
+}
+
+InstantiateMeshAssetOutcome Game::InstantiateMeshAssetFromGtaFile(Renderer& renderer, const std::string& absoluteGtaPath,
+    DescriptorSetLayoutHandle sceneServicesSetLayout, const std::string& requestedName)
 {
     InstantiateMeshAssetOutcome outcome;
 
-    const Entity root = CreateMeshEntityFromGtaFile(renderer, absoluteGtaPath, sceneServicesSetLayout);
+    AssignedEntityName assigned;
+    const Entity root = CreateUniquelyNamedMeshEntityFromGtaFile(
+        renderer, absoluteGtaPath, sceneServicesSetLayout, requestedName, &assigned);
     if (root == kInvalidEntity) {
         outcome.success = false;
         outcome.errorMessage = "failed to load or spawn a Mesh asset from \"" + absoluteGtaPath
@@ -119,9 +135,8 @@ InstantiateMeshAssetOutcome Game::InstantiateMeshAssetFromGtaFile(
     outcome.success = true;
     outcome.entityIndex = root.index;
     outcome.entityGeneration = root.generation;
-    if (const Name* name = m_registry.TryGetComponent<Name>(root)) {
-        outcome.resolvedName = name->value;
-    }
+    outcome.resolvedName = assigned.name;
+    outcome.nameAdjusted = assigned.adjusted;
     return outcome;
 }
 

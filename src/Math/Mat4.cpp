@@ -192,42 +192,12 @@ Mat4 Mat4::Inverse() const noexcept
     return ok ? result : Mat4::Identity();
 }
 
-Vec3 Mat4::TransformPoint(const Vec3& p) const noexcept
-{
-    Vec4 r = (*this) * Vec4(p.x, p.y, p.z, 1.0f);
-    return r.XYZ();
-}
-
-Vec3 Mat4::TransformVector(const Vec3& v) const noexcept
-{
-    Vec4 r = (*this) * Vec4(v.x, v.y, v.z, 0.0f);
-    return r.XYZ();
-}
-
 Vec3 Mat4::TransformNormal(const Vec3& n) const noexcept
 {
     Mat4 inv;
     if (!TryInverse(inv))
         return n; // degenerate transform - nothing sane to do, return input unchanged
     return inv.Transposed().TransformVector(n);
-}
-
-Vec4 operator*(const Mat4& m, const Vec4& v) noexcept
-{
-    return Vec4(
-        m.columns[0].x * v.x + m.columns[1].x * v.y + m.columns[2].x * v.z + m.columns[3].x * v.w,
-        m.columns[0].y * v.x + m.columns[1].y * v.y + m.columns[2].y * v.z + m.columns[3].y * v.w,
-        m.columns[0].z * v.x + m.columns[1].z * v.y + m.columns[2].z * v.z + m.columns[3].z * v.w,
-        m.columns[0].w * v.x + m.columns[1].w * v.y + m.columns[2].w * v.z + m.columns[3].w * v.w);
-}
-
-Mat4 operator*(const Mat4& a, const Mat4& b) noexcept
-{
-    return Mat4(
-        a * b.columns[0],
-        a * b.columns[1],
-        a * b.columns[2],
-        a * b.columns[3]);
 }
 
 } // namespace gte

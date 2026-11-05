@@ -1,6 +1,7 @@
 #pragma once
 #include "DynamicChainDefinition.h"
 #include "../Animation/BoneLocalOffset.h"
+#include "../Animation/BoneWorldCache.h"
 #include "../Assets/SkeletonData.h"
 #include "../Math/Vec3.h"
 
@@ -124,5 +125,10 @@ namespace gte {
 // joint (including the tip) at its own simulated position.
 void ApplyDynamicChainPhysicsToPose(const SkeletonData& skeleton, const DynamicChainDefinition& definition,
     const std::vector<Vec3>& simulatedJointWorldPositions, std::vector<BoneLocalOffset>& pose);
+
+// Same result, reusing `cache` for the bone world matrices. The cache must describe `pose` on entry (Reset() it when the
+// pose is new); every pose write inside this call is reported to it.
+void ApplyDynamicChainPhysicsToPose(const SkeletonData& skeleton, const DynamicChainDefinition& definition,
+    const std::vector<Vec3>& simulatedJointWorldPositions, std::vector<BoneLocalOffset>& pose, BoneWorldCache& cache);
 
 } // namespace gte

@@ -50,6 +50,7 @@ struct DeleteEntityCommand {
 // Plain request payload for one InstantiateMeshAsset command.
 struct InstantiateMeshAssetCommand {
     std::string absoluteGtaPath;
+    std::string requestedName; // Empty = use the asset stem.
 };
 
 // "" means "use Editor::SceneIO.h's own DefaultScenePath()".

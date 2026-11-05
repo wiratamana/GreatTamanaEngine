@@ -46,11 +46,8 @@ public:
     void SetSkinningMode(SkinningMode mode) noexcept { m_mode = mode; }
     SkinningMode GetSkinningMode() const noexcept { return m_mode; }
 
-    // Called by Game after a skinned model is spawned.
-    void RegisterSkinnedMesh(const std::string& absoluteGtaPath, const SkinnedMeshData& data)
-    {
-        m_rigCache.Register(absoluteGtaPath, data);
-    }
+    // Called by Game after a skinned model is spawned. Also builds the packed data the CPU skinning kernels read.
+    void RegisterSkinnedMesh(const std::string& absoluteGtaPath, const SkinnedMeshData& data);
 
     // The GPU-side sibling of RegisterSkinnedMesh(), called alongside it for every rigged model whatever the mode.
     // `parts` are the model's mesh parts. No-op for a boneless model or one whose parts resolve to no live mesh.
@@ -99,7 +96,12 @@ public:
     void AppendGpuSkinningMeshHandles(std::vector<MeshHandle>& out) const { m_gpuRigCache.AppendBoundMeshHandles(out); }
 
 private:
-    // Skins and uploads one entity's model. `mode` is the mode captured once at the start of SkinAndUpload().
+    // Keeps the entity's renderers on the mesh of `mode` and records it as the pose source of its model for this
+    // frame. Instances of one model share GPU buffers, so only the last recorded entity of a model is skinned.
+    void NoteSkinCandidate(Registry& registry, Entity entity, const std::string& meshGtaPath, SkinningMode mode);
+
+    // Skins and uploads one model from one entity's pose. `mode` is the mode captured once at the start of
+    // SkinAndUpload().
     void SkinAndUploadOneEntity(Registry& registry, Entity entity, const std::string& meshGtaPath, SkinningMode mode);
 
     RenderSystem& m_renderSystem;
@@ -118,10 +120,16 @@ private:
     // Model paths that need a GPU skinning dispatch this frame; rebuilt by SkinAndUpload().
     std::vector<std::string> m_gpuModelsNeedingDispatchThisFrame;
 
+    // The entity whose pose a model is skinned from this frame. `meshGtaPath` points into a component and is only
+    // valid inside SkinAndUpload().
+    struct SkinWinner {
+        const std::string* meshGtaPath;
+        Entity entity;
+    };
+    std::vector<SkinWinner> m_skinWinnersThisFrame;
+
     // Per-model scratch arrays kept between frames so skinning does not allocate every frame.
     struct AnimatorScratchBuffers {
-        std::vector<Vec3> skinnedPositions;
-        std::vector<Vec3> skinnedNormals;
         std::vector<MeshVertex> packedUntextured;
         std::vector<MeshVertexUv> packedTextured;
     };

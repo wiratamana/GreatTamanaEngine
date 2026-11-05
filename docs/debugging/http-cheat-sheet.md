@@ -1,6 +1,6 @@
 # HTTP debugging cheat sheet
 > One-page guide to the editor's HTTP debug server. For humans and AI agents who need to see, measure or poke a running editor.
-> Verified against code: 2026-11-04
+> Verified against code: 2026-11-05
 
 ## TL;DR
 - The editor runs a server on `http://127.0.0.1:8080`. Loopback only. The port is fixed.
@@ -128,7 +128,7 @@ Full params and responses: [HTTP routes](http-routes.md) and [HTTP routes (debug
 | Frame dbg | `/frame_debugger/state` | none | |
 | Frame dbg | `/frame_debugger/get_event_texture` | `index`, `format` | **IMG** |
 | Scene | `POST /instantiate_primitive` | `shape`, `name`, `world_position`, `parent` | **W** |
-| Scene | `POST /instantiate_light`, `/instantiate_asset` | `name`, `color`, `illuminance_lux` / `gta_path` | **W** |
+| Scene | `POST /instantiate_light`, `/instantiate_asset` | `name`, `color`, `illuminance_lux` / `gta_path`, optional `name` | **W** |
 | Scene | `POST /set_entity_trs` | `name`, `translation`, `rotation_euler_degrees`, `scale` | **W** |
 | Scene | `POST /delete_entity` | `name` | **W** |
 | Scene | `POST /save_scene`, `/load_scene` | `path` (optional) | **W** |
@@ -289,6 +289,7 @@ curl.exe "http://127.0.0.1:8080/scene_camera/image?overlay=false" -o scene.png
 curl.exe -X POST http://127.0.0.1:8080/delete_entity -d "{\"name\":\"T1\"}"
 ```
 - Entity names are made unique. Always use the `name` from the reply for later calls.
+- `/instantiate_asset` accepts an optional `name`. Taken names get ` (1)`, ` (2)`. URL-encode spaces and parentheses in GET queries.
 - Load test: `POST /open_preset_scene` with `{"preset":"hiz_demo","count":50000,"spacing":2,"profile":"geometry_only"}`.
 - `POST /spawn_instance_grid` spawns a grid of instances (`count` 1..100000).
 

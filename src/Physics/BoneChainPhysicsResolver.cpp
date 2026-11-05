@@ -28,6 +28,14 @@ constexpr float kMinAngleRadians = 1e-5f;
 void ApplyDynamicChainPhysicsToPose(const SkeletonData& skeleton, const DynamicChainDefinition& definition,
     const std::vector<Vec3>& simulatedJointWorldPositions, std::vector<BoneLocalOffset>& pose)
 {
+    BoneWorldCache cache;
+    cache.Reset(skeleton.bones.size());
+    ApplyDynamicChainPhysicsToPose(skeleton, definition, simulatedJointWorldPositions, pose, cache);
+}
+
+void ApplyDynamicChainPhysicsToPose(const SkeletonData& skeleton, const DynamicChainDefinition& definition,
+    const std::vector<Vec3>& simulatedJointWorldPositions, std::vector<BoneLocalOffset>& pose, BoneWorldCache& cache)
+{
     const std::size_t jointCount = definition.jointBoneIndices.size();
     if (simulatedJointWorldPositions.size() != jointCount || definition.parentJointIndex.size() != jointCount) {
         return; // Malformed/stale input - never read/write out of bounds.
@@ -68,7 +76,7 @@ void ApplyDynamicChainPhysicsToPose(const SkeletonData& skeleton, const DynamicC
                 continue; // No real anchor bone (e.g. a world-anchored chain) - nothing to translate relative to.
             }
 
-            const Mat4 anchorWorld = ComputeBoneWorldMatrix(skeleton, pose, rootBoneIndex);
+            const Mat4 anchorWorld = cache.Get(skeleton, pose, rootBoneIndex);
             Mat4 anchorWorldInverse;
             if (!anchorWorld.TryInverse(anchorWorldInverse)) {
                 continue; // Algebraically should never happen (anchorWorld is a unit-scale TRS) - defensive only.
@@ -78,6 +86,7 @@ void ApplyDynamicChainPhysicsToPose(const SkeletonData& skeleton, const DynamicC
             const Vec3 localBindOffset = skeleton.bones[static_cast<std::size_t>(boneIndex)].position
                 - skeleton.bones[static_cast<std::size_t>(rootBoneIndex)].position;
             pose[static_cast<std::size_t>(boneIndex)].translation = desiredLocalPoint - localBindOffset;
+            cache.Invalidate(boneIndex);
             // pose[boneIndex].rotation is intentionally left untouched here - if
             // this SAME bone is itself some LATER joint's own tree-parent, the
             // `parentJoint >= 0` branch below (a later iteration, per this
@@ -99,10 +108,10 @@ void ApplyDynamicChainPhysicsToPose(const SkeletonData& skeleton, const DynamicC
             continue;
         }
 
-        const Mat4 parentWorld = ComputeBoneWorldMatrix(skeleton, pose, parentBoneIndex);
+        const Mat4 parentWorld = cache.Get(skeleton, pose, parentBoneIndex);
         const Vec3 parentWorldPos = parentWorld.TransformPoint(Vec3::Zero());
 
-        const Mat4 currentChildWorld = ComputeBoneWorldMatrix(skeleton, pose, boneIndex);
+        const Mat4 currentChildWorld = cache.Get(skeleton, pose, boneIndex);
         const Vec3 currentChildPos = currentChildWorld.TransformPoint(Vec3::Zero());
         const Vec3 rawCurrentDelta = currentChildPos - parentWorldPos;
 
@@ -131,10 +140,11 @@ void ApplyDynamicChainPhysicsToPose(const SkeletonData& skeleton, const DynamicC
         const Quat newParentWorldRotation = delta * Quat::FromMat4(parentWorld);
 
         const std::int32_t grandparentBoneIndex = skeleton.bones[static_cast<std::size_t>(parentBoneIndex)].parentBoneIndex;
-        const Mat4 grandparentWorld = ComputeBoneWorldMatrix(skeleton, pose, grandparentBoneIndex);
+        const Mat4 grandparentWorld = cache.Get(skeleton, pose, grandparentBoneIndex);
         const Quat grandparentWorldRotationInverse = Quat::FromMat4(grandparentWorld).Inverse();
         pose[static_cast<std::size_t>(parentBoneIndex)].rotation =
             Normalize(grandparentWorldRotationInverse * newParentWorldRotation);
+        cache.Invalidate(parentBoneIndex);
     }
 }
 

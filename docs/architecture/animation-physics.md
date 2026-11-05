@@ -1,12 +1,12 @@
 # Animation and physics
 > How a skinned MMD model gets its pose each frame: motion sampling, IK, Verlet hair physics, CPU or GPU skinning. For anyone touching pose, skinning or chain physics.
-> Verified against code: 2026-11-03
+> Verified against code: 2026-11-05
 
 ## TL;DR
 - Pose evaluation is pure CPU math in `src/Animation/`. It has no ECS, GPU or file code.
 - Each frame runs three stages in this order: animate, physics, skin.
 - Physics is secondary motion only: Verlet dynamic bone chains (hair, skirt). It is not a rigid-body engine.
-- Skinning runs on the job system (default) or as a GPU compute pass. The CPU skinning code is the reference.
+- Skinning runs on the CPU (default, one SIMD pass per model) or as a GPU compute pass. The scalar CPU skinning code is the reference.
 - Not implemented: morph blending, MMD bezier curves, camera/light keyframe playback.
 
 ## Diagram
@@ -50,7 +50,7 @@ The only data shared between the stages is the `ResolvedAnimationPose` component
 ## Skinning modes
 | Mode | What happens |
 |---|---|
-| `CpuJobSystem` (default) | The job system skins vertices in batches, then the vertex buffers are re-uploaded. |
+| `CpuJobSystem` (default) | Each model is skinned once per frame. One fused SSE2 kernel (`VertexSkinningSimd`) writes the renderer vertex layout directly, then the vertex buffers are re-uploaded. It runs on the main thread. It uses the job system only at 262144 vertices or more. |
 | `GpuCompute` | Bone matrices are uploaded. A compute pass skins the vertices later in the frame. |
 
 - Switch in the editor Jobs panel only (`Panels/JobsPanel.cpp`). No HTTP route changes the mode.
@@ -75,7 +75,7 @@ A chain is a tree of simulated bones hanging from a pinned anchor bone.
 | Colliders | Static PMX bodies become sphere, box or capsule colliders (`ModelColliderDetection`). All chains of a model share them. A joint inside a collider in the bind pose ignores that collider. A joint near one keeps half of its largest free radius, so resting contact is not pushed again every step (`FitJointCollisionToBindPose`). |
 | Wind | One world wind (`WindSettings`): direction, base strength, gust strength and frequency. Default is zero. |
 | Time | Fixed step with an accumulator. Simulation runs in true world space. With interpolation on, each step blends the anchor frame of the last two render frames (quaternion slerp plus lerp of the translation, always rigid) and lerps the animated joints in the anchor frame, so a welded joint keeps one anchor-local position at every render rate. The written pose is interpolated in anchor-local space between display knots; each knot is the mean of two consecutive steps (removes step-rate jitter, adds half a step of lag). |
-| Parallel | Chains run in parallel when a model has more than one chain and at least 24 joints. The outer entity loop stays sequential. |
+| Parallel | One claim list holds the chains of all entities (largest first). Entities with more than one chain and at least 24 joints join it. Workers and the main thread claim chains from it. Other entities run on the main thread. |
 
 Defaults:
 
@@ -103,6 +103,9 @@ Defaults:
 | `src/Animation/AnimationPoseEvaluator.*` | The pose order |
 | `src/Animation/MotionSampler.*`, `IkSolver.*`, `AppendBoneSolver.*` | Sample, IK, append |
 | `src/Animation/SkeletonPose.*`, `VertexSkinning.*` | FK and the CPU skinning reference |
+| `src/Animation/VertexSkinningSimd.*` | Fused SSE2 skin and pack kernel, compact skin data built at registration |
+| `src/Animation/BoneWorldCache.h` | Per-step cache of bone world matrices for physics |
+| `src/Physics/ColliderBounds.h` | Cheap collider reach test before the exact collision test |
 | `src/Animation/BoneChainResolver.h`, `BonePoseMath.h` | Shared bone-walk and local matrix |
 | `src/Game/Animation/AnimationSystem.*` | Play, evaluate, skin, upload, caches |
 | `src/Game/Animation/GpuSkinningRigCache.*` | GPU skinning buffers per model |
@@ -125,12 +128,14 @@ Defaults:
 4. CPU skinning (`SkinVertexRange`) is the reference. If the GPU kernel disagrees, fix the kernel.
 5. Physics runs after append and before final skinning. It edits the pose in place and never replaces it.
 6. `PhysicsSystem` does not depend on `AnimationSystem` or the renderer. `DynamicChainRig` has its own `meshGtaPath`.
-7. Keep the per-entity skinning loop sequential. Two entities share one model's output buffers.
+7. Skin each model once per frame. Instances of one model share the output buffers, so only the last entity in iteration order is skinned. Still call `ApplyMeshHandleForSkinningMode` for every instance. Keep the skinning loop sequential.
 8. Chain state is per entity. Never share it.
 9. Mask the PMX collision group before you shift: `group & 0x0F`. The byte comes raw from the file.
 
 ## Gotchas
-- Two entities from the same model `.gta` share GPU mesh buffers. The last pose written wins.
+- Two entities from the same model `.gta` share GPU mesh buffers. The last pose written wins, and only that entity is skinned.
+- The fused skin kernel reads compact data built in `AnimationSystem::RegisterSkinnedMesh`. A model registered another way has none and is not skinned in CPU mode.
+- The bone world cache and the SSE2 matrix product must stay bit-identical to the plain walk. Run `BoneWorldCacheTests.*` and `Mat4SimdParityTests.*` after any change.
 - CPU skinning transforms normals with the bone matrix directly. This is correct for rigid bone matrices only.
 - `SkeletalAnimator` is not saved in a scene. After a load, play the clip again.
 - Playing a clip is a UI action: drop an Animation asset from the Project panel on a rigged model row in the Hierarchy. `/hierarchy_action` only reparents and toggles.

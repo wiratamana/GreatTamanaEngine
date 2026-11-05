@@ -2,6 +2,7 @@
 
 #include "../../Assets/MeshData.h"
 #include "../../Assets/PhysicsData.h"
+#include "../../Animation/VertexSkinningSimd.h"
 #include "../../Assets/SkeletonData.h"
 #include "../../Math/Vec2.h"
 #include "../../Math/Vec3.h"
@@ -47,6 +48,9 @@ struct SkinnedMeshData {
     // DetectDynamicChains()'s own defaults, exactly like `physics` being
     // std::nullopt already does for RigidBody-seeded defaults above.
     std::vector<JointPhysicsOverride> jointPhysicsOverrides;
+
+    // Packed copy of the bind data for the SIMD skin+pack kernels; built by AnimationSystem::RegisterSkinnedMesh().
+    CompactSkinData compactSkin;
 };
 
 // Replaces the old Game::m_meshSkinningCache, but re-homed as an explicit,

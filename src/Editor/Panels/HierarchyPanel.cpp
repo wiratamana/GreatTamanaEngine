@@ -167,7 +167,7 @@ void ApplyPendingAction(Game& game, Renderer& renderer, EditorContext& ctx, Regi
 #if GTE_ENABLE_PROJECT_PANEL
         // An animation plays on a rigged model; any other asset spawns as a child of the target.
         if (registry.IsAlive(action.target) && !game.PlayAnimationOnEntity(action.target, action.assetPath)) {
-            const Entity spawned = game.CreateMeshEntityFromGtaFile(renderer, action.assetPath, sceneServicesSetLayout);
+            const Entity spawned = game.CreateUniquelyNamedMeshEntityFromGtaFile(renderer, action.assetPath, sceneServicesSetLayout);
             if (spawned.IsValid()) {
                 SetParent(registry, spawned, action.target, /*worldPositionStays=*/true);
                 ctx.selection.SelectEntity(spawned);
@@ -242,7 +242,7 @@ void HierarchyPanel::OnGui(EditorFrame& frame)
 #if GTE_ENABLE_PROJECT_PANEL
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kProjectAssetDragDropPayloadType)) {
                 const std::string absolutePath(static_cast<const char*>(payload->Data));
-                const Entity spawned = game.CreateMeshEntityFromGtaFile(renderer, absolutePath, sceneServicesSetLayout);
+                const Entity spawned = game.CreateUniquelyNamedMeshEntityFromGtaFile(renderer, absolutePath, sceneServicesSetLayout);
                 if (spawned.IsValid()) {
                     ctx.selection.SelectEntity(spawned);
                 }

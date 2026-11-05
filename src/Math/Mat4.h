@@ -4,6 +4,10 @@
 #include "Vec3.h"
 #include "Vec4.h"
 
+#if defined(__SSE2__)
+#include <emmintrin.h>
+#endif
+
 namespace gte {
 
 struct Quat; // fwd decl - see Quat.h/.cpp for the quaternion<->matrix conversions
@@ -100,8 +104,40 @@ struct alignas(16) Mat4 {
     Vec3 TransformNormal(const Vec3& n) const noexcept;
 };
 
-Mat4 operator*(const Mat4& a, const Mat4& b) noexcept;
-Vec4 operator*(const Mat4& m, const Vec4& v) noexcept;
+// Column-major product. The SSE2 path adds the four column terms in the same order as the scalar code, so results match bit for bit.
+inline Vec4 operator*(const Mat4& m, const Vec4& v) noexcept
+{
+#if defined(__SSE2__)
+    __m128 r = _mm_mul_ps(_mm_load_ps(&m.columns[0].x), _mm_set1_ps(v.x));
+    r = _mm_add_ps(r, _mm_mul_ps(_mm_load_ps(&m.columns[1].x), _mm_set1_ps(v.y)));
+    r = _mm_add_ps(r, _mm_mul_ps(_mm_load_ps(&m.columns[2].x), _mm_set1_ps(v.z)));
+    r = _mm_add_ps(r, _mm_mul_ps(_mm_load_ps(&m.columns[3].x), _mm_set1_ps(v.w)));
+    alignas(16) float out[4];
+    _mm_store_ps(out, r);
+    return Vec4(out[0], out[1], out[2], out[3]);
+#else
+    return Vec4(
+        m.columns[0].x * v.x + m.columns[1].x * v.y + m.columns[2].x * v.z + m.columns[3].x * v.w,
+        m.columns[0].y * v.x + m.columns[1].y * v.y + m.columns[2].y * v.z + m.columns[3].y * v.w,
+        m.columns[0].z * v.x + m.columns[1].z * v.y + m.columns[2].z * v.z + m.columns[3].z * v.w,
+        m.columns[0].w * v.x + m.columns[1].w * v.y + m.columns[2].w * v.z + m.columns[3].w * v.w);
+#endif
+}
+
+inline Mat4 operator*(const Mat4& a, const Mat4& b) noexcept
+{
+    return Mat4(a * b.columns[0], a * b.columns[1], a * b.columns[2], a * b.columns[3]);
+}
+
+inline Vec3 Mat4::TransformPoint(const Vec3& p) const noexcept
+{
+    return ((*this) * Vec4(p.x, p.y, p.z, 1.0f)).XYZ();
+}
+
+inline Vec3 Mat4::TransformVector(const Vec3& v) const noexcept
+{
+    return ((*this) * Vec4(v.x, v.y, v.z, 0.0f)).XYZ();
+}
 
 inline bool ApproximatelyEqual(const Mat4& a, const Mat4& b, float epsilon = kEpsilon) noexcept
 {

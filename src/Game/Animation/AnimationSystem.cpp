@@ -2,7 +2,7 @@
 
 #include "../../Animation/AnimationPoseEvaluator.h"
 #include "../../Animation/SkeletonPose.h"
-#include "../../Animation/VertexSkinning.h"
+#include "../../Animation/VertexSkinningSimd.h"
 #include "../../ECS/Components/DynamicChainRig.h"
 #include "../../ECS/Components/MeshAssetSource.h"
 #include "../../ECS/Components/MeshRenderer.h"
@@ -17,7 +17,6 @@
 #include "../../Renderer/MeshVertex.h"
 #include "../Instantiation/MeshInstantiationSystem.h"
 #include "../Instantiation/MeshAssetPartGrouping.h"
-#include "../Instantiation/MeshVertexPacking.h"
 #include "../RenderSystem.h"
 
 #include <algorithm>
@@ -32,59 +31,60 @@ namespace {
 // VMD motions use a fixed 30 frames per second grid.
 constexpr float kVmdFramesPerSecond = 30.0f;
 
-// Below this vertex count skinning and packing run inline: a job dispatch would cost more than the work.
-constexpr std::size_t kMinVerticesToParallelize = 512;
+// Below this vertex count skin+pack runs inline: a fork/join costs more than the work.
+constexpr std::size_t kMinVerticesToParallelize = 262144;
 
 // Never split a model into batches smaller than this many vertices.
-constexpr std::uint32_t kMinVerticesPerBatch = 256;
+constexpr std::uint32_t kMinVerticesPerBatch = 32768;
+
+// The skin kernels write floats straight into the renderer's vertex structs.
+static_assert(sizeof(MeshVertexUv) == 8 * sizeof(float));
+static_assert(sizeof(MeshVertex) == 6 * sizeof(float));
 
 // Per-batch job context: pointers into data owned by the caller, which outlives the dispatch and its wait.
-struct SkinningBatchContext {
-    const std::vector<Vec3>* bindPositions;
-    const std::vector<Vec3>* bindNormals;
-    const std::vector<VertexSkinWeights>* skinWeights;
-    const std::vector<Mat4>* skinningMatrices;
-    std::vector<Vec3>* outPositions;
-    std::vector<Vec3>* outNormals;
+struct SkinPackBatchContext {
+    const CompactSkinData* data;
+    const Mat4* skinningMatrices;
+    std::size_t matrixCount;
+    float* outVertices;
+    bool textured;
 };
 
-// Job body: skins one batch's slice of vertices. Inputs are read-only and shared; each batch writes a disjoint slice.
-void RunSkinningBatch(std::uint32_t beginIndex, std::uint32_t endIndex, void* payload)
+void SkinPackBatch(const SkinPackBatchContext& context, std::uint32_t beginIndex, std::uint32_t endIndex)
+{
+    if (context.textured) {
+        SkinPackTexturedRange(beginIndex, endIndex, *context.data, context.skinningMatrices, context.matrixCount,
+            context.outVertices);
+    } else {
+        SkinPackUntexturedRange(beginIndex, endIndex, *context.data, context.skinningMatrices, context.matrixCount,
+            context.outVertices);
+    }
+}
+
+// Job body: skins and packs one batch's slice. Inputs are read-only and shared; each batch writes a disjoint slice.
+void RunSkinPackBatch(std::uint32_t beginIndex, std::uint32_t endIndex, void* payload)
 {
     // Job bodies are profiled only with the job scope macro.
     GTE_PROFILE_JOB_SCOPE("SkinVertices");
 
-    SkinningBatchContext* context = static_cast<SkinningBatchContext*>(payload);
-    SkinVertexRange(beginIndex, endIndex, *context->bindPositions, *context->bindNormals, *context->skinWeights,
-        *context->skinningMatrices, *context->outPositions, *context->outNormals);
+    SkinPackBatch(*static_cast<const SkinPackBatchContext*>(payload), beginIndex, endIndex);
 }
 
-// Packing is parallel per vertex like the skin blend; these mirror SkinningBatchContext for the pack functions.
-struct PackUntexturedBatchContext {
-    const std::vector<Vec3>* positions;
-    const std::vector<Vec3>* normals;
-    std::vector<MeshVertex>* out;
-};
-
-void RunPackUntexturedBatch(std::uint32_t beginIndex, std::uint32_t endIndex, void* payload)
+// Skins every vertex and writes the packed result to `outVertices`: inline for small models, else one fork/join.
+void SkinPackAllVertices(const CompactSkinData& data, const std::vector<Mat4>& skinningMatrices, bool textured,
+    float* outVertices)
 {
-    GTE_PROFILE_JOB_SCOPE("PackMeshVertices");
-    PackUntexturedBatchContext* context = static_cast<PackUntexturedBatchContext*>(payload);
-    PackMeshVertexRange(beginIndex, endIndex, *context->positions, *context->normals, *context->out);
-}
+    SkinPackBatchContext context{ &data, skinningMatrices.data(), skinningMatrices.size(), outVertices, textured };
+    const std::uint32_t vertexCount = static_cast<std::uint32_t>(data.VertexCount());
+    if (vertexCount < kMinVerticesToParallelize) {
+        SkinPackBatch(context, 0, vertexCount);
+        return;
+    }
 
-struct PackTexturedBatchContext {
-    const std::vector<Vec3>* positions;
-    const std::vector<Vec3>* normals;
-    const std::vector<Vec2>* uvs;
-    std::vector<MeshVertexUv>* out;
-};
-
-void RunPackTexturedBatch(std::uint32_t beginIndex, std::uint32_t endIndex, void* payload)
-{
-    GTE_PROFILE_JOB_SCOPE("PackMeshVertexUvs");
-    PackTexturedBatchContext* context = static_cast<PackTexturedBatchContext*>(payload);
-    PackMeshVertexUvRange(beginIndex, endIndex, *context->positions, *context->normals, *context->uvs, *context->out);
+    Jobs::JobHandle handle;
+    Jobs::Dispatch(&RunSkinPackBatch, vertexCount, &context, handle, kMinVerticesPerBatch);
+    GTE_PROFILE_BLOCKED("Wait.Workers");
+    Jobs::JobSystem::Instance().WaitForJobs(handle);
 }
 
 // Points every MeshRenderer on the entity's direct children (a model's parts) at the CPU- or GPU-skinned mesh that
@@ -242,7 +242,38 @@ void AnimationSystem::EvaluatePoses(Registry& registry, double deltaSeconds)
     }
 }
 
-// Skins and uploads one entity's model, found through a playing animator or an enabled DynamicChainRig.
+void AnimationSystem::RegisterSkinnedMesh(const std::string& absoluteGtaPath, const SkinnedMeshData& data)
+{
+    SkinnedMeshData registered = data;
+    registered.compactSkin = BuildCompactSkinData(
+        data.bindPositions, data.bindNormals, data.uvs, data.skinWeights, data.skeleton.bones.size());
+    m_rigCache.Register(absoluteGtaPath, std::move(registered));
+}
+
+void AnimationSystem::NoteSkinCandidate(
+    Registry& registry, Entity entity, const std::string& meshGtaPath, SkinningMode mode)
+{
+    // Same skip rules as SkinAndUploadOneEntity(): an entity it would not skin must not become the winner.
+    if (m_rigCache.TryGet(meshGtaPath) == nullptr || !registry.HasComponent<ResolvedAnimationPose>(entity)) {
+        return;
+    }
+
+    // Every instance keeps its own renderers on the right mesh, also the ones that are not skinned this frame.
+    const GpuSkinningRigCache::GpuModelEntry* gpuEntry = m_gpuRigCache.TryGet(meshGtaPath);
+    if (gpuEntry != nullptr) {
+        ApplyMeshHandleForSkinningMode(registry, entity, *gpuEntry, mode);
+    }
+
+    for (SkinWinner& winner : m_skinWinnersThisFrame) {
+        if (*winner.meshGtaPath == meshGtaPath) {
+            winner.entity = entity; // The last instance wins, as when every instance was written in turn.
+            return;
+        }
+    }
+    m_skinWinnersThisFrame.push_back(SkinWinner{ &meshGtaPath, entity });
+}
+
+// Skins and uploads one model from one entity's pose, found through a playing animator or an enabled DynamicChainRig.
 void AnimationSystem::SkinAndUploadOneEntity(
     Registry& registry, Entity entity, const std::string& meshGtaPath, SkinningMode mode)
 {
@@ -258,14 +289,9 @@ void AnimationSystem::SkinAndUploadOneEntity(
     }
     const std::vector<Mat4> skinningMatrices = ComputeSkinningMatrices(skinData->skeleton, resolvedPose->pose);
 
-    // Keep the model's renderers on the mesh that matches the current mode, so a mode switch applies next frame.
-    const GpuSkinningRigCache::GpuModelEntry* gpuEntry = m_gpuRigCache.TryGet(meshGtaPath);
-    if (gpuEntry != nullptr) {
-        ApplyMeshHandleForSkinningMode(registry, entity, *gpuEntry, mode);
-    }
-
     if (mode == SkinningMode::GpuCompute) {
         // The whole CPU cost in GPU mode is one upload; the dispatch is recorded later by the skinning pass.
+        const GpuSkinningRigCache::GpuModelEntry* gpuEntry = m_gpuRigCache.TryGet(meshGtaPath);
         if (gpuEntry == nullptr) {
             return; // Never registered for GPU skinning.
         }
@@ -279,27 +305,11 @@ void AnimationSystem::SkinAndUploadOneEntity(
         return;
     }
 
-    // CpuJobSystem mode. The scratch arrays are kept per model between frames; resize() allocates only the first time.
-    const std::size_t vertexCount = skinData->bindPositions.size();
-    AnimatorScratchBuffers& scratch = m_scratchBuffers[meshGtaPath];
-    std::vector<Vec3>& skinnedPositions = scratch.skinnedPositions;
-    std::vector<Vec3>& skinnedNormals = scratch.skinnedNormals;
-    skinnedPositions.resize(vertexCount);
-    skinnedNormals.resize(vertexCount);
-
-    // CPU skinning runs on the worker pool for models large enough to benefit, inline otherwise; the result is the same.
-    if (vertexCount < kMinVerticesToParallelize) {
-        SkinVertexRange(0, static_cast<std::uint32_t>(vertexCount), skinData->bindPositions,
-            skinData->bindNormals, skinData->skinWeights, skinningMatrices, skinnedPositions, skinnedNormals);
-    } else {
-        SkinningBatchContext context{ &skinData->bindPositions, &skinData->bindNormals, &skinData->skinWeights,
-            &skinningMatrices, &skinnedPositions, &skinnedNormals };
-        Jobs::JobHandle skinningHandle;
-        Jobs::Dispatch(&RunSkinningBatch, static_cast<std::uint32_t>(vertexCount), &context, skinningHandle,
-            kMinVerticesPerBatch);
-        // One wait per model: the next model's dispatch must not start before this one finishes.
-        GTE_PROFILE_BLOCKED("Wait.Workers");
-        Jobs::JobSystem::Instance().WaitForJobs(skinningHandle);
+    // CpuJobSystem mode. The packed bind data is built at registration; a model without it cannot be skinned here.
+    const CompactSkinData& compactSkin = skinData->compactSkin;
+    const std::size_t vertexCount = compactSkin.VertexCount();
+    if (vertexCount == 0 || vertexCount != skinData->bindPositions.size()) {
+        return;
     }
 
     const std::vector<MeshAssetPart>* parts = m_meshInstantiationSystem.TryGetMeshAssetParts(meshGtaPath);
@@ -307,45 +317,21 @@ void AnimationSystem::SkinAndUploadOneEntity(
         return;
     }
 
-    // Parts that share one GPU vertex buffer are grouped so each distinct buffer is packed and uploaded once.
+    // Parts that share one GPU vertex buffer are grouped so each distinct buffer is skinned, packed and uploaded once.
     const std::vector<MeshAssetPartGroup> groups = GroupMeshAssetPartsBySharedVertexBuffer(m_renderSystem, *parts);
 
-    // For each distinct vertex buffer: pack from the freshly skinned arrays (on the worker pool for large models)
-    // and upload once. The upload stays on the main thread.
+    // The scratch arrays are kept per model between frames; resize() allocates only the first time.
+    AnimatorScratchBuffers& scratch = m_scratchBuffers[meshGtaPath];
     for (const MeshAssetPartGroup& group : groups) {
         if (group.textured) {
             std::vector<MeshVertexUv>& packed = scratch.packedTextured;
             packed.resize(vertexCount);
-
-            if (vertexCount < kMinVerticesToParallelize) {
-                PackMeshVertexUvRange(
-                    0, static_cast<std::uint32_t>(vertexCount), skinnedPositions, skinnedNormals, skinData->uvs, packed);
-            } else {
-                PackTexturedBatchContext context{ &skinnedPositions, &skinnedNormals, &skinData->uvs, &packed };
-                Jobs::JobHandle packHandle;
-                Jobs::Dispatch(&RunPackTexturedBatch, static_cast<std::uint32_t>(vertexCount), &context,
-                    packHandle, kMinVerticesPerBatch);
-                GTE_PROFILE_BLOCKED("Wait.Workers");
-                Jobs::JobSystem::Instance().WaitForJobs(packHandle);
-            }
-
+            SkinPackAllVertices(compactSkin, skinningMatrices, true, reinterpret_cast<float*>(packed.data()));
             group.representativeMesh->UpdateVertexData(packed.data(), packed.size() * sizeof(MeshVertexUv));
         } else {
             std::vector<MeshVertex>& packed = scratch.packedUntextured;
             packed.resize(vertexCount);
-
-            if (vertexCount < kMinVerticesToParallelize) {
-                PackMeshVertexRange(
-                    0, static_cast<std::uint32_t>(vertexCount), skinnedPositions, skinnedNormals, packed);
-            } else {
-                PackUntexturedBatchContext context{ &skinnedPositions, &skinnedNormals, &packed };
-                Jobs::JobHandle packHandle;
-                Jobs::Dispatch(&RunPackUntexturedBatch, static_cast<std::uint32_t>(vertexCount), &context,
-                    packHandle, kMinVerticesPerBatch);
-                GTE_PROFILE_BLOCKED("Wait.Workers");
-                Jobs::JobSystem::Instance().WaitForJobs(packHandle);
-            }
-
+            SkinPackAllVertices(compactSkin, skinningMatrices, false, reinterpret_cast<float*>(packed.data()));
             group.representativeMesh->UpdateVertexData(packed.data(), packed.size() * sizeof(MeshVertex));
         }
     }
@@ -358,9 +344,10 @@ void AnimationSystem::SkinAndUpload(Registry& registry)
     // The mode is captured once so one model is never processed under two modes.
     const SkinningMode mode = m_mode;
     m_gpuModelsNeedingDispatchThisFrame.clear();
+    m_skinWinnersThisFrame.clear();
 
-    // Models must be processed strictly one at a time, whatever source found them: instances of one model share
-    // GPU mesh buffers, so overlapping two models' dispatches would be a data race. This holds in GPU mode too.
+    // Instances of one model share GPU mesh buffers and the last pose written wins, so each model is skinned once,
+    // from the entity that would have written last. Models are skinned strictly one at a time.
     std::unordered_set<Entity> processedThisFrame;
 
     // Source 1: every playing SkeletalAnimator.
@@ -371,12 +358,12 @@ void AnimationSystem::SkinAndUpload(Registry& registry)
         if (!animator.playing || animator.animationGtaPath.empty()) {
             continue;
         }
-        SkinAndUploadOneEntity(registry, animatorEntity, animator.meshGtaPath, mode);
+        NoteSkinCandidate(registry, animatorEntity, animator.meshGtaPath, mode);
         processedThisFrame.insert(animatorEntity);
     }
 
     // Source 2: enabled DynamicChainRig entities with a fresh pose that source 1 did not process (an entity may
-    // carry both components and must be uploaded only once).
+    // carry both components and must be handled only once).
     ComponentStorage<DynamicChainRig>& rigs = registry.Storage<DynamicChainRig>();
     for (std::size_t i = 0; i < rigs.Size(); ++i) {
         DynamicChainRig& rig = rigs.ComponentAt(i);
@@ -387,10 +374,11 @@ void AnimationSystem::SkinAndUpload(Registry& registry)
         if (processedThisFrame.count(entity) > 0) {
             continue;
         }
-        if (!registry.HasComponent<ResolvedAnimationPose>(entity)) {
-            continue; // EvaluatePoses() produced no pose for it this frame.
-        }
-        SkinAndUploadOneEntity(registry, entity, rig.meshGtaPath, mode);
+        NoteSkinCandidate(registry, entity, rig.meshGtaPath, mode);
+    }
+
+    for (const SkinWinner& winner : m_skinWinnersThisFrame) {
+        SkinAndUploadOneEntity(registry, winner.entity, *winner.meshGtaPath, mode);
     }
 }
 

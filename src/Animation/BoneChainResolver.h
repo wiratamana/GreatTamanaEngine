@@ -115,6 +115,38 @@ T ResolveSingleBoneChain(const SkeletonData& skeleton, std::int32_t boneIndex, c
         return rootValue;
     }
 
+    // Fast path: walk up into a fixed array, then fold root-first. No heap, same call order and same values as the
+    // recursive walk below. A cycle ends the walk with `rootValue`; a very deep chain takes the recursive path.
+    constexpr std::size_t kInlineDepth = 128;
+    std::size_t path[kInlineDepth];
+    std::size_t depth = 0;
+    for (std::size_t index = static_cast<std::size_t>(boneIndex);;) {
+        path[depth++] = index;
+        const std::int32_t next = nextIndex(index);
+        if (!(next >= 0 && static_cast<std::size_t>(next) < count && static_cast<std::size_t>(next) != index)) {
+            break;
+        }
+        bool cycle = false;
+        for (std::size_t i = 0; i < depth; ++i) {
+            cycle = cycle || path[i] == static_cast<std::size_t>(next);
+        }
+        if (cycle) {
+            break;
+        }
+        if (depth == kInlineDepth) {
+            depth = 0; // too deep for the array
+            break;
+        }
+        index = static_cast<std::size_t>(next);
+    }
+    if (depth > 0) {
+        T value = rootValue;
+        for (std::size_t i = depth; i-- > 0;) {
+            value = resolveNode(path[i], value);
+        }
+        return value;
+    }
+
     std::vector<std::uint8_t> visiting(count, 0);
 
     struct Recur {

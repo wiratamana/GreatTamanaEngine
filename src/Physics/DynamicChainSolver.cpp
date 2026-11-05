@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <emmintrin.h>
 
 namespace gte {
 
@@ -42,6 +43,18 @@ void SeedParticlesFromAnimatedPose(const DynamicChainDefinition& definition,
     }
 }
 
+// ScaleStepFraction() with a per-joint memo: the pow() only runs when base, step or multiplier changed.
+float MemoScaleStepFraction(StepFractionMemo& memo, float base, float stepSeconds, float multiplier) noexcept
+{
+    if (!(memo.base == base && memo.stepSeconds == stepSeconds && memo.multiplier == multiplier)) {
+        memo.base = base;
+        memo.stepSeconds = stepSeconds;
+        memo.multiplier = multiplier;
+        memo.result = ScaleStepFraction(base, stepSeconds, multiplier);
+    }
+    return memo.result;
+}
+
 bool IsFinite(const Vec3& v) noexcept
 {
     return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
@@ -53,23 +66,53 @@ bool IsIgnoredCollider(const std::vector<std::uint16_t>& sortedIgnored, std::siz
         && std::binary_search(sortedIgnored.begin(), sortedIgnored.end(), static_cast<std::uint16_t>(colliderIndex));
 }
 
+// Bit k of the result is set when collider `first + k` may reach the particle: not provably out of range (NaN counts as in range).
+int ReachableLanes(const ColliderReachSet& reach, std::size_t first, const Vec3& position, float particleRadius) noexcept
+{
+    const __m128 dx = _mm_sub_ps(_mm_set1_ps(position.x), _mm_loadu_ps(reach.X() + first));
+    const __m128 dy = _mm_sub_ps(_mm_set1_ps(position.y), _mm_loadu_ps(reach.Y() + first));
+    const __m128 dz = _mm_sub_ps(_mm_set1_ps(position.z), _mm_loadu_ps(reach.Z() + first));
+    const __m128 distanceSq = _mm_add_ps(_mm_add_ps(_mm_mul_ps(dx, dx), _mm_mul_ps(dy, dy)), _mm_mul_ps(dz, dz));
+    const __m128 limit = _mm_add_ps(_mm_loadu_ps(reach.Bound() + first),
+        _mm_mul_ps(_mm_loadu_ps(reach.PerRadius() + first), _mm_set1_ps(particleRadius)));
+    return _mm_movemask_ps(_mm_cmpngt_ps(distanceSq, _mm_mul_ps(limit, limit)));
+}
+
 // Pushes one joint out of every collider that applies to it; returns how far it moved.
+// Colliders are visited in list order against the live particle position. Colliders surely out of reach are skipped four
+// at a time; they could not have moved the particle, so the result is identical to testing every one.
 float CollideJoint(const DynamicChainDefinition& definition, std::size_t jointIndex, const StepOptions& options,
-    const std::vector<Collider>& colliders, VerletParticle& particle)
+    const std::vector<Collider>& colliders, const ColliderReachSet& reach, VerletParticle& particle)
 {
     const DynamicJointSettings& js = definition.jointSettings[jointIndex];
     particle.collisionRadius
         = (options.useCollisionFit && js.collisionFitRadius >= 0.0f) ? js.collisionFitRadius : js.collisionRadius;
     const Vec3 before = particle.position;
-    for (std::size_t k = 0; k < colliders.size(); ++k) {
-        const Collider& collider = colliders[k];
-        if (options.useCollisionFit && IsIgnoredCollider(js.ignoredColliderIndices, k)) {
-            continue;
+    const float particleRadius = std::max(0.0f, particle.collisionRadius);
+    for (std::size_t first = 0; first < reach.padded; first += 4) {
+        int lanes = ReachableLanes(reach, first, particle.position, particleRadius);
+        while (lanes != 0) {
+            const int lane = __builtin_ctz(static_cast<unsigned int>(lanes));
+            const std::size_t k = first + static_cast<std::size_t>(lane);
+            if (k >= colliders.size()) {
+                break;
+            }
+            const Collider& collider = colliders[k];
+            lanes &= ~(1 << lane);
+            if (options.useCollisionFit && IsIgnoredCollider(js.ignoredColliderIndices, k)) {
+                continue;
+            }
+            if (!GroupsMayCollide(js.group, js.collisionMask, collider.group, collider.collisionMask)) {
+                continue;
+            }
+            const Vec3 beforeSolve = particle.position;
+            SolveCollision(particle, collider);
+            if (particle.position.x != beforeSolve.x || particle.position.y != beforeSolve.y
+                || particle.position.z != beforeSolve.z) {
+                // The particle moved: the later colliders of this group must be judged at its new place.
+                lanes = ReachableLanes(reach, first, particle.position, particleRadius) & ~((2 << lane) - 1);
+            }
         }
-        if (!GroupsMayCollide(js.group, js.collisionMask, collider.group, collider.collisionMask)) {
-            continue;
-        }
-        SolveCollision(particle, collider);
     }
     return Length(particle.position - before);
 }
@@ -206,14 +249,20 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
     state.lastRootWorldPosition = rootWorldPosition;
 
     // Integrate under gravity and wind with step-length damping.
+    state.scratchDampingFractions.resize(jointCount);
+    state.scratchStiffnessFractions.resize(jointCount);
+    // With no wind strength the wind term does not depend on position or time: compute it once.
+    const bool windIsZero = wind.baseStrength == 0.0f && wind.gustStrength == 0.0f && !std::signbit(wind.baseStrength);
+    const Vec3 zeroWind = windIsZero ? ComputeWindAcceleration(wind, Vec3::Zero(), 0.0f) : Vec3::Zero();
     for (std::size_t i = 0; i < jointCount; ++i) {
         VerletParticle& particle = state.particles[i];
         const DynamicJointSettings& js = definition.jointSettings[i];
-        const Vec3 acceleration = gravity * definition.gravityScale
-            + ComputeWindAcceleration(wind, particle.position, state.simulationTimeSeconds) * definition.windScale;
+        const Vec3 windAcceleration
+            = windIsZero ? zeroWind : ComputeWindAcceleration(wind, particle.position, state.simulationTimeSeconds);
+        const Vec3 acceleration = gravity * definition.gravityScale + windAcceleration * definition.windScale;
         const float baseDamping = (options.useRawPmxDamping && js.pmxLinearDamping >= 0.0f) ? js.pmxLinearDamping : js.damping;
-        IntegrateParticle(
-            particle, fixedDeltaTime, acceleration, ScaleStepFraction(baseDamping, fixedDeltaTime, options.dampingMultiplier));
+        IntegrateParticle(particle, fixedDeltaTime, acceleration,
+            MemoScaleStepFraction(state.scratchDampingFractions[i], baseDamping, fixedDeltaTime, options.dampingMultiplier));
     }
 
     // The cone pass only runs when at least one joint has a finite limit.
@@ -255,7 +304,8 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
     // Soft pull toward the animated pose, once per step.
     for (std::size_t i = 0; i < jointCount; ++i) {
         SolveGoalConstraint(state.particles[i], animatedJointWorldPositions[i],
-            ScaleStepFraction(definition.jointSettings[i].stiffness, fixedDeltaTime, options.stiffnessMultiplier));
+            MemoScaleStepFraction(state.scratchStiffnessFractions[i], definition.jointSettings[i].stiffness, fixedDeltaTime,
+                options.stiffnessMultiplier));
     }
 
     // Cone first, so collision sees a legal pose.
@@ -267,13 +317,14 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
     // Collision; welded joints cannot move, so they skip it.
     if (definition.collisionEnabled && !colliders.empty()) {
         state.scratchPushDistance.assign(jointCount, 0.0f);
+        ComputeColliderReach(colliders, state.scratchReach);
         const auto collideAll = [&](bool record) {
             bool moved = false;
             for (std::size_t i = 0; i < jointCount; ++i) {
                 if (coneActive && IsWeldedLimit(state.scratchLimits[i])) {
                     continue;
                 }
-                const float pushed = CollideJoint(definition, i, options, colliders, state.particles[i]);
+                const float pushed = CollideJoint(definition, i, options, colliders, state.scratchReach, state.particles[i]);
                 if (pushed > kPushEpsilon) {
                     moved = true;
                     if (record) {
@@ -304,7 +355,7 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
             }
             ++diagnostics->collisionRawPushedParticles;
             VerletParticle probe = state.particles[i];
-            if (!coneActive || CollideJoint(definition, i, options, colliders, probe) <= kRetainTolerance) {
+            if (!coneActive || CollideJoint(definition, i, options, colliders, state.scratchReach, probe) <= kRetainTolerance) {
                 ++diagnostics->collisionPushedParticles;
                 diagnostics->collisionPushDistanceSum += pushed;
             }

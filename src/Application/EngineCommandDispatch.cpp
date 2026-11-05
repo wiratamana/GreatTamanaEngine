@@ -37,8 +37,9 @@ EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneI
     }
     // Spawns an imported mesh asset; uploads its GPU mesh through `renderer`.
     case EngineCommandKind::InstantiateMeshAsset: {
-        result.instantiateMeshAsset = game.InstantiateMeshAssetFromGtaFile(
-            renderer, request.instantiateMeshAsset.absoluteGtaPath, sceneServicesSetLayout);
+        result.instantiateMeshAsset = game.InstantiateMeshAssetFromGtaFile(renderer,
+            request.instantiateMeshAsset.absoluteGtaPath, sceneServicesSetLayout,
+            request.instantiateMeshAsset.requestedName);
         break;
     }
     // Scene save/load goes through the scene IO capability; a null capability answers "not available".

@@ -8,6 +8,7 @@
 #include "Animation/AnimationSystem.h"
 #include "ECS/Components/DirectionalLight.h"
 #include "ECS/EntityMarkSet.h"
+#include "ECS/EntityQuery.h"
 #include "ECS/Registry.h"
 #include "EngineCommandResults.h"
 #include "Instantiation/MeshInstantiationSystem.h"
@@ -76,11 +77,17 @@ public:
     Entity CreateMeshEntityFromGtaFile(
         Renderer& renderer, const std::string& absoluteGtaPath, DescriptorSetLayoutHandle sceneServicesSetLayout);
 
-    // Outcome-returning wrapper around CreateMeshEntityFromGtaFile(): `success == false` with an error
+    // Like CreateMeshEntityFromGtaFile(), then gives the root a unique Name (`requestedName`, or the asset stem
+    // when empty; " (N)" is appended when taken). Returns the root, or kInvalidEntity. `nameOut` may be null.
+    Entity CreateUniquelyNamedMeshEntityFromGtaFile(Renderer& renderer, const std::string& absoluteGtaPath,
+        DescriptorSetLayoutHandle sceneServicesSetLayout, const std::string& requestedName = {},
+        AssignedEntityName* nameOut = nullptr);
+
+    // Outcome-returning wrapper around CreateUniquelyNamedMeshEntityFromGtaFile(): `success == false` with an error
     // message (and no entity) exactly when that call would return kInvalidEntity. Never throws.
-    // `sceneServicesSetLayout` is the layout of Core's scene-services descriptor set.
-    InstantiateMeshAssetOutcome InstantiateMeshAssetFromGtaFile(
-        Renderer& renderer, const std::string& absoluteGtaPath, DescriptorSetLayoutHandle sceneServicesSetLayout);
+    // `requestedName` is the already-trimmed base name for the root (empty = asset stem).
+    InstantiateMeshAssetOutcome InstantiateMeshAssetFromGtaFile(Renderer& renderer, const std::string& absoluteGtaPath,
+        DescriptorSetLayoutHandle sceneServicesSetLayout, const std::string& requestedName);
 
     // Plays `absoluteAnimationGtaPath` on `targetEntity`'s model (forwards to AnimationSystem::Play()).
     // Returns false, changing nothing, if the entity has no MeshAssetSource or registered skinning data,

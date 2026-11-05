@@ -1,7 +1,7 @@
 # HTTP routes
 
 > Reference for the general debug routes: capture, logs, scene, editor UI, scene camera, assets and clusters. For people and AI agents who need exact parameters.
-> Verified against code: 2026-11-01
+> Verified against code: 2026-11-05
 
 ## TL;DR
 - Server: `127.0.0.1:8080`, editor only. See [HTTP server](../architecture/http-server.md).
@@ -143,7 +143,7 @@ All **MUT**. They use `EngineCommandBridge`: one request at a time, 3 s timeout.
 |---|---|---|---|
 | `POST /instantiate_primitive` | B `shape`* (`cube`, `sphere`, `capsule`, `cone`, `plane`), `name`*, `world_position` {x,y,z}, `parent` (name) | `{success, entity:{index,generation}, name, parent_requested_but_not_found, requested_parent_name}` | `400` |
 | `POST /instantiate_light` | B `name`*, `light_type` (`""` or `directional`), `world_position`, `rotation_euler_degrees`, `color` {r,g,b}, `illuminance_lux`, `active`, `parent` | Same shape as primitive | `400` |
-| `POST /instantiate_asset` | B `gta_path`* (absolute path of a mesh `.gta`) | `{success, entity, name}` | `400` |
+| `POST /instantiate_asset` | B `gta_path`* (absolute path of a mesh `.gta`), `name` (optional base name for the root; default = file stem) | `{success, entity, name, name_adjusted}` | `400` (bad `gta_path`, bad `name`, load failure) |
 | `POST /delete_entity` | B `name`* | `{success, entity}` | `404` unknown name |
 | `POST /set_entity_trs` | B `name`*, `translation`, `rotation_euler_degrees`, `scale` | `{success, entity, changed, transform}` | `404` unknown name, `409` no Transform |
 | `POST /save_scene` | B `path` (empty = default path) | `{success, resolved_path}` | `500` I/O, `503` |
@@ -152,6 +152,11 @@ All **MUT**. They use `EngineCommandBridge`: one request at a time, 3 s timeout.
 
 Details:
 - Entity names are made unique. Always read the returned `name` for the next call.
+- `instantiate_asset` names the spawned root. If the name is taken, the engine adds ` (1)`, ` (2)` and uses the first free one. `name_adjusted` is `true` then.
+- `instantiate_asset` `name`: optional, trimmed, max 128 bytes, no control characters. Empty or null means the file stem. A bad `name` gives `400` and nothing is spawned.
+- Names with spaces or parentheses must be URL-encoded in GET query strings (`Furina%20(1)`). JSON bodies need nothing.
+- Only the root is made unique. Child parts keep their own names. A freed suffix can be reused.
+- After a `504` on a big first load, the model may still have spawned. Check `/hierarchy_state` before you send the request again, or you get a second instance named `Furina (1)`.
 - A missing `parent` still spawns the entity. The reply sets `parent_requested_but_not_found`.
 - In `set_entity_trs`, each of `translation`, `rotation_euler_degrees`, `scale` is all-or-nothing: x, y and z are all required. `null` means "leave it".
 - Rotation is Euler degrees: x = pitch, y = yaw, z = roll. The reply has both Euler and `rotation_quaternion`.

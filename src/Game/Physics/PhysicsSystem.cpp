@@ -21,8 +21,12 @@
 
 #include <algorithm>
 #include <cassert>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <deque>
+#include <cstdio>
+#include <cstring>
 #include <unordered_set>
 
 namespace gte {
@@ -76,6 +80,7 @@ struct DynamicChainBatchContext {
     const std::vector<ChainFrameSample*>* recorderSlots;
 };
 
+
 void AddDiagnostics(StepDiagnostics& sum, const StepDiagnostics& add) noexcept
 {
     sum.collisionRawPushedParticles += add.collisionRawPushedParticles;
@@ -118,15 +123,16 @@ void StepDynamicChainRange(std::uint32_t beginIndex, std::uint32_t endIndex, Dyn
         ChainFrameSample* slot = context.recorderSlots != nullptr ? (*context.recorderSlots)[chainIndex] : nullptr;
 
         // Animated (pre-physics) pose in world space; captured once before any step.
+        state.boneCache.Reset(context.skeleton->bones.size());
         const Mat4 rootWorld
-            = context.entityWorldMatrix * ComputeBoneWorldMatrix(*context.skeleton, *context.pose, chain.rootBoneIndex);
+            = context.entityWorldMatrix * state.boneCache.Get(*context.skeleton, *context.pose, chain.rootBoneIndex);
         const Vec3 rootWorldPos = rootWorld.TransformPoint(Vec3::Zero());
 
         std::vector<Vec3> animatedJointWorldPositions;
         animatedJointWorldPositions.reserve(chain.jointBoneIndices.size());
         for (std::int32_t boneIndex : chain.jointBoneIndices) {
             const Mat4 jointWorld
-                = context.entityWorldMatrix * ComputeBoneWorldMatrix(*context.skeleton, *context.pose, boneIndex);
+                = context.entityWorldMatrix * state.boneCache.Get(*context.skeleton, *context.pose, boneIndex);
             animatedJointWorldPositions.push_back(jointWorld.TransformPoint(Vec3::Zero()));
         }
 
@@ -214,7 +220,7 @@ void StepDynamicChainRange(std::uint32_t beginIndex, std::uint32_t endIndex, Dyn
             for (const Vec3& world : displayWorld) {
                 simulatedPositions.push_back(context.entityWorldMatrixInverse.TransformPoint(world));
             }
-            ApplyDynamicChainPhysicsToPose(*context.skeleton, chain, simulatedPositions, *context.pose);
+            ApplyDynamicChainPhysicsToPose(*context.skeleton, chain, simulatedPositions, *context.pose, state.boneCache);
         }
 
         if (slot != nullptr) {
@@ -225,7 +231,7 @@ void StepDynamicChainRange(std::uint32_t beginIndex, std::uint32_t endIndex, Dyn
             slot->fk.resize(chain.jointBoneIndices.size());
             for (std::size_t i = 0; i < chain.jointBoneIndices.size(); ++i) {
                 const Mat4 jointWorld = context.entityWorldMatrix
-                    * ComputeBoneWorldMatrix(*context.skeleton, *context.pose, chain.jointBoneIndices[i]);
+                    * state.boneCache.Get(*context.skeleton, *context.pose, chain.jointBoneIndices[i]);
                 slot->fk[i] = jointWorld.TransformPoint(Vec3::Zero());
             }
             slot->collisionRawPushedParticles = frameDiag.collisionRawPushedParticles;
@@ -238,10 +244,41 @@ void StepDynamicChainRange(std::uint32_t beginIndex, std::uint32_t endIndex, Dyn
     }
 }
 
-void RunDynamicChainBatchJob(std::uint32_t beginIndex, std::uint32_t endIndex, void* payload)
+// One entity's frame of work. Lives in a deque, so the pointers inside `context` stay valid while jobs run.
+struct EntityStepWork {
+    DynamicChainBatchContext context;
+    std::vector<Collider> colliders;
+    std::vector<ChainFrameSample*> recorderSlots;
+    std::uint32_t chainCount = 0;
+    bool parallel = false;
+};
+
+// One chain of one entity, with a cost estimate used to start the largest chains first.
+struct ChainStepItem {
+    EntityStepWork* work;
+    std::uint32_t chainIndex;
+    std::uint32_t cost;
+};
+
+// Every claimer takes the next unclaimed chain until none are left.
+struct ChainClaimContext {
+    const std::vector<ChainStepItem>* items;
+    std::atomic<std::size_t> next{ 0 };
+};
+
+void ClaimAndStepChains(ChainClaimContext& claim)
+{
+    const std::vector<ChainStepItem>& items = *claim.items;
+    for (std::size_t i = claim.next.fetch_add(1, std::memory_order_relaxed); i < items.size();
+         i = claim.next.fetch_add(1, std::memory_order_relaxed)) {
+        StepDynamicChainRange(items[i].chainIndex, items[i].chainIndex + 1, items[i].work->context);
+    }
+}
+
+void RunChainClaimJob(std::uint32_t /*beginIndex*/, std::uint32_t /*endIndex*/, void* payload)
 {
     GTE_PROFILE_JOB_SCOPE("StepDynamicChain");
-    StepDynamicChainRange(beginIndex, endIndex, *static_cast<DynamicChainBatchContext*>(payload));
+    ClaimAndStepChains(*static_cast<ChainClaimContext*>(payload));
 }
 
 } // namespace
@@ -397,7 +434,8 @@ void PhysicsSystem::Update(Registry& registry, double deltaSeconds)
     const bool recording = recorder.Enabled();
     const StepOptions stepOptions = BuildStepOptions(m_globalSettings);
 
-    // Entities are processed one at a time; chains of one entity may run in parallel.
+    // Pass 1 (main thread): prepare every entity. Pass 2: step all chains of all entities in one parallel call.
+    std::deque<EntityStepWork> entityWork;
     ComponentStorage<DynamicChainRig>& rigs = registry.Storage<DynamicChainRig>();
     for (std::size_t i = 0; i < rigs.Size(); ++i) {
         DynamicChainRig& rig = rigs.ComponentAt(i);
@@ -436,13 +474,14 @@ void PhysicsSystem::Update(Registry& registry, double deltaSeconds)
             entityWorldMatrixInverse = Mat4::Identity();
         }
 
+        EntityStepWork& work = entityWork.emplace_back();
+
         // Colliders are resolved once per entity and shared by its chains.
-        std::vector<Collider> resolvedColliders;
         const bool anyChainWantsCollision = m_globalSettings.collisionEnabled
             && std::any_of(model->chains.begin(), model->chains.end(),
                 [](const DynamicChainDefinition& c) { return c.collisionEnabled; });
         if (anyChainWantsCollision && !model->colliders.empty()) {
-            resolvedColliders = ResolveEntityColliders(*model, resolvedPose->pose, entityWorldMatrix);
+            work.colliders = ResolveEntityColliders(*model, resolvedPose->pose, entityWorldMatrix);
         }
 
         std::size_t totalJoints = 0;
@@ -452,7 +491,6 @@ void PhysicsSystem::Update(Registry& registry, double deltaSeconds)
 
         // Recorder slots are looked up here on the main thread, so jobs never touch the recorder map.
         const bool recordThis = recording && (m_recorderOverride == nullptr || entity == m_recorderOverrideEntity);
-        std::vector<ChainFrameSample*> recorderSlots;
         if (recordThis) {
             std::vector<std::size_t> jointCounts;
             jointCounts.reserve(model->chains.size());
@@ -460,26 +498,54 @@ void PhysicsSystem::Update(Registry& registry, double deltaSeconds)
                 jointCounts.push_back(chain.jointBoneIndices.size());
             }
             recorder.BeginFrame(entity, model->chains.size(), jointCounts, static_cast<float>(deltaSeconds), stepCount);
-            recorderSlots.reserve(model->chains.size());
+            work.recorderSlots.reserve(model->chains.size());
             for (std::size_t c = 0; c < model->chains.size(); ++c) {
-                recorderSlots.push_back(recorder.SlotFor(entity, c));
+                work.recorderSlots.push_back(recorder.SlotFor(entity, c));
             }
         }
 
-        DynamicChainBatchContext context{ &model->skeleton, &model->chains, &rig.chainStates, &resolvedPose->pose, stepCount,
-            m_globalSettings.fixedTimestepSeconds, m_globalSettings.gravity, m_globalSettings.wind, entityWorldMatrix,
-            entityWorldMatrixInverse, rig.frozen, &resolvedColliders, stepOptions, m_globalSettings.interpolateOutput, alpha,
-            static_cast<float>(deltaSeconds), accumulatedBefore, recordThis ? &recorderSlots : nullptr };
+        work.context = DynamicChainBatchContext{ &model->skeleton, &model->chains, &rig.chainStates, &resolvedPose->pose,
+            stepCount, m_globalSettings.fixedTimestepSeconds, m_globalSettings.gravity, m_globalSettings.wind,
+            entityWorldMatrix, entityWorldMatrixInverse, rig.frozen, &work.colliders, stepOptions,
+            m_globalSettings.interpolateOutput, alpha, static_cast<float>(deltaSeconds), accumulatedBefore,
+            recordThis ? &work.recorderSlots : nullptr };
+        work.chainCount = static_cast<std::uint32_t>(model->chains.size());
+        work.parallel = totalJoints >= kMinDynamicJointsToParallelize && model->chains.size() > 1;
+    }
 
-        if (totalJoints >= kMinDynamicJointsToParallelize && model->chains.size() > 1) {
-            Jobs::JobHandle chainHandle;
-            Jobs::Dispatch(&RunDynamicChainBatchJob, static_cast<std::uint32_t>(model->chains.size()), &context,
-                chainHandle, /*minItemsPerBatch=*/1);
-            GTE_PROFILE_BLOCKED("Wait.Workers");
-            Jobs::JobSystem::Instance().WaitForJobs(chainHandle);
-        } else {
-            StepDynamicChainRange(0, static_cast<std::uint32_t>(model->chains.size()), context);
+    // Chains of different entities are independent, so one claim list covers all of them, largest first.
+    std::vector<ChainStepItem> items;
+    for (EntityStepWork& work : entityWork) {
+        if (!work.parallel) {
+            continue;
         }
+        for (std::uint32_t c = 0; c < work.chainCount; ++c) {
+            const std::size_t joints = (*work.context.chains)[c].jointBoneIndices.size();
+            items.push_back(ChainStepItem{ &work, c, static_cast<std::uint32_t>(joints * (work.context.stepCount + 1)) });
+        }
+    }
+    std::stable_sort(items.begin(), items.end(),
+        [](const ChainStepItem& a, const ChainStepItem& b) { return a.cost > b.cost; });
+
+    ChainClaimContext claim;
+    claim.items = &items;
+    Jobs::JobHandle chainHandle;
+    const std::size_t workerCount = Jobs::JobSystem::Instance().WorkerCount();
+    const std::size_t helperCount = items.size() > 1 ? std::min(workerCount, items.size() - 1) : 0;
+    if (helperCount > 0) {
+        Jobs::Dispatch(&RunChainClaimJob, static_cast<std::uint32_t>(helperCount), &claim, chainHandle,
+            /*minItemsPerBatch=*/1);
+    }
+    // The main thread works too: serial entities first, then it claims chains like a worker.
+    for (EntityStepWork& work : entityWork) {
+        if (!work.parallel) {
+            StepDynamicChainRange(0, work.chainCount, work.context);
+        }
+    }
+    ClaimAndStepChains(claim);
+    if (helperCount > 0) {
+        GTE_PROFILE_BLOCKED("Wait.Workers");
+        Jobs::JobSystem::Instance().WaitForJobs(chainHandle);
     }
 
     m_lastUpdateMilliseconds

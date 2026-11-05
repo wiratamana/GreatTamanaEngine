@@ -74,8 +74,8 @@ Meaning of the words:
 ## Where it is used
 | Caller | Work | Threshold |
 |---|---|---|
-| `AnimationSystem` (CPU skinning mode only) | Vertex skinning and vertex packing | 512 vertices or more, batches of 256 or more |
-| `PhysicsSystem` | One item per Verlet chain | 24 joints or more per entity |
+| `AnimationSystem` (CPU skinning mode only) | Fused vertex skin and pack. Serial on the main thread below the threshold. | 262144 vertices or more, batches of 32768 or more |
+| `PhysicsSystem` | One claim list for the chains of all entities, largest first. The main thread claims too. | Entity with more than one chain and 24 joints or more |
 | `Core::BuildClusterBounds` | Cluster bounds chunks | 2 chunks or more |
 | `MeshClusterBuildRunner` | One `Schedule` job for a cluster build | Runs inline if `WorkerCount()` is below 2 |
 | `ProjectScanRunner` | One `Schedule` job per Project folder scan | Never inline by choice; inline only when the job system is OFF |

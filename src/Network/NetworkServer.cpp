@@ -1857,6 +1857,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         EngineCommandRequest request;
         request.kind = EngineCommandKind::InstantiateMeshAsset;
         request.instantiateMeshAsset.absoluteGtaPath = parsed.gtaPath;
+        request.instantiateMeshAsset.requestedName = parsed.requestedName;
 
         const EngineCommandBridge::SubmitResult submit = commandBridge->SubmitAndWait(request);
         if (submit.alreadyPending) {
@@ -1877,7 +1878,8 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
             return;
         }
         res.status = 200;
-        res.set_content(BuildInstantiateAssetResponseJson(outcome.entityIndex, outcome.entityGeneration, outcome.resolvedName),
+        res.set_content(BuildInstantiateAssetResponseJson(
+                            outcome.entityIndex, outcome.entityGeneration, outcome.resolvedName, outcome.nameAdjusted),
             "application/json");
     });
 
