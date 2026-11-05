@@ -82,6 +82,18 @@ ClusterCullParams MakeClusterCullParams(const Mat4& cullViewProjection, const Ve
     return params;
 }
 
+void SetClusterCullInstanceBox(ClusterCullParams& params, const AABB& box) noexcept
+{
+    params.instanceBoxMin[0] = box.min.x;
+    params.instanceBoxMin[1] = box.min.y;
+    params.instanceBoxMin[2] = box.min.z;
+    params.instanceBoxMin[3] = 1.0f;
+    params.instanceBoxMax[0] = box.max.x;
+    params.instanceBoxMax[1] = box.max.y;
+    params.instanceBoxMax[2] = box.max.z;
+    params.instanceBoxMax[3] = 0.0f;
+}
+
 bool ClusterCullParamsAreFinite(const ClusterCullParams& params) noexcept
 {
     for (const auto& plane : params.planes) {
@@ -137,21 +149,35 @@ std::uint64_t ClusterBufferCapacity(std::uint64_t requestedBytes) noexcept
     return capacity;
 }
 
-std::uint64_t ClusterHistoryCapacity(std::uint64_t workItems) noexcept
+std::uint64_t ClusterHistoryCapacity(std::uint64_t words) noexcept
 {
-    return ClusterBufferCapacity(SaturatingMul(workItems, kClusterHistoryBytes));
+    return ClusterBufferCapacity(SaturatingMul(words, kClusterHistoryBytes));
 }
 
 std::uint64_t ClusterChainBytes(std::uint64_t instanceCount, std::uint64_t workItems, bool twoPhase) noexcept
 {
-    const std::uint64_t lanes = twoPhase ? 2 : 1;
+    return ClusterChainBytes(instanceCount, workItems, ClusterChainShape{ twoPhase, false, std::nullopt });
+}
+
+std::uint64_t ClusterChainBytes(std::uint64_t instanceCount, std::uint64_t workItems, const ClusterChainShape& shape) noexcept
+{
+    const std::uint64_t lanes = shape.twoPhase ? 2 : 1;
     std::uint64_t perLane = ClusterBufferCapacity(SaturatingMul(workItems, kClusterVisibleBytes));
     perLane = SaturatingAdd(perLane, ClusterBufferCapacity(SaturatingMul(workItems, kClusterCommandBytes)));
     perLane = SaturatingAdd(perLane, ClusterBufferCapacity(kClusterCountBytes));
 
-    std::uint64_t total = ClusterBufferCapacity(SaturatingMul(instanceCount, sizeof(ClusterInstanceGpu)));
-    total = SaturatingAdd(total, SaturatingMul(perLane, lanes));
-    return twoPhase ? SaturatingAdd(total, ClusterHistoryCapacity(workItems)) : total;
+    std::uint64_t total = SaturatingMul(perLane, lanes);
+    if (!shape.instancesShared) {
+        total = SaturatingAdd(total, ClusterBufferCapacity(SaturatingMul(instanceCount, sizeof(ClusterInstanceGpu))));
+    }
+    return shape.twoPhase ? SaturatingAdd(total, ClusterHistoryCapacity(shape.historyWords.value_or(workItems))) : total;
+}
+
+bool ClusterDrawLedger::CanReserve(
+    std::uint64_t owner, std::uint32_t scope, std::uint64_t bytes, std::uint64_t ceiling) const noexcept
+{
+    const std::uint64_t existing = HeldBy(owner, scope);
+    return bytes <= existing || FitsClusterBudget(Total() - existing, bytes, ceiling);
 }
 
 bool ClusterDrawLedger::TryReserve(
@@ -277,6 +303,37 @@ bool ClusterFrustumCulled(const MeshCluster& cluster, const Mat4& world, const s
     return IsAABBOutsideFrustum(planes, TransformAABB(local, world));
 }
 
+ClusterInstanceClass ClusterInstanceFrustumClass(
+    const AABB& localBox, const Mat4& world, const std::array<Plane, 6>& planes) noexcept
+{
+    const Vec3 centre = (localBox.min + localBox.max) * 0.5f;
+    const Vec3 half = (localBox.max - localBox.min) * 0.5f;
+    const Vec3 worldCentre = world.TransformPoint(centre);
+    const Vec3 c0 = Column3(world, 0);
+    const Vec3 c1 = Column3(world, 1);
+    const Vec3 c2 = Column3(world, 2);
+    const Vec3 worldHalf(std::abs(c0.x) * half.x + std::abs(c1.x) * half.y + std::abs(c2.x) * half.z,
+        std::abs(c0.y) * half.x + std::abs(c1.y) * half.y + std::abs(c2.y) * half.z,
+        std::abs(c0.z) * half.x + std::abs(c1.z) * half.y + std::abs(c2.z) * half.z);
+    if (!IsFiniteVec(worldCentre) || !IsFiniteVec(worldHalf)) {
+        return ClusterInstanceClass::Partial;
+    }
+    ClusterInstanceClass result = ClusterInstanceClass::Inside;
+    for (const Plane& plane : planes) {
+        const float d = Dot(plane.normal, worldCentre) + plane.distance;
+        const float r = std::abs(plane.normal.x) * worldHalf.x + std::abs(plane.normal.y) * worldHalf.y
+            + std::abs(plane.normal.z) * worldHalf.z;
+        const float pad = 1e-4f * (std::abs(d) + r + std::abs(plane.distance)) + 1e-4f;
+        if (d + r < -pad) {
+            return ClusterInstanceClass::Outside;
+        }
+        if (d - r < pad) {
+            result = ClusterInstanceClass::Partial;
+        }
+    }
+    return result;
+}
+
 bool ClusterConeCulled(const MeshCluster& cluster, const Mat4& world, std::uint32_t instanceFlags,
     float maxScale, const Vec3& eyeOrDirection, bool orthographic) noexcept
 {
@@ -338,24 +395,11 @@ bool CameraPoseEqual(const Mat4& viewProjectionA, const Vec3& eyeA, const Mat4& 
 std::uint64_t ClusterHistoryKey(std::uint64_t meshToken, std::uint32_t clusterCount,
     std::span<const std::uint32_t> entityIds, std::uint64_t bufferGeneration) noexcept
 {
-    // FNV-1a over 64-bit words with a final avalanche; the order of the ids matters.
-    constexpr std::uint64_t kPrime = 0x100000001b3ull;
-    std::uint64_t hash = 0xcbf29ce484222325ull;
-    const auto mix = [&hash](std::uint64_t value) {
-        hash = (hash ^ value) * kPrime;
-        hash ^= hash >> 29;
-    };
-    mix(meshToken);
-    mix(clusterCount);
-    mix(bufferGeneration);
-    mix(entityIds.size());
+    ClusterHistoryHasher hasher(meshToken, clusterCount, bufferGeneration, entityIds.size());
     for (const std::uint32_t id : entityIds) {
-        mix(id);
+        hasher.Add(id);
     }
-    hash ^= hash >> 33;
-    hash *= 0xff51afd7ed558ccdull;
-    hash ^= hash >> 33;
-    return hash;
+    return hasher.Finish();
 }
 
 HizLayout HizLayoutFor(std::uint32_t sceneWidth, std::uint32_t sceneHeight) noexcept

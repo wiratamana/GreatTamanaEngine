@@ -275,6 +275,75 @@ TEST(ClusterDrawStateTests, ATwoPhaseChainNeedsASecondLaneAndIsRecordedOnTheFirs
     EXPECT_GT(twoLanes.HeldBytes(kGame), ClusterChainBytes(1, 1000, false));
 }
 
+TEST(ClusterDrawStateTests, TheInstanceBufferOfASlotIsChargedOnceForAllLanes)
+{
+    constexpr std::uint64_t kInstances = 50000;
+    constexpr std::uint64_t kWork = 1100000;
+    ClusterDrawState state("TestInstancesOnce", { 4, 2 });
+    for (std::uint32_t lane = 0; lane < 4; ++lane) {
+        ASSERT_EQ(state.TryReserveChainBytes(kGame, lane, 0, kInstances, kWork, false), ClusterReserveResult::Ok);
+    }
+    const std::uint64_t oneChain = ClusterChainBytes(kInstances, kWork, false);
+    const std::uint64_t instances = ClusterBufferCapacity(kInstances * sizeof(ClusterInstanceGpu));
+    EXPECT_EQ(state.HeldBytes(kGame), 4 * (oneChain - instances) + instances);
+
+    // A second slot has its own instance buffer.
+    ASSERT_EQ(state.TryReserveChainBytes(kGame, 0, 1, kInstances, kWork, false), ClusterReserveResult::Ok);
+    EXPECT_EQ(state.HeldBytes(kGame), 5 * (oneChain - instances) + 2 * instances);
+}
+
+TEST(ClusterDrawStateTests, AGrowingInstanceCountIsChargedEvenWhenAnotherLaneHoldsTheBuffer)
+{
+    ClusterDrawState state("TestInstanceGrowth", { 2, 1 });
+    ASSERT_EQ(state.TryReserveChainBytes(kGame, 0, 0, 1000, 20000, false), ClusterReserveResult::Ok);
+    ASSERT_EQ(state.TryReserveChainBytes(kGame, 1, 0, 1000, 20000, false), ClusterReserveResult::Ok);
+    const std::uint64_t before = state.HeldBytes(kGame);
+    ASSERT_EQ(state.TryReserveChainBytes(kGame, 0, 0, 100000, 20000, false), ClusterReserveResult::Ok);
+    EXPECT_EQ(state.HeldBytes(kGame), before - ClusterBufferCapacity(1000 * sizeof(ClusterInstanceGpu))
+        + ClusterBufferCapacity(100000 * sizeof(ClusterInstanceGpu)));
+}
+
+TEST(ClusterDrawStateTests, CanReserveAnswersLikeTryReserveAndRecordsNothing)
+{
+    ClusterDrawState state("TestCanReserve", { 2, 1 });
+    EXPECT_EQ(state.CanReserveChainBytes(kGame, 0, 0, 50000, 1100000, true), ClusterReserveResult::Ok);
+    EXPECT_EQ(state.HeldBytes(kGame), 0u);
+    EXPECT_EQ(state.CanReserveChainBytes(rg::ViewScope::Shared, 0, 0, 1, 1, false), ClusterReserveResult::BadIndex);
+
+    // Over the state budget: a chain far bigger than 256 MiB.
+    EXPECT_EQ(state.CanReserveChainBytes(kGame, 0, 0, 1, 20000000, false), ClusterReserveResult::OverStateBudget);
+    EXPECT_EQ(state.HeldBytes(kGame), 0u);
+}
+
+TEST(ClusterDrawStateTests, ATwoPhaseChainCanBeRefusedWhileTheSingleChainFits)
+{
+    // 3 frustum chains of 52 MiB leave 100 MiB of the 256 MiB state budget: room for one more of them, not for a Hi-Z chain.
+    constexpr std::uint64_t kInstances = 50000;
+    constexpr std::uint64_t kWork = 1100000;
+    constexpr std::uint64_t kHistoryWords = 100000; // 50000 instances x 2 chunks.
+    ASSERT_EQ(ClusterHistoryWordCount(kInstances, 22), kHistoryWords);
+    ClusterDrawState state("TestLadder", { 2, kMainViewPartSlots });
+    for (std::uint32_t slot = 0; slot < 3; ++slot) {
+        ASSERT_EQ(state.TryReserveChainBytes(kGame, 0, slot, kInstances, kWork, false), ClusterReserveResult::Ok);
+    }
+    EXPECT_EQ(state.CanReserveChainBytes(kGame, 0, 3, kInstances, kWork, false), ClusterReserveResult::Ok);
+    EXPECT_EQ(state.CanReserveChainBytes(kGame, 0, 3, kInstances, kWork, true, kHistoryWords),
+        ClusterReserveResult::OverStateBudget);
+    EXPECT_EQ(state.HeldBytes(kGame), 3 * ClusterChainBytes(kInstances, kWork, false));
+}
+
+TEST(ClusterDrawStateTests, ThePackedHistoryChargesAboutAChunkOfTheOldSize)
+{
+    constexpr std::uint64_t kInstances = 50000;
+    constexpr std::uint64_t kWork = 1100000;
+    const std::uint64_t old = ClusterChainBytes(kInstances, kWork, true);
+    const std::uint64_t packed = ClusterChainBytes(
+        kInstances, kWork, ClusterChainShape{ true, false, ClusterHistoryWordCount(kInstances, 22) });
+    EXPECT_EQ(old - packed, ClusterHistoryCapacity(kWork) - ClusterHistoryCapacity(ClusterHistoryWordCount(kInstances, 22)));
+    EXPECT_EQ(ClusterHistoryCapacity(kWork), 8u << 20);
+    EXPECT_EQ(ClusterHistoryCapacity(ClusterHistoryWordCount(kInstances, 22)), 512u << 10);
+}
+
 TEST(ClusterDrawStateTests, StateBudgetThenProcessCeiling)
 {
     constexpr std::uint64_t kInstances = 1;

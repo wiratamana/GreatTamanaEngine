@@ -48,6 +48,7 @@ inline constexpr std::array kHizReasonTable{
     fx::EnumEntry<HizReason>{ HizReason::Unavailable, "Unavailable" },
     fx::EnumEntry<HizReason>{ HizReason::TooLarge, "TooLarge" },
     fx::EnumEntry<HizReason>{ HizReason::NothingInView, "NothingInView" },
+    fx::EnumEntry<HizReason>{ HizReason::OverBudget, "OverBudget" },
 };
 
 // Whose camera a view culls with: its own, the primary view's, or nobody's (no test runs).

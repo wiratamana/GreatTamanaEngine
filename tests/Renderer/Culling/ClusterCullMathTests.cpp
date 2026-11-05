@@ -99,7 +99,7 @@ TEST(ClusterCullMath, RecordSizesAndKitConstantsAgree)
         EXPECT_EQ(ClusterBufferCapacity(bytes), fx::PersistentBufferCapacityFor(bytes)) << bytes;
     }
     EXPECT_EQ(kClusterFlagUniformScale | kClusterFlagPositiveHand, 3u);
-    EXPECT_EQ(sizeof(ClusterCullParams), 224u);
+    EXPECT_EQ(sizeof(ClusterCullParams), 256u);
     EXPECT_EQ(kMaxMeshClusters, kClusterMaxBufferBytes / sizeof(MeshCluster));
 }
 
@@ -857,7 +857,7 @@ TEST(ClusterCullMath, CullParamsCarryTheCullCameraPyramidSizeAndDepthMap)
 
 TEST(ClusterCullMath, ParamBlockLayoutIsFixed)
 {
-    EXPECT_EQ(sizeof(ClusterCullParams), 224u);
+    EXPECT_EQ(sizeof(ClusterCullParams), 256u);
     EXPECT_EQ(offsetof(ClusterCullParams, viewProjection), 112u);
     EXPECT_EQ(offsetof(ClusterCullParams, hiz), 192u);
     EXPECT_EQ(offsetof(ClusterCullParams, depthMap), 208u);

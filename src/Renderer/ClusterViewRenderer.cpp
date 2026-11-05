@@ -371,7 +371,7 @@ bool ClusterViewRenderer::Impl::DeclareCull(rg::RenderGraphBuilder& builder, con
         .Bind("count", set.count)
         .Bind("history", history)
         .Bind("hizAtlas", hizAtlasHandle)
-        .Dispatch(Extent2D{ tableClusters, 1 });
+        .Dispatch(Extent2D{ static_cast<std::uint32_t>(ClusterCullThreadCount(1, tableClusters)), 1 });
 }
 
 bool ClusterViewRenderer::Impl::DeclareDraw(rg::RenderGraphBuilder& builder, const char* passName, const GraphSet& set,

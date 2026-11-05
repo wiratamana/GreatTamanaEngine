@@ -5,7 +5,8 @@
   A value that was not measured prints '-', never 0. Profiles: geometry_only (fixed-cost features off), full, both.
   Checks per profile: wall on  -> Hi-Z GpuDrivenScene primary ms <= WallRatio (0.25) x Frustum;
                       wall off -> Hi-Z GpuDrivenScene primary ms <= Frustum + HizBudgetMs (3.0).
-  Hi-Z runs a second full cull pass over all work items; only an indirect-dispatch cull would remove that cost.
+  Hi-Z runs a second cull round, but each thread tests a whole instance box first, so the extra cost is small when nothing is hidden.
+  The default HizBudgetMs (3.0) is loose on purpose; tighten it only after you measure it on your own GPU.
   Exit code: 0 = all checks pass, 1 = a check failed, 2 = precondition failed or editor unreachable,
   3 = a check could not be evaluated (invalid rows, Hi-Z not applied, missing data).
   Start the editor with --no-vsync and the Game tab visible. Cleanup closes the demo through

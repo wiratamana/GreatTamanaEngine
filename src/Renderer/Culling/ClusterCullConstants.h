@@ -22,6 +22,9 @@ inline constexpr std::uint32_t kClusterCullFlagHistoryValid = 1u << 7; // The hi
 inline constexpr std::uint32_t kClusterCullFlagRawDepth = 1u << 8; // Set when no depth map exists.
 inline constexpr std::uint32_t kClusterCullFlagCollectReasons = 1u << 9; // Count the outcome of every item.
 
+// Clusters per history word and per cull thread: bits 0-15 hold "visible", bits 16-31 "drawn first".
+inline constexpr std::uint32_t kClusterChunkClusters = 16;
+
 // Bits of one history word.
 inline constexpr std::uint32_t kClusterHistoryVisible = 1u << 0; // Visible after the last second phase.
 inline constexpr std::uint32_t kClusterHistoryDrawnFirst = 1u << 1; // Drawn by the first phase of this frame.

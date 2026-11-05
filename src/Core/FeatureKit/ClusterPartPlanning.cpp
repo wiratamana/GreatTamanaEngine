@@ -3,12 +3,29 @@
 #include <algorithm>
 #include <limits>
 #include <map>
+#include <numeric>
 
 namespace gte::fx {
 
 std::vector<ClusterMeshGroup> GroupInstances(std::span<const ClusterInstance> candidates, bool splitByMaterial)
 {
     std::vector<ClusterMeshGroup> groups;
+    if (candidates.empty()) {
+        return groups;
+    }
+    // Common case: every candidate shares one mesh and material. One group, one exact allocation.
+    const ClusterInstance& first = candidates.front();
+    const MaterialToken firstMaterial = splitByMaterial ? first.material : MaterialToken{};
+    const bool single = std::all_of(candidates.begin(), candidates.end(), [&](const ClusterInstance& candidate) {
+        return candidate.mesh == first.mesh && (splitByMaterial ? candidate.material : MaterialToken{}) == firstMaterial;
+    });
+    if (single) {
+        ClusterMeshGroup& group = groups.emplace_back(ClusterMeshGroup{ first.mesh, firstMaterial, first.kind, {} });
+        group.instances.resize(candidates.size());
+        std::iota(group.instances.begin(), group.instances.end(), std::uint32_t{ 0 });
+        return groups;
+    }
+
     std::map<std::pair<MeshToken, MaterialToken>, std::size_t> groupOf;
     // Runs of one mesh and material are common; the last group skips the map lookup.
     std::size_t lastGroup = 0;

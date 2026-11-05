@@ -73,6 +73,28 @@ public:
     // One DrawCommand per entity with a MeshRenderer, with its world matrix. Touches only `registry`.
     static std::vector<DrawCommand> CollectRenderables(Registry& registry);
 
+    // Same list written into `out`, whose capacity is reused.
+    static void CollectRenderables(Registry& registry, std::vector<DrawCommand>& out);
+
+    // The render list of one frame. While it is built, every Draw() of the same registry reads it instead of
+    // collecting again. Nothing may add, remove or move renderables until the scope ends.
+    class SharedListScope {
+    public:
+        explicit SharedListScope(RenderSystem& system) noexcept : m_system(system) {}
+        ~SharedListScope() { m_system.EndSharedList(); }
+        SharedListScope(const SharedListScope&) = delete;
+        SharedListScope& operator=(const SharedListScope&) = delete;
+
+        // Collects the list and returns it; later Draw() calls on `registry` reuse it.
+        const std::vector<DrawCommand>& Build(Registry& registry) { return m_system.BuildSharedList(registry); }
+
+        // Grows whenever the list content may differ from the previous frame's; equal when it was reused as is.
+        std::uint64_t Epoch() const noexcept { return m_system.m_sharedListEpoch; }
+
+    private:
+        RenderSystem& m_system;
+    };
+
     // True when some Camera component is active.
     static bool HasActiveCamera(Registry& registry) noexcept;
 
@@ -99,6 +121,32 @@ public:
         std::optional<SceneCullRequest> cull = std::nullopt, const EntityMarkSet* onlyEntities = nullptr);
 
 private:
+    const std::vector<DrawCommand>& BuildSharedList(Registry& registry);
+    void EndSharedList() noexcept;
+
+    // One renderable as the last collect saw it: everything its DrawCommand was computed from.
+    struct RenderListEntry {
+        Entity entity;
+        MeshHandle mesh;
+        PipelineHandle pipeline;
+        MaterialTextureHandle texture;
+        bool hasTransform = false;
+        Vec3 position;
+        Quat rotation;
+        Vec3 scale;
+    };
+    bool SharedListMatchesSnapshot(Registry& registry) const;
+    bool SnapshotSharedList(Registry& registry); // False when a renderable has a parent (list not reusable).
+
+    // The list keeps its content between frames; `m_sharedListRegistry` is set only while a frame may read it.
+    std::vector<DrawCommand> m_sharedList;
+    const Registry* m_sharedListRegistry = nullptr;
+    std::uint64_t m_sharedListEpoch = 0;
+    std::vector<RenderListEntry> m_listSnapshot;
+    const Registry* m_listSnapshotRegistry = nullptr;
+    bool m_listSnapshotValid = false;
+    std::uint32_t m_listMissStreak = 0; // Consecutive frames the list changed while a snapshot existed.
+    std::uint32_t m_listCooldown = 0;   // Frames left before a snapshot is tried again.
     ResourcePool<Mesh, MeshHandle> m_meshes;
     ResourcePool<Pipeline, PipelineHandle> m_pipelines;
     ResourcePool<MaterialTexture, MaterialTextureHandle> m_textures;

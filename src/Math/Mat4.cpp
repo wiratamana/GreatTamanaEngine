@@ -100,7 +100,13 @@ Mat4 Mat4::FromQuat(const Quat& q) noexcept
 
 Mat4 Mat4::TRS(const Vec3& position, const Quat& rotation, const Vec3& scale) noexcept
 {
-    return Translation(position) * FromQuat(rotation) * Scaling(scale);
+    // Closed form of Translation * FromQuat * Scaling: rotation columns scaled per axis, then the translation.
+    const Mat4 r = FromQuat(rotation);
+    return Mat4(
+        Vec4(r.columns[0].x * scale.x, r.columns[0].y * scale.x, r.columns[0].z * scale.x, 0.0f),
+        Vec4(r.columns[1].x * scale.y, r.columns[1].y * scale.y, r.columns[1].z * scale.y, 0.0f),
+        Vec4(r.columns[2].x * scale.z, r.columns[2].y * scale.z, r.columns[2].z * scale.z, 0.0f),
+        Vec4(position.x, position.y, position.z, 1.0f));
 }
 
 Mat4 Mat4::LookAtLH(const Vec3& eye, const Vec3& target, const Vec3& up) noexcept

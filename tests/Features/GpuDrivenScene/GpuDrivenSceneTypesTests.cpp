@@ -291,6 +291,12 @@ TEST(GpuDrivenSceneTypesTest, NothingInViewHasAnExactName)
     EXPECT_EQ(fx::EnumName(kHizReasonTable, HizReason::NothingInView), "NothingInView");
 }
 
+TEST(GpuDrivenSceneTypesTest, OverBudgetHasAnExactNameAndIsKeptWhenHiZIsNotApplied)
+{
+    EXPECT_EQ(fx::EnumName(kHizReasonTable, HizReason::OverBudget), "OverBudget");
+    EXPECT_EQ(HizReasonOfView(false, true, true, false, true, false, HizReason::OverBudget), HizReason::OverBudget);
+}
+
 const fx::FeatureDebugField* FindField(const fx::FeatureDebugResult& result, std::string_view key)
 {
     for (const fx::FeatureDebugField& field : result.fields) {

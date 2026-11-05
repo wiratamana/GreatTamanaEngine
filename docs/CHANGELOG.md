@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [GPU culling: cheaper CPU floor, instance-level cull, ledger fix](#gpu-culling-cheaper-cpu-floor-instance-level-cull-ledger-fix-branch-featuretoon-shading-impl-2026-11-05) | `feature/toon-shading-impl` | 2026-11-05 |
 | [Toon light follows the world light](#toon-light-follows-the-world-light-branch-featuretoon-shading-impl-2026-11-04) | `feature/toon-shading-impl` | 2026-11-04 |
 | [Temporal anti-aliasing](#temporal-anti-aliasing-branch-featuretoon-shading-impl-2026-11-04) | `feature/toon-shading-impl` | 2026-11-04 |
 | [Toon character, Bloom and the Furina showcase](#toon-character-bloom-and-the-furina-showcase-branch-featuretoon-shading-impl-2026-11-03) | `feature/toon-shading-impl` | 2026-11-03 |
@@ -40,6 +41,15 @@
 | [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+
+## GPU culling: cheaper CPU floor, instance-level cull, ledger fix (branch `feature/toon-shading-impl`, 2026-11-05)
+
+- **CPU floor.** The draw list is built once per frame and shared (`RenderSystem::SharedListScope`). `Mat4::TRS` is closed form. Candidate and instance buffers keep their capacity.
+- **Cull shader.** `ClusterCull.comp` runs one thread per (instance, chunk of 16 clusters) and tests the instance box first. `ClusterCullParams` is 256 bytes.
+  The history is one word per (instance, chunk). Survivors now come in runs of up to 16, so draw order changes.
+- **Static-scene reuse.** An unchanged scene reuses the render list, candidates, keys and the instance upload. Parented renderables are never cached.
+- **Memory ledger.** The shared instance buffer is charged once per slot and the history buffer is sized by the packed history. A Hi-Z chain over budget runs as a `Frustum` chain (`hizReason=OverBudget`) before the CPU draw is used.
+- **Not verified.** The GPU parity tests skip on a machine without headless Vulkan. See [GPU-driven rendering](architecture/gpu-driven-rendering.md).
 
 ## Toon light follows the world light (branch `feature/toon-shading-impl`, 2026-11-04)
 

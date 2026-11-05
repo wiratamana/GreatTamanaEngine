@@ -320,7 +320,7 @@ Top level: `enabled`, `mode`, `cone`, `collectStats`, `debugView`, `supported`. 
 |---|---|
 | `rendered`, `frameIndex`, `cameraValid` | The view rendered. The camera is valid. |
 | `occlusion` | `NotRequested`, `Applied`, `Unusable`, `NoCullCamera`. Hi-Z works only when `Applied`. |
-| `hizReason` | Why Hi-Z was skipped: `None`, `Unavailable`, `TooLarge`, `NothingInView` |
+| `hizReason` | Why Hi-Z was skipped: `None`, `Unavailable`, `TooLarge`, `NothingInView`, `OverBudget` |
 | `inertReason` | Why the GPU path is idle: `none`, `device caps`, `shared scope`, `capture armed`, `toggled off`, `invalid state` |
 | `lastRefusalReason` | Text of the last refusal |
 | `claimedEntities`, `parts`, `skippedParts`, `skippedInstances` | Work taken by the GPU path. Parts outside the cull frustum. |

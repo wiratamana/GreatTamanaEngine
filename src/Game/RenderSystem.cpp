@@ -10,6 +10,7 @@
 #include "Renderer/RenderGraph/CommandBuffer.h"
 
 #include <array>
+#include <cstring>
 #include <optional>
 #include <string>
 
@@ -17,9 +18,16 @@ namespace gte {
 
 std::vector<DrawCommand> RenderSystem::CollectRenderables(Registry& registry)
 {
+    std::vector<DrawCommand> commands;
+    CollectRenderables(registry, commands);
+    return commands;
+}
+
+void RenderSystem::CollectRenderables(Registry& registry, std::vector<DrawCommand>& commands)
+{
     GTE_PROFILE_SCOPE("RenderSystem::CollectRenderables");
 
-    std::vector<DrawCommand> commands;
+    commands.clear();
 
     ComponentStorage<MeshRenderer>& renderers = registry.Storage<MeshRenderer>();
     commands.reserve(renderers.Size());
@@ -33,8 +41,116 @@ std::vector<DrawCommand> RenderSystem::CollectRenderables(Registry& registry)
 
         commands.push_back(DrawCommand{ entity, meshRenderer.mesh, meshRenderer.pipeline, meshRenderer.texture, model });
     }
+}
 
-    return commands;
+namespace {
+
+// Frames to wait before snapshotting again after the list kept changing, or held a parented renderable.
+constexpr std::uint32_t kChangingListCooldown = 30;
+constexpr std::uint32_t kParentedListCooldown = 120;
+
+bool SameBytes(const void* a, const void* b, std::size_t size) noexcept
+{
+    return std::memcmp(a, b, size) == 0;
+}
+
+} // namespace
+
+bool RenderSystem::SharedListMatchesSnapshot(Registry& registry) const
+{
+    ComponentStorage<MeshRenderer>& renderers = registry.Storage<MeshRenderer>();
+    ComponentStorage<Transform>& transforms = registry.Storage<Transform>();
+    if (renderers.Size() != m_listSnapshot.size() || renderers.Size() != m_sharedList.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < m_listSnapshot.size(); ++i) {
+        const RenderListEntry& old = m_listSnapshot[i];
+        const MeshRenderer& meshRenderer = renderers.ComponentAt(i);
+        const Entity entity = renderers.EntityAt(i);
+        if (entity != old.entity || meshRenderer.mesh != old.mesh || meshRenderer.pipeline != old.pipeline
+            || meshRenderer.texture != old.texture) {
+            return false;
+        }
+        const Transform* transform = transforms.TryGet(entity);
+        if (transform == nullptr) {
+            if (old.hasTransform) {
+                return false;
+            }
+            continue;
+        }
+        // Bitwise on purpose: a NaN must compare equal to itself, and -0 must differ from +0.
+        if (!old.hasTransform || transform->parent.IsValid()
+            || !SameBytes(&transform->position, &old.position, sizeof(Vec3))
+            || !SameBytes(&transform->rotation, &old.rotation, sizeof(Quat))
+            || !SameBytes(&transform->scale, &old.scale, sizeof(Vec3))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool RenderSystem::SnapshotSharedList(Registry& registry)
+{
+    ComponentStorage<MeshRenderer>& renderers = registry.Storage<MeshRenderer>();
+    ComponentStorage<Transform>& transforms = registry.Storage<Transform>();
+    m_listSnapshot.resize(renderers.Size());
+    for (std::size_t i = 0; i < m_listSnapshot.size(); ++i) {
+        const MeshRenderer& meshRenderer = renderers.ComponentAt(i);
+        RenderListEntry& entry = m_listSnapshot[i];
+        entry.entity = renderers.EntityAt(i);
+        entry.mesh = meshRenderer.mesh;
+        entry.pipeline = meshRenderer.pipeline;
+        entry.texture = meshRenderer.texture;
+        const Transform* transform = transforms.TryGet(entry.entity);
+        entry.hasTransform = transform != nullptr;
+        if (transform != nullptr) {
+            if (transform->parent.IsValid()) {
+                return false; // The world matrix would depend on ancestors; such lists are always rebuilt.
+            }
+            entry.position = transform->position;
+            entry.rotation = transform->rotation;
+            entry.scale = transform->scale;
+        }
+    }
+    return true;
+}
+
+const std::vector<DrawCommand>& RenderSystem::BuildSharedList(Registry& registry)
+{
+    m_sharedListRegistry = nullptr;
+    // A frame whose renderables and their transforms equal the previous frame's reuses the previous list.
+    if (m_listCooldown == 0 && m_listSnapshotValid && m_listSnapshotRegistry == &registry
+        && SharedListMatchesSnapshot(registry)) {
+        m_listMissStreak = 0;
+        m_sharedListRegistry = &registry;
+        return m_sharedList;
+    }
+
+    CollectRenderables(registry, m_sharedList);
+    ++m_sharedListEpoch;
+    if (m_listCooldown > 0) {
+        --m_listCooldown;
+    } else {
+        // A list that changed twice in a row is probably animated: stop paying for snapshots for a while.
+        m_listMissStreak = m_listSnapshotValid ? m_listMissStreak + 1 : 0;
+        m_listSnapshotValid = false;
+        if (m_listMissStreak >= 2) {
+            m_listMissStreak = 0;
+            m_listCooldown = kChangingListCooldown;
+        } else if (SnapshotSharedList(registry)) {
+            m_listSnapshotValid = true;
+            m_listSnapshotRegistry = &registry;
+        } else {
+            m_listCooldown = kParentedListCooldown;
+        }
+    }
+    m_sharedListRegistry = &registry;
+    return m_sharedList;
+}
+
+void RenderSystem::EndSharedList() noexcept
+{
+    m_sharedListRegistry = nullptr;
 }
 
 bool RenderSystem::HasActiveCamera(Registry& registry) noexcept
@@ -134,7 +250,12 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
 {
     GTE_PROFILE_SCOPE("RenderSystem::Draw");
 
-    const std::vector<DrawCommand> commands = CollectRenderables(registry);
+    // A frame-scoped list is shared by every draw of the frame; otherwise this call collects its own.
+    std::vector<DrawCommand> ownCommands;
+    if (m_sharedListRegistry != &registry) {
+        CollectRenderables(registry, ownCommands);
+    }
+    const std::vector<DrawCommand>& commands = m_sharedListRegistry == &registry ? m_sharedList : ownCommands;
     const bool hasOverrideSet = pipelineOverrideSet.has_value();
 
     // An unusable matrix means no culling: a fallback plane would reject real geometry.

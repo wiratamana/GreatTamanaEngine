@@ -130,6 +130,7 @@ ClusterDrawState::ClusterDrawState(std::string_view baseName, ClusterDrawShape s
         }
     }
     m_instanceUploadSerial.assign(rg::kViewScopeCount * m_shape.partSlots, 0);
+    m_instanceContent.assign(rg::kViewScopeCount * m_shape.partSlots, InstanceContent{});
 
     constexpr BufferUse kInstanceUse = BufferUse::Storage | BufferUse::HostWrite;
     constexpr BufferUse kVisibleUse = BufferUse::Storage;
@@ -163,6 +164,7 @@ ClusterDrawState::ClusterDrawState(std::string_view baseName, ClusterDrawShape s
     m_historyDummyOnce.resize(rg::kViewScopeCount * m_shape.lanes);
     m_historyRecords.assign(rg::kViewScopeCount * m_shape.partSlots, ClusterHistoryRecord{});
     m_chainBytes.assign(chains * rg::kViewScopeCount, 0);
+    m_instanceBytes.assign(rg::kViewScopeCount * m_shape.partSlots, 0);
 }
 
 ClusterDrawState::~ClusterDrawState()
@@ -342,6 +344,68 @@ void ClusterDrawState::NoteInstanceUploaded(const Frame& frame, std::uint32_t sl
     }
 }
 
+bool ClusterDrawState::InstanceContentIs(const Frame& frame, std::uint32_t slot, const InstanceContent& want) const noexcept
+{
+    return InRange(0, slot) && want.group.epoch != 0
+        && m_instanceContent[rg::ViewScopeIndex(frame.Scope()) * m_shape.partSlots + slot] == want;
+}
+
+void ClusterDrawState::NoteInstanceContent(const Frame& frame, std::uint32_t slot, const InstanceContent& content) noexcept
+{
+    if (InRange(0, slot)) {
+        m_instanceContent[rg::ViewScopeIndex(frame.Scope()) * m_shape.partSlots + slot] = content;
+    }
+}
+
+namespace {
+
+std::optional<std::uint64_t> FindKey(const std::vector<ClusterDrawState::KeyMemo>& memos, const ClusterDrawState::KeyQuery& query)
+{
+    if (query.group.epoch == 0) {
+        return std::nullopt;
+    }
+    for (const ClusterDrawState::KeyMemo& memo : memos) {
+        if (memo.query == query) {
+            return memo.key;
+        }
+    }
+    return std::nullopt;
+}
+
+void StoreKey(std::vector<ClusterDrawState::KeyMemo>& memos, const ClusterDrawState::KeyQuery& query, std::uint64_t key)
+{
+    if (query.group.epoch == 0) {
+        return;
+    }
+    // Memos of an older candidate list are dead; the cap bounds a scene with many parts.
+    if (!memos.empty() && (memos.front().query.group.epoch != query.group.epoch || memos.size() >= ClusterDrawState::kMaxKeyMemos)) {
+        memos.clear();
+    }
+    memos.push_back(ClusterDrawState::KeyMemo{ query, key });
+}
+
+} // namespace
+
+std::optional<std::uint64_t> ClusterDrawState::FindSetKey(const KeyQuery& query) const noexcept
+{
+    return FindKey(m_setKeys, query);
+}
+
+void ClusterDrawState::StoreSetKey(const KeyQuery& query, std::uint64_t key)
+{
+    StoreKey(m_setKeys, query, key);
+}
+
+std::optional<std::uint64_t> ClusterDrawState::FindHistoryKey(const KeyQuery& query) const noexcept
+{
+    return FindKey(m_historyKeys, query);
+}
+
+void ClusterDrawState::StoreHistoryKey(const KeyQuery& query, std::uint64_t key)
+{
+    StoreKey(m_historyKeys, query, key);
+}
+
 const Pipeline* ClusterDrawState::ResolvePipeline(detail::FrameContext& context, const ClusterPipelineKey& key)
 {
     const std::size_t index = ClusterPipelineCacheIndex(key);
@@ -416,27 +480,66 @@ std::uint64_t ClusterDrawState::HeldBytes(rg::ViewScope scope) const noexcept
     for (std::size_t i = 0; i < perScope; ++i) {
         total += m_chainBytes[first + i];
     }
+    const std::size_t firstSlot = rg::ViewScopeIndex(scope) * m_shape.partSlots;
+    for (std::size_t i = 0; i < m_shape.partSlots; ++i) {
+        total += m_instanceBytes[firstSlot + i];
+    }
     return total;
 }
 
-ClusterReserveResult ClusterDrawState::TryReserveChainBytes(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot,
-    std::uint64_t instanceCount, std::uint64_t workItems, bool twoPhase)
+ClusterReserveResult ClusterDrawState::CheckChainBytes(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot,
+    std::uint64_t instanceCount, std::uint64_t workItems, bool twoPhase, std::optional<std::uint64_t> historyWords,
+    ChainWant& want) const
 {
     if (!InRange(lane, slot) || scope == rg::ViewScope::Shared || (twoPhase && lane + 1 >= m_shape.lanes)) {
         return ClusterReserveResult::BadIndex;
     }
     const std::size_t scopeIndex = rg::ViewScopeIndex(scope);
-    std::uint64_t& recorded = m_chainBytes[ChainIndex(scopeIndex, lane, slot)];
-    const std::uint64_t wanted = std::max(recorded, ClusterChainBytes(instanceCount, workItems, twoPhase));
-    const std::uint64_t others = HeldBytes(scope) - recorded;
-    if (!FitsClusterBudget(others, wanted, kClusterDrawBudgetBytes)) {
+    const std::uint64_t recordedLane = m_chainBytes[ChainIndex(scopeIndex, lane, slot)];
+    const std::uint64_t recordedInstances = m_instanceBytes[scopeIndex * m_shape.partSlots + slot];
+    want.lane = std::max(recordedLane,
+        ClusterChainBytes(instanceCount, workItems, ClusterChainShape{ twoPhase, true, historyWords }));
+    want.instances = std::max(recordedInstances,
+        ClusterBufferCapacity(instanceCount * std::uint64_t{ sizeof(ClusterInstanceGpu) }));
+    const std::uint64_t others = HeldBytes(scope) - recordedLane - recordedInstances;
+    const std::uint64_t total = want.lane + want.instances;
+    if (!FitsClusterBudget(others, total, kClusterDrawBudgetBytes)) {
         return ClusterReserveResult::OverStateBudget;
     }
-    if (!ProcessClusterLedger().TryReserve(m_owner, static_cast<std::uint32_t>(scopeIndex), others + wanted,
-            kClusterDrawProcessBudgetBytes)) {
+    if (!ProcessClusterLedger().CanReserve(
+            m_owner, static_cast<std::uint32_t>(scopeIndex), others + total, kClusterDrawProcessBudgetBytes)) {
         return ClusterReserveResult::OverProcessBudget;
     }
-    recorded = wanted;
+    return ClusterReserveResult::Ok;
+}
+
+ClusterReserveResult ClusterDrawState::CanReserveChainBytes(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot,
+    std::uint64_t instanceCount, std::uint64_t workItems, bool twoPhase, std::optional<std::uint64_t> historyWords) const
+{
+    ChainWant want;
+    return CheckChainBytes(scope, lane, slot, instanceCount, workItems, twoPhase, historyWords, want);
+}
+
+ClusterReserveResult ClusterDrawState::TryReserveChainBytes(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot,
+    std::uint64_t instanceCount, std::uint64_t workItems, bool twoPhase, std::optional<std::uint64_t> historyWords)
+{
+    ChainWant want;
+    const ClusterReserveResult result =
+        CheckChainBytes(scope, lane, slot, instanceCount, workItems, twoPhase, historyWords, want);
+    if (result != ClusterReserveResult::Ok) {
+        return result;
+    }
+    const std::size_t scopeIndex = rg::ViewScopeIndex(scope);
+    std::uint64_t& recordedLane = m_chainBytes[ChainIndex(scopeIndex, lane, slot)];
+    std::uint64_t& recordedInstances = m_instanceBytes[scopeIndex * m_shape.partSlots + slot];
+    const std::uint64_t others = HeldBytes(scope) - recordedLane - recordedInstances;
+    // The check above passed, so the ledger raise cannot fail; its entry now holds this scope's new total.
+    if (!ProcessClusterLedger().TryReserve(m_owner, static_cast<std::uint32_t>(scopeIndex),
+            others + want.lane + want.instances, kClusterDrawProcessBudgetBytes)) {
+        return ClusterReserveResult::OverProcessBudget;
+    }
+    recordedLane = want.lane;
+    recordedInstances = want.instances;
     return ClusterReserveResult::Ok;
 }
 
@@ -499,6 +602,8 @@ bool ClusterDrawState::ReleaseIdleScope(Frame& frame)
 
     const std::size_t perScope = static_cast<std::size_t>(m_shape.lanes) * m_shape.partSlots;
     std::fill_n(m_chainBytes.begin() + static_cast<std::ptrdiff_t>(scopeIndex * perScope), perScope, std::uint64_t{ 0 });
+    std::fill_n(m_instanceBytes.begin() + static_cast<std::ptrdiff_t>(scopeIndex * m_shape.partSlots), m_shape.partSlots,
+        std::uint64_t{ 0 });
     std::fill_n(m_historyRecords.begin() + static_cast<std::ptrdiff_t>(scopeIndex * m_shape.partSlots),
         m_shape.partSlots, ClusterHistoryRecord{});
     ProcessClusterLedger().Release(m_owner, static_cast<std::uint32_t>(scopeIndex));

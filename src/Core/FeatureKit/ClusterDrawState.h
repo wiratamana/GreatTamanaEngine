@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -138,6 +139,48 @@ public:
     bool NeedsInstanceUpload(const Frame& frame, std::uint32_t slot) const noexcept;
     void NoteInstanceUploaded(const Frame& frame, std::uint32_t slot) noexcept;
 
+    // One group of the shared candidate list: the same id means the same instances in the same order.
+    struct CandidateGroupId {
+        std::uint64_t epoch = 0; // Candidate epoch; 0 = not the shared list, never reusable.
+        MeshToken mesh;
+        MaterialToken material;
+        std::uint64_t instanceCount = 0;
+        bool depthOnly = false;
+
+        bool operator==(const CandidateGroupId&) const noexcept = default;
+    };
+
+    // What a slot's instance buffer holds, so an unchanged group is not rebuilt and uploaded again.
+    struct InstanceContent {
+        CandidateGroupId group;
+        std::uint64_t generation = 0; // Buffer generation when it was written.
+
+        bool operator==(const InstanceContent&) const noexcept = default;
+    };
+    bool InstanceContentIs(const Frame& frame, std::uint32_t slot, const InstanceContent& want) const noexcept;
+    void NoteInstanceContent(const Frame& frame, std::uint32_t slot, const InstanceContent& content) noexcept;
+
+    // Keys that depend only on the candidate list of `epoch`; looked up and stored per group. Epoch 0 never matches.
+    struct KeyQuery {
+        CandidateGroupId group;
+        std::uint32_t clusterCount = 0;
+        std::uint64_t generation = 0; // History buffer generation; 0 for the set key.
+
+        bool operator==(const KeyQuery&) const noexcept = default;
+    };
+    struct KeyMemo {
+        KeyQuery query;
+        std::uint64_t key = 0;
+    };
+    static constexpr std::size_t kMaxKeyMemos = 16;
+    std::optional<std::uint64_t> FindSetKey(const KeyQuery& query) const noexcept;
+    void StoreSetKey(const KeyQuery& query, std::uint64_t key);
+    std::optional<std::uint64_t> FindHistoryKey(const KeyQuery& query) const noexcept;
+    void StoreHistoryKey(const KeyQuery& query, std::uint64_t key);
+
+    // Staging array for the instance records of one upload; keeps its capacity between frames.
+    std::vector<ClusterInstanceGpu>& InstanceScratch() noexcept { return m_instanceScratch; }
+
     // The cached pipeline of `key`. Null while it is missing or backing off after a failed build.
     const Pipeline* ResolvePipeline(detail::FrameContext& context, const ClusterPipelineKey& key);
 
@@ -148,8 +191,14 @@ public:
 
     // Checks the buffer budget of one chain (per-state and process-wide) and records its capacity. A two-phase
     // chain is recorded on its first lane and covers both lanes and the history. Nothing is recorded unless Ok.
+    // The instance buffer of a slot is charged once. `historyWords` empty = one history word per work item.
     ClusterReserveResult TryReserveChainBytes(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot,
-        std::uint64_t instanceCount, std::uint64_t workItems, bool twoPhase);
+        std::uint64_t instanceCount, std::uint64_t workItems, bool twoPhase,
+        std::optional<std::uint64_t> historyWords = std::nullopt);
+    // The answer TryReserveChainBytes would give, recording nothing.
+    ClusterReserveResult CanReserveChainBytes(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot,
+        std::uint64_t instanceCount, std::uint64_t workItems, bool twoPhase,
+        std::optional<std::uint64_t> historyWords = std::nullopt) const;
 
     // Capacity bytes recorded for one scope (all lanes and slots).
     std::uint64_t HeldBytes(rg::ViewScope scope) const noexcept;
@@ -175,6 +224,15 @@ private:
     {
         return Valid() && lane < m_shape.lanes && slot < m_shape.partSlots;
     }
+    // Capacity a chain wants: its own lane buffers, and the instance buffer of its slot (shared by every lane).
+    struct ChainWant {
+        std::uint64_t lane = 0;
+        std::uint64_t instances = 0;
+    };
+    // Shared by Try/CanReserveChainBytes: what a chain wants and whether it fits. Records nothing.
+    ClusterReserveResult CheckChainBytes(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot,
+        std::uint64_t instanceCount, std::uint64_t workItems, bool twoPhase, std::optional<std::uint64_t> historyWords,
+        ChainWant& want) const;
 
     std::string m_base;
     ClusterDrawShape m_shape;
@@ -194,6 +252,10 @@ private:
     };
     std::array<SpanKey, rg::kViewScopeCount> m_candidateSpans;
     std::vector<std::uint64_t> m_instanceUploadSerial; // [scope][slot]
+    std::vector<ClusterInstanceGpu> m_instanceScratch;
+    std::vector<InstanceContent> m_instanceContent; // [scope][slot]
+    std::vector<KeyMemo> m_setKeys;
+    std::vector<KeyMemo> m_historyKeys;
     std::vector<std::unique_ptr<PersistentBuffer>> m_instances;
     std::vector<std::unique_ptr<PersistentBuffer>> m_visible;
     std::vector<std::unique_ptr<PersistentBuffer>> m_commands;
@@ -211,7 +273,8 @@ private:
     std::array<rg::BuildRetryGate, kClusterPipelineKeyCount> m_pipelineGates;
     std::unique_ptr<rg::ClusterDrawBindings> m_bindings;
 
-    std::vector<std::uint64_t> m_chainBytes; // [scope][lane][slot] recorded capacity
+    std::vector<std::uint64_t> m_chainBytes;    // [scope][lane][slot] recorded lane capacity (without instances)
+    std::vector<std::uint64_t> m_instanceBytes; // [scope][slot] recorded instance buffer capacity, charged once
     std::array<std::uint64_t, rg::kViewScopeCount> m_lastChainFrame;
     ClusterSurvivorTable m_survivors;
 };

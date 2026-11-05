@@ -49,7 +49,7 @@ Set them in the panel or with `/feature_debug/set`. A bad value changes nothing 
 | `rendered`, `frameIndex`, `cameraValid` | Did the view run lately. Is the cull camera usable. |
 | `cullCamera` | `own`, `primary` or `none`. |
 | `occlusion` | `NotRequested`, `Applied`, `Unusable`, `NoCullCamera`. |
-| `hizReason` | `None`, `Unavailable`, `TooLarge`, `NothingInView`. |
+| `hizReason` | `None`, `Unavailable`, `TooLarge`, `NothingInView`, `OverBudget`. |
 | `hizSource` | `own`, `primary` or `none`. `primary` = occlusion inherited. |
 | `sharedSurvivors` | The view drew the primary view's survivors. |
 | `inertReason` | `none`, `device caps`, `shared scope`, `capture armed`, `toggled off`, `invalid state`. |

@@ -1,6 +1,6 @@
 # GPU-driven rendering
 > How the engine culls clusters on the GPU and draws the survivors with one indirect call. For anyone who touches the cluster path, culling or Hi-Z.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-11-05
 
 ## TL;DR
 - A big mesh is cut into clusters. A compute pass culls them per view. One counted indirect draw renders the survivors.
@@ -44,6 +44,8 @@
 | Slot | the part found no free slot (12 per colour view, 4 for depth-only) | `noSlot` |
 
 - A mesh without a table gets one cluster over its whole index range (`Core::EnsureClusterTable`). A failed try backs off 120 frames, doubling.
+- The draw list (world matrix of every renderable) is built once per frame (`RenderSystem::SharedListScope`) and shared by candidate selection and every `RenderSystem::Draw`.
+- A static scene reuses the list, the candidates, the keys and the instance upload. Any change to a renderable or its `Transform` rebuilds them. Camera moves cost nothing.
 - Alpha-tested slices get no table, so they stay on the CPU path.
 - Build and file format of cluster tables: [Mesh clusters](mesh-clusters.md).
 
@@ -53,7 +55,7 @@ A part is one (mesh, material) pair. A colour view has 12 part slots and 2 lanes
 1. The feature calls `Frame::ClusterDraw(state, lane)`, sets instances, cameras and flags, then `Record()`.
 2. A part that is not worth a chain is dropped. Worth = at least 2 clusters or at least 4 instances.
 3. A part fully outside the cull frustum gets no pass and no slot. Its entities are still claimed (`skippedParts`).
-4. For every other part `Record()` declares, in this order: **Reset** (`FillBuffer`), **Cull** (`ClusterCull.comp`), **Draw** (indirect).
+4. For every other part `Record()` declares, in this order: **Reset** (`FillBuffer`), **Cull** (`ClusterCull.comp`), **Draw** (indirect). Cull runs one thread per (instance, chunk of 16 clusters). It tests the instance box first, so a hidden instance skips all its clusters. `ClusterCullParams` is 256 bytes.
 5. With `collectStats` it adds three passes per part slot: stats, stats clear, stats copy.
 6. Descriptor sets: 0 = material, 1 = scene services, 2 = cluster buffers. Lit parts reuse `TexturedMesh.frag` and `PbrMesh.frag`.
 7. Only after every pass of a part was declared, the verb claims its entities.
@@ -85,7 +87,7 @@ Occlusion is exact for the current frame. Only the primary view builds a pyramid
 | Pyramid level 0 | Half the scene depth size. Each level keeps the farthest depth of a block. |
 | Levels | Down to 1x1. At most 14 (`kHizMaxLevels`). Scene side above 16384 px = no pyramid. |
 | Atlas size | Rounded up to a multiple of 256 texels. Frame-local, not kept between frames. |
-| History | One `uint32` per work item: bit 0 = visible last frame, bit 1 = drawn in round 1. |
+| History | One `uint32` per (instance, chunk of 16 clusters): bits 0-15 = visible after round 2, bits 16-31 = drawn in round 1 of this frame. Round 2 rewrites every word. |
 | History key | `ClusterHistoryKey`: mesh token, cluster count, entity ids in order, buffer generation. |
 | Depth compare | Perspective: pyramid depth is turned into view distance (`HizDepthMapOf`). Ortho or skewed: raw compare. |
 | Safe cases | Clear depth never occludes. A corner behind the eye keeps the box. |
@@ -144,6 +146,8 @@ Constants live in `src/Renderer/Culling/ClusterCullMath.h` and `ClusterPassCount
 | Pipelines | 18 (`kClusterPipelineKeyCount`) = 3 variants x 3 material kinds x 2 cull modes |
 
 - A part over a limit, beyond the slots, or over a budget is not claimed. It logs once and draws on the CPU path.
+- A Hi-Z chain that does not fit the budget is first retried as a single-phase `Frustum` chain (`hizReason=OverBudget`). The CPU path is the last resort.
+- The instance buffer of a slot is charged once for all lanes. The history buffer holds one word per (instance, chunk of 16 clusters).
 - Instance counts are never cut.
 
 ## Key files
@@ -174,14 +178,15 @@ Constants live in `src/Renderer/Culling/ClusterCullMath.h` and `ClusterPassCount
 11. **No second batching path.** Do not add a parallel batching mechanism. Everything else uses `Renderer::Submit()`.
 
 ## Gotchas
-- **Draw order changes.** Survivors are appended with `atomicAdd`. Two coincident triangles can swap winners (`MeshHasCoincidentTriangles`).
+- **Draw order changes.** Survivors are appended with `atomicAdd`, in runs of up to 16 per (instance, chunk). Two coincident triangles can swap winners (`MeshHasCoincidentTriangles`).
+- **No renderable changes during the frame.** The shared render list and the reuse cache assume nothing adds, removes or moves a renderable between declare and submit. Parented renderables are never cached.
 - **Synchronous graph only.** `GpuParams` and the instance buffer are written on the CPU at declare time. A pipelined regime makes the verb inert.
 - **Turned-off features keep memory.** A feature disabled with `set_feature_enabled` gets no callback, so `TickIdle` never runs. Its buffers stay in the ledger.
 - **Ledger can refuse a big chain.** After many cluster lanes (for example Shadow at 100000 instances), re-enable the feature for 600 frames or restart before a big Hi-Z test.
 - **Hi-Z scope.** Primary view only. Primitives, alpha-tested, skinned and transparent meshes get frustum culling only.
 - **Box test only.** Hi-Z tests axis-aligned cluster boxes.
 - **No cancel inside a build.** A cluster build cannot stop inside one meshoptimizer call. With one job worker it runs inline and stalls the editor.
-- **Hi-Z reasons.** `hizReason` is `None`, `Unavailable`, `TooLarge` or `NothingInView`. `NothingInView` means every part was outside the frustum.
+- **Hi-Z reasons.** `hizReason` is `None`, `Unavailable`, `TooLarge`, `NothingInView` or `OverBudget`. `NothingInView` means every part was outside the frustum. `OverBudget` means the two-phase chain did not fit the memory budget, so the chain runs as a plain `Frustum` chain.
 - **`inertReason` values.** `none`, `device caps`, `shared scope`, `capture armed`, `toggled off`, `invalid state`.
 - **Cone test and the secondary camera.** With a cull camera different from the view camera, the cone test uses the cull eye. Back faces seen from the Scene camera can vanish.
 - **Open items.** LOD selection, bindless batching, alpha-tested meshes and GPU-skinned meshes on the cluster path, and async compute are not done.

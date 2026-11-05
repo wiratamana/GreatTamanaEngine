@@ -13,6 +13,7 @@ std::string_view HizReasonText(HizReason reason) noexcept
     case HizReason::Unavailable: return "not available";
     case HizReason::TooLarge: return "view is too large";
     case HizReason::NothingInView: return "nothing in view";
+    case HizReason::OverBudget: return "over the memory budget, frustum only";
     }
     return "not ready";
 }

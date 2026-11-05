@@ -44,7 +44,7 @@ Default URL: `http://127.0.0.1:8080`. Close the editor without saving when you f
 
 - A row is valid when 80% of samples have `Present` status and no folded GPU record. A check on an invalid row prints `INVALID`, never `PASS`.
 - Checks use same-run ratios. Absolute ms are for orientation.
-- Hi-Z runs a second cull pass over all work items. So it can add ms when nothing is hidden. The demo limit (3.0 ms) is looser than D3 (0.4 ms) for this reason.
+- Hi-Z runs a second cull round. The cull tests a whole instance box first, so the extra cost is small when nothing is hidden. The demo limit (3.0 ms) is kept loose, because it was set before the instance-level cull and was not re-measured.
 - Without `-BaselineSpanMs`, D7 prints `PARTIAL` and the run exits 3. It never prints FAIL.
 - `soak_equality` captures NoCull twice per pose. The difference is the noise floor. A frame fails when the Hi-Z difference is above `max(8, 4 x noise)` pixels, or a block of 16 or more connected pixels differs.
 - T7 finds the "look away" pose by measurement: zero visible clusters and `skippedParts >= 1`. No pose found means `INVALID`.

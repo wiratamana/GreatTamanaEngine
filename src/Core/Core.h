@@ -245,7 +245,14 @@ public:
     bool CaptureArmedThisFrame() const noexcept { return m_captureArmedThisFrame; }
 
     // Instances of cluster-ready meshes this frame, rebuilt by BuildFrame(). Valid until the next BuildFrame().
-    std::span<const fx::ClusterInstance> ClusterCandidates() const noexcept { return m_clusterCandidates; }
+    std::span<const fx::ClusterInstance> ClusterCandidates() const noexcept
+    {
+        return m_clusterCandidatesActive ? std::span<const fx::ClusterInstance>(m_clusterCandidates)
+                                         : std::span<const fx::ClusterInstance>();
+    }
+
+    // Grows whenever the candidate list was rebuilt; equal between two frames that reused it.
+    std::uint64_t ClusterCandidateEpoch() const noexcept { return m_clusterCandidateEpoch; }
 
     // World box of each candidate, built once per frame on the first call of any of the three accessors below.
     // Inverted (never rejected) when the mesh has no cluster bounds or the matrix is non-finite. Kit verbs only.
@@ -302,7 +309,7 @@ private:
     RenderTexture* AcquireDirectPrimaryTarget();
     const RenderPassViewData* FindViewData(rg::RenderViewId view) const noexcept;
     const ExposedViewOutput* FindExposedViewOutput(rg::ViewScope scope) const noexcept;
-    void BuildClusterCandidates();
+    void BuildClusterCandidates(std::span<const DrawCommand> commands, std::uint64_t renderListEpoch);
     void BuildClusterBounds();
 
     IEditorLayer* m_editorLayer = nullptr; // Optional editor hook.
@@ -379,7 +386,11 @@ private:
 
     // Cluster-ready instances and entity exclusion sets of this frame, cleared at the start of BuildFrame().
     // The pool is a fixed array, so a reserved set keeps its address; the epoch grows with each clear.
+    // The list keeps its content between frames; `m_clusterCandidatesActive` says whether this frame may read it.
     std::vector<fx::ClusterInstance> m_clusterCandidates;
+    bool m_clusterCandidatesActive = false;
+    std::uint64_t m_clusterCandidateEpoch = 0;
+    ClusterCandidateReuse m_candidateReuse; // What the last rebuild depended on besides the render list.
     // Per-candidate arrays below are rebuilt together on first use; `m_clusterBoundsBuilt` guards stale contents.
     std::vector<AABB> m_clusterCandidateBounds;
     std::vector<Entity> m_clusterCandidateEntities;

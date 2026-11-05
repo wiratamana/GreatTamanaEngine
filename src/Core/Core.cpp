@@ -719,13 +719,41 @@ const fx::ClusterPartBox& Core::ClusterCandidateUnion()
     return m_clusterCandidateUnion;
 }
 
-void Core::BuildClusterCandidates()
+namespace {
+
+// The mesh and pipeline facts the candidate list reads for one pair.
+ClusterCandidatePair ResolveCandidatePair(RenderSystem& renderSystem, MeshHandle meshHandle, PipelineHandle pipelineHandle,
+    const std::unordered_set<BufferObjectHandle>& gpuSkinnedOutputs)
 {
-    m_clusterCandidates.clear();
-    m_clusterCandidateUnion = fx::ClusterPartBox{};
-    m_clusterBoundsBuilt = false;
+    ClusterCandidatePair pair;
+    pair.mesh = meshHandle;
+    pair.pipeline = pipelineHandle;
+    const Mesh* mesh = renderSystem.TryGetMesh(meshHandle);
+    const Pipeline* pipeline = renderSystem.TryGetPipeline(pipelineHandle);
+    pair.resolved = mesh != nullptr && pipeline != nullptr;
+    if (!pair.resolved) {
+        return pair;
+    }
+    pair.facts.meshHasClusters = mesh->HasClusters();
+    pair.facts.meshSynthesizable = mesh->HasIndexBuffer() && mesh->IndexCount() > 0 && mesh->IndexCount() % 3 == 0
+        && mesh->LocalBounds().has_value();
+    pair.facts.meshHasIndexBuffer = mesh->HasIndexBuffer();
+    pair.facts.layout = pipeline->VertexLayoutKind();
+    pair.facts.gpuSkinned = gpuSkinnedOutputs.contains(mesh->VertexBufferHandle());
+    pair.clusterBounds = mesh->ClusterBounds();
+    return pair;
+}
+
+} // namespace
+
+void Core::BuildClusterCandidates(std::span<const DrawCommand> commands, std::uint64_t renderListEpoch)
+{
+    // Nothing is readable until a list is built or reused below.
+    m_clusterCandidatesActive = false;
     m_clusterRejections = fx::ClusterRejectCounts{};
     if (!ClusterPathSupported(m_renderer.IndirectDrawCaps()) || m_renderFeatureCompositorPtr == nullptr) {
+        m_candidateReuse.valid = false;
+        m_clusterBoundsBuilt = false;
         return;
     }
     // Only enabled features of the stages that can declare a cluster chain read the list.
@@ -739,6 +767,8 @@ void Core::BuildClusterCandidates()
         || std::any_of(preOpaqueFeatures.begin(), preOpaqueFeatures.end(),
             [](const PreOpaqueEntry& entry) { return entry.enabledOverride; });
     if (!anyReader) {
+        m_candidateReuse.valid = false;
+        m_clusterBoundsBuilt = false;
         return;
     }
 
@@ -749,29 +779,56 @@ void Core::BuildClusterCandidates()
     }
 
     RenderSystem& renderSystem = m_game.GetRenderSystem();
-    const std::vector<DrawCommand> commands = RenderSystem::CollectRenderables(m_game.GetRegistry());
-    std::vector<ClusterCandidateInput> inputs;
-    inputs.reserve(commands.size());
+
+    // The same render list and the same mesh facts give the same candidates, boxes and reject counts.
+    if (m_candidateReuse.valid && m_candidateReuse.renderListEpoch == renderListEpoch) {
+        const bool same = std::all_of(m_candidateReuse.pairs.begin(), m_candidateReuse.pairs.end(),
+            [&](const ClusterCandidatePair& old) {
+                return old.SameAs(ResolveCandidatePair(renderSystem, old.mesh, old.pipeline, gpuSkinnedOutputs));
+            });
+        if (same) {
+            m_clusterRejections = m_candidateReuse.rejections;
+            m_clusterCandidatesActive = true;
+            return;
+        }
+    }
+
+    m_candidateReuse = ClusterCandidateReuse{};
+    m_candidateReuse.renderListEpoch = renderListEpoch;
+    m_candidateReuse.valid = true;
+    m_clusterCandidateUnion = fx::ClusterPartBox{};
+    m_clusterBoundsBuilt = false;
+    ++m_clusterCandidateEpoch;
+    ClusterCandidateBuilder builder(m_clusterCandidates, commands.size());
+
+    // Mesh and pipeline facts are the same for every command of one (mesh, pipeline) pair; runs of it are common.
+    MeshHandle lastMesh;
+    PipelineHandle lastPipeline;
+    bool haveLast = false;
+    bool lastResolved = false;
+    ClusterCandidateFacts facts;
     for (const DrawCommand& command : commands) {
-        const Mesh* mesh = renderSystem.TryGetMesh(command.mesh);
-        const Pipeline* pipeline = renderSystem.TryGetPipeline(command.pipeline);
-        if (mesh == nullptr || pipeline == nullptr) {
+        if (!haveLast || command.mesh != lastMesh || command.pipeline != lastPipeline) {
+            haveLast = true;
+            lastMesh = command.mesh;
+            lastPipeline = command.pipeline;
+            const ClusterCandidatePair pair =
+                ResolveCandidatePair(renderSystem, command.mesh, command.pipeline, gpuSkinnedOutputs);
+            lastResolved = pair.resolved;
+            facts = pair.facts;
+            if (!m_candidateReuse.Note(pair)) {
+                m_candidateReuse.valid = false; // Too many distinct pairs to track; this frame is built as usual.
+            }
+        }
+        if (!lastResolved) {
             continue;
         }
-        ClusterCandidateInput input;
-        input.entity = command.entity;
-        input.mesh = fx::MeshToken{ command.mesh.index, command.mesh.generation };
-        input.material = fx::MaterialToken{ command.texture.index, command.texture.generation };
-        input.world = command.model;
-        input.meshHasClusters = mesh->HasClusters();
-        input.meshSynthesizable = mesh->HasIndexBuffer() && mesh->IndexCount() > 0 && mesh->IndexCount() % 3 == 0
-            && mesh->LocalBounds().has_value();
-        input.meshHasIndexBuffer = mesh->HasIndexBuffer();
-        input.layout = pipeline->VertexLayoutKind();
-        input.gpuSkinned = gpuSkinnedOutputs.contains(mesh->VertexBufferHandle());
-        inputs.push_back(input);
+        builder.Add(facts, command.entity, fx::MeshToken{ command.mesh.index, command.mesh.generation },
+            fx::MaterialToken{ command.texture.index, command.texture.generation }, command.model);
     }
-    m_clusterCandidates = SelectClusterCandidates(inputs, true, &m_clusterRejections);
+    builder.Finish(&m_clusterRejections);
+    m_candidateReuse.rejections = m_clusterRejections;
+    m_clusterCandidatesActive = true;
 }
 
 DescriptorSetHandle Core::ResolveClusterMaterialSet(fx::MaterialToken token)
@@ -1258,7 +1315,7 @@ void Core::BuildFrame()
         request.reset();
     }
     m_viewJitterThisFrame.fill(Vec2{});
-    m_clusterCandidates.clear();
+    m_clusterCandidatesActive = false;
     m_clusterRejections = fx::ClusterRejectCounts{};
     for (std::size_t i = 0; i < m_exclusionSetsUsed; ++i) {
         m_exclusionSets[i].Clear();
@@ -1330,6 +1387,8 @@ void Core::BuildFrame()
                 throw std::runtime_error("injected offscreen fault");
             }
             const rg::RecordingContext offscreenCmd = recording.Context();
+            // One render list serves the candidate build and every scene draw of this frame's graph.
+            RenderSystem::SharedListScope renderList(m_game.GetRenderSystem());
             m_renderGraph.Execute(offscreenCmd, rg::ExecuteTimingMode::SynchronousImmediateReadback,
                 [&](rg::RenderGraphBuilder& b) {
                     GTE_PROFILE_SCOPE("Offscreen.Declare");
@@ -1345,9 +1404,12 @@ void Core::BuildFrame()
 
                         // One candidate list for every view of this frame. A failure leaves the list empty (CPU path).
                         try {
-                            BuildClusterCandidates();
+                            const std::vector<DrawCommand>& commands = renderList.Build(m_game.GetRegistry());
+                            BuildClusterCandidates(commands, renderList.Epoch());
                         } catch (const std::exception& e) {
                             m_clusterCandidates.clear();
+                            m_clusterCandidatesActive = false;
+                            m_candidateReuse = ClusterCandidateReuse{};
                             m_clusterRejections = fx::ClusterRejectCounts{};
                             const std::string failure = std::string("Core: cluster candidate list failed: ") + e.what();
                             if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {

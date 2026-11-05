@@ -297,5 +297,12 @@ TEST(ClusterPartSkipTest, FullySkippedChainReadsNothingInViewOnlyWhenItWantedOcc
     EXPECT_EQ(ClusterHizReasonOf(HizReason::TooLarge, true, true, false), HizReason::None);
 }
 
+TEST(ClusterPartSkipTest, ADowngradedHiZChainReportsTheBudgetReason)
+{
+    EXPECT_EQ(ClusterHizReasonOf(HizReason::OverBudget, true, false, false), HizReason::OverBudget);
+    EXPECT_EQ(ClusterHizReasonOf(HizReason::OverBudget, true, false, true), HizReason::NothingInView);
+    EXPECT_EQ(ClusterHizReasonOf(HizReason::OverBudget, true, true, false), HizReason::None);
+}
+
 } // namespace
 } // namespace gte::fx

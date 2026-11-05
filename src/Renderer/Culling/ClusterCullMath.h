@@ -109,14 +109,29 @@ struct ClusterCullParams {
     std::uint32_t counts[4];
     float hiz[4]; // x,y = atlas size, z,w = level 0 size (Hi-Z occlusion only).
     float depthMap[4]; // x = k, y = b of d = k + b / w, z = pyramid level count (Hi-Z occlusion only).
+    float instanceBoxMin[4]; // xyz = union of the mesh's cluster boxes (local space), w = 1 when valid.
+    float instanceBoxMax[4];
 };
-static_assert(sizeof(ClusterCullParams) == 224);
+static_assert(sizeof(ClusterCullParams) == 256);
 static_assert(sizeof(ClusterCullParams) % 16 == 0);
 static_assert(offsetof(ClusterCullParams, eyeOrDirection) == 96);
 static_assert(offsetof(ClusterCullParams, viewProjection) == 112);
 static_assert(offsetof(ClusterCullParams, counts) == 176);
 static_assert(offsetof(ClusterCullParams, hiz) == 192);
 static_assert(offsetof(ClusterCullParams, depthMap) == 208);
+static_assert(offsetof(ClusterCullParams, instanceBoxMin) == 224);
+
+// Chunks of kClusterChunkClusters clusters (one history word each) in a mesh, and the cull threads of a dispatch:
+// one per (instance, chunk).
+constexpr std::uint64_t ClusterChunkCount(std::uint64_t clusterCount) noexcept
+{
+    return (clusterCount + kClusterChunkClusters - 1) / kClusterChunkClusters;
+}
+
+constexpr std::uint64_t ClusterCullThreadCount(std::uint64_t instanceCount, std::uint64_t clusterCount) noexcept
+{
+    return instanceCount * ClusterChunkCount(clusterCount);
+}
 
 // Packs a world matrix and its flags into the GPU record.
 ClusterInstanceGpu MakeClusterInstanceGpu(const Mat4& world, std::uint32_t flags, float maxScale) noexcept;
@@ -125,6 +140,9 @@ ClusterInstanceGpu MakeClusterInstanceGpu(const Mat4& world, std::uint32_t flags
 // zero until SetClusterCullHiz.
 ClusterCullParams MakeClusterCullParams(const Mat4& cullViewProjection, const Vec3& eyeOrDirection,
     bool orthographic, std::uint32_t instanceCount, std::uint32_t clusterCount, ClusterCullFlags flags) noexcept;
+
+// Sets the instance box: the union of the mesh's cluster boxes. Without it the instance-level test is off.
+void SetClusterCullInstanceBox(ClusterCullParams& params, const AABB& box) noexcept;
 
 // False when any plane or the eye holds a non-finite value.
 bool ClusterCullParamsAreFinite(const ClusterCullParams& params) noexcept;
@@ -155,12 +173,27 @@ ClusterPartVerdict EvaluateClusterPart(
 // Buffer capacity for a request: next power of two, at least the minimum, at most the maximum.
 std::uint64_t ClusterBufferCapacity(std::uint64_t requestedBytes) noexcept;
 
-// Capacity bytes of the history buffer of a two-phase chain, rounded up.
-std::uint64_t ClusterHistoryCapacity(std::uint64_t workItems) noexcept;
+// Capacity bytes of the history buffer of a two-phase chain holding `words` 32-bit words, rounded up.
+std::uint64_t ClusterHistoryCapacity(std::uint64_t words) noexcept;
+
+// Words of the packed history of a part: one per (instance, chunk), see ClusterChunkCount().
+constexpr std::uint64_t ClusterHistoryWordCount(std::uint64_t instanceCount, std::uint64_t clusterCount) noexcept
+{
+    return instanceCount * ClusterChunkCount(clusterCount);
+}
+
+// Which buffers a chain charges. `instancesShared` is true when another lane of the same (scope, slot) already holds
+// the instance buffer. `historyWords` is the history size of a two-phase chain; empty = one word per work item.
+struct ClusterChainShape {
+    bool twoPhase = false;
+    bool instancesShared = false;
+    std::optional<std::uint64_t> historyWords;
+};
 
 // Capacity bytes of one chain, each buffer rounded up: instances once; visible, commands and count per lane;
 // the history buffer when `twoPhase` (two lanes, one per phase).
 std::uint64_t ClusterChainBytes(std::uint64_t instanceCount, std::uint64_t workItems, bool twoPhase) noexcept;
+std::uint64_t ClusterChainBytes(std::uint64_t instanceCount, std::uint64_t workItems, const ClusterChainShape& shape) noexcept;
 
 // True when `held + add` stays within `ceiling`. Never overflows.
 constexpr bool FitsClusterBudget(std::uint64_t held, std::uint64_t add, std::uint64_t ceiling) noexcept
@@ -179,6 +212,8 @@ class ClusterDrawLedger {
 public:
     // Raises the entry of (owner, scope) to `bytes` unless the total would pass `ceiling`.
     bool TryReserve(std::uint64_t owner, std::uint32_t scope, std::uint64_t bytes, std::uint64_t ceiling);
+    // The answer TryReserve would give, without recording anything.
+    bool CanReserve(std::uint64_t owner, std::uint32_t scope, std::uint64_t bytes, std::uint64_t ceiling) const noexcept;
     void Release(std::uint64_t owner, std::uint32_t scope) noexcept;
     void ReleaseOwner(std::uint64_t owner) noexcept;
     std::uint64_t HeldBy(std::uint64_t owner, std::uint32_t scope) const noexcept;
@@ -264,6 +299,47 @@ constexpr ClusterPhaseResult ClusterPhaseSecond(std::uint32_t word, bool inView,
     return { visible && (word & kClusterHistoryDrawnFirst) == 0, visible ? kClusterHistoryVisible : 0u };
 }
 
+// The shader keeps the same two bits per cluster, packed per chunk of kClusterChunkClusters clusters: bits 0-15 hold
+// "visible", bits 16-31 hold "drawn first". `emitMask` and the masks below use bit i for cluster i of the chunk.
+struct ClusterChunkResult {
+    std::uint32_t emitMask = 0;
+    std::uint32_t word = 0;
+};
+
+// First phase of a chunk. `inViewMask` is only read where the visible bit is set. Equals ClusterPhaseFirst per bit.
+constexpr ClusterChunkResult ClusterChunkPhaseFirst(std::uint32_t word, bool historyValid, std::uint32_t inViewMask) noexcept
+{
+    const std::uint32_t visible = (historyValid ? word : 0u) & 0xFFFFu;
+    const std::uint32_t drawn = visible & inViewMask;
+    return { drawn, visible | (drawn << 16) };
+}
+
+// Second phase of a chunk. Equals ClusterPhaseSecond per bit; the new word holds only the visible bits.
+constexpr ClusterChunkResult ClusterChunkPhaseSecond(std::uint32_t word, std::uint32_t visibleMask) noexcept
+{
+    const std::uint32_t visible = visibleMask & 0xFFFFu;
+    return { visible & ~(word >> 16), visible };
+}
+
+// Position of cluster `cluster` of `instance` in the history buffer: word index and bit. Instances run fastest.
+struct ClusterHistorySlot {
+    std::uint64_t word = 0;
+    std::uint32_t bit = 0;
+};
+
+constexpr ClusterHistorySlot ClusterHistorySlotOf(
+    std::uint32_t instance, std::uint32_t cluster, std::uint32_t instanceCount) noexcept
+{
+    return { std::uint64_t{ cluster / kClusterChunkClusters } * instanceCount + instance, cluster % kClusterChunkClusters };
+}
+
+// Where a whole instance box lies against the frustum. Outside: every cluster is outside. Inside: every cluster
+// is inside. Both are padded, so the cluster tests never disagree. A non-finite box is Partial.
+enum class ClusterInstanceClass : std::uint8_t { Outside, Partial, Inside };
+
+ClusterInstanceClass ClusterInstanceFrustumClass(
+    const AABB& localBox, const Mat4& world, const std::array<Plane, 6>& planes) noexcept;
+
 // Outcome counter an item adds to. Values equal the kClusterReason* slots.
 enum class ClusterReason : std::uint32_t {
     Frustum = kClusterReasonFrustum,
@@ -290,6 +366,40 @@ constexpr ClusterReason ClusterReasonOf(bool outsideFrustum, bool coneCulled, bo
 // generation gives another key, so stale history is never trusted.
 std::uint64_t ClusterHistoryKey(std::uint64_t meshToken, std::uint32_t clusterCount,
     std::span<const std::uint32_t> entityIds, std::uint64_t bufferGeneration) noexcept;
+
+// ClusterHistoryKey() with the ids fed one by one, so no id array is needed. `idCount` is the number of Add() calls.
+// FNV-1a over 64-bit words with a final avalanche; the order of the ids matters.
+class ClusterHistoryHasher {
+public:
+    ClusterHistoryHasher(std::uint64_t meshToken, std::uint32_t clusterCount, std::uint64_t bufferGeneration,
+        std::size_t idCount) noexcept
+    {
+        Mix(meshToken);
+        Mix(clusterCount);
+        Mix(bufferGeneration);
+        Mix(idCount);
+    }
+
+    void Add(std::uint32_t id) noexcept { Mix(id); }
+
+    std::uint64_t Finish() const noexcept
+    {
+        std::uint64_t hash = m_hash;
+        hash ^= hash >> 33;
+        hash *= 0xff51afd7ed558ccdull;
+        hash ^= hash >> 33;
+        return hash;
+    }
+
+private:
+    void Mix(std::uint64_t value) noexcept
+    {
+        m_hash = (m_hash ^ value) * 0x100000001b3ull;
+        m_hash ^= m_hash >> 29;
+    }
+
+    std::uint64_t m_hash = 0xcbf29ce484222325ull;
+};
 
 // ---------------------------------------------------------------------------------------------
 // Hi-Z occlusion
@@ -369,7 +479,8 @@ bool ClusterOccluded(const MeshCluster& cluster, const Mat4& world, const Mat4& 
 void SetClusterCullHiz(ClusterCullParams& params, const HizLayout& layout) noexcept;
 
 // Why a pyramid cannot cull. None means usable. NothingInView: every part was outside the cull frustum, no pyramid ran.
-enum class HizReason : std::uint8_t { None, Unavailable, TooLarge, NothingInView };
+// OverBudget: the two-phase chain did not fit the memory budget, so the chain runs single-phase (frustum only).
+enum class HizReason : std::uint8_t { None, Unavailable, TooLarge, NothingInView, OverBudget };
 
 // ---------------------------------------------------------------------------------------------
 // Pipeline key

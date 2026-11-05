@@ -42,7 +42,9 @@ struct PlannedPart {
     std::uint64_t workItems = 0;
     std::uint64_t setKey = 0;     // Instance set and order; see ClusterPartSetKey().
     ClusterSurvivorPart published; // The primary view's survivors of this part; set only for a shared chain.
-    std::vector<ClusterInstanceGpu> instances;
+    std::size_t instanceCount = 0;
+    ClusterDrawState::CandidateGroupId groupId; // Epoch 0 unless the part is a group of the shared candidate list.
+    std::vector<std::uint32_t> candidates; // Indices into the chain's instances, in draw order.
     std::vector<Entity> entities;
     ClusterCullParams params{};
 };
@@ -56,14 +58,13 @@ std::string TokenText(MeshToken token)
 std::uint64_t ClusterPartSetKey(
     const ClusterMeshGroup& group, std::uint32_t clusterCount, std::span<const ClusterInstance> instances)
 {
-    std::vector<std::uint32_t> words;
-    words.reserve(group.instances.size() * 2);
-    for (const std::uint32_t candidate : group.instances) {
-        words.push_back(instances[candidate].entity.index);
-        words.push_back(instances[candidate].entity.generation);
-    }
     const std::uint64_t meshToken = (std::uint64_t{ group.mesh.index } << 32) | group.mesh.generation;
-    return ClusterHistoryKey(meshToken, clusterCount, words, 0);
+    ClusterHistoryHasher hasher(meshToken, clusterCount, 0, group.instances.size() * 2);
+    for (const std::uint32_t candidate : group.instances) {
+        hasher.Add(instances[candidate].entity.index);
+        hasher.Add(instances[candidate].entity.generation);
+    }
+    return hasher.Finish();
 }
 
 // Bits the chain sets itself; a caller never asks for them.
@@ -435,10 +436,26 @@ void PlanChain(ClusterDrawChain::Impl& s)
 
     // The secondary view draws the primary view's survivors when every planned part was published for the same
     // instances, cull camera and tests. Otherwise it culls on its own.
+    // A group of the shared candidate list is fully identified by the list's epoch, so its keys and records are reusable.
+    const std::span<const ClusterInstance> sharedCandidates = frame.ClusterCandidates();
+    const std::uint64_t candidateEpoch =
+        (s.instances.data() == sharedCandidates.data() && s.instances.size() == sharedCandidates.size())
+        ? frame.ClusterCandidateEpoch() : 0;
+    std::vector<ClusterDrawState::CandidateGroupId> groupIds(eligible.size());
+    for (std::size_t i = 0; i < eligible.size(); ++i) {
+        groupIds[i] = ClusterDrawState::CandidateGroupId{
+            candidateEpoch, eligible[i].mesh, eligible[i].material, eligible[i].instances.size(), s.depthOnly };
+    }
     std::vector<std::uint64_t> setKeys(eligible.size(), 0);
     if (!s.depthOnly) {
         for (const std::uint32_t index : assignment.assigned) {
+            const ClusterDrawState::KeyQuery query{ groupIds[index], clusterCounts[index], 0 };
+            if (const std::optional<std::uint64_t> known = state.FindSetKey(query)) {
+                setKeys[index] = *known;
+                continue;
+            }
             setKeys[index] = ClusterPartSetKey(eligible[index], clusterCounts[index], s.instances);
+            state.StoreSetKey(query, setKeys[index]);
         }
     }
     if (s.reuseSurvivors && context->scope == rg::ViewScope::Secondary && !s.depthOnly) {
@@ -456,13 +473,33 @@ void PlanChain(ClusterDrawChain::Impl& s)
         s.sharedLanes = table.laneCount;
         s.twoPhase = s.twoPhase && !s.shared;
     }
+    // A Hi-Z chain that does not fit the memory budget runs as the plain frustum chain; only a chain that does not fit
+    // either way falls back to the CPU draw.
+    if (s.twoPhase && !s.shared) {
+        std::uint32_t probeSlot = 0;
+        bool fits = true;
+        for (const std::uint32_t index : assignment.assigned) {
+            const std::uint64_t instanceCount = eligible[index].instances.size();
+            fits = fits
+                && state.CanReserveChainBytes(context->scope, s.lane, probeSlot++, instanceCount,
+                       instanceCount * clusterCounts[index], true,
+                       ClusterHistoryWordCount(instanceCount, clusterCounts[index]))
+                    == ClusterReserveResult::Ok;
+        }
+        if (!fits) {
+            s.twoPhase = false;
+            s.hizReason = HizReason::OverBudget;
+            frame.ReportWarningOnce(std::string("Pass '") + anchorName.value
+                + "': the Hi-Z chain is over the cluster draw memory budget; it runs as a frustum chain");
+        }
+    }
     const std::uint32_t rounds = s.shared ? s.sharedLanes : (s.twoPhase ? 2u : 1u);
 
     std::uint32_t slot = 0;
     std::uint32_t toggledOffParts = 0;
     for (const std::uint32_t index : assignment.assigned) {
         const std::uint32_t thisSlot = slot++;
-        const ClusterMeshGroup& group = eligible[index];
+        ClusterMeshGroup& group = eligible[index];
         const std::uint64_t instanceCount = group.instances.size();
         const std::uint64_t workItems = instanceCount * clusterCounts[index];
 
@@ -480,7 +517,8 @@ void PlanChain(ClusterDrawChain::Impl& s)
             continue;
         }
         if (!s.shared
-            && state.TryReserveChainBytes(context->scope, s.lane, thisSlot, instanceCount, workItems, s.twoPhase)
+            && state.TryReserveChainBytes(context->scope, s.lane, thisSlot, instanceCount, workItems, s.twoPhase,
+                   ClusterHistoryWordCount(instanceCount, clusterCounts[index]))
                 != ClusterReserveResult::Ok) {
             frame.ReportWarningOnce(std::string("Pass '") + anchorName.value + "': " + TokenText(group.mesh)
                 + " is over the cluster draw memory budget; the CPU draw is used");
@@ -499,15 +537,19 @@ void PlanChain(ClusterDrawChain::Impl& s)
         if (s.shared) {
             part.published = *state.Survivors().Find(group.mesh, part.setKey);
         }
-        part.instances.reserve(group.instances.size());
-        part.entities.reserve(group.instances.size());
-        for (const std::uint32_t candidate : group.instances) {
-            const ClusterInstance& instance = s.instances[candidate];
-            part.instances.push_back(MakeClusterInstanceGpu(instance.world, instance.flags, instance.maxScale));
-            part.entities.push_back(instance.entity);
+        // The GPU records are built in Begin(), and only by the chain that uploads them.
+        part.instanceCount = group.instances.size();
+        part.groupId = groupIds[index];
+        part.candidates = std::move(group.instances);
+        part.entities.reserve(part.candidates.size());
+        for (const std::uint32_t candidate : part.candidates) {
+            part.entities.push_back(s.instances[candidate].entity);
         }
         part.params = MakeClusterCullParams(cullCamera.viewProjection, cullCamera.eyeOrDirection,
             cullCamera.orthographic, static_cast<std::uint32_t>(instanceCount), part.clusterCount, flags);
+        if (const Mesh* boxMesh = core.ResolveClusterMesh(group.mesh); boxMesh != nullptr && boxMesh->ClusterBounds()) {
+            SetClusterCullInstanceBox(part.params, *boxMesh->ClusterBounds());
+        }
         s.parts.push_back(std::move(part));
     }
     if (s.parts.empty() && s.skippedParts == 0) {
@@ -567,7 +609,7 @@ public:
         const ClusterSurvivorPart& published = part.published;
         PartRuntime& run = runtime[index];
         run.instances = s.frame->StampBuffer(
-            published.instances, part.instances.size() * sizeof(ClusterInstanceGpu), BufferUse::Storage);
+            published.instances, part.instanceCount * sizeof(ClusterInstanceGpu), BufferUse::Storage);
         bool ok = run.instances.IsValid();
         for (std::uint32_t round = 0; round < s.sharedLanes; ++round) {
             const ClusterSurvivorLane& lane = published.lanes[round];
@@ -603,14 +645,27 @@ public:
 
         // Acquire imports each buffer once per frame; nothing is declared yet.
         PersistentBuffer* instanceBuffer = state.Instances(part.slot);
-        const std::uint64_t instanceBytes = part.instances.size() * sizeof(ClusterInstanceGpu);
+        const std::uint64_t instanceBytes = part.instanceCount * sizeof(ClusterInstanceGpu);
         run.instances = instanceBuffer->Acquire(frame, instanceBytes);
         if (!run.instances.IsValid()) {
             return false;
         }
         if (state.NeedsInstanceUpload(frame, part.slot)) {
-            if (!instanceBuffer->Upload(frame, part.instances.data(), instanceBytes)) {
-                return false;
+            // The records are built and uploaded only when the buffer does not already hold this group.
+            const ClusterDrawState::InstanceContent content{ part.groupId, instanceBuffer->Generation(frame) };
+            if (!state.InstanceContentIs(frame, part.slot, content)) {
+                std::vector<ClusterInstanceGpu>& records = state.InstanceScratch();
+                records.clear();
+                records.reserve(part.candidates.size());
+                for (const std::uint32_t candidate : part.candidates) {
+                    const ClusterInstance& instance = s.instances[candidate];
+                    records.push_back(MakeClusterInstanceGpu(instance.world, instance.flags, instance.maxScale));
+                }
+                if (!instanceBuffer->Upload(frame, records.data(), instanceBytes)) {
+                    state.NoteInstanceContent(frame, part.slot, ClusterDrawState::InstanceContent{});
+                    return false;
+                }
+                state.NoteInstanceContent(frame, part.slot, content);
             }
             state.NoteInstanceUploaded(frame, part.slot);
         }
@@ -639,18 +694,24 @@ public:
             return run.history.IsValid();
         }
         PersistentBuffer* historyBuffer = state.History(part.slot);
-        run.history = historyBuffer->Acquire(frame, part.workItems * kClusterHistoryBytes);
+        run.history = historyBuffer->Acquire(
+            frame, ClusterHistoryWordCount(part.instanceCount, part.clusterCount) * kClusterHistoryBytes);
         if (!run.history.IsValid()) {
             return false;
         }
-        std::vector<std::uint32_t> entityWords;
-        entityWords.reserve(part.entities.size() * 2);
-        for (const Entity& entity : part.entities) {
-            entityWords.push_back(entity.index);
-            entityWords.push_back(entity.generation);
+        const ClusterDrawState::KeyQuery historyQuery{ part.groupId, part.clusterCount, historyBuffer->Generation(frame) };
+        if (const std::optional<std::uint64_t> known = state.FindHistoryKey(historyQuery)) {
+            run.historyKey = *known;
+        } else {
+            const std::uint64_t meshToken = (std::uint64_t{ part.mesh.index } << 32) | part.mesh.generation;
+            ClusterHistoryHasher hasher(meshToken, part.clusterCount, historyQuery.generation, part.entities.size() * 2);
+            for (const Entity& entity : part.entities) {
+                hasher.Add(entity.index);
+                hasher.Add(entity.generation);
+            }
+            run.historyKey = hasher.Finish();
+            state.StoreHistoryKey(historyQuery, run.historyKey);
         }
-        const std::uint64_t meshToken = (std::uint64_t{ part.mesh.index } << 32) | part.mesh.generation;
-        run.historyKey = ClusterHistoryKey(meshToken, part.clusterCount, entityWords, historyBuffer->Generation(frame));
         run.historyValid = ClusterHistoryUsable(state.HistoryRecord(frame, part.slot), run.historyKey, frame.FrameIndex());
         // Valid again only once both rounds of this frame were declared.
         state.DropHistory(frame, part.slot);
@@ -693,7 +754,7 @@ public:
             .BindBuffer("count", run.count[round])
             .BindBuffer("history", run.history)
             .Bind("hizAtlas", pyramid)
-            .Dispatch(Extent2D{ static_cast<std::uint32_t>(part.workItems), 1 });
+            .Dispatch(Extent2D{ static_cast<std::uint32_t>(ClusterCullThreadCount(part.instanceCount, part.clusterCount)), 1 });
     }
 
     bool Draw(std::size_t index, std::uint32_t round)
@@ -896,7 +957,7 @@ void RecordChain(ClusterDrawChain::Impl& s)
     for (std::size_t i = 0; i < s.parts.size(); ++i) {
         if (outcome.progress[i] == ClusterChainProgress::Draw) {
             s.result.declared = true;
-            s.result.instances += static_cast<std::uint32_t>(s.parts[i].instances.size());
+            s.result.instances += static_cast<std::uint32_t>(s.parts[i].instanceCount);
             ++s.result.parts;
             s.result.workItems += s.parts[i].workItems;
         }

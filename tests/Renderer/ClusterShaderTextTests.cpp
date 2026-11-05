@@ -55,6 +55,7 @@ constexpr UintRow kUintRows[] = {
     { "kClusterCullFlagHistoryValid", kClusterCullFlagHistoryValid },
     { "kClusterCullFlagRawDepth", kClusterCullFlagRawDepth },
     { "kClusterCullFlagCollectReasons", kClusterCullFlagCollectReasons },
+    { "kClusterChunkClusters", kClusterChunkClusters },
     { "kClusterHistoryVisible", kClusterHistoryVisible },
     { "kClusterHistoryDrawnFirst", kClusterHistoryDrawnFirst },
     { "kClusterReasonFrustum", kClusterReasonFrustum },
@@ -205,18 +206,12 @@ TEST(ClusterShaderText, PhasesFollowTheOracleTruthTable)
     const std::string text = ReadShader();
     EXPECT_TRUE(Contains(text, "layout(std430, binding = 7) buffer HistoryBlock {"));
     EXPECT_TRUE(Contains(text, "} history;"));
-    // The view test runs once, before the phase branch.
-    const std::size_t inView = text.find("bool inView =");
-    const std::size_t first = text.find("if ((cullFlags & kClusterCullFlagPhaseFirst) != 0u) {");
-    const std::size_t second = text.find("} else if ((cullFlags & kClusterCullFlagPhaseSecond) != 0u) {");
-    ASSERT_NE(inView, std::string::npos);
-    ASSERT_NE(first, std::string::npos);
-    ASSERT_NE(second, std::string::npos);
-    EXPECT_LT(inView, first);
-    EXPECT_LT(first, second);
-    EXPECT_EQ(text.find("bool inView =", inView + 1), std::string::npos);
-    EXPECT_TRUE(Contains(text, "history.items[id] = (word & kClusterHistoryVisible) | (drawn ? kClusterHistoryDrawnFirst : 0u);"));
-    EXPECT_TRUE(Contains(text, "history.items[id] = isVisible ? kClusterHistoryVisible : 0u;"));
+    // One history word per (instance, chunk): bits 0-15 visible, bits 16-31 drawn first (see ClusterChunkPhaseFirst).
+    EXPECT_TRUE(Contains(text, "history.items[id] = visibleBefore | (emitMask << 16);"));
+    EXPECT_TRUE(Contains(text, "history.items[id] = visibleMask;"));
+    // A chunk the instance box rejects keeps the visible bits in the first phase and clears the word in the second.
+    EXPECT_TRUE(Contains(text, "history.items[id] = visibleBefore;"));
+    EXPECT_TRUE(Contains(text, "history.items[id] = 0u;"));
 }
 
 TEST(ClusterShaderText, OcclusionClampsTheScreenRectAndKnowsNoMovedBit)
@@ -256,8 +251,8 @@ TEST(ClusterShaderText, CountBlockCarriesTheReasonCountersBehindTheSurvivorCount
     EXPECT_LE(kClusterReasonKept, kClusterReasonWords - 1);
     // Counters run only when asked for and only through atomics.
     EXPECT_TRUE(Contains(text, "bool collect = (cullFlags & kClusterCullFlagCollectReasons) != 0u;"));
-    EXPECT_TRUE(Contains(text, "atomicAdd(count.reasons[kClusterReasonHistory], 1u);"));
-    EXPECT_TRUE(Contains(text, "atomicAdd(count.reasons[ReasonSlot(outside, coneCulled, occluded)], 1u);"));
+    EXPECT_TRUE(Contains(text, "atomicAdd(count.reasons[kClusterReasonHistory], r.history);"));
+    EXPECT_TRUE(Contains(text, "atomicAdd(count.reasons[kClusterReasonKept], r.kept);"));
 }
 
 TEST(ClusterShaderText, TintShadersReadTheDrawTagTheVertexShadersForward)

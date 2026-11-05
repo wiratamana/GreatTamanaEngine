@@ -1,6 +1,7 @@
 #version 450
 
-// Cluster culling: one thread per (instance, cluster) pair; survivors append a visible record and a draw command.
+// Cluster culling: one thread per (instance, chunk of kClusterChunkClusters clusters). The instance box is tested first;
+// only when it does not decide the whole chunk are the clusters tested one by one.
 // NOTE: layouts must match ClusterCullMath.h (ClusterInstanceGpu, ClusterCullParams, MeshCluster); zero the count first.
 
 #include "ClusterCullConstants.glsl"
@@ -15,6 +16,8 @@ struct ClusterCullParams {
     uvec4 counts; // x = instanceCount, y = clusterCount, z = workItems, w = cull flags.
     vec4 hiz; // xy = atlas size, zw = level 0 size.
     vec4 depthMap; // x = k, y = b of d = k + b / w, z = pyramid level count.
+    vec4 instanceBoxMin; // xyz = union box of the mesh's clusters (local space), w = 1 when valid.
+    vec4 instanceBoxMax;
 };
 layout(std430, binding = 0) readonly buffer ParamsBlock {
     ClusterCullParams value;
@@ -57,7 +60,7 @@ layout(std430, binding = 5) buffer CountBlock {
     uint reasons[kClusterReasonWords];
 } count;
 
-// One 32-bit word per work item: bit 0 = visible last frame, bit 1 = drawn in the first phase of this frame.
+// One 32-bit word per instance and 16 clusters: bits 0-15 = visible last frame, bits 16-31 = drawn in the first phase of this frame.
 layout(std430, binding = 7) buffer HistoryBlock {
     uint items[];
 } history;
@@ -68,31 +71,48 @@ layout(binding = 6) uniform sampler2D hizAtlas;
 // Conservative: only a box fully behind one plane is rejected; a non-finite box is kept.
 bool OutsideFrustum(Cluster cluster, mat4 world)
 {
-    vec3 worldMin = vec3(0.0);
-    vec3 worldMax = vec3(0.0);
-    for (int i = 0; i < 8; ++i) {
-        vec3 corner = vec3(
-            (i & 1) != 0 ? cluster.aabbMax.x : cluster.aabbMin.x,
-            (i & 2) != 0 ? cluster.aabbMax.y : cluster.aabbMin.y,
-            (i & 4) != 0 ? cluster.aabbMax.z : cluster.aabbMin.z);
-        vec3 p = (world * vec4(corner, 1.0)).xyz;
-        worldMin = i == 0 ? p : min(worldMin, p);
-        worldMax = i == 0 ? p : max(worldMax, p);
-    }
-    if (any(isnan(worldMin)) || any(isnan(worldMax)) || any(isinf(worldMin)) || any(isinf(worldMax))) {
+    vec3 c = 0.5 * (cluster.aabbMin + cluster.aabbMax);
+    vec3 e = 0.5 * (cluster.aabbMax - cluster.aabbMin);
+    vec3 wc = (world * vec4(c, 1.0)).xyz;
+    vec3 we = abs(world[0].xyz) * e.x + abs(world[1].xyz) * e.y + abs(world[2].xyz) * e.z;
+    if (any(isnan(wc)) || any(isnan(we)) || any(isinf(wc)) || any(isinf(we))) {
         return false;
     }
     for (int plane = 0; plane < 6; ++plane) {
         vec3 normal = params.value.planes[plane].xyz;
-        vec3 farthest = vec3(
-            normal.x >= 0.0 ? worldMax.x : worldMin.x,
-            normal.y >= 0.0 ? worldMax.y : worldMin.y,
-            normal.z >= 0.0 ? worldMax.z : worldMin.z);
-        if (dot(normal, farthest) + params.value.planes[plane].w < 0.0) {
+        if (dot(normal, wc) + params.value.planes[plane].w + dot(abs(normal), we) < 0.0) {
             return true;
         }
     }
     return false;
+}
+
+// Instance box against the frustum, padded so the cluster tests never disagree: 0 = clearly outside one plane,
+// 2 = clearly inside every plane (so every cluster is inside), 1 = anything else. A non-finite box gives 1.
+uint InstanceFrustumClass(mat4 world)
+{
+    vec3 c = 0.5 * (params.value.instanceBoxMin.xyz + params.value.instanceBoxMax.xyz);
+    vec3 e = 0.5 * (params.value.instanceBoxMax.xyz - params.value.instanceBoxMin.xyz);
+    vec3 wc = (world * vec4(c, 1.0)).xyz;
+    vec3 we = abs(world[0].xyz) * e.x + abs(world[1].xyz) * e.y + abs(world[2].xyz) * e.z;
+    if (any(isnan(wc)) || any(isnan(we)) || any(isinf(wc)) || any(isinf(we))) {
+        return 1u;
+    }
+    uint result = 2u;
+    for (int plane = 0; plane < 6; ++plane) {
+        vec3 normal = params.value.planes[plane].xyz;
+        float w = params.value.planes[plane].w;
+        float d = dot(normal, wc) + w;
+        float r = dot(abs(normal), we);
+        float pad = 1e-4 * (abs(d) + r + abs(w)) + 1e-4;
+        if (d + r < -pad) {
+            return 0u;
+        }
+        if (d - r < pad) {
+            result = 1u;
+        }
+    }
+    return result;
 }
 
 // Back-face cone test; only for uniformly scaled, right-handed instances and clusters that have a cone.
@@ -191,81 +211,162 @@ bool Occluded(Cluster cluster, mat4 world)
     return IsBehind(nearestW, nearestZ, farthest);
 }
 
-// Counter slot of an item's final outcome. Mirrors ClusterReasonOf.
-uint ReasonSlot(bool outside, bool coneCulled, bool occluded)
+
+struct ReasonCounts {
+    uint frustum;
+    uint cone;
+    uint pyramid;
+    uint history;
+    uint kept;
+};
+
+void FlushReasons(ReasonCounts r)
 {
-    if (outside) {
-        return kClusterReasonFrustum;
+    if (r.frustum != 0u) { atomicAdd(count.reasons[kClusterReasonFrustum], r.frustum); }
+    if (r.cone != 0u) { atomicAdd(count.reasons[kClusterReasonCone], r.cone); }
+    if (r.pyramid != 0u) { atomicAdd(count.reasons[kClusterReasonPyramid], r.pyramid); }
+    if (r.history != 0u) { atomicAdd(count.reasons[kClusterReasonHistory], r.history); }
+    if (r.kept != 0u) { atomicAdd(count.reasons[kClusterReasonKept], r.kept); }
+}
+
+// Appends the survivors of one chunk (bit i = cluster firstCluster + i) as a contiguous run.
+void Emit(uint mask, uint firstCluster, uint instanceIndex)
+{
+    uint n = bitCount(mask);
+    if (n == 0u) {
+        return;
     }
-    if (coneCulled) {
-        return kClusterReasonCone;
+    uint slot = atomicAdd(count.value, n);
+    while (mask != 0u) {
+        int bit = findLSB(mask);
+        mask &= mask - 1u;
+        if (slot < params.value.counts.z) {
+            uint clusterIndex = firstCluster + uint(bit);
+            Cluster cluster = clusters.items[clusterIndex];
+            visible.items[slot] = uvec2(instanceIndex, clusterIndex);
+            uint base = slot * 5u;
+            commands.values[base + 0u] = cluster.indexCount;
+            commands.values[base + 1u] = 1u;
+            commands.values[base + 2u] = cluster.firstIndex;
+            commands.values[base + 3u] = 0u;
+            commands.values[base + 4u] = slot; // firstInstance: the vertex shader reads visible[gl_InstanceIndex].
+        }
+        ++slot;
     }
-    return occluded ? kClusterReasonPyramid : kClusterReasonKept;
 }
 
 void main()
 {
+    uint instanceCount = params.value.counts.x;
+    uint clusterCount = params.value.counts.y;
+    uint chunkCount = (clusterCount + kClusterChunkClusters - 1u) / kClusterChunkClusters;
     uint id = gl_GlobalInvocationID.x;
-    if (id >= params.value.counts.z) {
+    if (id >= instanceCount * chunkCount) {
         return;
     }
+    // Instances run fastest so one subgroup shares a chunk (uniform cluster reads) and the history reads are adjacent.
+    uint chunk = id / instanceCount;
+    uint instanceIndex = id - chunk * instanceCount;
+    uint first = chunk * kClusterChunkClusters;
+    uint end = min(first + kClusterChunkClusters, clusterCount);
 
-    uint clusterCount = params.value.counts.y;
-    uint instanceIndex = id / clusterCount;
-    uint clusterIndex = id - instanceIndex * clusterCount;
+    uint cullFlags = params.value.counts.w;
+    bool phaseFirst = (cullFlags & kClusterCullFlagPhaseFirst) != 0u;
+    bool phaseSecond = (cullFlags & kClusterCullFlagPhaseSecond) != 0u;
+    bool frustumOn = (cullFlags & kClusterCullFlagFrustum) != 0u;
+    bool coneOn = (cullFlags & kClusterCullFlagBackfaceCone) != 0u;
+    bool collect = (cullFlags & kClusterCullFlagCollectReasons) != 0u;
+    bool historyValid = (cullFlags & kClusterCullFlagHistoryValid) != 0u;
+    bool occlusionOn = phaseSecond || (!phaseFirst && (cullFlags & kClusterCullFlagOcclusion) != 0u);
+    ReasonCounts reasons = ReasonCounts(0u, 0u, 0u, 0u, 0u);
 
     ClusterInstance instance = instances.items[instanceIndex];
-    Cluster cluster = clusters.items[clusterIndex];
-    uint cullFlags = params.value.counts.w;
-
-    // Evaluated once so both phases agree on the result.
-    bool outside = (cullFlags & kClusterCullFlagFrustum) != 0u && OutsideFrustum(cluster, instance.world);
-    bool coneCulled = !outside && (cullFlags & kClusterCullFlagBackfaceCone) != 0u
-        && BackfaceConeCulled(cluster, instance.world, instance.info.x, uintBitsToFloat(instance.info.y));
-    bool inView = !outside && !coneCulled;
-    bool collect = (cullFlags & kClusterCullFlagCollectReasons) != 0u;
-
-    if ((cullFlags & kClusterCullFlagPhaseFirst) != 0u) {
-        uint word = (cullFlags & kClusterCullFlagHistoryValid) != 0u ? history.items[id] : 0u;
-        bool drawn = (word & kClusterHistoryVisible) != 0u && inView;
-        history.items[id] = (word & kClusterHistoryVisible) | (drawn ? kClusterHistoryDrawnFirst : 0u);
-        if (!drawn) {
-            return;
-        }
-        if (collect) {
-            atomicAdd(count.reasons[kClusterReasonHistory], 1u);
-        }
-    } else if ((cullFlags & kClusterCullFlagPhaseSecond) != 0u) {
-        bool occluded = inView && Occluded(cluster, instance.world);
-        bool isVisible = inView && !occluded;
-        uint word = history.items[id];
-        history.items[id] = isVisible ? kClusterHistoryVisible : 0u;
-        if (collect) {
-            atomicAdd(count.reasons[ReasonSlot(outside, coneCulled, occluded)], 1u);
-        }
-        if (!isVisible || (word & kClusterHistoryDrawnFirst) != 0u) {
-            return;
-        }
-    } else {
-        bool occluded = inView && (cullFlags & kClusterCullFlagOcclusion) != 0u && Occluded(cluster, instance.world);
-        if (collect) {
-            atomicAdd(count.reasons[ReasonSlot(outside, coneCulled, occluded)], 1u);
-        }
-        if (!inView || occluded) {
-            return;
-        }
+    bool boxValid = params.value.instanceBoxMin.w > 0.5;
+    uint frustumClass = (boxValid && frustumOn) ? InstanceFrustumClass(instance.world) : 1u;
+    bool instanceOutside = frustumClass == 0u;
+    bool instanceInside = !frustumOn || frustumClass == 2u;
+    bool instanceOccluded = false;
+    if (!instanceOutside && boxValid && occlusionOn) {
+        Cluster boxCluster;
+        boxCluster.sphere = vec4(0.0);
+        boxCluster.cone = vec4(0.0, 0.0, 0.0, 1.0);
+        boxCluster.aabbMin = params.value.instanceBoxMin.xyz;
+        boxCluster.firstIndex = 0u;
+        boxCluster.aabbMax = params.value.instanceBoxMax.xyz;
+        boxCluster.indexCount = 0u;
+        instanceOccluded = Occluded(boxCluster, instance.world);
     }
 
-    uint slot = atomicAdd(count.value, 1u);
-    if (slot >= params.value.counts.z) {
+    // The word of this chunk: bits 0-15 visible last frame, bits 16-31 drawn by the first phase of this frame.
+    uint previous = 0u;
+    if (phaseFirst) {
+        previous = historyValid ? history.items[id] : 0u;
+    } else if (phaseSecond) {
+        previous = history.items[id];
+    }
+    uint visibleBefore = previous & 0xFFFFu;
+    uint drawnFirst = previous >> 16;
+
+    bool exactBulk = instanceInside && !coneOn;
+    if (instanceOutside || (instanceOccluded && (!collect || exactBulk))) {
+        // Every cluster of the chunk is rejected: no cluster test, no survivor.
+        if (phaseFirst) {
+            history.items[id] = visibleBefore;
+        } else if (phaseSecond) {
+            history.items[id] = 0u;
+        }
+        if (collect && !phaseFirst) {
+            if (instanceOutside) {
+                reasons.frustum = end - first;
+            } else {
+                reasons.pyramid = end - first;
+            }
+            FlushReasons(reasons);
+        }
         return;
     }
-    visible.items[slot] = uvec2(instanceIndex, clusterIndex);
 
-    uint base = slot * 5u;
-    commands.values[base + 0u] = cluster.indexCount;
-    commands.values[base + 1u] = 1u;
-    commands.values[base + 2u] = cluster.firstIndex;
-    commands.values[base + 3u] = 0u;
-    commands.values[base + 4u] = slot; // firstInstance: the vertex shader reads visible[gl_InstanceIndex].
+    uint emitMask = 0u;
+    uint visibleMask = 0u;
+    for (uint c = first; c < end; ++c) {
+        uint bit = 1u << (c - first);
+        if (phaseFirst && (visibleBefore & bit) == 0u) {
+            continue;
+        }
+        Cluster cluster = clusters.items[c];
+        bool outside = frustumOn && !instanceInside && OutsideFrustum(cluster, instance.world);
+        bool coneCulled = !outside && coneOn
+            && BackfaceConeCulled(cluster, instance.world, instance.info.x, uintBitsToFloat(instance.info.y));
+        bool inView = !outside && !coneCulled;
+        if (phaseFirst) {
+            if (inView) {
+                emitMask |= bit;
+                ++reasons.history;
+            }
+            continue;
+        }
+        bool occluded = inView && occlusionOn && (instanceOccluded || Occluded(cluster, instance.world));
+        bool isVisible = inView && !occluded;
+        if (collect) {
+            if (outside) { ++reasons.frustum; }
+            else if (coneCulled) { ++reasons.cone; }
+            else if (occluded) { ++reasons.pyramid; }
+            else { ++reasons.kept; }
+        }
+        if (isVisible) {
+            visibleMask |= bit;
+            if ((drawnFirst & bit) == 0u) {
+                emitMask |= bit;
+            }
+        }
+    }
+    if (phaseFirst) {
+        history.items[id] = visibleBefore | (emitMask << 16);
+    } else if (phaseSecond) {
+        history.items[id] = visibleMask;
+    }
+    Emit(emitMask, first, instanceIndex);
+    if (collect) {
+        FlushReasons(reasons);
+    }
 }

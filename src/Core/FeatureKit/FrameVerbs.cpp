@@ -89,6 +89,14 @@ ClusterPartBox Frame::ClusterCandidateUnion() const
     return m_context->core->ClusterCandidateUnion();
 }
 
+std::uint64_t Frame::ClusterCandidateEpoch() const noexcept
+{
+    if (m_context == nullptr || m_context->core == nullptr || m_view.scope == rg::ViewScope::Shared) {
+        return 0;
+    }
+    return m_context->core->ClusterCandidateEpoch();
+}
+
 ClusterRejectCounts Frame::ClusterRejections() const noexcept
 {
     if (m_context == nullptr || m_context->core == nullptr || m_view.scope == rg::ViewScope::Shared) {

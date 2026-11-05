@@ -417,6 +417,7 @@ public:
         : m_fx(fx)
         , m_shaders(shaders)
         , m_clusterCount(scene.clusterCount)
+        , m_instanceCount(static_cast<std::uint32_t>(scene.worlds.size()))
         , m_items(scene.Items())
         , m_params(MakeBuffer(fx, sizeof(ClusterCullParams), "ParityParams", GpuBufferUse::Storage | GpuBufferUse::HostWrite))
         , m_instances(MakeBuffer(fx, scene.worlds.size() * sizeof(ClusterInstanceGpu), "ParityInstances",
@@ -451,9 +452,20 @@ public:
             && m_instances.Upload(records.data(), records.size() * sizeof(ClusterInstanceGpu));
     }
 
+    // `words` holds one word per work item (bit 0 visible, bit 1 drawn first); the shader keeps them packed per chunk.
     bool SetHistory(std::span<const std::uint32_t> words)
     {
-        return words.size() == m_items && m_history.Upload(words.data(), words.size_bytes());
+        if (words.size() != m_items) {
+            return false;
+        }
+        std::vector<std::uint32_t> packed(ClusterCullThreadCount(m_instanceCount, m_clusterCount), 0u);
+        for (std::uint32_t id = 0; id < m_items; ++id) {
+            const ClusterHistorySlot slot =
+                ClusterHistorySlotOf(id / m_clusterCount, id % m_clusterCount, m_instanceCount);
+            packed[slot.word] |= (words[id] & kClusterHistoryVisible) << slot.bit;
+            packed[slot.word] |= ((words[id] & kClusterHistoryDrawnFirst) >> 1) << (16 + slot.bit);
+        }
+        return m_history.Upload(packed.data(), packed.size() * sizeof(std::uint32_t));
     }
 
     // `atlas` is the whole pyramid atlas, row major.
@@ -496,7 +508,7 @@ public:
                      .Bind("count", count)
                      .Bind("history", history)
                      .Bind("hizAtlas", atlasTexture)
-                     .Dispatch(Extent2D{ m_items, 1 })
+                     .Dispatch(Extent2D{ static_cast<std::uint32_t>(ClusterCullThreadCount(m_instanceCount, m_clusterCount)), 1 })
                 && ok;
             ok = DeclareReadback(builder, "Parity.ReadCount", count, countHost, 4) && ok;
             ok = DeclareReadback(builder, "Parity.ReadVisible", visible, visibleHost, std::uint64_t{ m_items } * 8) && ok;
@@ -528,9 +540,16 @@ public:
         }
         std::sort(result.survivors.begin(), result.survivors.end());
         if (readHistory) {
-            result.history.resize(m_items);
-            if (!m_historyHost.Download(result.history.data(), result.history.size() * sizeof(std::uint32_t))) {
+            std::vector<std::uint32_t> packed(ClusterCullThreadCount(m_instanceCount, m_clusterCount));
+            if (!m_historyHost.Download(packed.data(), packed.size() * sizeof(std::uint32_t))) {
                 result.error = "the history could not be read back";
+            }
+            result.history.resize(m_items);
+            for (std::uint32_t id = 0; id < m_items && result.error.empty(); ++id) {
+                const ClusterHistorySlot slot =
+                    ClusterHistorySlotOf(id / m_clusterCount, id % m_clusterCount, m_instanceCount);
+                result.history[id] = ((packed[slot.word] >> slot.bit) & 1u) << 0
+                    | (((packed[slot.word] >> (16 + slot.bit)) & 1u) << 1);
             }
         }
         return result;
@@ -540,6 +559,7 @@ private:
     HeadlessRenderGraphFixture& m_fx;
     Shaders& m_shaders;
     std::uint32_t m_clusterCount;
+    std::uint32_t m_instanceCount;
     std::uint32_t m_items;
     GpuBuffer m_params;
     GpuBuffer m_instances;
@@ -660,6 +680,9 @@ ClusterCullParams MakeParams(const CullScene& scene, const Camera& camera, Clust
 {
     ClusterCullParams params = MakeClusterCullParams(camera.viewProjection, camera.eye, false,
         static_cast<std::uint32_t>(scene.worlds.size()), scene.clusterCount, flags);
+    if (const std::optional<AABB> box = ClusterTableBounds(scene.clusters); box.has_value()) {
+        SetClusterCullInstanceBox(params, *box); // Exercises the instance-level test; it must never change a result.
+    }
     if (layout != nullptr) {
         SetClusterCullHiz(params, *layout);
     }

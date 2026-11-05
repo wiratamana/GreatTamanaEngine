@@ -165,6 +165,9 @@ public:
     // Union of every candidate box; unbounded when any candidate box is unusable. Valid for this frame only.
     ClusterPartBox ClusterCandidateUnion() const;
 
+    // Changes whenever the candidate list was rebuilt; equal between frames that reused it. 0 when there is none.
+    std::uint64_t ClusterCandidateEpoch() const noexcept;
+
     // Renderables of this frame that stayed on the CPU draw, by reason. Zeros when ClusterCandidates() is empty
     // for lack of an engine context, a shared frame or device support.
     ClusterRejectCounts ClusterRejections() const noexcept;
