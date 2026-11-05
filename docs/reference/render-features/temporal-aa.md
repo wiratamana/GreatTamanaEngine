@@ -1,7 +1,7 @@
 # Temporal anti-aliasing
 
 > Smooths stair-stepped edges by mixing frames with a sub-pixel camera shift. For anyone who tunes edge quality, or sees shimmer, ghosts or softness.
-> Verified against code: 2026-11-04
+> Verified against code: 2026-11-04 (cost numbers measured on the dev GPU the same day)
 
 ## TL;DR
 - Feature `TemporalAa` in `src/Features/TemporalAa/`. Game view (Primary) only. The Scene view is not supported.
@@ -96,6 +96,14 @@ curl.exe http://127.0.0.1:8080/get_game_view -o taa.png
 ## Memory
 - `width * height * 24` bytes per view: two RGBA16F (8 bytes) and two R32F (4 bytes) targets. `game.textureBytes` shows it.
 - The targets are created on the first resolve. They stay after that.
+
+## Cost
+- Measured on the dev GPU at 1264x629: Resolve 1.16 ms, Copy 0.29 ms, Blend 0.29 ms. The chain is 1.74 ms. Before the shader rewrite the Resolve took 2.13 ms.
+- Furina scene at 719x372: chain 0.90 ms.
+- At 1080p the chain is about 4.5 ms (pixel count x2.6). This is over the 1.5 ms target.
+- This GPU moves only about 44 GB/s. The plain Copy blit of the same size also takes 0.29 ms, so the Resolve is close to bandwidth-bound.
+- Copy and Blend alone already cost about 1.5 ms at 1080p on this GPU. The Resolve shader cannot fix that.
+- Read the real numbers from the profiler. Do not trust this page for other GPUs.
 
 ## Gotchas
 - Anything that draws into the view's scene color or depth must use `f.View().DrawViewProjection()`. A site that uses `viewProjection` is offset by up to 1 pixel against the others: outline gaps, shimmer.
