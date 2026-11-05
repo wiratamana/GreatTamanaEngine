@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [Toon light follows the world light](#toon-light-follows-the-world-light-branch-featuretoon-shading-impl-2026-11-04) | `feature/toon-shading-impl` | 2026-11-04 |
 | [Temporal anti-aliasing](#temporal-anti-aliasing-branch-featuretoon-shading-impl-2026-11-04) | `feature/toon-shading-impl` | 2026-11-04 |
 | [Toon character, Bloom and the Furina showcase](#toon-character-bloom-and-the-furina-showcase-branch-featuretoon-shading-impl-2026-11-03) | `feature/toon-shading-impl` | 2026-11-03 |
 | [Bend floor for locked PMX strands](#bend-floor-for-locked-pmx-strands-branch-fixsmall-fixes-2026-11-03) | `fix/small-fixes` | 2026-11-03 |
@@ -39,6 +40,16 @@
 | [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+
+## Toon light follows the world light (branch `feature/toon-shading-impl`, 2026-11-04)
+
+- **Light split.** The toon surface used the sun direction as the normal, so it always got the full sun, never lost it in shadow and had no horizon fade.
+  It now uses `light = ambient + sun * share * castVisible`. The shade side follows the ambient light at low sun. See [Toon character](reference/render-features/toon-character.md).
+- **Cast shadow.** The shadow lookup also runs for pixels that face away from the sun (a point toward the sun, past the body), so a backlit character dims in a shadow.
+  `shadowStrength` now also removes sun energy.
+- **Night.** The outline and the unlit eye and face-line classes follow the world light level. At midnight the whole character is black, like the world.
+- **Shaders only.** `ToonCommon.glsl`, `ToonSurface.frag`, `ToonSurfaceVertex.glsl`, `ToonOutline.frag`. No new setting, no uniform change.
+- **Not changed.** The hair ring (`ToonOverlay.frag`) keeps its sun-direction normal: measured at dusk, it stays close to the hair under it.
 
 ## Temporal anti-aliasing (branch `feature/toon-shading-impl`, 2026-11-04)
 

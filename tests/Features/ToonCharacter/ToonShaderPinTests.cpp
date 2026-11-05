@@ -41,9 +41,28 @@ TEST(ToonShaderPinTest, SurfaceUsesTheSharedLightingAndTheSphereBinding)
     const std::string frag = ReadToonShader("ToonSurface.frag");
     EXPECT_TRUE(Has(frag, "#include \"DirectionalLighting.glsl\""));
     EXPECT_TRUE(Has(frag, "layout(set = 0, binding = 5) uniform sampler2D uSphereTexture"));
-    EXPECT_TRUE(Has(frag, "SunShadowAmount("));
-    EXPECT_TRUE(Has(frag, "ShadeDirectionalLinear("));
+    EXPECT_TRUE(Has(ReadToonShader("ToonCommon.glsl"), "SunShadowAmount("));
+    EXPECT_TRUE(Has(frag, "SceneHemisphereAmbient("));
     EXPECT_TRUE(Has(frag, "gl_FrontFacing"));
+}
+
+TEST(ToonShaderPinTest, ToonLightFollowsTheWorldLight)
+{
+    const std::string frag = ReadToonShader("ToonSurface.frag");
+    // The sun direction must never be the normal of the sun term: that made the toon pixel a light of its own.
+    EXPECT_FALSE(Has(frag, "ShadeDirectionalLinear("));
+    EXPECT_FALSE(Has(frag, "whiteLit"));
+    EXPECT_TRUE(Has(frag, "ToonShadeSunShare()"));
+    EXPECT_TRUE(Has(frag, "ToonSunShadow("));
+    EXPECT_TRUE(Has(frag, "ToonShadeSideLight()"));
+    EXPECT_TRUE(Has(frag, "layout(location = 4) in float inModelScale;"));
+    EXPECT_TRUE(Has(ReadToonShader("ToonOutline.frag"), "ToonShadeSideLight()"));
+
+    const std::string common = ReadToonShader("ToonCommon.glsl");
+    EXPECT_TRUE(Has(common, "float ToonSunShadow(vec3 pos, vec3 n, float nDotL, vec3 l, float reach)"));
+    EXPECT_TRUE(Has(common, "const float kToonShadowReach = 12.0;"));
+    EXPECT_TRUE(Has(common, "vec3 ToonShadeSideLight()"));
+    EXPECT_TRUE(Has(ReadToonShader("ToonSurfaceVertex.glsl"), "outModelScale = length(pc.model[0].xyz);"));
 }
 
 TEST(ToonShaderPinTest, ClassIdsMatchTheEnumAndShadeFloorLiftsTowardWhite)

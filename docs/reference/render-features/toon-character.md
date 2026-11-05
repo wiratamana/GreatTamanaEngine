@@ -1,13 +1,13 @@
 # ToonCharacter
 
 > Cel-shaded look with an outline for marked characters. For anyone who tunes the toon look or debugs a toon character.
-> Verified against code: 2026-11-03
+> Verified against code: 2026-11-04
 
 ## TL;DR
 - Feature `ToonCharacter` in `src/Features/ToonCharacter/`. It redraws marked characters with a toon shader and an inverted-hull outline.
 - A character is marked by a `ToonShading` component on its model root. Scenes save it.
 - Unmarked meshes are never touched. With the feature off, the normal look returns in the next frame.
-- The sun, the cascade shadows and the sun colour still drive the look. Toon parts receive and cast shadows.
+- The sun, the ambient light, the cascade shadows and the Atmosphere sun fade drive the look. Toon parts receive and cast shadows. At night the whole character is black with the world.
 - Class data comes from PMX materials (toon ramp, sphere mode, edge flag). No re-import is needed.
 - Eyes stay open (no morph blending). The face has no shadow SDF.
 
@@ -90,12 +90,19 @@ Toon data is carried by the normal material set. No new binding is needed for it
 - Materials with the same class and edge data share one material set (the params bytes are part of the cache key).
 
 ## Light and shadow rules
-- The look follows the first active `DirectionalLight` (or the Atmosphere-tinted sun). Sun direction, colour and intensity come from the scene uniform block.
-- Lit colour = `albedo * whiteLit * tone`. `whiteLit` is what a surface facing the sun gets, so exposure matches other objects.
-- Receive: the shader reads the cascade maps with `SunShadowAmount`. A shadow pushes the half-Lambert value toward the shade band (`shadowStrength`).
+- The look follows the first active `DirectionalLight` (or the Atmosphere-tinted sun). Sun direction, sun colour, ambient and shadow data come from the scene uniform block. The Atmosphere sun fade reaches the toon look like every other lit material.
+- Light has two parts: `light = ambient + sun * share * castVisible`. `sun` is the sun illuminance times 0.65 (same scale as the other lit shaders). Lit colour = `albedo * light * tone`.
+- `sunShare = smoothstep(0.34, 0.71, sun.y)`. It is 0 below 20 degrees sun elevation and 1 above 45 degrees (`ToonShadeSunShare` in `ToonCommon.glsl`).
+- A pixel in the lit band gets the full sun. A pixel in the shade band gets only `sunShare` of it. At high sun the shade side keeps the toon look. At low sun it falls to ambient only, like a real shade side.
+- Ambient is read at the sun direction in the lit band and while the sun is high. On the shade side at low sun it is read at the pixel normal.
+- Receive: one cascade lookup per pixel (`ToonSunShadow`). The result does two things. It pushes the half-Lambert value toward the shade band (`shadowStrength`), and it removes sun energy: `castVisible = 1 - castDepth * Shadow.strength * shadow`. `castDepth` is `shadowStrength` at high sun and 1 at low sun. A partial shadow gives a partial step.
+- A pixel facing away from the sun sits in the shade of its own body. It asks the cascade map at a point `reach` toward the sun, past the body, with `reach = 12 model units x model scale`. So a backlit character still dims when it stands in a cast shadow. A sun-facing pixel asks at its own position. The two blend over N.L from -0.15 to 0.15.
 - Cast: the shadow cascades draw every `MeshRenderer`, so toon parts cast shadows. A claim only changes the main opaque draw. The toon selection is never given to a shadow draw.
-- Eyes and face lines are unlit. They do not change with the sun direction.
-- Shaded pixels keep at least 35% of the lit luminance. A tone below the floor is lifted toward white, never scaled above 1.
+- Eyes and face lines are unlit by the sun. They are `albedo * min(ToonShadeSideLight, 1)`: they follow the world light level (up-facing ambient plus `sunShare` of the sun), not the sun direction and not cast shadow. At noon this is the plain albedo. At night it is black.
+- Rim, gold glint and the gem class use ambient plus the full sun, so they fade with the world light.
+- The gem class skips the shadow lookup (debug views 2 and 3 still run it).
+- Shaded pixels keep at least 35% of the lit luminance of the tone ramp. A tone below the floor is lifted toward white, never scaled above 1.
+- Night: when Atmosphere sets sun tint and ambient scale to 0 (sun at or below the horizon), body, rim, outline, eyes and face lines are all 0, like the world. With `sceneLightFollowsAtmosphere` off, or `Atmosphere.SunLight` switched off, the sun does not fade and the character stays lit like the scene.
 - Output radiance is clamped to 8192.
 
 ## Outline
@@ -103,7 +110,7 @@ Toon data is carried by the normal material set. No new binding is needed for it
 - Width in pixels = `outlineWidthPx * viewHeight / 720`. The record carries `outlineNdcY = widthPx * 2 / viewHeight` and the view aspect.
 - Per part width = `outlineWidthPx` x `edgeWidthScale`.
 - Parts without an edge are moved outside the clip volume in the vertex shader. They are not discarded.
-- Colour = albedo x class tint, never black. Tints: cloth (0.30, 0.36, 0.62), hair (0.03, 0.05, 0.14, dark blue so it reads on white hair), skin and face (0.55, 0.36, 0.34). `outlineDarkness` mixes the tint toward half strength.
+- Colour = albedo x class tint x `min(ToonShadeSideLight, 1)`. The line is never brighter than the shade side of the body. It is 0 when the world light is 0 and unchanged at noon. Tints: cloth (0.30, 0.36, 0.62), hair (0.03, 0.05, 0.14, dark blue so it reads on white hair), skin and face (0.55, 0.36, 0.34). `outlineDarkness` mixes the tint toward half strength.
 - Texels with alpha below 0.5 are discarded in all three fragment shaders.
 
 ## Settings and debug keys
@@ -116,7 +123,7 @@ Route: `/feature_debug/{state,set,invoke}?name=ToonCharacter`. Panel: `ToonChara
 | `bandThreshold` | 0.50 | 0.05..0.95 | Light / shade border (half Lambert) |
 | `bandSoftness` | 0.02 | 0.001..0.25 | Half width of the border smoothstep |
 | `deepThreshold` | 0.22 | 0..0.95 (not above `bandThreshold`) | Shade / deep shade border (cloth, hair) |
-| `shadowStrength` | 0.60 | 0..1 | How much a cascade shadow pushes toward shade |
+| `shadowStrength` | 0.60 | 0..1 | How much a cascade shadow pushes toward shade and removes of the sun. High sun: this share of the sun. Below 20 degrees sun elevation: all of it. 0 = the toon look ignores cast shadow |
 | `shadeBlend` | 1.0 | 0..1 | Strength of the coloured shade tint |
 | `rimStrength` | 0.35 | 0..2 | Rim light on the sun side |
 | `rimWidth` | 0.60 | 0..1 | Where the rim starts (fresnel) |
@@ -138,7 +145,7 @@ Read-only, per view with prefix `game.` or `scene.`: `status`, `frameIndex`, `ca
 | 0 | Normal toon look |
 | 1 | Class colours |
 | 2 | Band mask: lit 1, shade 0.5, deep 0 |
-| 3 | Shadow amount |
+| 3 | Cast shadow amount (shade-side pixels use the reach lookup) |
 | 4 | Outline only (surface black, outline white) |
 | 5 | Albedo only |
 | 6 | Overlay writes opaque magenta (1, 0, 1), alpha 1, on every `HairOverlay` fragment. No mask, no alpha discard, still depth tested |
@@ -187,6 +194,9 @@ curl.exe http://127.0.0.1:8080/get_game_view -o toon.png
 - The front-cull winding was written for PMX data. Check it with a picture on a new model.
 - Materials 28..30 of Furina (the `+` skirt layers) draw like cloth with no outline.
 - The cyan and gold tricks are colour heuristics, not material data.
+- The shade-side shadow reach is 12 model units (a PMX character is about 20 units tall). An occluder nearer than that along the sun ray is ignored for shade-side pixels. Another model scale needs another `kToonShadowReach` in `ToonCommon.glsl`.
+- At high sun (above 45 degrees) the shade side keeps the calibrated toon look. A backlit character is 4 to 6 times brighter than the PBR look of the same body. Between 45 and 20 degrees it fades to the real light, faster than the floor does.
+- Eyes, face lines and the outline follow the world light level but not cast shadow.
 - The sun disc must stay out of the frame when Bloom is on. Bloom clamps its input to 64.
 
 ## Cost
@@ -201,7 +211,7 @@ Measured live at 1264x629 (Release, `furina_showcase`, 32 parts, 39037 triangles
 
 - Total 3.57 ms, above the 2.0 ms budget. The main opaque draw needs 1.32 ms for the same 32 parts.
 - Surface split, by debug view: albedo only 0.92 ms, shadow amount 2.03 ms, normal look 2.48 ms. So about 1.1 ms is the cascade shadow lookup and about 0.5 ms is the rest of the toon maths. `gemHeuristic`, `goldGlint`, `rimStrength` and `shadowStrength` do not change the time.
-- The lookup cannot be skipped by the band thresholds. A sun-facing pixel has half-Lambert 0.5 or more, and `shadowStrength` 0.6 can push it down to 0.2, so the shadow can move any such pixel to shade (and it dims rim and gold glint too). Pixels facing away from the sun, eyes, face lines and gems already skip it. The lookup runs once per pixel. Its cost is the multi-tap filter (`filterSamples`) of the shared cascade code, run on every layer of a double-sided, unsorted draw.
+- The lookup cannot be skipped by the band thresholds. A sun-facing pixel has half-Lambert 0.5 or more, and `shadowStrength` 0.6 can push it down to 0.2, so the shadow can move any such pixel to shade (and it dims rim and gold glint too). Eyes, face lines and gems skip it. Pixels facing away from the sun run it too, at a point toward the sun (about 0.06 to 0.12 ms more on the Surface pass, measured on the Furina scene after the light rework). The lookup runs once per pixel. Its cost is the multi-tap filter (`filterSamples`) of the shared cascade code, run on every layer of a double-sided, unsorted draw.
 - Parts of class `HairOverlay` are clipped in the surface vertex stage, and the overlay clips every other class there. Their fragments are no longer shaded and discarded. These two changes are not measured yet; the table is the measurement taken before them.
 - Bloom is a fixed cost of 5 down and 5 up compute passes plus one full-resolution copy to the feature target. No cheap win is left without cutting quality or adding a new Bloom structure.
 - If the budget matters, turn off `Bloom` first (it is a global post effect), then `ToonCharacter.Overlay.Draw`. Lowering the Shadow `filterSamples` is the next lever for Surface.

@@ -14,6 +14,7 @@ layout(location = 0) out vec3 outWorldNormal;
 layout(location = 1) out vec2 outUv;
 layout(location = 2) out vec3 outWorldPos;
 layout(location = 3) out vec3 outHeadForward;
+layout(location = 4) out float outModelScale;
 
 invariant gl_Position;
 
@@ -34,6 +35,7 @@ void main()
     // mat3(model) is exact only for rotation and uniform scale.
     outWorldNormal = mat3(pc.model) * inNormal;
     outUv = inUv;
+    outModelScale = length(pc.model[0].xyz); // World size of one model unit, for the shadow reach.
     // The model front is -Z in model space.
     outHeadForward = normalize(mat3(pc.model) * vec3(0.0, 0.0, -1.0));
 }

@@ -15,6 +15,9 @@ const int kToonClothBack = 8;
 
 const float kToonAlphaCutoff = 0.5;
 const float kToonMinShadeLuma = 0.35;   // A shaded pixel keeps at least this share of the lit luminance.
+const float kToonShadeSunLow = 0.34;     // sin(20 deg): below this elevation the shade side gets ambient only.
+const float kToonShadeSunHigh = 0.71;    // sin(45 deg): above this elevation the shade side keeps the full sun share.
+const float kToonShadowReach = 12.0;     // Model units toward the sun, past the body, where a shade-side pixel asks for shadow.
 const float kToonMaxRadiance = 8192.0;
 const vec3 kToonLuma = vec3(0.2126, 0.7152, 0.0722);
 const vec3 kToonRimTint = vec3(0.75, 0.90, 1.00);   // Surface rim light.
@@ -121,6 +124,26 @@ vec3 ToonRgbToHsv(vec3 c)
         else { hue = (c.r - c.g) / d + 4.0; }
     }
     return vec3(hue * 60.0, mx > 1e-5 ? d / mx : 0.0, mx);
+}
+
+// Share of the sun that a toon pixel on the shade side still gets: 0 below 20 degrees elevation, 1 above 45.
+float ToonShadeSunShare()
+{
+    return smoothstep(kToonShadeSunLow, kToonShadeSunHigh, SceneSunDirection().y);
+}
+
+// Light level of the shade side facing up (ambient plus its share of the sun). Outline and unlit classes use min(this, 1).
+vec3 ToonShadeSideLight()
+{
+    return SceneHemisphereAmbient(vec3(0.0, 1.0, 0.0)) + SceneSunIlluminance() * (kDirectScale * ToonShadeSunShare());
+}
+
+// Cast shadow on a toon pixel (one lookup). A sun-facing pixel asks the cascade map at its own position.
+// A pixel facing away sits in its own body's shade, so it asks at a point `reach` toward the sun, past the body.
+float ToonSunShadow(vec3 pos, vec3 n, float nDotL, vec3 l, float reach)
+{
+    float facing = smoothstep(-0.15, 0.15, nDotL);
+    return SunShadowAmount(pos + l * (reach * (1.0 - facing)), normalize(mix(l, n, facing)), mix(1.0, max(nDotL, 0.0), facing));
 }
 
 #endif // TOON_COMMON_GLSL

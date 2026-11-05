@@ -26,5 +26,6 @@ void main()
         return;
     }
     vec3 tint = kToonOutlineTint[inClass];
-    outColor = vec4(texel.rgb * mix(tint, tint * 0.5, look.outlineDarkness), 1.0);
+    // The line follows the world light: it is never brighter than the shade side of the body.
+    outColor = vec4(texel.rgb * mix(tint, tint * 0.5, look.outlineDarkness) * min(ToonShadeSideLight(), vec3(1.0)), 1.0);
 }
