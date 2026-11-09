@@ -648,6 +648,74 @@ GpuUploadStats GpuResourceFactory::UploadStats() const noexcept
         m_uploadImageCount.load(std::memory_order_relaxed), m_uploadStagingBytes.load(std::memory_order_relaxed) };
 }
 
+StaticImage GpuResourceFactory::CreateStaticImage(const StaticImageDesc& desc) const
+{
+    if (desc.texels == nullptr || desc.width == 0 || desc.height == 0 || desc.depth == 0) {
+        throw std::runtime_error("GpuResourceFactory::CreateStaticImage: texels are null or an axis is zero.");
+    }
+    if (desc.format != PixelFormat::RGBA8_UNorm && desc.format != PixelFormat::R8_UNorm) {
+        throw std::runtime_error("GpuResourceFactory::CreateStaticImage: only RGBA8_UNorm and R8_UNorm are supported.");
+    }
+    const VkFormat vkFormat = ToVkFormat(desc.format);
+    if (!SupportsLinearSampling(m_physicalDevice, vkFormat)) {
+        throw std::runtime_error("GpuResourceFactory::CreateStaticImage: this device cannot sample the format.");
+    }
+    const std::uint64_t texelBytes = desc.format == PixelFormat::R8_UNorm ? 1u : 4u;
+    const std::uint64_t byteCount = std::uint64_t{ desc.width } * desc.height * desc.depth * texelBytes;
+
+    // Created before the staging buffer so a throw destroys the image first.
+    const auto image = std::make_shared<StaticImage>(m_allocator, m_memoryTracker, m_device, desc);
+
+    // Unnamed throwaway staging buffer; parked if the upload's wait fails.
+    const auto staging =
+        std::make_shared<Buffer>(CreateBuffer(byteCount, BufferUsage::TransferSrc, BufferMemoryUsage::CpuToGpu));
+    staging->Upload(desc.texels, static_cast<std::size_t>(byteCount));
+
+    const rg::ResourceState undefinedState{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE };
+    const rg::ResourceState transferDst = rg::RequiredStateFor(rg::ResourceAccess::TransferDst, false);
+    const rg::ResourceState shaderRead = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
+
+    const auto record = [&](VkCommandBuffer cmd) {
+        const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        const auto transition = [&](const rg::ResourceState& from, const rg::ResourceState& to) {
+            const VkImageMemoryBarrier2 barrier = rg::BuildImageMemoryBarrier2(image->Image(), range, from, to);
+            VkDependencyInfo dependency{};
+            dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            dependency.imageMemoryBarrierCount = 1;
+            dependency.pImageMemoryBarriers = &barrier;
+            vkCmdPipelineBarrier2(cmd, &dependency);
+        };
+
+        transition(undefinedState, transferDst);
+        VkBufferImageCopy region{};
+        region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        region.imageExtent = { desc.width, desc.height, desc.depth };
+        vkCmdCopyBufferToImage(
+            cmd, staging->Native(), image->Image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        transition(transferDst, shaderRead);
+    };
+
+    try {
+        const std::array<std::shared_ptr<void>, 1> inFlight{ staging };
+        SubmitOneShot(BlockSite::ImmediateSubmit, "static image upload", record, inFlight);
+    } catch (...) {
+        // The GPU may still write the image: park it instead of freeing it under it.
+        if (m_vulkanDevice->Waits().DeviceLost()) {
+            try {
+                m_abandoned.Park(image);
+            } catch (...) {
+                // Out of memory: the image is freed with the last reference.
+            }
+        }
+        throw;
+    }
+
+    m_uploadSubmitCount.fetch_add(1, std::memory_order_relaxed);
+    m_uploadImageCount.fetch_add(1, std::memory_order_relaxed);
+    m_uploadStagingBytes.fetch_add(byteCount, std::memory_order_relaxed);
+    return std::move(*image);
+}
+
 VolumeTexture GpuResourceFactory::CreateVolumeTexture(
     int width, int height, int depth, PixelFormat format, const char* debugName) const
 {

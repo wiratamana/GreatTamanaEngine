@@ -45,3 +45,7 @@
 
 # Compiled shaders (SPIR-V). Only the GLSL source is committed.
 *.spv
+
+# baked cloud noise (regenerate with tools/cloud_noise_bake)
+tools/cloud_noise_bake/out/
+tools/cloud_noise_bake/*.exe

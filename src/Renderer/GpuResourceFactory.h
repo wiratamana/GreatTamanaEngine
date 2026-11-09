@@ -9,6 +9,7 @@
 #include "Mesh.h"
 #include "Pipeline.h"
 #include "RenderTexture.h"
+#include "StaticImage.h"
 #include "Texture2D.h"
 #include "TextureArray2D.h"
 #include "UploadChunker.h"
@@ -134,6 +135,10 @@ public:
 
     // Finished texture uploads since creation.
     GpuUploadStats UploadStats() const noexcept;
+
+    // A read-only 2D or 3D image filled once from `desc.texels`, left in the shader-read layout.
+    // Throws on an invalid desc or a GPU failure; nothing leaks.
+    StaticImage CreateStaticImage(const StaticImageDesc& desc) const;
 
     VolumeTexture CreateVolumeTexture(
         int width, int height, int depth, PixelFormat format, const char* debugName = nullptr) const;

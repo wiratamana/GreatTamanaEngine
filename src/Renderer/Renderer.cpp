@@ -704,6 +704,11 @@ MaterialTexture Renderer::CreateMaterialVariant(const MaterialImages& images, co
     return m_resources.CreateMaterialVariant(images, params);
 }
 
+StaticImage Renderer::CreateStaticImage(const StaticImageDesc& desc) const
+{
+    return m_resources.CreateStaticImage(desc);
+}
+
 VolumeTexture Renderer::CreateVolumeTexture(
     int width, int height, int depth, PixelFormat format, const char* debugName) const
 {

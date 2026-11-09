@@ -21,6 +21,7 @@
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
 #include "RenderGraph/RenderGraphTypes.h"
 #include "RenderTexture.h"
+#include "StaticImage.h"
 #include "Texture2D.h"
 #include "TextureArray2D.h"
 #include "VolumeTexture.h"
@@ -315,6 +316,9 @@ public:
 
     // A new material (own params block and set) over `images`; null entries use the default image of the slot.
     MaterialTexture CreateMaterialVariant(const MaterialImages& images, const MaterialParams& params) const;
+
+    // A read-only 2D or 3D image filled once from CPU texels (see StaticImageDesc). Blocks until the copy ran.
+    StaticImage CreateStaticImage(const StaticImageDesc& desc) const;
 
     VolumeTexture CreateVolumeTexture(
         int width, int height, int depth, PixelFormat format, const char* debugName = nullptr) const;
