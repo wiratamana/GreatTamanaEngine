@@ -38,8 +38,14 @@ struct CloudShellSegment {
 CloudShellSegment ComputeCloudShellSegment(
     float cameraY, float dirY, float radiusM, float baseM, float topM, float maxDistanceM) noexcept;
 
-// Wind drift of the noise lookups: advances `offset` (x, z in metres) by `dt` seconds.
-void AdvanceCloudWind(float (&offset)[2], float speed, float directionDegrees, float dt) noexcept;
+// Wind drift of the noise lookups: moves `offset` (x, z in metres, double precision) by `dt` seconds and
+// returns the unwrapped step in `step`. The offset wraps at `periodM`, 0 meaning never.
+void AdvanceCloudWind(double (&offset)[2], double (&step)[2], float speed, float directionDegrees, float dt,
+    double periodM) noexcept;
+
+// Length after which the weather, shape and detail lookups all repeat: the least common multiple of the tile
+// sizes in whole metres, or 0 when they have none that stays small.
+double CloudWindPeriodM(const VolumetricCloudSettings& safe) noexcept;
 
 // Phase functions, normalised so they integrate to 1 over the sphere. `cosTheta` is the cosine between the
 // view ray and the direction toward the sun, so +1 looks into the sun.
@@ -97,7 +103,11 @@ struct VolumetricCloudFrameFacts {
     bool atmosphereLit = false;
     float skyIntensity = 1.0f;
     Vec3 atmosphereCameraKm = Vec3::Zero(); // Camera in atmosphere space.
+    float atmospherePlanetRadiusKm = 0.0f;  // The atmosphere's planet radius; used when atmosphereLit.
 };
+
+// Planet radius of the cloud shell: the atmosphere's own when it lights the clouds, so the two never differ.
+float CloudPlanetRadiusKm(const VolumetricCloudSettings& safe, const VolumetricCloudFrameFacts& facts) noexcept;
 
 VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     const VolumetricCloudSettings& safe, const VolumetricCloudFrameFacts& facts) noexcept;

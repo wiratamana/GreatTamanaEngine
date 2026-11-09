@@ -143,7 +143,7 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
 {
     float coverage = params.weather.w;
     vec2 wind = params.weather.yz;
-    vec4 wm = texture(weatherMap, (position.xz + wind) / params.weather.x);
+    vec4 wm = textureLod(weatherMap, (position.xz + wind) / params.weather.x, 0.0);
     float weatherCoverage = max(wm.r, Saturate(coverage - 0.5) * wm.g * 2.0);
     // A shape value can not reach the coverage threshold here, so skip the 3D fetch.
     densityFactor = 0.0;
@@ -164,7 +164,7 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
 
     float altitude = params.layer.x + heightFraction * (params.layer.y - params.layer.x);
     vec3 shapeUv = vec3(position.x + wind.x, altitude, position.z + wind.y) / params.noise.x;
-    vec4 sn = texture(shapeVolume, shapeUv);
+    vec4 sn = textureLod(shapeVolume, shapeUv, 0.0);
     float fbm = sn.g * 0.625 + sn.b * 0.25 + sn.a * 0.125;
     float shape = Remap(sn.r, fbm - 1.0, 1.0, 0.0, 1.0);
     return Saturate(Remap(shape * shapeGradient, 1.0 - coverage * weatherCoverage, 1.0, 0.0, 1.0));
@@ -176,7 +176,7 @@ float CloudDetail(vec3 position, float heightFraction, float shape, float densit
     vec2 wind = params.weather.yz;
     float altitude = params.layer.x + heightFraction * (params.layer.y - params.layer.x);
     vec3 detailUv = vec3(position.x + wind.x, altitude, position.z + wind.y) / params.noise.y;
-    vec3 dn = texture(detailVolume, detailUv).rgb;
+    vec3 dn = textureLod(detailVolume, detailUv, 0.0).rgb;
     float fbm = dn.r * 0.625 + dn.g * 0.25 + dn.b * 0.125;
     float erosion = mix(fbm, 1.0 - fbm, Saturate(heightFraction * 5.0));
     erosion *= params.noise.z * detailAmount * exp(-params.weather.w * 0.75);
@@ -311,7 +311,8 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, out 
 
 void main()
 {
-    ivec2 lowSize = imageSize(lowColorOut);
+    // A persistent target keeps its old size for one frame after a resize: trust the bound images.
+    ivec2 lowSize = min(imageSize(lowColorOut), imageSize(lowAuxOut));
     ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
     if (texel.x >= lowSize.x || texel.y >= lowSize.y) {
         return;
@@ -320,7 +321,7 @@ void main()
     ivec2 fullSize = ivec2(params.fullSize.xy);
     ivec2 pixel = min(texel * int(params.lowRes.x) + ivec2(params.lowRes.yz), fullSize - 1);
     vec2 uv = (vec2(pixel) + 0.5) / vec2(fullSize);
-    float rawDepth = texture(sourceDepth, uv).r;
+    float rawDepth = textureLod(sourceDepth, uv, 0.0).r;
 
     vec2 ndc = uv * 2.0 - 1.0;
     vec4 nearPoint = params.invViewProjection * vec4(ndc, 0.0, 1.0);
@@ -351,7 +352,7 @@ void main()
         }
     }
 
-    float bn = texture(blueNoise, (vec2(pixel) + 0.5) / kBlueNoiseSize).r;
+    float bn = textureLod(blueNoise, (vec2(pixel) + 0.5) / kBlueNoiseSize, 0.0).r;
     float jitter = fract(bn + kGoldenRatio * float(params.counts.y & 63u));
     if (AtmosphereOn()) {
         gSkyAmbient = SkyAmbientRadiance();

@@ -47,7 +47,7 @@ bool TapUsable(vec4 color, vec4 aux, float pixelEndKm)
 // saw this pixel's surface. Returns false when none did.
 bool FetchHistory(vec2 texelPosition, float pixelEndKm, out vec4 color, out float distanceKm)
 {
-    ivec2 size = ivec2(params.sizes.xy);
+    ivec2 size = min(textureSize(historyColor, 0), textureSize(historyAux, 0));
     ivec2 base = ivec2(floor(texelPosition));
     vec2 f = texelPosition - vec2(base);
     vec4 colorSum = vec4(0.0);
@@ -88,12 +88,14 @@ void main()
 {
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
     ivec2 fullSize = ivec2(params.sizes.xy);
-    if (pixel.x >= fullSize.x || pixel.y >= fullSize.y) {
+    // A persistent target keeps its old size for one frame after a resize: never write past the bound images.
+    ivec2 writable = min(imageSize(historyColorOut), min(imageSize(historyAuxOut), imageSize(destinationImage)));
+    if (pixel.x >= fullSize.x || pixel.y >= fullSize.y || pixel.x >= writable.x || pixel.y >= writable.y) {
         return;
     }
     vec2 uv = (vec2(pixel) + 0.5) / vec2(fullSize);
-    vec3 scene = texture(sourceColor, uv).rgb;
-    float rawDepth = texture(sourceDepth, uv).r;
+    vec3 scene = textureLod(sourceColor, uv, 0.0).rgb;
+    float rawDepth = textureLod(sourceDepth, uv, 0.0).r;
     vec2 ndc = uv * 2.0 - 1.0;
 
     // Distance this pixel's surface lies at; a pixel without a surface sees the whole layer.
@@ -106,7 +108,7 @@ void main()
     // Fresh samples: the four march texels around this pixel. The texel at integer coordinates holds
     // the pixel (texel * divisor + offset), so the pixel that was marched itself gets weight 1.
     int divisor = int(params.counts.x);
-    ivec2 lowSize = ivec2(params.sizes.zw);
+    ivec2 lowSize = min(ivec2(params.sizes.zw), min(textureSize(lowColor, 0), textureSize(lowAux, 0)));
     vec2 lowPosition = vec2(pixel - ivec2(params.counts.yz)) / float(divisor);
     ivec2 lowBase = ivec2(floor(lowPosition));
     vec2 lowFrac = lowPosition - vec2(lowBase);

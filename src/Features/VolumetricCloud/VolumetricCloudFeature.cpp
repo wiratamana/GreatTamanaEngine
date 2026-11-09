@@ -140,9 +140,8 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
     const std::optional<SunLightModulation> modulation = m_sunLight.Fetch(f);
     const SunLightModulation light = modulation ? SanitizeSunLightModulation(*modulation) : SunLightModulation{};
 
-    view.previousWindOffset[0] = view.windOffset[0];
-    view.previousWindOffset[1] = view.windOffset[1];
-    AdvanceCloudWind(view.windOffset, m_settings.windSpeed, m_settings.windDirection, f.DeltaSeconds());
+    AdvanceCloudWind(view.windOffset, view.windStep, m_settings.windSpeed, m_settings.windDirection, f.DeltaSeconds(),
+        CloudWindPeriodM(m_settings));
     VolumetricCloudFrameFacts facts;
     // Rays and reprojection are formed relative to the eye, in double precision.
     const CloudRelativeCamera camera = MakeCloudRelativeCamera(f.View().viewProjection, f.View().eye);
@@ -156,8 +155,8 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
     facts.sunIlluminance = sun.sunIlluminance;
     facts.sunTint = light.sunTint;
     facts.ambientScale = light.ambientScale;
-    facts.windOffset[0] = view.windOffset[0];
-    facts.windOffset[1] = view.windOffset[1];
+    facts.windOffset[0] = static_cast<float>(view.windOffset[0]);
+    facts.windOffset[1] = static_cast<float>(view.windOffset[1]);
     facts.frameIndex = f.FrameIndex();
     facts.viewWidth = full.width;
     facts.viewHeight = full.height;
@@ -182,6 +181,7 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
         multiScatteringLut = sharedLuts->multiScattering;
         skyViewLut = viewLuts->skyView;
         facts.skyIntensity = viewLuts->skyIntensity;
+        facts.atmospherePlanetRadiusKm = air.planetRadiusKm;
         // Planet-centred frame like the sky: only the height above the ground matters.
         const float heightKm = std::max(f.View().eye.y, 0.0f) / kMetresPerKilometer;
         facts.atmosphereCameraKm = Vec3(0.0f, air.planetRadiusKm + heightKm, 0.0f);
@@ -214,8 +214,8 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
     const bool accumulate = m_settings.temporal >= 0.5f;
     VolumetricCloudResolveFacts resolveFacts;
     resolveFacts.prevViewProjection = MakeCloudRelativeCamera(view.previous.viewProjection, f.View().eye).projection;
-    resolveFacts.windDelta[0] = view.windOffset[0] - view.previousWindOffset[0];
-    resolveFacts.windDelta[1] = view.windOffset[1] - view.previousWindOffset[1];
+    resolveFacts.windDelta[0] = static_cast<float>(view.windStep[0]);
+    resolveFacts.windDelta[1] = static_cast<float>(view.windStep[1]);
     resolveFacts.historyValid = accumulate && basis.valid && fx::HistoryUsable(view.previous, basis, f.FrameIndex(), full, divisor);
     resolveFacts.lowWidth = low.width;
     resolveFacts.lowHeight = low.height;

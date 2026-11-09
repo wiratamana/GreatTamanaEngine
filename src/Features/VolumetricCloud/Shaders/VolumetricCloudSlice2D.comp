@@ -21,7 +21,7 @@ void main()
         return;
     }
     vec2 uv = (vec2(texel) + 0.5) / vec2(outSize);
-    vec4 value = texture(noiseTexture, uv * pc.tiling);
+    vec4 value = textureLod(noiseTexture, uv * pc.tiling, 0.0);
     vec3 color = pc.channel == 4u ? value.rgb : vec3(value[min(pc.channel, 3u)]);
     imageStore(destinationImage, texel, vec4(color, 1.0));
 }

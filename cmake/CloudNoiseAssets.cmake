@@ -16,8 +16,15 @@ function(gte_add_cloud_noise_assets exe_target)
     add_executable(cloud_noise_bake "${_tool_dir}/main.cpp")
     target_include_directories(cloud_noise_bake PRIVATE "${CMAKE_SOURCE_DIR}/third_party/stb")
     target_link_libraries(cloud_noise_bake PRIVATE Threads::Threads)
-    target_link_options(cloud_noise_bake PRIVATE -static)
-    target_compile_options(cloud_noise_bake PRIVATE -O2)
+    # Optimised in every configuration so the bake takes seconds; static on MinGW so it needs no runtime DLLs.
+    if(MINGW)
+        target_link_options(cloud_noise_bake PRIVATE -static)
+    endif()
+    if(MSVC)
+        target_compile_options(cloud_noise_bake PRIVATE /O2)
+    else()
+        target_compile_options(cloud_noise_bake PRIVATE -O2)
+    endif()
     set_target_properties(cloud_noise_bake PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tools")
 
@@ -26,10 +33,16 @@ function(gte_add_cloud_noise_assets exe_target)
         list(APPEND _outputs "${_out_dir}/${_name}.gtvol")
     endforeach()
 
+    # Baked into a staging folder and copied over only after the tool succeeded, so a crash never
+    # leaves half-written files that look up to date.
+    set(_stage_dir "${CMAKE_BINARY_DIR}/assets/clouds_stage")
     add_custom_command(
         OUTPUT ${_outputs}
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}"
-        COMMAND cloud_noise_bake bake --out "${_out_dir}" --blue "${_blue_png}"
+        COMMAND ${CMAKE_COMMAND} -E remove_directory "${_stage_dir}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_stage_dir}" "${_out_dir}"
+        COMMAND cloud_noise_bake bake --out "${_stage_dir}" --blue "${_blue_png}"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${_stage_dir}" "${_out_dir}"
+        COMMAND ${CMAKE_COMMAND} -E remove_directory "${_stage_dir}"
         DEPENDS cloud_noise_bake "${_blue_png}"
         COMMENT "Baking cloud noise assets into ${_out_dir}"
         VERBATIM)

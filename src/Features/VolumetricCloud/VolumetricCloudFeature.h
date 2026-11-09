@@ -18,8 +18,8 @@ struct VolumetricCloudViewState {
     fx::GpuParams<VolumetricCloudResolveParamsGpu> resolveParams;
     fx::GpuParams<AtmosphereParametersGpu> atmosphereParams;
     VolumetricCloudViewSnapshot snapshot;
-    float windOffset[2] = {};
-    float previousWindOffset[2] = {};
+    double windOffset[2] = {};
+    double windStep[2] = {};
     fx::TemporalHistory previous; // Valid only when the resolve pass wrote the history last frame.
 
     // March target at 1/divisor of the view size: cloud light + transmittance, and distance + completeness.

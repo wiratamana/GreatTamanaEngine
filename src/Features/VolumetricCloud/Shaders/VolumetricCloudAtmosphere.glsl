@@ -27,7 +27,7 @@ vec3 SunTransmittanceAt(vec3 positionKm, vec3 sunDirection)
     float radiusKm = max(length(positionKm), 1e-3);
     float heightKm = clamp(radiusKm - air.planetRadiusKm, 0.0, air.atmosphereThicknessKm);
     vec2 uv = HeightZenithToTransmittanceLutUv(air, heightKm, dot(positionKm, sunDirection) / radiusKm);
-    vec3 transmittance = texture(transmittanceLut, ClampLutUvHalfTexelInset(uv, textureSize(transmittanceLut, 0))).rgb;
+    vec3 transmittance = textureLod(transmittanceLut, ClampLutUvHalfTexelInset(uv, textureSize(transmittanceLut, 0)), 0.0).rgb;
     return transmittance * PlanetVisibility(positionKm, sunDirection, air.planetRadiusKm);
 }
 
@@ -38,14 +38,14 @@ vec3 SkyAmbientRadiance()
     float viewHeightKm = max(params.atmosphereCamera.y, planetRadiusKm);
     ivec2 size = textureSize(skyViewLut, 0);
     vec3 sum = kAmbientZenithWeight
-        * texture(skyViewLut, ViewDirectionToSkyViewLutUv(vec3(0.0, 1.0, 0.0), size, viewHeightKm, planetRadiusKm)).rgb;
+        * textureLod(skyViewLut, ViewDirectionToSkyViewLutUv(vec3(0.0, 1.0, 0.0), size, viewHeightKm, planetRadiusKm), 0.0).rgb;
     float ringCos = cos(kAmbientRingElevation);
     float ringSin = sin(kAmbientRingElevation);
     for (int i = 0; i < 4; ++i) {
         float phi = (float(i) + 0.5) * 0.5 * kAtmospherePi;
         vec3 direction = vec3(ringCos * cos(phi), ringSin, ringCos * sin(phi));
         sum += kAmbientRingWeight
-            * texture(skyViewLut, ViewDirectionToSkyViewLutUv(direction, size, viewHeightKm, planetRadiusKm)).rgb;
+            * textureLod(skyViewLut, ViewDirectionToSkyViewLutUv(direction, size, viewHeightKm, planetRadiusKm), 0.0).rgb;
     }
     return sum * params.atmosphereMode.y * params.atmosphereMode.w;
 }
@@ -71,8 +71,8 @@ vec3 AirInscatter(vec3 rayDirection, float distanceKm, vec3 sunDirection, vec3 s
         float radiusKm = max(length(positionKm), 1e-3);
         float heightKm = clamp(radiusKm - air.planetRadiusKm, 0.0, air.atmosphereThicknessKm);
         vec2 uv = HeightZenithToTransmittanceLutUv(air, heightKm, dot(positionKm, sunDirection) / radiusKm);
-        vec3 sunTransmittance = texture(transmittanceLut, ClampLutUvHalfTexelInset(uv, transmittanceSize)).rgb;
-        vec3 multiScattered = texture(multiScatteringLut, ClampLutUvHalfTexelInset(uv, multiScatteringSize)).rgb;
+        vec3 sunTransmittance = textureLod(transmittanceLut, ClampLutUvHalfTexelInset(uv, transmittanceSize), 0.0).rgb;
+        vec3 multiScattered = textureLod(multiScatteringLut, ClampLutUvHalfTexelInset(uv, multiScatteringSize), 0.0).rgb;
 
         vec3 scatterRayleigh = air.rayleighScattering * RayleighDensityAtHeight(air, heightKm) * scale;
         vec3 scatterMie = air.mieScattering * MieDensityAtHeight(air, heightKm) * scale;

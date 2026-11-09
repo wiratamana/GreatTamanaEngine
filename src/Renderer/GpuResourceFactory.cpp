@@ -660,6 +660,15 @@ StaticImage GpuResourceFactory::CreateStaticImage(const StaticImageDesc& desc) c
     if (!SupportsLinearSampling(m_physicalDevice, vkFormat)) {
         throw std::runtime_error("GpuResourceFactory::CreateStaticImage: this device cannot sample the format.");
     }
+    VkPhysicalDeviceProperties deviceProperties{};
+    vkGetPhysicalDeviceProperties(m_physicalDevice, &deviceProperties);
+    const bool volume = desc.depth > 1;
+    const std::uint32_t axisLimit = volume ? deviceProperties.limits.maxImageDimension3D
+                                           : deviceProperties.limits.maxImageDimension2D;
+    if (desc.width > axisLimit || desc.height > axisLimit || (volume && desc.depth > axisLimit)) {
+        throw std::runtime_error(std::string("GpuResourceFactory::CreateStaticImage: the image is larger than the ")
+            + (volume ? "3D" : "2D") + " size limit of this device (" + std::to_string(axisLimit) + ").");
+    }
     const std::uint64_t texelBytes = desc.format == PixelFormat::R8_UNorm ? 1u : 4u;
     const std::uint64_t byteCount = std::uint64_t{ desc.width } * desc.height * desc.depth * texelBytes;
 

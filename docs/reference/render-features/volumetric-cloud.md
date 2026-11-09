@@ -41,7 +41,7 @@ This is the hybrid option: the clouds stay a separate feature and read the sky t
 | Sky light | sun luminance x tint x ambient scale | sky-view LUT: the zenith and a ring of 4 at 35 degrees, x sky intensity x `skyAmbient`. One lookup set per marched pixel |
 | Distance | cloud opacity falls with `exp(-t / hazeDistanceM)` into the sky pixel behind | the air between the eye and the cloud: `final = scene*T + cloud*Tair + (1-T)*Lair`. `Lair` is 8 samples of single and multiple scattering from the LUTs along the ray up to the mean cloud distance, `Tair` its transmittance |
 
-Units are the sky's: atmosphere space is km from the planet centre, the camera at `(0, R + height)` like the Atmosphere feature, world units are metres. The cloud shell radius (`planetRadiusKm`) and the Atmosphere planet radius are separate numbers; keep them equal.
+Units are the sky's: atmosphere space is km from the planet centre, the camera at `(0, R + height)` like the Atmosphere feature, world units are metres. In mode 1 the cloud shell uses the Atmosphere's planet radius, so the two can not differ; `planetRadiusKm` only applies to mode 0 (standalone) or when no tables are published.
 `final = scene*T + cloud*Tair + (1-T)*Lair` leaves a sky pixel unchanged where the cloud lets everything through, because the sky already holds the air light of the same distance. The aerial perspective volume of the Atmosphere only reaches 0.5 km after its auto scale, so it is not used.
 `hazeDistanceM` has no effect in mode 1. `sunIntensity` and `ambientIntensity` scale the sun term in both modes; `ambientIntensity` only in mode 0, `skyAmbient` only in mode 1. `airScale` multiplies the air's scattering and extinction between the eye and the cloud (1 is physical).
 
@@ -74,7 +74,7 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `channel` | 4 | 0..4 | Channel of the debug view: 0 R, 1 G, 2 B, 3 A, 4 RGB |
 | `slice` | 0.5 | 0..1 | Depth of the shown noise slice (debug views) |
 | `tiling` | 2 | 0.25..16 | Repeats of the shown noise over the screen (debug views) |
-| `planetRadiusKm` | 6371 | 1000..20000 | Planet radius for the layer curvature (km). Same as the Atmosphere ground radius |
+| `planetRadiusKm` | 6371 | 1000..20000 | Planet radius for the layer curvature (km), standalone only. In mode 1 the Atmosphere's radius is used |
 | `layerBaseM` | 1500 | 0..20000 | Layer base altitude above Y = 0 (m) |
 | `layerTopM` | 4000 | 10..30000 | Layer top altitude (m). Kept at least 50 m above the base |
 | `maxDistanceM` | 60000 | 1000..500000 | Longest ray (m) |
@@ -189,7 +189,10 @@ Memory per view: 4 full-size RGBA16F history targets (about 12 MB at 884x432), s
 - The layer is a sphere shell around a planet centred below the camera. Horizontal camera position does not bend it.
 - Perspective cameras only. A view with no valid `invViewProjection` gives `NoValidCamera`.
 - The Game camera far plane is 1000 m. The scene depth limit works inside that range; beyond it the sky shows through.
-- A noise file is loaded once per process.
+- A noise file is loaded once per process. A file larger than the device's 2D or 3D image limit is refused with one log line.
+- Transparent objects and particles are not in the scene depth, and the cloud pass runs after the transparent stage. Where a transparent object is seen in front of the sky, cloud in that pixel is added on top of it: the object looks dimmed by the cloud, as if it were behind it. Opaque objects are never affected. Workaround: keep the clouds off the view that shows such objects close to the camera, or lower `coverage`. The proper fix is to run the cloud pass before the transparent stage, or to give it a depth input that includes the transparent objects.
+- A march that stops at `maxSteps` before the end of its segment still reports that it looked all the way. This can only drop far cloud, never add cloud in front of a surface. It is left as is on purpose: reporting the short reach makes the resolve pass reject the pixel's own march and punches holes in the far clouds.
+- The wind offset is kept in double precision per view and wraps at the common repeat length of the three noise tiles (420000 m with the default scales), so long sessions keep sub-metre precision. When the tile sizes have no small common length the offset does not wrap.
 
 ## Related
 - [Render features](README.md) · [Atmosphere](atmosphere.md) · [Temporal anti-aliasing](temporal-aa.md) · [Volumetric light](volumetric-light.md)

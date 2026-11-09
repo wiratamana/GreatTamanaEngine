@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <numeric>
 #include <utility>
 
 namespace gte {
@@ -278,11 +279,34 @@ CloudShellSegment ComputeCloudShellSegment(
     return segment;
 }
 
-void AdvanceCloudWind(float (&offset)[2], float speed, float directionDegrees, float dt) noexcept
+void AdvanceCloudWind(double (&offset)[2], double (&step)[2], float speed, float directionDegrees, float dt,
+    double periodM) noexcept
 {
-    const float radians = directionDegrees * kPi / 180.0f;
-    offset[0] += std::cos(radians) * speed * dt;
-    offset[1] += std::sin(radians) * speed * dt;
+    const double radians = static_cast<double>(directionDegrees) * kPi / 180.0;
+    const double distance = static_cast<double>(speed) * static_cast<double>(dt);
+    step[0] = std::cos(radians) * distance;
+    step[1] = std::sin(radians) * distance;
+    for (int axis = 0; axis < 2; ++axis) {
+        offset[axis] += step[axis];
+        if (periodM > 0.0) {
+            offset[axis] = std::fmod(offset[axis], periodM);
+            offset[axis] += offset[axis] < 0.0 ? periodM : 0.0;
+        }
+    }
+}
+
+double CloudWindPeriodM(const VolumetricCloudSettings& safe) noexcept
+{
+    constexpr std::uint64_t kMaxPeriodM = 100000000ull;
+    std::uint64_t period = 1;
+    for (const float tile : { safe.weatherScaleM, safe.shapeScaleM, safe.detailScaleM }) {
+        const std::uint64_t metres = static_cast<std::uint64_t>(std::max(std::llround(tile), 1ll));
+        period = period / std::gcd(period, metres) * metres;
+        if (period > kMaxPeriodM) {
+            return 0.0;
+        }
+    }
+    return static_cast<double>(period);
 }
 
 float CloudHenyeyGreenstein(float cosTheta, float g) noexcept
@@ -342,12 +366,18 @@ void CloudAccumulateStep(float& light, float& transmittance, float source, float
     transmittance *= 1.0f - opacity;
 }
 
+float CloudPlanetRadiusKm(const VolumetricCloudSettings& safe, const VolumetricCloudFrameFacts& facts) noexcept
+{
+    const bool shared = facts.atmosphereLit && std::isfinite(facts.atmospherePlanetRadiusKm) && facts.atmospherePlanetRadiusKm >= 1.0f;
+    return shared ? facts.atmospherePlanetRadiusKm : safe.planetRadiusKm;
+}
+
 VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     const VolumetricCloudSettings& safe, const VolumetricCloudFrameFacts& facts) noexcept
 {
     VolumetricCloudParamsGpu p;
     p.invViewProjection = facts.invViewProjection;
-    fx::PackVec3(p.eyeAndPlanetRadius, facts.eye, safe.planetRadiusKm * 1000.0f);
+    fx::PackVec3(p.eyeAndPlanetRadius, facts.eye, CloudPlanetRadiusKm(safe, facts) * 1000.0f);
 
     // A sun under the horizon lights nothing; the sky keeps a little ambient light.
     const float sunVisibility = SmoothStep(-0.05f, 0.15f, facts.sunDirection.y);

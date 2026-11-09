@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
@@ -266,12 +267,59 @@ TEST(VolumetricCloudLayerTest, MaxDistanceCutsTheSegment)
 
 TEST(VolumetricCloudLayerTest, WindMovesAlongTheDirection)
 {
-    float offset[2] = {};
-    AdvanceCloudWind(offset, 10.0f, 0.0f, 2.0f);
-    EXPECT_NEAR(offset[0], 20.0f, 1e-4f);
-    EXPECT_NEAR(offset[1], 0.0f, 1e-4f);
-    AdvanceCloudWind(offset, 10.0f, 90.0f, 1.0f);
-    EXPECT_NEAR(offset[1], 10.0f, 1e-4f);
+    double offset[2] = {};
+    double step[2] = {};
+    AdvanceCloudWind(offset, step, 10.0f, 0.0f, 2.0f, 0.0);
+    EXPECT_NEAR(offset[0], 20.0, 1e-4);
+    EXPECT_NEAR(offset[1], 0.0, 1e-4);
+    EXPECT_NEAR(step[0], 20.0, 1e-4);
+    AdvanceCloudWind(offset, step, 10.0f, 90.0f, 1.0f, 0.0);
+    EXPECT_NEAR(offset[1], 10.0, 1e-4);
+}
+
+TEST(VolumetricCloudLayerTest, WindPeriodIsTheCommonRepeatOfTheNoiseTiles)
+{
+    const VolumetricCloudSettings defaults = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    EXPECT_DOUBLE_EQ(CloudWindPeriodM(defaults), 420000.0);
+    VolumetricCloudSettings odd = defaults;
+    odd.weatherScaleM = 12347.0f;
+    odd.shapeScaleM = 5003.0f;
+    odd.detailScaleM = 701.0f;
+    EXPECT_DOUBLE_EQ(CloudWindPeriodM(odd), 0.0);
+}
+
+TEST(VolumetricCloudLayerTest, TheAtmosphereRadiusWinsOnlyWhenItLightsTheClouds)
+{
+    const VolumetricCloudSettings safe = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    VolumetricCloudFrameFacts facts;
+    facts.atmospherePlanetRadiusKm = 6000.0f;
+    EXPECT_FLOAT_EQ(CloudPlanetRadiusKm(safe, facts), safe.planetRadiusKm);
+    facts.atmosphereLit = true;
+    EXPECT_FLOAT_EQ(CloudPlanetRadiusKm(safe, facts), 6000.0f);
+    EXPECT_FLOAT_EQ(MakeVolumetricCloudParams(safe, facts).eyeAndPlanetRadius[3], 6000.0f * 1000.0f);
+    facts.atmospherePlanetRadiusKm = 0.0f;
+    EXPECT_FLOAT_EQ(CloudPlanetRadiusKm(safe, facts), safe.planetRadiusKm);
+    facts.atmospherePlanetRadiusKm = std::numeric_limits<float>::quiet_NaN();
+    EXPECT_FLOAT_EQ(CloudPlanetRadiusKm(safe, facts), safe.planetRadiusKm);
+}
+
+TEST(VolumetricCloudLayerTest, WindKeepsSubMetreResolutionAfterTenHours)
+{
+    const VolumetricCloudSettings defaults = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    const double period = CloudWindPeriodM(defaults);
+    double offset[2] = {};
+    double step[2] = {};
+    double unwrappedX = 0.0;
+    for (int frame = 0; frame < 36000 * 60; ++frame) {
+        AdvanceCloudWind(offset, step, 4.0f, 30.0f, 1.0f / 60.0f, period);
+        unwrappedX += step[0];
+    }
+    EXPECT_GE(offset[0], 0.0);
+    EXPECT_LT(offset[0], period);
+    EXPECT_NEAR(offset[0], std::fmod(unwrappedX, period), 1e-3);
+    // One float step at the largest offset is far below a metre.
+    const float value = static_cast<float>(period);
+    EXPECT_LT(std::nextafter(value, 2.0f * value) - value, 0.1f);
 }
 
 TEST(VolumetricCloudParamsTest, BlockLayoutMatchesTheShader)
@@ -908,3 +956,25 @@ TEST(VolumetricCloudTemporalTest, ResolveShaderTapRuleUsesTheSameToleranceAsTheR
 
 } // namespace
 } // namespace gte
+
+TEST(VolumetricCloudShaderTest, ImageAccessIsBoundedByTheBoundImages)
+{
+    const std::string march = gte::ReadShaderText("VolumetricCloud.comp");
+    const std::string resolve = gte::ReadShaderText("VolumetricCloudResolve.comp");
+    EXPECT_NE(march.find("imageSize(lowAuxOut)"), std::string::npos);
+    EXPECT_NE(resolve.find("imageSize(destinationImage)"), std::string::npos);
+    EXPECT_NE(resolve.find("textureSize(historyColor, 0)"), std::string::npos);
+    EXPECT_NE(resolve.find("textureSize(lowColor, 0)"), std::string::npos);
+}
+
+TEST(VolumetricCloudShaderTest, NoImplicitLodInTheComputeShaders)
+{
+    for (const char* name : { "VolumetricCloud.comp", "VolumetricCloudResolve.comp", "VolumetricCloudLighting.glsl",
+             "VolumetricCloudAtmosphere.glsl", "VolumetricCloudSlice2D.comp", "VolumetricCloudSlice3D.comp" }) {
+        const std::string source = gte::ReadShaderText(name);
+        for (std::size_t at = source.find("texture("); at != std::string::npos; at = source.find("texture(", at + 1)) {
+            const bool part = at > 0 && (std::isalnum(static_cast<unsigned char>(source[at - 1])) || source[at - 1] == '_');
+            EXPECT_TRUE(part) << name << " uses texture() without an explicit level of detail";
+        }
+    }
+}
