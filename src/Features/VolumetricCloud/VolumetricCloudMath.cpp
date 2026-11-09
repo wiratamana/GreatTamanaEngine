@@ -1,4 +1,6 @@
-#include "VolumetricCloudTypes.h"
+#include "VolumetricCloudMath.h"
+
+#include "../../Core/FeatureKit/ScreenSpaceView.h"
 
 #include <algorithm>
 #include <cmath>
@@ -7,9 +9,54 @@ namespace gte {
 
 namespace {
 
+constexpr float kMinLayerThicknessM = 50.0f;
+constexpr float kMinStepM = 1e-4f;
+// A camera standing on the ground looks into it, even with rounding at 6371 km.
+constexpr float kGroundSlackM = 0.5f;
+// Radiance of the blue sky light, relative to the sun's luminance.
+constexpr float kAmbientTint[3] = { 0.55f, 0.7f, 1.0f };
+
 float ClampOrDefault(float value, float low, float high, float fallback) noexcept
 {
     return std::isfinite(value) ? std::clamp(value, low, high) : fallback;
+}
+
+float Saturate(float v) noexcept
+{
+    return std::clamp(v, 0.0f, 1.0f);
+}
+
+float SmoothStep(float lo, float hi, float v) noexcept
+{
+    const float t = Saturate((v - lo) / std::max(hi - lo, kMinStepM));
+    return t * t * (3.0f - 2.0f * t);
+}
+
+// Both roots of the ray against a sphere of altitude `heightM`, centred below the eye.
+struct SphereRoots {
+    bool hit = false;
+    float tNear = 0.0f;
+    float tFar = 0.0f;
+};
+
+// The discriminant is a product of two sums, so it keeps its digits for a radius of 6371 km.
+SphereRoots IntersectShell(float cameraY, float dirY, float radiusM, float heightM) noexcept
+{
+    const float ro = radiusM + cameraY;
+    const float s = std::sqrt(std::max(1.0f - dirY * dirY, 0.0f));
+    const float inner = (heightM - cameraY) + ro * dirY * dirY / (1.0f + s);
+    const float outer = radiusM + heightM + ro * s;
+    const float disc = inner * outer;
+    SphereRoots roots;
+    if (disc < 0.0f) {
+        return roots;
+    }
+    const float root = std::sqrt(disc);
+    const float b = ro * dirY;
+    roots.hit = true;
+    roots.tNear = -b - root;
+    roots.tFar = -b + root;
+    return roots;
 }
 
 } // namespace
@@ -18,8 +65,10 @@ VolumetricCloudSettings SanitizeVolumetricCloudSettings(const VolumetricCloudSet
 {
     const VolumetricCloudSettings defaults;
     VolumetricCloudSettings out = candidate;
-    out.slice = ClampOrDefault(candidate.slice, 0.0f, 1.0f, defaults.slice);
-    out.tiling = ClampOrDefault(candidate.tiling, 0.25f, 16.0f, defaults.tiling);
+    for (const VolumetricCloudFloatSetting& entry : kVolumetricCloudFloatSettings) {
+        out.*(entry.member) = ClampOrDefault(candidate.*(entry.member), entry.low, entry.high, defaults.*(entry.member));
+    }
+    out.layerTopM = std::max(out.layerTopM, out.layerBaseM + kMinLayerThicknessM);
     out.channel = std::min(candidate.channel, kCloudDebugChannelRgb);
     if (static_cast<std::uint8_t>(candidate.debugView) > static_cast<std::uint8_t>(VolumetricCloudDebugView::BlueNoise)) {
         out.debugView = VolumetricCloudDebugView::Off;
@@ -30,6 +79,136 @@ VolumetricCloudSettings SanitizeVolumetricCloudSettings(const VolumetricCloudSet
 VolumetricCloudSlicePush MakeVolumetricCloudSlicePush(const VolumetricCloudSettings& settings) noexcept
 {
     return VolumetricCloudSlicePush{ settings.slice, settings.tiling, settings.channel, 0u };
+}
+
+float CloudRemap(float v, float lo0, float hi0, float lo1, float hi1) noexcept
+{
+    float width = hi0 - lo0;
+    if (std::abs(width) < kMinStepM) {
+        width = width < 0.0f ? -kMinStepM : kMinStepM;
+    }
+    return lo1 + (v - lo0) / width * (hi1 - lo1);
+}
+
+float CloudAltitudeM(float horizontalSquared, float y, float radiusM) noexcept
+{
+    const float s = horizontalSquared + y * (2.0f * radiusM + y);
+    return s / (std::sqrt(std::max(s + radiusM * radiusM, 0.0f)) + radiusM);
+}
+
+float CloudHeightFraction(float altitudeM, float baseM, float topM) noexcept
+{
+    return Saturate((altitudeM - baseM) / std::max(topM - baseM, kMinStepM));
+}
+
+float CloudShapeGradient(float heightFraction, float peak, float baseRoundness, float topRoundness) noexcept
+{
+    const float stop = Saturate(peak + topRoundness);
+    const float bottom = Saturate(CloudRemap(heightFraction, 0.0f, baseRoundness, 0.0f, 1.0f));
+    const float top = Saturate(CloudRemap(heightFraction, stop * 0.2f, stop, 1.0f, 0.0f));
+    return bottom * top;
+}
+
+float CloudDensityGradient(float heightFraction, float ramp, float topFade) noexcept
+{
+    const float bottom = heightFraction * Saturate(CloudRemap(heightFraction, 0.0f, ramp, 0.0f, 1.0f));
+    const float top = Saturate(CloudRemap(heightFraction, topFade, 1.0f, 1.0f, 0.0f));
+    return bottom * top;
+}
+
+CloudShellSegment ComputeCloudShellSegment(
+    float cameraY, float dirY, float radiusM, float baseM, float topM, float maxDistanceM) noexcept
+{
+    CloudShellSegment segment;
+    const float y = std::max(cameraY, 0.0f);
+    const SphereRoots top = IntersectShell(y, dirY, radiusM, topM);
+    const SphereRoots base = IntersectShell(y, dirY, radiusM, baseM);
+
+    float start = 0.0f;
+    float end = 0.0f;
+    if (y < baseM) {
+        // The base sphere also holds the ground: a ray that leaves it only far away passes the layer.
+        const SphereRoots ground = IntersectShell(y, dirY, radiusM, 0.0f);
+        if (dirY < 0.0f && ground.hit && ground.tNear > -kGroundSlackM) {
+            return segment;
+        }
+        start = base.tFar;
+        end = top.tFar;
+    } else if (y < topM) {
+        end = top.tFar;
+        if (base.hit && base.tNear > 0.0f) {
+            end = std::min(end, base.tNear);
+        }
+    } else {
+        if (!top.hit || top.tFar <= 0.0f) {
+            return segment;
+        }
+        start = std::max(top.tNear, 0.0f);
+        end = (base.hit && base.tNear > 0.0f) ? base.tNear : top.tFar;
+    }
+    end = std::min(end, maxDistanceM);
+    if (!(end > start)) {
+        return segment;
+    }
+    segment.hit = true;
+    segment.tStart = start;
+    segment.tEnd = end;
+    return segment;
+}
+
+void AdvanceCloudWind(float (&offset)[2], float speed, float directionDegrees, float dt) noexcept
+{
+    const float radians = directionDegrees * kPi / 180.0f;
+    offset[0] += std::cos(radians) * speed * dt;
+    offset[1] += std::sin(radians) * speed * dt;
+}
+
+VolumetricCloudParamsGpu MakeVolumetricCloudParams(
+    const VolumetricCloudSettings& safe, const VolumetricCloudFrameFacts& facts) noexcept
+{
+    VolumetricCloudParamsGpu p;
+    p.invViewProjection = facts.invViewProjection;
+    fx::PackVec3(p.eyeAndPlanetRadius, facts.eye, safe.planetRadiusKm * 1000.0f);
+
+    // A sun under the horizon lights nothing; the sky keeps a little ambient light.
+    const float sunVisibility = SmoothStep(-0.05f, 0.15f, facts.sunDirection.y);
+    fx::PackVec3(p.sunDirectionAndIntensity, facts.sunDirection, safe.sunIntensity);
+    const Vec3 sun = facts.sunIlluminance * facts.sunTint;
+    fx::PackVec3(p.sunColorAndAmbient, sun * sunVisibility, safe.ambientIntensity);
+
+    const float luminance = 0.2126f * sun.x + 0.7152f * sun.y + 0.0722f * sun.z;
+    const float ambient = luminance * facts.ambientScale * (0.15f + 0.85f * sunVisibility);
+    fx::PackVec3(p.ambientColor, Vec3(kAmbientTint[0], kAmbientTint[1], kAmbientTint[2]) * ambient);
+
+    p.layer[0] = safe.layerBaseM;
+    p.layer[1] = safe.layerTopM;
+    p.layer[2] = safe.maxDistanceM;
+    p.layer[3] = safe.fadeStart;
+    p.weather[0] = safe.weatherScaleM;
+    p.weather[1] = facts.windOffset[0];
+    p.weather[2] = facts.windOffset[1];
+    p.weather[3] = safe.coverage;
+    p.noise[0] = safe.shapeScaleM;
+    p.noise[1] = safe.detailScaleM;
+    p.noise[2] = safe.detailStrength;
+    p.noise[3] = safe.detailFadeDistM;
+    p.density[0] = safe.density;
+    p.density[1] = safe.extinction;
+    p.density[2] = safe.peakMin;
+    p.density[3] = safe.jitter;
+    p.heightShape[0] = safe.baseRoundness;
+    p.heightShape[1] = safe.topRoundness;
+    p.heightShape[2] = safe.densityRamp;
+    p.heightShape[3] = safe.densityTopFade;
+    p.march[0] = safe.stepBaseM;
+    p.march[1] = safe.stepGrowth;
+    p.march[2] = safe.coarseMultiplier;
+    p.march[3] = safe.minTransmittance;
+    p.counts[0] = static_cast<std::uint32_t>(std::lround(safe.maxSteps));
+    p.counts[1] = static_cast<std::uint32_t>(facts.frameIndex & 0xFFFFFFFFu);
+    p.counts[2] = static_cast<std::uint32_t>(std::lround(safe.emptyToCoarse));
+    p.skip[0] = safe.clearSkip;
+    return p;
 }
 
 } // namespace gte

@@ -1,0 +1,305 @@
+#version 450
+
+// One cloud layer between two spheres below the camera, ray marched. Writes scene * transmittance + cloud light.
+layout(local_size_x = 8, local_size_y = 8) in;
+
+#include "SceneDepthConstants.glsl"
+
+// Member names and order match VolumetricCloudParamsGpu.
+layout(std430, binding = 0) readonly buffer VolumetricCloudParams {
+    mat4 invViewProjection;
+    vec4 eyeAndPlanetRadius;        // xyz eye, w planet radius (m).
+    vec4 sunDirectionAndIntensity;  // xyz toward the sun, w sun intensity factor.
+    vec4 sunColorAndAmbient;        // rgb sun radiance, w ambient intensity factor.
+    vec4 ambientColor;              // rgb ambient radiance.
+    vec4 layer;                     // x base, y top, z max distance, w fade start fraction.
+    vec4 weather;                   // x weather tile (m), yz wind offset (m), w coverage.
+    vec4 noise;                     // x shape tile (m), y detail tile (m), z detail strength, w detail fade (m).
+    vec4 density;                   // x density factor, y extinction (1/m), z peak min, w jitter strength.
+    vec4 heightShape;               // x base roundness, y top roundness, z density ramp, w density top fade.
+    vec4 march;                     // x base step (m), y step growth, z coarse multiplier, w min transmittance.
+    uvec4 counts;                   // x max steps, y frame index, z empty samples to coarse.
+    vec4 skip;                      // x clear-weather stride multiplier.
+} params;
+
+layout(binding = 1) uniform sampler2D sourceColor;
+layout(binding = 2) uniform sampler2D sourceDepth;
+layout(binding = 3) uniform sampler3D shapeVolume;   // R Perlin-Worley, GBA Worley fbm.
+layout(binding = 4) uniform sampler3D detailVolume;  // RGB Worley fbm.
+layout(binding = 5) uniform sampler2D weatherMap;    // R low coverage, G high coverage, B peak, A density.
+layout(binding = 6) uniform sampler2D blueNoise;
+layout(binding = 7, rgba16f) uniform writeonly image2D destinationImage;
+
+const float kMinWidth = 1e-4;
+const float kGoldenRatio = 0.61803398875;
+const float kBlueNoiseSize = 128.0;
+const float kMaxOutputLuminance = 65504.0;
+const float kMinCoverageProduct = 0.02;
+const float kGroundSlack = 0.5;
+
+float Saturate(float v)
+{
+    return clamp(v, 0.0, 1.0);
+}
+
+float Remap(float v, float lo0, float hi0, float lo1, float hi1)
+{
+    float width = hi0 - lo0;
+    width = abs(width) < kMinWidth ? (width < 0.0 ? -kMinWidth : kMinWidth) : width;
+    return lo1 + (v - lo0) / width * (hi1 - lo1);
+}
+
+// Height above sea level of a point `horizontalSquared` from the planet axis at world height `y`.
+float Altitude(float horizontalSquared, float y)
+{
+    float radius = params.eyeAndPlanetRadius.w;
+    float s = horizontalSquared + y * (2.0 * radius + y);
+    return s / (sqrt(max(s + radius * radius, 0.0)) + radius);
+}
+
+// Roots of the ray against the sphere at altitude `height`; returns false on a miss.
+bool IntersectShell(float cameraY, float dirY, float height, out float tNear, out float tFar)
+{
+    float radius = params.eyeAndPlanetRadius.w;
+    float ro = radius + cameraY;
+    float s = sqrt(max(1.0 - dirY * dirY, 0.0));
+    float inner = (height - cameraY) + ro * dirY * dirY / (1.0 + s);
+    float outer = radius + height + ro * s;
+    float disc = inner * outer;
+    tNear = 0.0;
+    tFar = 0.0;
+    if (disc < 0.0) {
+        return false;
+    }
+    float root = sqrt(disc);
+    float b = ro * dirY;
+    tNear = -b - root;
+    tFar = -b + root;
+    return true;
+}
+
+// Part of the ray inside the layer; false when it misses. Same logic as ComputeCloudShellSegment().
+bool LayerSegment(float cameraY, float dirY, out float tStart, out float tEnd)
+{
+    float base = params.layer.x;
+    float top = params.layer.y;
+    float y = max(cameraY, 0.0);
+    float topNear, topFar, baseNear, baseFar;
+    bool topHit = IntersectShell(y, dirY, top, topNear, topFar);
+    bool baseHit = IntersectShell(y, dirY, base, baseNear, baseFar);
+    tStart = 0.0;
+    tEnd = 0.0;
+    if (y < base) {
+        float groundNear, groundFar;
+        bool groundHit = IntersectShell(y, dirY, 0.0, groundNear, groundFar);
+        if (dirY < 0.0 && groundHit && groundNear > -kGroundSlack) {
+            return false;
+        }
+        tStart = baseFar;
+        tEnd = topFar;
+    } else if (y < top) {
+        tEnd = topFar;
+        if (baseHit && baseNear > 0.0) {
+            tEnd = min(tEnd, baseNear);
+        }
+    } else {
+        if (!topHit || topFar <= 0.0) {
+            return false;
+        }
+        tStart = max(topNear, 0.0);
+        tEnd = (baseHit && baseNear > 0.0) ? baseNear : topFar;
+    }
+    tEnd = min(tEnd, params.layer.z);
+    return tEnd > tStart;
+}
+
+// Cloud body at a world position: the coverage-eroded base shape, and the height-based density factor.
+// Returns the shape; `densityFactor` is the part that scales it.
+// Set by CloudShape(): the weather map holds no cloud at the last sampled position.
+bool gWeatherClear = false;
+
+float CloudShape(vec3 position, float heightFraction, out float densityFactor)
+{
+    float coverage = params.weather.w;
+    vec2 wind = params.weather.yz;
+    vec4 wm = texture(weatherMap, (position.xz + wind) / params.weather.x);
+    float weatherCoverage = max(wm.r, Saturate(coverage - 0.5) * wm.g * 2.0);
+    // A shape value can not reach the coverage threshold here, so skip the 3D fetch.
+    densityFactor = 0.0;
+    gWeatherClear = coverage * weatherCoverage <= kMinCoverageProduct;
+    if (gWeatherClear) {
+        return 0.0;
+    }
+
+    float peak = mix(params.density.z, 1.0, wm.b);
+    float stop = Saturate(peak + params.heightShape.y);
+    float roundBottom = Saturate(Remap(heightFraction, 0.0, params.heightShape.x, 0.0, 1.0));
+    float roundTop = Saturate(Remap(heightFraction, stop * 0.2, stop, 1.0, 0.0));
+    float shapeGradient = roundBottom * roundTop;
+
+    float rampBottom = heightFraction * Saturate(Remap(heightFraction, 0.0, params.heightShape.z, 0.0, 1.0));
+    float rampTop = Saturate(Remap(heightFraction, params.heightShape.w, 1.0, 1.0, 0.0));
+    densityFactor = params.density.x * rampBottom * rampTop * wm.a * 2.0;
+
+    float altitude = params.layer.x + heightFraction * (params.layer.y - params.layer.x);
+    vec3 shapeUv = vec3(position.x + wind.x, altitude, position.z + wind.y) / params.noise.x;
+    vec4 sn = texture(shapeVolume, shapeUv);
+    float fbm = sn.g * 0.625 + sn.b * 0.25 + sn.a * 0.125;
+    float shape = Remap(sn.r, fbm - 1.0, 1.0, 0.0, 1.0);
+    return Saturate(Remap(shape * shapeGradient, 1.0 - coverage * weatherCoverage, 1.0, 0.0, 1.0));
+}
+
+// Erodes the shape with the fine noise and applies the density factor. `detailAmount` is 0..1 of the strength.
+float CloudDetail(vec3 position, float heightFraction, float shape, float densityFactor, float detailAmount)
+{
+    vec2 wind = params.weather.yz;
+    float altitude = params.layer.x + heightFraction * (params.layer.y - params.layer.x);
+    vec3 detailUv = vec3(position.x + wind.x, altitude, position.z + wind.y) / params.noise.y;
+    vec3 dn = texture(detailVolume, detailUv).rgb;
+    float fbm = dn.r * 0.625 + dn.g * 0.25 + dn.b * 0.125;
+    float erosion = mix(fbm, 1.0 - fbm, Saturate(heightFraction * 5.0));
+    erosion *= params.noise.z * detailAmount * exp(-params.weather.w * 0.75);
+    return Saturate(Remap(shape, erosion, 1.0, 0.0, 1.0)) * densityFactor;
+}
+
+// Full density at a world position, for light marching.
+float CloudDensityAt(vec3 position, float detailAmount)
+{
+    float horizontalSquared = dot(position.xz - params.eyeAndPlanetRadius.xz, position.xz - params.eyeAndPlanetRadius.xz);
+    float altitude = Altitude(horizontalSquared, position.y);
+    float h = Saturate((altitude - params.layer.x) / max(params.layer.y - params.layer.x, kMinWidth));
+    float factor;
+    float shape = CloudShape(position, h, factor);
+    return CloudDetail(position, h, shape, factor, detailAmount);
+}
+
+#include "VolumetricCloudLighting.glsl"
+
+// Marches [tStart, tEnd]. Returns light in rgb and the transmittance in a.
+vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter)
+{
+    float maxDistance = params.layer.z;
+    float fadeBegin = params.layer.w * maxDistance;
+    float baseStep = params.march.x;
+    float growth = params.march.y;
+    float coarseMultiplier = params.march.z;
+    float horizontalScale = dot(rd.xz, rd.xz);
+    uint maxSteps = params.counts.x;
+    uint emptyToCoarse = params.counts.z;
+
+    vec3 sunDirection = params.sunDirectionAndIntensity.xyz;
+    vec3 sunRadiance = params.sunColorAndAmbient.rgb * params.sunDirectionAndIntensity.w;
+    vec3 ambientRadiance = params.ambientColor.rgb * params.sunColorAndAmbient.w;
+
+    float stepLength = baseStep + tStart * growth;
+    float t = tStart + jitter * params.density.w * stepLength;
+    vec3 light = vec3(0.0);
+    float transmittance = 1.0;
+    bool coarse = true;
+    uint emptyRun = 0u;
+
+    for (uint i = 0u; i < maxSteps && t < tEnd && transmittance > params.march.w; ++i) {
+        stepLength = baseStep + t * growth;
+        float coarseLength = stepLength * coarseMultiplier;
+        vec3 position = vec3(eye.x + rd.x * t, eye.y + rd.y * t, eye.z + rd.z * t);
+        float altitude = Altitude(horizontalScale * t * t, eye.y + rd.y * t);
+        float h = Saturate((altitude - params.layer.x) / (params.layer.y - params.layer.x));
+        float factor;
+        float shape = CloudShape(position, h, factor);
+
+        if (coarse) {
+            if (shape * factor > 0.0) {
+                coarse = false;
+                emptyRun = 0u;
+                t = max(t - coarseLength, tStart);
+            } else {
+                t += gWeatherClear ? coarseLength * params.skip.x : coarseLength;
+            }
+            continue;
+        }
+
+        float detailAmount = 1.0 - smoothstep(0.5 * params.noise.w, params.noise.w, t);
+        float d = CloudDetail(position, h, shape, factor, detailAmount);
+        if (d <= 0.0) {
+            emptyRun++;
+            if (emptyRun >= emptyToCoarse) {
+                coarse = true;
+            }
+            t += stepLength;
+            continue;
+        }
+        emptyRun = 0u;
+
+        float fade = 1.0 - smoothstep(fadeBegin, maxDistance, t);
+        float extinction = d * params.density.y * fade;
+        float stepTransmittance = exp(-extinction * stepLength);
+
+        CloudLightInput li;
+        li.position = position;
+        li.density = d;
+        li.heightFraction = h;
+        li.extinction = extinction;
+        li.stepLength = stepLength;
+        li.distanceAlongRay = t;
+        li.viewDirection = rd;
+        li.sunDirection = sunDirection;
+        li.sunRadiance = sunRadiance;
+        li.ambientRadiance = ambientRadiance;
+        light += transmittance * CloudSourceRadiance(li) * (1.0 - stepTransmittance);
+        transmittance *= stepTransmittance;
+        t += stepLength;
+    }
+
+    // Below the cutoff the cloud counts as opaque; rescale so there is no step at the threshold.
+    float cutoff = params.march.w;
+    if (transmittance <= cutoff) {
+        transmittance = 0.0;
+    } else {
+        transmittance = Saturate((transmittance - cutoff) / (1.0 - cutoff));
+    }
+    return vec4(light, transmittance);
+}
+
+void main()
+{
+    ivec2 outSize = imageSize(destinationImage);
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    if (texel.x >= outSize.x || texel.y >= outSize.y) {
+        return;
+    }
+    vec2 uv = (vec2(texel) + 0.5) / vec2(outSize);
+    vec3 scene = texture(sourceColor, uv).rgb;
+    float rawDepth = texture(sourceDepth, uv).r;
+
+    vec2 ndc = uv * 2.0 - 1.0;
+    vec4 nearPoint = params.invViewProjection * vec4(ndc, 0.0, 1.0);
+    vec4 farPoint = params.invViewProjection * vec4(ndc, 1.0, 1.0);
+    vec3 rd = normalize(farPoint.xyz / farPoint.w - nearPoint.xyz / nearPoint.w);
+    vec3 eye = params.eyeAndPlanetRadius.xyz;
+
+    float tStart;
+    float tEnd;
+    if (!LayerSegment(eye.y, rd.y, tStart, tEnd)) {
+        imageStore(destinationImage, texel, vec4(scene, 1.0));
+        return;
+    }
+    // Clouds behind the surface at this pixel are never added.
+    if (rawDepth < kClearDepthThreshold) {
+        vec4 world = params.invViewProjection * vec4(ndc, rawDepth, 1.0);
+        tEnd = min(tEnd, length(world.xyz / world.w - eye));
+        if (tEnd <= tStart) {
+            imageStore(destinationImage, texel, vec4(scene, 1.0));
+            return;
+        }
+    }
+
+    float bn = texture(blueNoise, (vec2(texel) + 0.5) / kBlueNoiseSize).r;
+    float jitter = fract(bn + kGoldenRatio * float(params.counts.y & 63u));
+    vec4 cloud = MarchClouds(eye, rd, tStart, tEnd, jitter);
+
+    vec3 color = scene * cloud.a + cloud.rgb;
+    if (any(isnan(color)) || any(isinf(color))) {
+        color = scene;
+    }
+    imageStore(destinationImage, texel, vec4(clamp(color, vec3(0.0), vec3(kMaxOutputLuminance)), 1.0));
+}

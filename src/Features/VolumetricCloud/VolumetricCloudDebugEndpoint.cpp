@@ -46,15 +46,25 @@ std::string_view StatusName(VolumetricCloudFrameStatus status) noexcept
 {
     switch (status) {
     case VolumetricCloudFrameStatus::NotRendered: return "NotRendered";
-    case VolumetricCloudFrameStatus::Off: return "Off";
     case VolumetricCloudFrameStatus::Ok: return "Ok";
     case VolumetricCloudFrameStatus::Disabled: return "Disabled";
     case VolumetricCloudFrameStatus::AssetMissing: return "AssetMissing";
     case VolumetricCloudFrameStatus::ShadersNotReady: return "ShadersNotReady";
     case VolumetricCloudFrameStatus::TargetFailed: return "TargetFailed";
     case VolumetricCloudFrameStatus::PassDisabled: return "PassDisabled";
+    case VolumetricCloudFrameStatus::NoValidCamera: return "NoValidCamera";
     }
     return "NotRendered";
+}
+
+const VolumetricCloudFloatSetting* FindFloatSetting(std::string_view key) noexcept
+{
+    for (const VolumetricCloudFloatSetting& entry : kVolumetricCloudFloatSettings) {
+        if (key == entry.name) {
+            return &entry;
+        }
+    }
+    return nullptr;
 }
 
 std::string SizeText(std::uint32_t w, std::uint32_t h, std::uint32_t d)
@@ -87,9 +97,10 @@ fx::FeatureDebugResult VolumetricCloudDebugEndpoint::GetState() const
     fx::FeatureDebugResult out;
     Add(out, "enabled", s.enabled);
     Add(out, "debugView", std::string(DebugViewName(s.debugView)));
-    Add(out, "slice", static_cast<double>(s.slice));
     Add(out, "channel", static_cast<std::int64_t>(s.channel));
-    Add(out, "tiling", static_cast<double>(s.tiling));
+    for (const VolumetricCloudFloatSetting& entry : kVolumetricCloudFloatSettings) {
+        Add(out, entry.name, static_cast<double>(s.*(entry.member)));
+    }
 
     const fx::VolumeSize shape = m_feature.ShapeSize();
     const fx::VolumeSize detail = m_feature.DetailSize();
@@ -117,7 +128,7 @@ fx::FeatureDebugResult VolumetricCloudDebugEndpoint::Set(std::span<const fx::Fea
         } else if (arg.key == "debugView") {
             const auto view = ParseDebugView(arg.value);
             if (!view) {
-                return Fail(arg.key, "debugView must be Off, ShapeSlice, DetailSlice, WeatherMap or BlueNoise");
+                return Fail(arg.key, "debugView must be Off (the clouds), ShapeSlice, DetailSlice, WeatherMap or BlueNoise");
             }
             candidate.debugView = *view;
         } else if (arg.key == "channel") {
@@ -126,12 +137,12 @@ fx::FeatureDebugResult VolumetricCloudDebugEndpoint::Set(std::span<const fx::Fea
                 return Fail(arg.key, "value does not fit this key");
             }
             candidate.channel = static_cast<std::uint32_t>(*parsed);
-        } else if (arg.key == "slice" || arg.key == "tiling") {
+        } else if (const VolumetricCloudFloatSetting* entry = FindFloatSetting(arg.key)) {
             const auto parsed = fx::ParseDebugFloat(arg.value);
             if (!parsed || std::abs(*parsed) > std::numeric_limits<float>::max()) {
                 return Fail(arg.key, "value does not fit this key");
             }
-            (arg.key == "slice" ? candidate.slice : candidate.tiling) = static_cast<float>(*parsed);
+            candidate.*(entry->member) = static_cast<float>(*parsed);
         } else {
             const bool readOnly = arg.key.starts_with("game.") || arg.key.starts_with("scene.");
             return Fail(arg.key, readOnly ? "key is read-only" : "unknown key");

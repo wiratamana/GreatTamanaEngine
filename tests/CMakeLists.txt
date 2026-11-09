@@ -93,6 +93,7 @@ gte_test_path_defines(GreatTamanaEngineTests "${CMAKE_BINARY_DIR}/shaders"
     GTE_TEST_VOLUMETRIC_TEMPORAL_SPV_PATH=VolumetricLightTemporal.comp.spv
     GTE_TEST_VOLUMETRIC_INTEGRATE_SPV_PATH=VolumetricLightIntegrate.comp.spv
     GTE_TEST_VOLUMETRIC_COMPOSITE_SPV_PATH=VolumetricLightComposite.comp.spv
+    GTE_TEST_CLOUD_MARCH_SPV_PATH=VolumetricCloud.comp.spv
     GTE_TEST_CLOUD_SLICE3D_SPV_PATH=VolumetricCloudSlice3D.comp.spv
     GTE_TEST_CLOUD_SLICE2D_SPV_PATH=VolumetricCloudSlice2D.comp.spv
     GTE_TEST_TONEMAPPING_SPV_PATH=ToneMapping.comp.spv
