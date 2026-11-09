@@ -3,7 +3,9 @@
 #include "../../Core/FeatureKit/ScreenSpaceView.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <utility>
 
 namespace gte {
 
@@ -60,7 +62,101 @@ SphereRoots IntersectShell(float cameraY, float dirY, float radiusM, float heigh
     return roots;
 }
 
+using Matrix64 = std::array<double, 16>; // Column-major, like Mat4.
+
+Matrix64 ToDouble(const Mat4& m) noexcept
+{
+    Matrix64 out{};
+    for (int c = 0; c < 4; ++c) {
+        for (int r = 0; r < 4; ++r) {
+            out[static_cast<std::size_t>(c * 4 + r)] = static_cast<double>(m(r, c));
+        }
+    }
+    return out;
+}
+
+Mat4 ToFloat(const Matrix64& m) noexcept
+{
+    Mat4 out = Mat4::Identity();
+    for (int c = 0; c < 4; ++c) {
+        for (int r = 0; r < 4; ++r) {
+            out(r, c) = static_cast<float>(m[static_cast<std::size_t>(c * 4 + r)]);
+        }
+    }
+    return out;
+}
+
+// Gauss-Jordan with partial pivoting. False when the matrix is singular.
+bool Invert(const Matrix64& in, Matrix64& out) noexcept
+{
+    double a[4][8] = {};
+    for (int r = 0; r < 4; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            a[r][c] = in[static_cast<std::size_t>(c * 4 + r)];
+        }
+        a[r][4 + r] = 1.0;
+    }
+    for (int col = 0; col < 4; ++col) {
+        int pivot = col;
+        for (int r = col + 1; r < 4; ++r) {
+            if (std::abs(a[r][col]) > std::abs(a[pivot][col])) {
+                pivot = r;
+            }
+        }
+        if (!(std::abs(a[pivot][col]) > 1e-300)) {
+            return false;
+        }
+        for (int c = 0; c < 8; ++c) {
+            std::swap(a[col][c], a[pivot][c]);
+        }
+        const double scale = 1.0 / a[col][col];
+        for (int c = 0; c < 8; ++c) {
+            a[col][c] *= scale;
+        }
+        for (int r = 0; r < 4; ++r) {
+            if (r == col) {
+                continue;
+            }
+            const double factor = a[r][col];
+            for (int c = 0; c < 8; ++c) {
+                a[r][c] -= factor * a[col][c];
+            }
+        }
+    }
+    for (int r = 0; r < 4; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            out[static_cast<std::size_t>(c * 4 + r)] = a[r][4 + c];
+        }
+    }
+    return true;
+}
+
 } // namespace
+
+CloudRelativeCamera MakeCloudRelativeCamera(const Mat4& viewProjection, const Vec3& eye) noexcept
+{
+    CloudRelativeCamera camera;
+    Matrix64 vp = ToDouble(viewProjection);
+    // The projection of the eye itself becomes the translation column: A = VP * Translation(eye).
+    for (int r = 0; r < 4; ++r) {
+        const std::size_t row = static_cast<std::size_t>(r);
+        vp[12 + row] += vp[row] * static_cast<double>(eye.x) + vp[4 + row] * static_cast<double>(eye.y)
+            + vp[8 + row] * static_cast<double>(eye.z);
+    }
+    Matrix64 inverse{};
+    if (!Invert(vp, inverse)) {
+        return camera;
+    }
+    for (const double value : vp) {
+        if (!std::isfinite(value)) {
+            return camera;
+        }
+    }
+    camera.valid = true;
+    camera.projection = ToFloat(vp);
+    camera.inverse = ToFloat(inverse);
+    return camera;
+}
 
 VolumetricCloudSettings SanitizeVolumetricCloudSettings(const VolumetricCloudSettings& candidate) noexcept
 {
@@ -287,7 +383,81 @@ VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     p.drainePhase[1] = kCloudDraineG;
     p.drainePhase[2] = kCloudDraineAlpha;
     p.drainePhase[3] = kCloudDraineWeight;
+    const std::uint32_t divisor = CloudResolutionDivisor(safe);
+    const CloudSampleOffset offset = CloudBayerOffset(facts.frameIndex, divisor);
+    p.lowRes[0] = divisor;
+    p.lowRes[1] = offset.x;
+    p.lowRes[2] = offset.y;
+    p.fullSize[0] = facts.viewWidth;
+    p.fullSize[1] = facts.viewHeight;
     return p;
+}
+
+std::uint32_t CloudResolutionDivisor(const VolumetricCloudSettings& safe) noexcept
+{
+    if (safe.resolutionDivisor < 1.5f) {
+        return 1;
+    }
+    return safe.resolutionDivisor < 3.0f ? 2 : 4;
+}
+
+CloudSampleOffset CloudBayerOffset(std::uint64_t frameIndex, std::uint32_t divisor) noexcept
+{
+    // Rank of each cell of the Bayer matrix; the cell holding rank k is visited on frame k.
+    constexpr std::uint32_t kBayer2[4] = { 0, 2, 3, 1 };
+    constexpr std::uint32_t kBayer4[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
+    if (divisor != 2 && divisor != 4) {
+        return CloudSampleOffset{};
+    }
+    const std::uint32_t cells = divisor * divisor;
+    const std::uint32_t rank = static_cast<std::uint32_t>(frameIndex % cells);
+    const std::uint32_t* matrix = divisor == 2 ? kBayer2 : kBayer4;
+    for (std::uint32_t i = 0; i < cells; ++i) {
+        if (matrix[i] == rank) {
+            return CloudSampleOffset{ i % divisor, i / divisor };
+        }
+    }
+    return CloudSampleOffset{};
+}
+
+VolumetricCloudResolveParamsGpu MakeVolumetricCloudResolveParams(const VolumetricCloudSettings& safe,
+    const VolumetricCloudFrameFacts& facts, const VolumetricCloudResolveFacts& resolve) noexcept
+{
+    VolumetricCloudResolveParamsGpu p;
+    p.invViewProjection = facts.invViewProjection;
+    p.prevViewProjection = resolve.prevViewProjection;
+    fx::PackVec3(p.eye, facts.eye);
+    p.windDelta[0] = resolve.windDelta[0];
+    p.windDelta[2] = resolve.windDelta[1];
+    const bool accumulate = safe.temporal >= 0.5f;
+    p.blend[0] = accumulate ? safe.historyBlend : 1.0f;
+    p.blend[1] = accumulate ? safe.freshBlend : 1.0f;
+    p.blend[2] = safe.clampExpand;
+    p.blend[3] = safe.maxDistanceM * 0.25f;
+    p.motion[0] = accumulate ? safe.motionBlend : 1.0f;
+    const std::uint32_t divisor = CloudResolutionDivisor(safe);
+    const CloudSampleOffset offset = CloudBayerOffset(facts.frameIndex, divisor);
+    p.counts[0] = divisor;
+    p.counts[1] = offset.x;
+    p.counts[2] = offset.y;
+    p.counts[3] = (accumulate && resolve.historyValid) ? 1u : 0u;
+    p.sizes[0] = facts.viewWidth;
+    p.sizes[1] = facts.viewHeight;
+    p.sizes[2] = resolve.lowWidth;
+    p.sizes[3] = resolve.lowHeight;
+    return p;
+}
+
+bool CloudTapUsable(float tapEndKm, float tapDistanceKm, float tapTransmittance, float pixelEndKm) noexcept
+{
+    constexpr float kRelative = 0.03f;
+    constexpr float kSlackKm = 0.02f;
+    // The tap must have looked at least as far as this pixel's surface.
+    if (tapEndKm < (1.0f - kRelative) * pixelEndKm - kSlackKm) {
+        return false;
+    }
+    // A cloud that sits behind this pixel's surface must not be added to it.
+    return tapTransmittance > 0.999f || tapDistanceKm <= (1.0f + kRelative) * pixelEndKm + kSlackKm;
 }
 
 } // namespace gte

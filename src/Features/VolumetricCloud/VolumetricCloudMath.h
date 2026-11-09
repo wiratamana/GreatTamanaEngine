@@ -67,9 +67,21 @@ float CloudStepOpacity(float extinction, float stepLength) noexcept;
 // Adds one step to a front-to-back accumulation. `source` is the radiance per unit of absorbed light.
 void CloudAccumulateStep(float& light, float& transmittance, float source, float opacity) noexcept;
 
+// View-projection matrices that work in coordinates relative to the eye. The engine's own inverse is
+// computed in single precision with the camera thousands of metres from the origin, which leaves rays
+// about half a pixel off; here the product and the inverse are formed in double precision.
+struct CloudRelativeCamera {
+    bool valid = false;
+    Mat4 inverse = Mat4::Identity();    // Clip space to world position minus eye.
+    Mat4 projection = Mat4::Identity(); // World position minus eye to clip space.
+};
+
+// `viewProjection` maps world positions to clip space; `eye` is the origin of the relative frame.
+CloudRelativeCamera MakeCloudRelativeCamera(const Mat4& viewProjection, const Vec3& eye) noexcept;
+
 // What the per-frame parameter block needs besides the settings.
 struct VolumetricCloudFrameFacts {
-    Mat4 invViewProjection = Mat4::Identity();
+    Mat4 invViewProjection = Mat4::Identity(); // Eye-relative, from MakeCloudRelativeCamera().
     Vec3 eye;
     Vec3 sunDirection = Vec3::Up();
     Vec3 sunIlluminance = Vec3::One();
@@ -77,9 +89,41 @@ struct VolumetricCloudFrameFacts {
     float ambientScale = 1.0f;
     float windOffset[2] = {};
     std::uint64_t frameIndex = 0;
+    std::uint32_t viewWidth = 1;
+    std::uint32_t viewHeight = 1;
 };
 
 VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     const VolumetricCloudSettings& safe, const VolumetricCloudFrameFacts& facts) noexcept;
+
+// The march resolution divisor in use: the setting rounded to 1, 2 or 4.
+std::uint32_t CloudResolutionDivisor(const VolumetricCloudSettings& safe) noexcept;
+
+// Pixel inside an n x n block that the march samples on `frameIndex`; n*n frames visit every pixel once,
+// in a Bayer order so that consecutive frames land far apart.
+struct CloudSampleOffset {
+    std::uint32_t x = 0;
+    std::uint32_t y = 0;
+};
+CloudSampleOffset CloudBayerOffset(std::uint64_t frameIndex, std::uint32_t divisor) noexcept;
+
+// Previous-frame data of the resolve pass.
+struct VolumetricCloudResolveFacts {
+    Mat4 prevViewProjection = Mat4::Identity(); // Last frame's view-projection, eye-relative to THIS frame's eye.
+    float windDelta[2] = {}; // Wind offset now minus last frame (m).
+    bool historyValid = false;
+    std::uint32_t lowWidth = 1;
+    std::uint32_t lowHeight = 1;
+};
+
+VolumetricCloudResolveParamsGpu MakeVolumetricCloudResolveParams(const VolumetricCloudSettings& safe,
+    const VolumetricCloudFrameFacts& facts, const VolumetricCloudResolveFacts& resolve) noexcept;
+
+// CPU twin of the tap test in VolumetricCloudResolve.comp: may a march result be used at a pixel whose scene
+// lies `pixelEndKm` away? `tapEndKm` is how far that march looked, `tapDistanceKm` where its cloud sits.
+bool CloudTapUsable(float tapEndKm, float tapDistanceKm, float tapTransmittance, float pixelEndKm) noexcept;
+
+// Distance that stands for "no surface", in km.
+inline constexpr float kCloudNoSurfaceKm = 1000.0f;
 
 } // namespace gte

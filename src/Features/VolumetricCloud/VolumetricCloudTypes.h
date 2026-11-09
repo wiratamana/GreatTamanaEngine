@@ -70,16 +70,16 @@ struct VolumetricCloudSettings {
     float stepBaseM = 40.0f;
     float stepGrowth = 0.025f;
     float coarseMultiplier = 3.0f;
-    float maxSteps = 128.0f;
+    float maxSteps = 64.0f;
     float emptyToCoarse = 3.0f;
     float clearSkip = 1.0f; // Stride multiplier over weather that holds no cloud; above 1 can miss small clouds.
-    float minTransmittance = 0.05f;
+    float minTransmittance = 0.1f;
     float jitter = 1.0f;
 
     // Lighting. Intensities scale the sun and sky radiance the engine hands over.
     float sunIntensity = 8.0f;
     float ambientIntensity = 0.28f;
-    float sunSteps = 5.0f;          // Samples of the march toward the sun.
+    float sunSteps = 3.0f;          // Samples of the march toward the sun.
     float lightReach = 0.5f;        // Length of that march, as a fraction of the layer thickness.
     float msOctaves = 3.0f;         // Multiple scattering octaves.
     float msAttenuation = 0.5f;     // Per octave factor on the optical depth.
@@ -96,6 +96,14 @@ struct VolumetricCloudSettings {
     float hazeDistanceM = 45000.0f; // Distance at which a cloud has faded to 1/e into the sky behind it.
     float lightDetail = 0.0f;       // Share of the fine erosion the nearest sun sample uses.
     float lightStride = 2.0f;       // Lit samples that share one sun march.
+
+    // Resolution and temporal accumulation.
+    float resolutionDivisor = 4.0f; // March at 1/n of the view size per axis; 1, 2 or 4.
+    float temporal = 1.0f;          // 1 accumulates over frames; 0 shows the current march only.
+    float historyBlend = 0.0f;      // Weight of the new samples in a pixel without an exact sample this frame.
+    float freshBlend = 0.2f;        // Same for the pixel that was marched itself.
+    float clampExpand = 0.0f;       // Relative growth of the neighbourhood box the history is clamped to; 0 = no clamp.
+    float motionBlend = 0.5f;       // Extra weight of the new samples where the picture moves by a pixel or more.
 };
 
 // One tunable float: its endpoint key, field and range.
@@ -156,11 +164,19 @@ inline constexpr std::array kVolumetricCloudFloatSettings{
     VolumetricCloudFloatSetting{ "hazeDistanceM", &VolumetricCloudSettings::hazeDistanceM, 1000.0f, 10000000.0f },
     VolumetricCloudFloatSetting{ "lightDetail", &VolumetricCloudSettings::lightDetail, 0.0f, 1.0f },
     VolumetricCloudFloatSetting{ "lightStride", &VolumetricCloudSettings::lightStride, 1.0f, 8.0f },
+    VolumetricCloudFloatSetting{ "resolutionDivisor", &VolumetricCloudSettings::resolutionDivisor, 1.0f, 4.0f },
+    VolumetricCloudFloatSetting{ "temporal", &VolumetricCloudSettings::temporal, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "historyBlend", &VolumetricCloudSettings::historyBlend, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "freshBlend", &VolumetricCloudSettings::freshBlend, 0.01f, 1.0f },
+    VolumetricCloudFloatSetting{ "clampExpand", &VolumetricCloudSettings::clampExpand, 0.0f, 4.0f },
+    VolumetricCloudFloatSetting{ "motionBlend", &VolumetricCloudSettings::motionBlend, 0.0f, 1.0f },
 };
 
 struct VolumetricCloudViewSnapshot {
     VolumetricCloudFrameStatus status = VolumetricCloudFrameStatus::NotRendered;
     std::uint64_t frameIndex = 0;
+    bool historyUsed = false;       // The resolve pass blended the history of the last frame.
+    std::uint32_t divisor = 1;      // March resolution divisor of the last frame.
 };
 
 // Push constants of the slice viewer shaders (16 bytes).
@@ -193,9 +209,25 @@ struct VolumetricCloudParamsGpu {
     float lightScatter[4] = {};         // x silver g, y octave attenuation, z octave contribution, w octave eccentricity.
     float lightMisc[4] = {};            // x phase model, y ambient at the base, z haze distance (m), w light detail.
     float drainePhase[4] = {};          // x Henyey-Greenstein g, y Draine g, z Draine alpha, w Draine weight.
+    std::uint32_t lowRes[4] = {};       // x divisor, yz sample offset inside the block, w unused.
+    std::uint32_t fullSize[4] = {};     // xy view size in pixels.
 };
-static_assert(sizeof(VolumetricCloudParamsGpu) == 64 + 17 * 16);
+static_assert(sizeof(VolumetricCloudParamsGpu) == 64 + 19 * 16);
 static_assert(std::is_trivially_copyable_v<VolumetricCloudParamsGpu>);
+
+// std430 block of VolumetricCloudResolve.comp; member order matches the shader.
+struct VolumetricCloudResolveParamsGpu {
+    Mat4 invViewProjection;
+    Mat4 prevViewProjection;
+    float eye[4] = {};                  // xyz eye (world).
+    float windDelta[4] = {};            // xz: shift from a cloud position now to the same cloud last frame (m).
+    float blend[4] = {};                // x history blend, y fresh blend, z clamp expand, w fallback cloud distance (m).
+    float motion[4] = {};               // x extra blend at one pixel of motion.
+    std::uint32_t counts[4] = {};       // x divisor, yz sample offset inside the block, w history valid.
+    std::uint32_t sizes[4] = {};        // xy view size, zw march target size.
+};
+static_assert(sizeof(VolumetricCloudResolveParamsGpu) == 128 + 6 * 16);
+static_assert(std::is_trivially_copyable_v<VolumetricCloudResolveParamsGpu>);
 
 // Clamps every field into its documented range; a non-finite number falls back to the default.
 VolumetricCloudSettings SanitizeVolumetricCloudSettings(const VolumetricCloudSettings& candidate) noexcept;

@@ -1,13 +1,14 @@
 #version 450
 
-// One cloud layer between two spheres below the camera, ray marched. Writes scene * transmittance + cloud light.
+// One cloud layer between two spheres below the camera, ray marched at a fraction of the view size.
+// Writes the cloud light and transmittance; VolumetricCloudResolve.comp upsamples and composites it.
 layout(local_size_x = 8, local_size_y = 8) in;
 
 #include "SceneDepthConstants.glsl"
 
 // Member names and order match VolumetricCloudParamsGpu.
 layout(std430, binding = 0) readonly buffer VolumetricCloudParams {
-    mat4 invViewProjection;
+    mat4 invViewProjection;         // Clip space to world position minus eye.
     vec4 eyeAndPlanetRadius;        // xyz eye, w planet radius (m).
     vec4 sunDirectionAndIntensity;  // xyz toward the sun, w sun intensity factor.
     vec4 sunColorAndAmbient;        // rgb sun radiance, w ambient intensity factor.
@@ -25,15 +26,19 @@ layout(std430, binding = 0) readonly buffer VolumetricCloudParams {
     vec4 lightScatter;              // x silver g, y octave attenuation, z octave contribution, w octave eccentricity.
     vec4 lightMisc;                 // x phase model, y ambient at the base, z haze distance (m), w light detail.
     vec4 drainePhase;               // x Henyey-Greenstein g, y Draine g, z Draine alpha, w Draine weight.
+    uvec4 lowRes;                   // x divisor, yz sample offset inside the block.
+    uvec4 fullSize;                 // xy view size in pixels.
 } params;
 
-layout(binding = 1) uniform sampler2D sourceColor;
-layout(binding = 2) uniform sampler2D sourceDepth;
-layout(binding = 3) uniform sampler3D shapeVolume;   // R Perlin-Worley, GBA Worley fbm.
-layout(binding = 4) uniform sampler3D detailVolume;  // RGB Worley fbm.
-layout(binding = 5) uniform sampler2D weatherMap;    // R low coverage, G high coverage, B peak, A density.
-layout(binding = 6) uniform sampler2D blueNoise;
-layout(binding = 7, rgba16f) uniform writeonly image2D destinationImage;
+layout(binding = 1) uniform sampler2D sourceDepth;
+layout(binding = 2) uniform sampler3D shapeVolume;   // R Perlin-Worley, GBA Worley fbm.
+layout(binding = 3) uniform sampler3D detailVolume;  // RGB Worley fbm.
+layout(binding = 4) uniform sampler2D weatherMap;    // R low coverage, G high coverage, B peak, A density.
+layout(binding = 5) uniform sampler2D blueNoise;
+layout(binding = 6, rgba16f) uniform writeonly image2D lowColorOut; // Cloud light in rgb, transmittance in a.
+layout(binding = 7, rgba16f) uniform writeonly image2D lowAuxOut;   // x cloud distance, y complete up to (km).
+
+const float kNoSurfaceKm = 1000.0;
 
 const float kMinWidth = 1e-4;
 const float kGoldenRatio = 0.61803398875;
@@ -180,9 +185,12 @@ float CloudDensityAt(vec3 position, float detailAmount)
 
 #include "VolumetricCloudLighting.glsl"
 
-// Marches [tStart, tEnd]. Returns light in rgb and the transmittance in a.
-vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter)
+// Marches [tStart, tEnd]. Returns light in rgb and the transmittance in a; `cloudDistance` is the mean
+// distance of the cloud, weighted by how much each step adds to the picture (0 when there is none).
+vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, out float cloudDistance)
 {
+    float distanceSum = 0.0;
+    float weightSum = 0.0;
     float maxDistance = params.layer.z;
     float fadeBegin = params.layer.w * maxDistance;
     float baseStep = params.march.x;
@@ -265,10 +273,13 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter)
         li.ambientRadiance = ambientRadiance;
         li.sunOpticalDepth = sunOpticalDepth;
         light += transmittance * CloudSourceRadiance(li) * opacity;
+        float weight = transmittance * opacity;
+        distanceSum += weight * t;
+        weightSum += weight;
         transmittance *= 1.0 - opacity;
         t += stepLength;
     }
-
+    cloudDistance = weightSum > 0.0 ? distanceSum / weightSum : 0.0;
     // Below the cutoff the cloud counts as opaque; rescale so there is no step at the threshold.
     float cutoff = params.march.w;
     if (transmittance <= cutoff) {
@@ -281,13 +292,15 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter)
 
 void main()
 {
-    ivec2 outSize = imageSize(destinationImage);
+    ivec2 lowSize = imageSize(lowColorOut);
     ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
-    if (texel.x >= outSize.x || texel.y >= outSize.y) {
+    if (texel.x >= lowSize.x || texel.y >= lowSize.y) {
         return;
     }
-    vec2 uv = (vec2(texel) + 0.5) / vec2(outSize);
-    vec3 scene = texture(sourceColor, uv).rgb;
+    // The march samples one real pixel of its block; the offset walks through the block over the frames.
+    ivec2 fullSize = ivec2(params.fullSize.xy);
+    ivec2 pixel = min(texel * int(params.lowRes.x) + ivec2(params.lowRes.yz), fullSize - 1);
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(fullSize);
     float rawDepth = texture(sourceDepth, uv).r;
 
     vec2 ndc = uv * 2.0 - 1.0;
@@ -299,26 +312,34 @@ void main()
     float tStart;
     float tEnd;
     if (!LayerSegment(eye.y, rd.y, tStart, tEnd)) {
-        imageStore(destinationImage, texel, vec4(scene, 1.0));
+        imageStore(lowColorOut, texel, vec4(0.0, 0.0, 0.0, 1.0));
+        imageStore(lowAuxOut, texel, vec4(0.0, kNoSurfaceKm, 0.0, 0.0));
         return;
     }
     // Clouds behind the surface at this pixel are never added.
+    float completeKm = kNoSurfaceKm;
     if (rawDepth < kClearDepthThreshold) {
         vec4 world = params.invViewProjection * vec4(ndc, rawDepth, 1.0);
-        tEnd = min(tEnd, length(world.xyz / world.w - eye));
+        float surface = length(world.xyz / world.w);
+        if (surface < tEnd) {
+            tEnd = surface;
+            completeKm = surface * 0.001;
+        }
         if (tEnd <= tStart) {
-            imageStore(destinationImage, texel, vec4(scene, 1.0));
+            imageStore(lowColorOut, texel, vec4(0.0, 0.0, 0.0, 1.0));
+            imageStore(lowAuxOut, texel, vec4(0.0, completeKm, 0.0, 0.0));
             return;
         }
     }
 
-    float bn = texture(blueNoise, (vec2(texel) + 0.5) / kBlueNoiseSize).r;
+    float bn = texture(blueNoise, (vec2(pixel) + 0.5) / kBlueNoiseSize).r;
     float jitter = fract(bn + kGoldenRatio * float(params.counts.y & 63u));
-    vec4 cloud = MarchClouds(eye, rd, tStart, tEnd, jitter);
-
-    vec3 color = scene * cloud.a + cloud.rgb;
-    if (any(isnan(color)) || any(isinf(color))) {
-        color = scene;
+    float cloudDistance;
+    vec4 cloud = MarchClouds(eye, rd, tStart, tEnd, jitter, cloudDistance);
+    if (any(isnan(cloud)) || any(isinf(cloud))) {
+        cloud = vec4(0.0, 0.0, 0.0, 1.0);
+        cloudDistance = 0.0;
     }
-    imageStore(destinationImage, texel, vec4(clamp(color, vec3(0.0), vec3(kMaxOutputLuminance)), 1.0));
+    imageStore(lowColorOut, texel, vec4(min(cloud.rgb, vec3(kMaxOutputLuminance)), cloud.a));
+    imageStore(lowAuxOut, texel, vec4(cloudDistance * 0.001, completeKm, 0.0, 0.0));
 }

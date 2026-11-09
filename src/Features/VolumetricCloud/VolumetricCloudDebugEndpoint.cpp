@@ -111,6 +111,8 @@ fx::FeatureDebugResult VolumetricCloudDebugEndpoint::GetState() const
     Add(out, "game.assets.weather", SizeText(weather.width, weather.height, 0));
     Add(out, "game.assets.blueNoise", SizeText(blue.width, blue.height, 0));
     Add(out, "game.status", std::string(StatusName(m_feature.Snapshot(rg::ViewScope::Primary).status)));
+    Add(out, "game.historyUsed", m_feature.Snapshot(rg::ViewScope::Primary).historyUsed);
+    Add(out, "game.divisor", static_cast<std::int64_t>(m_feature.Snapshot(rg::ViewScope::Primary).divisor));
     Add(out, "scene.status", std::string(StatusName(m_feature.Snapshot(rg::ViewScope::Secondary).status)));
     return out;
 }

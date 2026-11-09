@@ -26,7 +26,7 @@ void VolumetricCloudFeature::Setup(fx::FeatureSetup& s)
 
     s.PostComposite("VolumetricCloud", kCompositePriority, fx::Blend::Replace,
         [this](fx::CompositeFrame& f) { CompositePass(f); },
-        fx::Gate{ "VolumetricCloud.March.Dispatch", "VolumetricCloud.Debug.Dispatch",
+        fx::Gate{ "VolumetricCloud.March.Dispatch", "VolumetricCloud.Resolve.Dispatch", "VolumetricCloud.Debug.Dispatch",
             "VolumetricCloud.CopyToPrivateTarget" });
 }
 
@@ -95,11 +95,14 @@ bool VolumetricCloudFeature::RunSliceView(
 bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudViewState& view, fx::Texture output,
     VolumetricCloudViewSnapshot& snapshot)
 {
-    if (!f.PassEnabled("VolumetricCloud.March.Dispatch")) {
+    if (!f.PassEnabled("VolumetricCloud.March.Dispatch") || !f.PassEnabled("VolumetricCloud.Resolve.Dispatch")) {
         snapshot.status = VolumetricCloudFrameStatus::PassDisabled;
         return false;
     }
-    if (!f.ShaderReady(m_marchShader)) {
+    // Ask both before testing either, so a failed build of one does not hide the other.
+    const bool marchReady = f.ShaderReady(m_marchShader);
+    const bool resolveReady = f.ShaderReady(m_resolveShader);
+    if (!marchReady || !resolveReady) {
         snapshot.status = VolumetricCloudFrameStatus::ShadersNotReady;
         return false;
     }
@@ -112,13 +115,38 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
         return false;
     }
 
+    // Each target is acquired once per frame; a refused Acquire returns an invalid texture.
+    const Extent2D full = f.Extent();
+    const std::uint32_t divisor = CloudResolutionDivisor(m_settings);
+    const Extent2D low = fx::ScaledExtent(full, divisor);
+    const std::uint32_t slot = static_cast<std::uint32_t>(f.FrameIndex() & 1u);
+    const fx::Texture lowColor = view.lowColor.Acquire(f, low, PixelFormat::RGBA16_Float);
+    const fx::Texture lowAux = view.lowAux.Acquire(f, low, PixelFormat::RGBA16_Float);
+    const fx::Texture currentColor = view.historyColor[slot].Acquire(f, full, PixelFormat::RGBA16_Float);
+    const fx::Texture currentAux = view.historyAux[slot].Acquire(f, full, PixelFormat::RGBA16_Float);
+    const fx::Texture previousColor = view.historyColor[slot ^ 1u].Acquire(f, full, PixelFormat::RGBA16_Float);
+    const fx::Texture previousAux = view.historyAux[slot ^ 1u].Acquire(f, full, PixelFormat::RGBA16_Float);
+    if (!lowColor.IsValid() || !lowAux.IsValid() || !currentColor.IsValid() || !currentAux.IsValid()
+        || !previousColor.IsValid() || !previousAux.IsValid()) {
+        snapshot.status = VolumetricCloudFrameStatus::TargetFailed;
+        return false;
+    }
+
     const ResolvedDirectionalLight sun = ResolveActiveDirectionalLight(f.Scene());
     const std::optional<SunLightModulation> modulation = m_sunLight.Fetch(f);
     const SunLightModulation light = modulation ? SanitizeSunLightModulation(*modulation) : SunLightModulation{};
 
+    view.previousWindOffset[0] = view.windOffset[0];
+    view.previousWindOffset[1] = view.windOffset[1];
     AdvanceCloudWind(view.windOffset, m_settings.windSpeed, m_settings.windDirection, f.DeltaSeconds());
     VolumetricCloudFrameFacts facts;
-    facts.invViewProjection = f.View().invViewProjection;
+    // Rays and reprojection are formed relative to the eye, in double precision.
+    const CloudRelativeCamera camera = MakeCloudRelativeCamera(f.View().viewProjection, f.View().eye);
+    if (!camera.valid) {
+        snapshot.status = VolumetricCloudFrameStatus::NoValidCamera;
+        return false;
+    }
+    facts.invViewProjection = camera.inverse;
     facts.eye = f.View().eye;
     facts.sunDirection = sun.directionTowardSun;
     facts.sunIlluminance = sun.sunIlluminance;
@@ -127,22 +155,59 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
     facts.windOffset[0] = view.windOffset[0];
     facts.windOffset[1] = view.windOffset[1];
     facts.frameIndex = f.FrameIndex();
+    facts.viewWidth = full.width;
+    facts.viewHeight = full.height;
 
-    const bool dispatched = f.Compute(m_marchShader, "VolumetricCloud.March.Dispatch")
-                                .Params(view.params, MakeVolumetricCloudParams(m_settings, facts))
-                                .Bind("sourceColor", f.SceneColor())
-                                .Bind("sourceDepth", fx::Depth(f.SceneDepth()))
-                                .Bind("shapeVolume", shape)
-                                .Bind("detailVolume", detail)
-                                .Bind("weatherMap", weather)
-                                .Bind("blueNoise", blueNoise)
-                                .Bind("destinationImage", output)
-                                .Dispatch(f.Extent());
-    if (!dispatched) {
+    const bool marched = f.Compute(m_marchShader, "VolumetricCloud.March.Dispatch")
+                             .Params(view.params, MakeVolumetricCloudParams(m_settings, facts))
+                             .Bind("sourceDepth", fx::Depth(f.SceneDepth()))
+                             .Bind("shapeVolume", shape)
+                             .Bind("detailVolume", detail)
+                             .Bind("weatherMap", weather)
+                             .Bind("blueNoise", blueNoise)
+                             .Bind("lowColorOut", lowColor)
+                             .Bind("lowAuxOut", lowAux)
+                             .Dispatch(low);
+    if (!marched) {
         f.ReportOnce("VolumetricCloud.March.Dispatch was refused");
         snapshot.status = VolumetricCloudFrameStatus::ShadersNotReady;
+        return false;
     }
-    return dispatched;
+
+    // The history reprojects through the previous unjittered view-projection, which this feature keeps itself.
+    const fx::CameraBasis basis = fx::DeriveCameraBasis(f.View().eye, f.View().invViewProjection, full);
+    const bool accumulate = m_settings.temporal >= 0.5f;
+    VolumetricCloudResolveFacts resolveFacts;
+    resolveFacts.prevViewProjection = MakeCloudRelativeCamera(view.previous.viewProjection, f.View().eye).projection;
+    resolveFacts.windDelta[0] = view.windOffset[0] - view.previousWindOffset[0];
+    resolveFacts.windDelta[1] = view.windOffset[1] - view.previousWindOffset[1];
+    resolveFacts.historyValid = accumulate && basis.valid && fx::HistoryUsable(view.previous, basis, f.FrameIndex(), full, divisor);
+    resolveFacts.lowWidth = low.width;
+    resolveFacts.lowHeight = low.height;
+    snapshot.historyUsed = resolveFacts.historyValid;
+    snapshot.divisor = divisor;
+
+    const bool resolved = f.Compute(m_resolveShader, "VolumetricCloud.Resolve.Dispatch")
+                              .Params(view.resolveParams, MakeVolumetricCloudResolveParams(m_settings, facts, resolveFacts))
+                              .Bind("sourceColor", f.SceneColor())
+                              .Bind("sourceDepth", fx::Depth(f.SceneDepth()))
+                              .Bind("lowColor", lowColor)
+                              .Bind("lowAux", lowAux)
+                              .Bind("historyColor", previousColor)
+                              .Bind("historyAux", previousAux)
+                              .Bind("historyColorOut", currentColor)
+                              .Bind("historyAuxOut", currentAux)
+                              .Bind("destinationImage", output)
+                              .Dispatch(full);
+    if (!resolved) {
+        f.ReportOnce("VolumetricCloud.Resolve.Dispatch was refused");
+        snapshot.status = VolumetricCloudFrameStatus::ShadersNotReady;
+        return false;
+    }
+    // Only a frame whose resolve pass ran becomes history.
+    view.previous = basis.valid ? fx::MakeHistory(basis, f.View().viewProjection, f.FrameIndex(), full, divisor, view.previous)
+                                : fx::TemporalHistory{};
+    return true;
 }
 
 void VolumetricCloudFeature::CompositePass(fx::CompositeFrame& f)
@@ -152,27 +217,37 @@ void VolumetricCloudFeature::CompositePass(fx::CompositeFrame& f)
     VolumetricCloudViewSnapshot& snapshot = view.snapshot;
     snapshot.frameIndex = f.FrameIndex();
 
+    // A frame that does not write the history must not leave the last one usable.
+    const auto bail = [&](VolumetricCloudFrameStatus status) {
+        view.previous = fx::TemporalHistory{};
+        snapshot.status = status;
+    };
+
     if (!m_settings.enabled) {
-        snapshot.status = VolumetricCloudFrameStatus::Disabled;
+        bail(VolumetricCloudFrameStatus::Disabled);
         return;
     }
     if (!f.View().invViewProjectionValid) {
-        snapshot.status = VolumetricCloudFrameStatus::NoValidCamera;
+        bail(VolumetricCloudFrameStatus::NoValidCamera);
         return;
     }
     if (!f.PassEnabled("VolumetricCloud.CopyToPrivateTarget")) {
-        snapshot.status = VolumetricCloudFrameStatus::PassDisabled;
+        bail(VolumetricCloudFrameStatus::PassDisabled);
         return;
     }
     const fx::Texture output = m_output.Acquire(f, f.Extent(), PixelFormat::RGBA16_Float);
     if (!output.IsValid()) {
-        snapshot.status = VolumetricCloudFrameStatus::TargetFailed;
+        bail(VolumetricCloudFrameStatus::TargetFailed);
         return;
     }
 
     const bool sliceView = m_settings.debugView != VolumetricCloudDebugView::Off;
     if (!(sliceView ? RunSliceView(f, output, snapshot) : RunMarch(f, view, output, snapshot))) {
+        view.previous = fx::TemporalHistory{};
         return;
+    }
+    if (sliceView) {
+        view.previous = fx::TemporalHistory{};
     }
     snapshot.status = VolumetricCloudFrameStatus::Ok;
     f.ExposeAsViewOutput(m_output, output);

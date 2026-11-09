@@ -1,0 +1,210 @@
+#version 450
+
+// Upsamples the low resolution cloud march, blends it with the reprojected history of the last frame and
+// composites the result over the scene. A tap or a history texel is only used where it saw the same surface.
+layout(local_size_x = 8, local_size_y = 8) in;
+
+#include "SceneDepthConstants.glsl"
+
+// Member names and order match VolumetricCloudResolveParamsGpu.
+layout(std430, binding = 0) readonly buffer VolumetricCloudResolveParams {
+    mat4 invViewProjection;     // Clip space to world position minus eye.
+    mat4 prevViewProjection;    // Last frame's world position minus THIS frame's eye to clip space.
+    vec4 eye;           // xyz eye.
+    vec4 windDelta;     // xz shift to last frame's cloud position.
+    vec4 blend;         // x history blend, y fresh blend, z clamp expand, w fallback cloud distance (m).
+    vec4 motion;        // x extra blend at one pixel of motion.
+    uvec4 counts;       // x divisor, yz sample offset, w history valid.
+    uvec4 sizes;        // xy view size, zw march target size.
+} params;
+
+layout(binding = 1) uniform sampler2D sourceColor;
+layout(binding = 2) uniform sampler2D sourceDepth;
+layout(binding = 3) uniform sampler2D lowColor;      // Cloud light in rgb, transmittance in a.
+layout(binding = 4) uniform sampler2D lowAux;        // x cloud distance, y complete up to (km).
+layout(binding = 5) uniform sampler2D historyColor;
+layout(binding = 6) uniform sampler2D historyAux;
+layout(binding = 7, rgba16f) uniform writeonly image2D historyColorOut;
+layout(binding = 8, rgba16f) uniform writeonly image2D historyAuxOut;
+layout(binding = 9, rgba16f) uniform writeonly image2D destinationImage;
+
+const float kNoSurfaceKm = 1000.0;
+const float kMaxOutputLuminance = 65504.0;
+const float kRelative = 0.03;
+const float kSlackKm = 0.02;
+const float kClearTransmittance = 0.999;
+
+// Keep identical to CloudTapUsable() in VolumetricCloudMath.cpp.
+bool TapUsable(vec4 color, vec4 aux, float pixelEndKm)
+{
+    if (aux.y < (1.0 - kRelative) * pixelEndKm - kSlackKm) {
+        return false;
+    }
+    return color.a > kClearTransmittance || aux.x <= (1.0 + kRelative) * pixelEndKm + kSlackKm;
+}
+
+// Bilinear fetch of the history around `texelPosition` (texel centres at integers), using only texels that
+// saw this pixel's surface. Returns false when none did.
+bool FetchHistory(vec2 texelPosition, float pixelEndKm, out vec4 color, out float distanceKm)
+{
+    ivec2 size = ivec2(params.sizes.xy);
+    ivec2 base = ivec2(floor(texelPosition));
+    vec2 f = texelPosition - vec2(base);
+    vec4 colorSum = vec4(0.0);
+    float distanceSum = 0.0;
+    float distanceWeight = 0.0;
+    float weightSum = 0.0;
+    for (int k = 0; k < 4; ++k) {
+        ivec2 c = base + ivec2(k & 1, k >> 1);
+        if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, size))) {
+            continue;
+        }
+        float w = ((k & 1) == 1 ? f.x : 1.0 - f.x) * ((k >> 1) == 1 ? f.y : 1.0 - f.y);
+        if (w <= 0.0) {
+            continue;
+        }
+        vec4 hc = texelFetch(historyColor, c, 0);
+        vec4 ha = texelFetch(historyAux, c, 0);
+        if (!TapUsable(hc, ha, pixelEndKm)) {
+            continue;
+        }
+        colorSum += hc * w;
+        weightSum += w;
+        float cloudWeight = w * (1.0 - hc.a);
+        distanceSum += ha.x * cloudWeight;
+        distanceWeight += cloudWeight;
+    }
+    color = vec4(0.0, 0.0, 0.0, 1.0);
+    distanceKm = 0.0;
+    if (weightSum < 1e-3) {
+        return false;
+    }
+    color = colorSum / weightSum;
+    distanceKm = distanceWeight > 0.0 ? distanceSum / distanceWeight : 0.0;
+    return true;
+}
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 fullSize = ivec2(params.sizes.xy);
+    if (pixel.x >= fullSize.x || pixel.y >= fullSize.y) {
+        return;
+    }
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(fullSize);
+    vec3 scene = texture(sourceColor, uv).rgb;
+    float rawDepth = texture(sourceDepth, uv).r;
+    vec2 ndc = uv * 2.0 - 1.0;
+
+    // Distance this pixel's surface lies at; a pixel without a surface sees the whole layer.
+    float pixelEndKm = kNoSurfaceKm;
+    if (rawDepth < kClearDepthThreshold) {
+        vec4 world = params.invViewProjection * vec4(ndc, rawDepth, 1.0);
+        pixelEndKm = min(length(world.xyz / world.w) * 0.001, kNoSurfaceKm);
+    }
+
+    // Fresh samples: the four march texels around this pixel. The texel at integer coordinates holds
+    // the pixel (texel * divisor + offset), so the pixel that was marched itself gets weight 1.
+    int divisor = int(params.counts.x);
+    ivec2 lowSize = ivec2(params.sizes.zw);
+    vec2 lowPosition = vec2(pixel - ivec2(params.counts.yz)) / float(divisor);
+    ivec2 lowBase = ivec2(floor(lowPosition));
+    vec2 lowFrac = lowPosition - vec2(lowBase);
+    vec4 freshSum = vec4(0.0);
+    float freshDistanceSum = 0.0;
+    float freshDistanceWeight = 0.0;
+    float freshWeight = 0.0;
+    float maxTapWeight = 0.0;
+    for (int k = 0; k < 4; ++k) {
+        ivec2 c = clamp(lowBase + ivec2(k & 1, k >> 1), ivec2(0), lowSize - 1);
+        float w = ((k & 1) == 1 ? lowFrac.x : 1.0 - lowFrac.x) * ((k >> 1) == 1 ? lowFrac.y : 1.0 - lowFrac.y);
+        if (w <= 0.0) {
+            continue;
+        }
+        vec4 tapColor = texelFetch(lowColor, c, 0);
+        vec4 tapAux = texelFetch(lowAux, c, 0);
+        if (!TapUsable(tapColor, tapAux, pixelEndKm)) {
+            continue;
+        }
+        freshSum += tapColor * w;
+        freshWeight += w;
+        float cloudWeight = w * (1.0 - tapColor.a);
+        freshDistanceSum += tapAux.x * cloudWeight;
+        freshDistanceWeight += cloudWeight;
+        maxTapWeight = max(maxTapWeight, w);
+    }
+    // The history is clamped into the box of the usable march texels around the pixel, 3 x 3 of them,
+    // so that a pixel that was marched itself still has neighbours to compare with. Skipped when off.
+    vec4 boxMin = vec4(1e30);
+    vec4 boxMax = vec4(-1e30);
+    if (params.blend.z > 0.0) {
+        ivec2 lowNearest = ivec2(floor(lowPosition + 0.5));
+        for (int k = 0; k < 9; ++k) {
+            ivec2 c = clamp(lowNearest + ivec2(k % 3 - 1, k / 3 - 1), ivec2(0), lowSize - 1);
+            vec4 tapColor = texelFetch(lowColor, c, 0);
+            if (TapUsable(tapColor, texelFetch(lowAux, c, 0), pixelEndKm)) {
+                boxMin = min(boxMin, tapColor);
+                boxMax = max(boxMax, tapColor);
+            }
+        }
+    }
+    bool hasFresh = freshWeight > 1e-3;
+    vec4 fresh = hasFresh ? freshSum / freshWeight : vec4(0.0, 0.0, 0.0, 1.0);
+    float freshDistanceKm = freshDistanceWeight > 0.0 ? freshDistanceSum / freshDistanceWeight : 0.0;
+
+    // History: reproject through the cloud, which is far, never through the scene surface.
+    vec4 history = vec4(0.0, 0.0, 0.0, 1.0);
+    float historyDistanceKm = 0.0;
+    bool hasHistory = false;
+    vec2 reprojectionShift = vec2(0.0); // Motion of this pixel since last frame, in pixels.
+    if (params.counts.w != 0u) {
+        vec4 nearPoint = params.invViewProjection * vec4(ndc, 0.0, 1.0);
+        vec4 farPoint = params.invViewProjection * vec4(ndc, 1.0, 1.0);
+        vec3 rd = normalize(farPoint.xyz / farPoint.w - nearPoint.xyz / nearPoint.w);
+        float distance = (hasFresh && freshDistanceWeight > 0.0) ? freshDistanceKm * 1000.0 : params.blend.w;
+        vec3 previous = rd * distance + vec3(params.windDelta.x, 0.0, params.windDelta.z);
+        vec4 clip = params.prevViewProjection * vec4(previous, 1.0);
+        if (clip.w > 0.0) {
+            vec2 previousUv = clip.xy / clip.w * 0.5 + 0.5;
+            vec2 previousTexel = previousUv * vec2(fullSize) - 0.5;
+            reprojectionShift = previousTexel - vec2(pixel);
+            hasHistory = FetchHistory(previousTexel, pixelEndKm, history, historyDistanceKm);
+        }
+    }
+
+    vec4 cloud;
+    float cloudDistanceKm;
+    if (hasHistory && hasFresh) {
+        // A positive clamp pulls the history into the box of the fresh samples so a changed cloud leaves
+        // no trail; the march noise is as large as the signal at cloud edges, so zero turns it off.
+        vec4 kept = history;
+        if (params.blend.z > 0.0) {
+            vec4 extent = (boxMax - boxMin) * params.blend.z + 1e-3;
+            kept = clamp(history, boxMin - extent, boxMax + extent);
+        }
+        float alpha = maxTapWeight > 0.999 ? params.blend.y : params.blend.x;
+        // Where the picture moves the history is blurred and stale, so the new samples count for more.
+        alpha = max(alpha, params.motion.x * clamp(length(reprojectionShift), 0.0, 1.0));
+        cloud = mix(kept, fresh, alpha);
+        cloudDistanceKm = freshDistanceWeight > 0.0 ? mix(historyDistanceKm, freshDistanceKm, alpha) : historyDistanceKm;
+    } else if (hasFresh) {
+        cloud = fresh;
+        cloudDistanceKm = freshDistanceKm;
+    } else if (hasHistory) {
+        cloud = history;
+        cloudDistanceKm = historyDistanceKm;
+    } else {
+        cloud = vec4(0.0, 0.0, 0.0, 1.0);
+        cloudDistanceKm = 0.0;
+    }
+    cloud = vec4(max(cloud.rgb, vec3(0.0)), clamp(cloud.a, 0.0, 1.0));
+
+    imageStore(historyColorOut, pixel, cloud);
+    imageStore(historyAuxOut, pixel, vec4(cloudDistanceKm, pixelEndKm, 0.0, 0.0));
+
+    vec3 color = scene * cloud.a + cloud.rgb;
+    if (any(isnan(color)) || any(isinf(color))) {
+        color = scene;
+    }
+    imageStore(destinationImage, pixel, vec4(clamp(color, vec3(0.0), vec3(kMaxOutputLuminance)), 1.0));
+}

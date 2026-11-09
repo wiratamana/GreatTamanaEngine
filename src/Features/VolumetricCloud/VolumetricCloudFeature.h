@@ -3,8 +3,10 @@
 #include "VolumetricCloudDebugEndpoint.h"
 #include "VolumetricCloudTypes.h"
 #include "../../Core/FeatureKit/FeatureKit.h"
+#include "../../Core/FeatureKit/ScreenSpaceView.h"
 #include "../../Game/Lighting/SunLightModulation.h"
 
+#include <array>
 #include <cstdint>
 
 namespace gte {
@@ -12,8 +14,20 @@ namespace gte {
 // Per-view memory. Parameter blocks are per view on purpose.
 struct VolumetricCloudViewState {
     fx::GpuParams<VolumetricCloudParamsGpu> params;
+    fx::GpuParams<VolumetricCloudResolveParamsGpu> resolveParams;
     VolumetricCloudViewSnapshot snapshot;
     float windOffset[2] = {};
+    float previousWindOffset[2] = {};
+    fx::TemporalHistory previous; // Valid only when the resolve pass wrote the history last frame.
+
+    // March target at 1/divisor of the view size: cloud light + transmittance, and distance + completeness.
+    fx::PersistentTarget lowColor{ "VolumetricCloud.LowColor" };
+    fx::PersistentTarget lowAux{ "VolumetricCloud.LowAux" };
+    // Full size history of the resolved cloud, ping-pong by frame index.
+    std::array<fx::PersistentTarget, 2> historyColor{
+        fx::PersistentTarget{ "VolumetricCloud.HistoryColor0" }, fx::PersistentTarget{ "VolumetricCloud.HistoryColor1" } };
+    std::array<fx::PersistentTarget, 2> historyAux{
+        fx::PersistentTarget{ "VolumetricCloud.HistoryAux0" }, fx::PersistentTarget{ "VolumetricCloud.HistoryAux1" } };
 };
 
 // Volumetric clouds: one ray marched layer between two spheres, composited over the scene with the scene
@@ -45,7 +59,8 @@ private:
     void CompositePass(fx::CompositeFrame& f);
     // Draws the chosen noise texture instead of the clouds. False when nothing was declared.
     bool RunSliceView(fx::CompositeFrame& f, fx::Texture output, VolumetricCloudViewSnapshot& snapshot);
-    // Marches the cloud layer into `output`. False when nothing was declared.
+    // Marches the layer at low resolution, resolves it against the history and composites into `output`.
+    // False when nothing was declared.
     bool RunMarch(fx::CompositeFrame& f, VolumetricCloudViewState& view, fx::Texture output,
         VolumetricCloudViewSnapshot& snapshot);
     // The asset behind the chosen debug view; invalid while it is missing.
@@ -61,6 +76,7 @@ private:
     fx::StaticTexture m_weather{ kCloudWeatherAsset };
     fx::StaticTexture m_blueNoise{ kCloudBlueNoiseAsset };
     fx::ComputeShader m_marchShader{ "VolumetricCloud" };
+    fx::ComputeShader m_resolveShader{ "VolumetricCloudResolve" };
     fx::ComputeShader m_slice3dShader{ "VolumetricCloudSlice3D" };
     fx::ComputeShader m_slice2dShader{ "VolumetricCloudSlice2D" };
     fx::ViewOutput m_output{ "VolumetricCloud" };

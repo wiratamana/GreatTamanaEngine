@@ -9,10 +9,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <limits>
 #include <set>
 #include <span>
 #include <string>
+#include <utility>
 
 namespace gte {
 namespace {
@@ -285,7 +287,7 @@ TEST(VolumetricCloudParamsTest, BlockLayoutMatchesTheShader)
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, lightScatter), 288u);
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, lightMisc), 304u);
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, drainePhase), 320u);
-    EXPECT_EQ(sizeof(VolumetricCloudParamsGpu), 336u);
+    EXPECT_EQ(sizeof(VolumetricCloudParamsGpu), 368u);
 }
 
 TEST(VolumetricCloudParamsTest, PacksTheLightingSettings)
@@ -480,17 +482,197 @@ TEST(VolumetricCloudShaderNamesTest, MarchExposesBoundNames)
     ASSERT_NE(params, nullptr);
     EXPECT_EQ(params->type, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     EXPECT_EQ(params->access, ReflectedAccess::ReadOnly);
-    for (const char* sampler : { "sourceColor", "sourceDepth", "shapeVolume", "detailVolume", "weatherMap", "blueNoise" }) {
+    for (const char* sampler : { "sourceDepth", "shapeVolume", "detailVolume", "weatherMap", "blueNoise" }) {
         const ReflectedDescriptorBinding* binding = Find(result, sampler);
         ASSERT_NE(binding, nullptr) << sampler;
         EXPECT_EQ(binding->type, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) << sampler;
     }
-    const ReflectedDescriptorBinding* output = Find(result, "destinationImage");
-    ASSERT_NE(output, nullptr);
-    EXPECT_EQ(output->type, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
-    EXPECT_EQ(output->access, ReflectedAccess::WriteOnly);
+    for (const char* output : { "lowColorOut", "lowAuxOut" }) {
+        const ReflectedDescriptorBinding* binding = Find(result, output);
+        ASSERT_NE(binding, nullptr) << output;
+        EXPECT_EQ(binding->type, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) << output;
+        EXPECT_EQ(binding->access, ReflectedAccess::WriteOnly) << output;
+    }
     EXPECT_EQ(result.descriptorBindings.size(), 8u);
     EXPECT_FALSE(result.hasPushConstantRange);
+}
+
+TEST(VolumetricCloudShaderNamesTest, ResolveExposesBoundNames)
+{
+    const ShaderReflectionResult result = ReflectCompute(GTE_TEST_CLOUD_RESOLVE_SPV_PATH);
+    const ReflectedDescriptorBinding* params = Find(result, "params");
+    ASSERT_NE(params, nullptr);
+    EXPECT_EQ(params->type, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    EXPECT_EQ(params->access, ReflectedAccess::ReadOnly);
+    for (const char* sampler : { "sourceColor", "sourceDepth", "lowColor", "lowAux", "historyColor", "historyAux" }) {
+        const ReflectedDescriptorBinding* binding = Find(result, sampler);
+        ASSERT_NE(binding, nullptr) << sampler;
+        EXPECT_EQ(binding->type, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) << sampler;
+    }
+    for (const char* output : { "historyColorOut", "historyAuxOut", "destinationImage" }) {
+        const ReflectedDescriptorBinding* binding = Find(result, output);
+        ASSERT_NE(binding, nullptr) << output;
+        EXPECT_EQ(binding->type, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) << output;
+        EXPECT_EQ(binding->access, ReflectedAccess::WriteOnly) << output;
+    }
+    EXPECT_EQ(result.descriptorBindings.size(), 10u);
+    EXPECT_FALSE(result.hasPushConstantRange);
+}
+
+TEST(VolumetricCloudTemporalTest, ResolveBlockLayoutMatchesTheShader)
+{
+    EXPECT_EQ(offsetof(VolumetricCloudResolveParamsGpu, prevViewProjection), 64u);
+    EXPECT_EQ(offsetof(VolumetricCloudResolveParamsGpu, eye), 128u);
+    EXPECT_EQ(offsetof(VolumetricCloudResolveParamsGpu, windDelta), 144u);
+    EXPECT_EQ(offsetof(VolumetricCloudResolveParamsGpu, blend), 160u);
+    EXPECT_EQ(offsetof(VolumetricCloudResolveParamsGpu, motion), 176u);
+    EXPECT_EQ(offsetof(VolumetricCloudResolveParamsGpu, counts), 192u);
+    EXPECT_EQ(offsetof(VolumetricCloudResolveParamsGpu, sizes), 208u);
+    EXPECT_EQ(sizeof(VolumetricCloudResolveParamsGpu), 224u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, lowRes), 336u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, fullSize), 352u);
+}
+
+// A view ray rebuilt from the clip space of a pixel and projected back must land on the same pixel, also
+// when the camera stands thousands of metres from the origin.
+TEST(VolumetricCloudTemporalTest, RelativeCameraRoundTripsRaysFarFromTheOrigin)
+{
+    const Vec3 eye(2000.0f, 2.0f, -5000.0f);
+    const Mat4 view = Mat4::LookAtLH(eye, eye + Vec3(0.2f, 0.05f, 1.0f), Vec3::Up());
+    const Mat4 projection = Mat4::PerspectiveFovLH_ZO(1.0471976f, 884.0f / 432.0f, 0.1f, 1000.0f);
+    const CloudRelativeCamera camera = MakeCloudRelativeCamera(projection * view, eye);
+    ASSERT_TRUE(camera.valid);
+    const float width = 884.0f;
+    const float height = 432.0f;
+    double worst = 0.0;
+    for (float px = 5.5f; px < width; px += 97.0f) {
+        for (float py = 5.5f; py < height; py += 101.0f) {
+            const float ndcX = px / width * 2.0f - 1.0f;
+            const float ndcY = py / height * 2.0f - 1.0f;
+            const Vec4 nearPoint = camera.inverse * Vec4(ndcX, ndcY, 0.0f, 1.0f);
+            const Vec4 farPoint = camera.inverse * Vec4(ndcX, ndcY, 1.0f, 1.0f);
+            const Vec3 ray = Normalize(farPoint.XYZ() / farPoint.w - nearPoint.XYZ() / nearPoint.w);
+            for (const float distance : { 3000.0f, 15000.0f, 45000.0f }) {
+                const Vec4 clip = camera.projection * Vec4(ray.x * distance, ray.y * distance, ray.z * distance, 1.0f);
+                const double x = (clip.x / clip.w * 0.5f + 0.5f) * width - px;
+                const double y = (clip.y / clip.w * 0.5f + 0.5f) * height - py;
+                worst = std::max(worst, std::max(std::abs(x), std::abs(y)));
+            }
+        }
+    }
+    EXPECT_LT(worst, 0.02);
+}
+
+TEST(VolumetricCloudTemporalTest, DivisorRoundsToOneTwoOrFour)
+{
+    VolumetricCloudSettings s;
+    const auto divisorOf = [&](float value) {
+        s.resolutionDivisor = value;
+        return CloudResolutionDivisor(SanitizeVolumetricCloudSettings(s));
+    };
+    EXPECT_EQ(divisorOf(1.0f), 1u);
+    EXPECT_EQ(divisorOf(1.4f), 1u);
+    EXPECT_EQ(divisorOf(2.0f), 2u);
+    EXPECT_EQ(divisorOf(2.9f), 2u);
+    EXPECT_EQ(divisorOf(3.0f), 4u);
+    EXPECT_EQ(divisorOf(4.0f), 4u);
+    EXPECT_EQ(divisorOf(99.0f), 4u);
+}
+
+TEST(VolumetricCloudTemporalTest, BayerOffsetsVisitEveryCellOncePerCycle)
+{
+    for (const std::uint32_t divisor : { 2u, 4u }) {
+        const std::uint32_t cells = divisor * divisor;
+        std::set<std::pair<std::uint32_t, std::uint32_t>> seen;
+        for (std::uint32_t i = 0; i < cells; ++i) {
+            const CloudSampleOffset o = CloudBayerOffset(1000 + i, divisor);
+            EXPECT_LT(o.x, divisor);
+            EXPECT_LT(o.y, divisor);
+            seen.insert({ o.x, o.y });
+        }
+        EXPECT_EQ(seen.size(), cells) << divisor;
+        const CloudSampleOffset a = CloudBayerOffset(5, divisor);
+        const CloudSampleOffset b = CloudBayerOffset(5 + cells, divisor);
+        EXPECT_EQ(a.x, b.x);
+        EXPECT_EQ(a.y, b.y);
+    }
+    const CloudSampleOffset one = CloudBayerOffset(7, 1);
+    EXPECT_EQ(one.x, 0u);
+    EXPECT_EQ(one.y, 0u);
+}
+
+TEST(VolumetricCloudTemporalTest, ConsecutiveBayerSamplesMostlyLandFarApart)
+{
+    // Frame k and k+1 never march the same pixel, and most pairs are not even neighbours.
+    int far = 0;
+    for (std::uint32_t k = 0; k < 16; ++k) {
+        const CloudSampleOffset a = CloudBayerOffset(k, 4);
+        const CloudSampleOffset b = CloudBayerOffset(k + 1, 4);
+        const int dx = std::abs(static_cast<int>(a.x) - static_cast<int>(b.x));
+        const int dy = std::abs(static_cast<int>(a.y) - static_cast<int>(b.y));
+        EXPECT_GE(dx + dy, 1) << k;
+        far += std::max(dx, dy) >= 2 ? 1 : 0;
+    }
+    EXPECT_GE(far, 12);
+}
+
+TEST(VolumetricCloudTemporalTest, TapIsUsableOnlyWhereItSawTheSameSurface)
+{
+    const float sky = kCloudNoSurfaceKm;
+    // A march that saw the whole sky serves a sky pixel, with or without cloud.
+    EXPECT_TRUE(CloudTapUsable(sky, 0.0f, 1.0f, sky));
+    EXPECT_TRUE(CloudTapUsable(sky, 3.0f, 0.4f, sky));
+    // A march that stopped at a mountain 0.5 km away can not stand in for a sky pixel next to it.
+    EXPECT_FALSE(CloudTapUsable(0.5f, 0.0f, 1.0f, sky));
+    EXPECT_FALSE(CloudTapUsable(0.5f, 0.3f, 0.5f, sky));
+    // A cloud 3 km away is behind a mountain 0.5 km away.
+    EXPECT_FALSE(CloudTapUsable(sky, 3.0f, 0.4f, 0.5f));
+    // No cloud at all is fine for the mountain, a cloud in front of it too.
+    EXPECT_TRUE(CloudTapUsable(sky, 0.0f, 1.0f, 0.5f));
+    EXPECT_TRUE(CloudTapUsable(0.5f, 0.3f, 0.5f, 0.5f));
+    // A neighbouring surface at nearly the same distance is accepted.
+    EXPECT_TRUE(CloudTapUsable(0.5f, 0.3f, 0.5f, 0.505f));
+}
+
+TEST(VolumetricCloudTemporalTest, ResolveParamsCarryTheTemporalSettings)
+{
+    VolumetricCloudSettings s = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    s.resolutionDivisor = 4.0f;
+    VolumetricCloudFrameFacts facts;
+    facts.frameIndex = 3;
+    facts.viewWidth = 884;
+    facts.viewHeight = 432;
+    VolumetricCloudResolveFacts resolve;
+    resolve.historyValid = true;
+    resolve.lowWidth = 221;
+    resolve.lowHeight = 108;
+    resolve.windDelta[0] = 2.0f;
+    resolve.windDelta[1] = 3.0f;
+    const VolumetricCloudResolveParamsGpu p = MakeVolumetricCloudResolveParams(s, facts, resolve);
+    const CloudSampleOffset o = CloudBayerOffset(3, 4);
+    EXPECT_EQ(p.counts[0], 4u);
+    EXPECT_EQ(p.counts[1], o.x);
+    EXPECT_EQ(p.counts[2], o.y);
+    EXPECT_EQ(p.counts[3], 1u);
+    EXPECT_EQ(p.sizes[0], 884u);
+    EXPECT_EQ(p.sizes[3], 108u);
+    EXPECT_FLOAT_EQ(p.windDelta[0], 2.0f);
+    EXPECT_FLOAT_EQ(p.windDelta[2], 3.0f);
+    EXPECT_FLOAT_EQ(p.blend[0], s.historyBlend);
+
+    // Without accumulation the new samples replace the picture and no history is read.
+    s.temporal = 0.0f;
+    const VolumetricCloudResolveParamsGpu off = MakeVolumetricCloudResolveParams(s, facts, resolve);
+    EXPECT_EQ(off.counts[3], 0u);
+    EXPECT_FLOAT_EQ(off.blend[0], 1.0f);
+    EXPECT_FLOAT_EQ(off.blend[1], 1.0f);
+
+    // The march block carries the same offset as the resolve block.
+    const VolumetricCloudParamsGpu march = MakeVolumetricCloudParams(s, facts);
+    EXPECT_EQ(march.lowRes[0], 4u);
+    EXPECT_EQ(march.lowRes[1], o.x);
+    EXPECT_EQ(march.lowRes[2], o.y);
+    EXPECT_EQ(march.fullSize[0], 884u);
 }
 
 TEST(VolumetricCloudShaderNamesTest, Slice3dExposesBoundNamesAndPushBlock)
