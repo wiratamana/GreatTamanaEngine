@@ -173,6 +173,31 @@ VolumetricCloudSettings SanitizeVolumetricCloudSettings(const VolumetricCloudSet
     return out;
 }
 
+VolumetricCloudSettings ApplyVolumetricCloudPreset(
+    const VolumetricCloudSettings& current, VolumetricCloudPreset preset) noexcept
+{
+    const VolumetricCloudSettings defaults;
+    VolumetricCloudSettings out = current;
+    out.coverage = defaults.coverage;
+    out.density = defaults.density;
+    switch (preset) {
+    case VolumetricCloudPreset::Clear:
+        out.coverage = 0.2f;
+        out.density = 0.9f;
+        break;
+    case VolumetricCloudPreset::Scattered:
+        break;
+    case VolumetricCloudPreset::Broken:
+        out.coverage = 0.8f;
+        break;
+    case VolumetricCloudPreset::Overcast:
+        out.coverage = 1.0f;
+        out.density = 1.4f;
+        break;
+    }
+    return SanitizeVolumetricCloudSettings(out);
+}
+
 VolumetricCloudSlicePush MakeVolumetricCloudSlicePush(const VolumetricCloudSettings& settings) noexcept
 {
     return VolumetricCloudSlicePush{ settings.slice, settings.tiling, settings.channel, 0u };

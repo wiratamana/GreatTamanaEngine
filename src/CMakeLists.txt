@@ -84,6 +84,9 @@ foreach(_dir ${_feature_shader_dirs})
     gte_add_shaders_in_dir(GreatTamanaEditor "${_dir_rel}")
 endforeach()
 
+# --- Cloud noise assets ------------------------------------------------------------
+gte_add_cloud_noise_assets(GreatTamanaEditor)
+
 # --- Project assemblies ----------------------------------------------------------
 # Projects/<Name>/Libraries/CMakeLists.txt calls gte_add_project(<Name>). Their DLLs go here.
 set(GTE_PROJECT_ASSEMBLY_OUTPUT_DIR "$<TARGET_FILE_DIR:GreatTamanaEditor>/project_assemblies")

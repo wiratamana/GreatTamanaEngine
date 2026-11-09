@@ -1,0 +1,176 @@
+# VolumetricCloud (ray-marched cloud layer)
+> One sky cloud layer between two spheres, ray marched at low resolution and accumulated over frames. For anyone tuning or debugging clouds.
+> Verified against code: 2026-11-10
+
+## TL;DR
+- One cloud layer (default 1500..4000 m above Y = 0) on a 6371 km planet, composited over the scene.
+- Needs the baked noise in `assets/clouds/` next to the exe. The build makes it. Without it the effect draws nothing.
+- **Off by default.** One call turns it on with the tuned look: `/feature_debug/set?name=VolumetricCloud&enabled=true`.
+- Marches at 1/4 per axis (1/16 of the pixels) and accumulates over frames. About 2 to 2.6 ms at 884x432 on an Intel Iris Xe.
+- Scene depth limits every ray, so clouds never draw over a mountain or an object in front of them.
+- Off in the Scene view by default. On in the Game view once enabled.
+
+## Where in the frame
+| Registration | Stage | Priority | Toggle names |
+|---|---|---|---|
+| `VolumetricCloud.FrameStamp` | PreOpaque | 49 | `Always` (frame clock for snapshot age) |
+| `VolumetricCloud` (`Replace`) | PostComposite | -900 | `VolumetricCloud.March.Dispatch`, `...Resolve.Dispatch`, `...Debug.Dispatch`, `...CopyToPrivateTarget` |
+
+Code: `src/Features/VolumetricCloud/`. Shaders: `VolumetricCloud.comp` (march), `VolumetricCloudResolve.comp` (upsample, history, composite), `VolumetricCloudLighting.glsl`, `VolumetricCloudSlice2D.comp`, `VolumetricCloudSlice3D.comp`. Panel: **VolumetricCloud**.
+The pass runs after the aerial composite (-1000), so sky pixels are final. It runs before shadow (-500), VolumetricLight (-250), TemporalAa (-150), Bloom and ToneMapping.
+The composite writes `scene * T + cloud` itself and uses `Replace`. The engine `AlphaOver` is straight alpha and does not fit premultiplied cloud light.
+
+### Inputs
+| Source | Use |
+|---|---|
+| Scene color and scene depth of the view | Pixel colour behind the cloud. Depth (standard Z) is the far limit of the ray |
+| `Atmosphere.SunLight` channel (`SunLightModulation`) | Sun tint at sunset and the ambient scale. Missing channel gives neutral values |
+| First active ECS `DirectionalLight` | Sun direction and illuminance. With none, a fixed placeholder sun is used |
+| `assets/clouds/*.gtvol` | Baked noise, see below |
+
+The clouds do not read the Atmosphere LUTs. Haze fades a cloud into the sky colour already in the scene colour.
+
+## How it works
+1. **March** (compute, 1/`resolutionDivisor` of the view). Each low-res texel marches one real pixel of its block. The pixel walks a Bayer order, so 16 frames cover the full grid at divisor 4. A ray starts on the layer shell, jittered by blue noise, takes long steps over empty air, steps back on the first hit and then takes short steps with the detail noise and a sun march (Beer-Lambert optical depth, dual lobe Henyey-Greenstein, silver lining, 3 multiple scattering octaves, powder, sky ambient). It stores light, transmittance, the mean cloud distance and how far the ray looked.
+2. **Resolve** (compute, full size). Reprojects the history of the last frame through the cloud distance (never the scene depth), blends it with the new samples and composites over the scene. A sample or a history texel is only used if it saw at least as far as the pixel's own surface and its cloud is not behind that surface. This keeps the silhouette of a mountain clean.
+3. **History** is two full-size RGBA16F targets (colour + distance) in ping-pong. It is dropped on a camera cut, a resize, a disabled frame, a debug view or any early exit.
+
+Rays and reprojection are built eye-relative in double precision. The engine inverse view-projection is too coarse far from the origin (about 0.4 px at 5 km).
+
+## Noise assets
+Baked once by `tools/cloud_noise_bake` (the build runs it, see [Building](../../../BUILDING.md)). Format `GTV1`, read by `fx::StaticVolume` / `fx::StaticTexture` from `<working directory>/assets/clouds/`.
+
+| File | Size | Channels |
+|---|---|---|
+| `cloud_shape_128.gtvol` | 128^3 RGBA8 | R Perlin-Worley, G/B/A Worley at 8/16/32 cells |
+| `cloud_detail_32.gtvol` | 32^3 RGBA8 | R/G/B Worley at 4/8/16 cells, A the 0.625/0.25/0.125 mix |
+| `cloud_weather_512.gtvol` | 512^2 RGBA8 | R low coverage, G high coverage, B cloud type, A density 0.45..1 |
+| `blue_noise_128.gtvol` | 128^2 R8 | Blue noise for the ray start jitter |
+
+All tile on every axis and sample with REPEAT. A file is read once; restart the editor after a re-bake. A missing file logs one error and the status reads `AssetMissing`.
+
+## Settings
+Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become the default. Not saved in the scene file. Lengths are metres, angles degrees.
+
+| Key | Default | Range | Meaning |
+|---|---|---|---|
+| `enabled` | false | bool | Off gives status `Disabled` |
+| `debugView` | `Off` | `Off`, `ShapeSlice`, `DetailSlice`, `WeatherMap`, `BlueNoise` | Show one noise texture instead of the clouds |
+| `channel` | 4 | 0..4 | Channel of the debug view: 0 R, 1 G, 2 B, 3 A, 4 RGB |
+| `slice` | 0.5 | 0..1 | Depth of the shown noise slice (debug views) |
+| `tiling` | 2 | 0.25..16 | Repeats of the shown noise over the screen (debug views) |
+| `planetRadiusKm` | 6371 | 1000..20000 | Planet radius for the layer curvature (km). Same as the Atmosphere ground radius |
+| `layerBaseM` | 1500 | 0..20000 | Layer base altitude above Y = 0 (m) |
+| `layerTopM` | 4000 | 10..30000 | Layer top altitude (m). Kept at least 50 m above the base |
+| `maxDistanceM` | 60000 | 1000..500000 | Longest ray (m) |
+| `fadeStart` | 0.5 | 0..0.99 | Fraction of `maxDistanceM` where clouds start to thin out |
+| `coverage` | 0.65 | 0..1 | Sky share under cloud. 0.2 few puffs, 0.65 scattered, 1 overcast |
+| `density` | 1 | 0..4 | Density factor after shaping |
+| `extinction` | 0.03 | 0.0005..0.5 | Extinction per metre at density 1 |
+| `weatherScaleM` | 12000 | 1000..500000 | World size of one weather map tile (m) |
+| `shapeScaleM` | 5000 | 100..100000 | World size of one shape noise tile (m) |
+| `detailScaleM` | 700 | 10..20000 | World size of one detail noise tile (m) |
+| `detailStrength` | 0.35 | 0..1 | Erosion by the detail noise |
+| `detailFadeDistM` | 10000 | 100..500000 | Detail fades out by this distance (the noise has no mips) |
+| `windSpeed` | 4 | 0..500 | Wind speed (m/s) |
+| `windDirection` | 45 | -360..360 | Wind direction (degrees) |
+| `peakMin` | 0.3 | 0.05..1 | Lowest cloud peak as a fraction of the thickness |
+| `baseRoundness` | 0.07 | 0.01..0.5 | Rounding of the height gradient at the base |
+| `topRoundness` | 0.12 | 0..0.5 | Rounding of the height gradient at the top |
+| `densityRamp` | 0.2 | 0.01..0.5 | Density ramp above the base (fraction of the thickness) |
+| `densityTopFade` | 0.9 | 0.5..0.99 | Fraction of the thickness where density starts to fade at the top |
+| `stepBaseM` | 40 | 1..2000 | Detailed step length at the camera (m) |
+| `stepGrowth` | 0.025 | 0..0.5 | Step growth per metre of distance |
+| `coarseMultiplier` | 3 | 1..16 | Coarse step = this x the detailed step |
+| `maxSteps` | 64 | 8..512 | Hard step limit per ray |
+| `emptyToCoarse` | 3 | 1..16 | Empty samples before the long steps come back |
+| `clearSkip` | 1 | 1..32 | Stride multiplier over empty weather. Above 1 can miss small clouds |
+| `minTransmittance` | 0.1 | 0..0.5 | Ray stops below this transmittance |
+| `jitter` | 1 | 0..1 | Blue noise start jitter, 0..1 of a step |
+| `sunIntensity` | 8 | 0..100 | Sun radiance factor on top of the engine sun |
+| `ambientIntensity` | 0.28 | 0..100 | Sky light factor |
+| `sunSteps` | 3 | 1..12 | Samples of the march toward the sun |
+| `lightReach` | 0.5 | 0.05..2 | Length of that march as a fraction of the thickness |
+| `msOctaves` | 3 | 1..6 | Multiple scattering octaves |
+| `msAttenuation` | 0.5 | 0.05..1 | Per octave factor on the optical depth |
+| `msContribution` | 0.5 | 0..1 | Per octave factor on the light |
+| `msEccentricity` | 0.5 | 0..1 | Per octave factor on the phase eccentricity |
+| `phaseModel` | 0 | 0..1 | 0 dual lobe Henyey-Greenstein, 1 Henyey-Greenstein plus Draine |
+| `forwardG` | 0.8 | 0..0.99 | Forward lobe eccentricity |
+| `backwardG` | -0.35 | -0.99..0 | Backward lobe eccentricity |
+| `backwardMix` | 0.3 | 0..1 | Weight of the backward lobe |
+| `silverIntensity` | 0.2 | 0..4 | Weight of the narrow forward lobe that lights thin edges facing the sun |
+| `silverG` | 0.97 | 0.5..0.999 | Eccentricity of that lobe |
+| `powder` | 0.5 | 0..1 | Dark edge effect when looking away from the sun |
+| `ambientBottom` | 0.12 | 0..1 | Sky light left at the layer base, relative to the top |
+| `hazeDistanceM` | 45000 | 1000..1e+07 | Distance at which a cloud has faded to 1/e into the sky behind it |
+| `lightDetail` | 0 | 0..1 | Share of the fine erosion the nearest sun sample uses |
+| `lightStride` | 2 | 1..8 | Lit samples that share one sun march |
+| `resolutionDivisor` | 4 | 1..4 | March at 1/n of the view size per axis. 1, 2 or 4 (others round) |
+| `temporal` | 1 | 0..1 | 1 accumulates over frames, 0 shows the current march only |
+| `historyBlend` | 0 | 0..1 | Weight of new samples in a pixel that was not marched this frame |
+| `freshBlend` | 0.2 | 0.01..1 | Same for the pixel that was marched itself |
+| `clampExpand` | 0 | 0..4 | Growth of the box the history is clamped to. 0 = no clamp |
+| `motionBlend` | 0.5 | 0..1 | Extra weight of new samples where the picture moves a pixel or more |
+
+## Cloud coverage knobs
+| Want | Set |
+|---|---|
+| Fewer or more clouds | `coverage` (0.2 sparse, 0.65 default, 1 overcast) |
+| Thicker, darker clouds | `density`, `extinction` |
+| Bigger cloud fields or smaller | `weatherScaleM` |
+| Puffier or smoother edges | `detailStrength`, `detailScaleM` |
+| Lower or higher sky | `layerBaseM`, `layerTopM` (a mountain scene wants 250..1600) |
+| Brighter or darker | `sunIntensity`, `ambientIntensity` |
+
+Presets (action, no arguments, keep everything else and keep `enabled`): `preset_clear` (coverage 0.2, density 0.9), `preset_scattered` (the defaults), `preset_broken` (coverage 0.8), `preset_overcast` (coverage 1, density 1.4). The panel has one button per preset.
+
+## Debug keys
+Name for `/feature_debug`: `VolumetricCloud`. Actions: `reset_defaults`, `preset_clear`, `preset_scattered`, `preset_broken`, `preset_overcast`. Every setting above is writable. Read-only keys:
+
+| Key | Meaning |
+|---|---|
+| `game.status`, `scene.status` | `NotRendered`, `Ok`, `Disabled`, `AssetMissing`, `ShadersNotReady`, `TargetFailed`, `PassDisabled`, `NoValidCamera` |
+| `game.historyUsed` | The resolve pass blended the history of the last frame |
+| `game.divisor` | March divisor of the last frame |
+| `game.assets.shape/detail/weather/blueNoise` | Loaded size, or `not loaded` |
+
+Texture for `/get_texture`: `GameViewVolumetricCloud` (also `SceneViewVolumetricCloud`).
+
+## Quick check
+```cmd
+curl.exe "http://127.0.0.1:8080/feature_debug/set?name=VolumetricCloud&enabled=true"
+curl.exe "http://127.0.0.1:8080/feature_debug/invoke?name=VolumetricCloud&action=preset_overcast"
+curl.exe "http://127.0.0.1:8080/feature_debug/state?name=VolumetricCloud"
+curl.exe -o game.png "http://127.0.0.1:8080/get_game_view"
+curl.exe "http://127.0.0.1:8080/render_graph/set_feature_enabled?name=VolumetricCloud&enabled=true&view=secondary"
+```
+Status `Ok` and `game.historyUsed=true` mean the temporal path runs. Add a `DirectionalLight` (`POST /instantiate_light`) to steer the sun. The origin area of the weather map is a clear patch: test with the camera around (2000, 2, -5000).
+
+## Performance
+Measured on an Intel Iris Xe iGPU (shared memory, power limited), clouds on minus clouds off, `gpu_span`, medians of 3 interleaved rounds. Noise between runs is +-10..25 percent. A discrete GPU was not tested.
+
+| Resolution | Divisor 4 (default) | Divisor 2 | Divisor 1 (full, no history) |
+|---|---|---|---|
+| 884x432, horizon view | +2.56 ms | +3.62 ms | +9.59 ms |
+| 884x432, looking up | +1.98 ms | +4.02 ms | +11.58 ms |
+| 1284x722 | +4.3 ms | +7.7..8.3 ms | not measured |
+
+The resolve pass is bandwidth bound (0.6 ms at 884x432, 1.7 ms at 720p). The march pass is latency bound. The 2 ms target was not met at 884x432. Cheaper presets that cut steps reach 0.9..1.5 ms but change the cloud shapes.
+Memory per view: 4 full-size RGBA16F history targets (about 12 MB at 884x432), small march targets, and about 9.6 MB of noise shared by all views.
+
+## Limits
+- No cloud shadows on the ground and no cloud shadow on other clouds from outside the layer.
+- The noise has no mips. Detail fades out with distance instead.
+- Divisor 4 is soft. A newly exposed screen edge and the first frames after a resize or a camera cut show the raw 4x4 pattern for up to about 16 frames.
+- TemporalAa (-150) sees the clouds as normal pixels. Its jitter is not fed into the march pattern. TemporalAa, Gtao and Ssgi reported `NoValidCamera` with the camera 5 km from the origin in a test (their camera basis check uses the coarse engine matrix). The clouds do not depend on that check.
+- Atmosphere LUTs are not read: sun colour comes from the sun light record and the tint channel, haze from the pixel behind the cloud. A sun below the horizon gives no sun light and dark clouds.
+- The layer is a sphere shell around a planet centred below the camera. Horizontal camera position does not bend it.
+- Perspective cameras only. A view with no valid `invViewProjection` gives `NoValidCamera`.
+- The Game camera far plane is 1000 m. The scene depth limit works inside that range; beyond it the sky shows through.
+- A noise file is loaded once per process.
+
+## Related
+- [Render features](README.md) · [Atmosphere](atmosphere.md) · [Temporal anti-aliasing](temporal-aa.md) · [Volumetric light](volumetric-light.md)
+- [Render feature kit](../feature-kit.md) · [Building](../../../BUILDING.md) · `tools/cloud_noise_bake/README.md`
+- [HTTP cheat sheet](../../debugging/http-cheat-sheet.md) · [HTTP debug routes](../../debugging/http-routes-debug.md)

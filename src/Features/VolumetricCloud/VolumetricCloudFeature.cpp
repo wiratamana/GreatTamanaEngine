@@ -175,7 +175,9 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
     }
 
     // The history reprojects through the previous unjittered view-projection, which this feature keeps itself.
-    const fx::CameraBasis basis = fx::DeriveCameraBasis(f.View().eye, f.View().invViewProjection, full);
+    // The basis comes from the eye-relative inverse: the engine's own is too coarse far from the origin.
+    fx::CameraBasis basis = fx::DeriveCameraBasis(Vec3::Zero(), camera.inverse, full);
+    basis.eye = f.View().eye;
     const bool accumulate = m_settings.temporal >= 0.5f;
     VolumetricCloudResolveFacts resolveFacts;
     resolveFacts.prevViewProjection = MakeCloudRelativeCamera(view.previous.viewProjection, f.View().eye).projection;

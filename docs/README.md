@@ -72,7 +72,7 @@
 | Doc | What it gives you | Who |
 |---|---|---|
 | [Feature kit](reference/feature-kit.md) | `gte::fx` verbs, resources, channels | Feature authors |
-| [Render features](reference/render-features/README.md) | Master table of the 11 features | Everyone |
+| [Render features](reference/render-features/README.md) | Master table of the 12 features | Everyone |
 | [Atmosphere](reference/render-features/atmosphere.md) | Sky, aerial perspective, sun tint | Tuning, debugging |
 | [Shadow](reference/render-features/shadow.md) | Sun cascade shadows | Tuning, debugging |
 | [Scene lighting](reference/render-features/scene-lighting.md) | Sun and ambient data for materials | Tuning, debugging |
@@ -84,6 +84,7 @@
 | [Bloom](reference/render-features/bloom.md) | Glow around very bright pixels | Tuning, debugging |
 | [Toon character](reference/render-features/toon-character.md) | Cel shading and outline for marked characters | Tuning, debugging |
 | [Temporal anti-aliasing](reference/render-features/temporal-aa.md) | Jitter and history resolve for the Game view | Tuning, debugging |
+| [Volumetric cloud](reference/render-features/volumetric-cloud.md) | Ray-marched cloud layer with temporal upsampling | Tuning, debugging |
 
 ## Tools
 | Tool | What it does |

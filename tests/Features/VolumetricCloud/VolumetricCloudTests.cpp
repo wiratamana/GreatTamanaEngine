@@ -1,5 +1,6 @@
 // Tier-1 tests for the VolumetricCloud settings, the layer math and the shader names.
 
+#include "Core/FeatureKit/ScreenSpaceView.h"
 #include "Features/VolumetricCloud/VolumetricCloudMath.h"
 #include "Features/VolumetricCloud/VolumetricCloudTypes.h"
 #include "Renderer/Vulkan/ShaderReflection.h"
@@ -683,6 +684,64 @@ TEST(VolumetricCloudShaderNamesTest, Slice3dExposesBoundNamesAndPushBlock)
 TEST(VolumetricCloudShaderNamesTest, Slice2dExposesBoundNamesAndPushBlock)
 {
     ExpectViewerShader(GTE_TEST_CLOUD_SLICE2D_SPV_PATH, "noiseTexture");
+}
+
+TEST(VolumetricCloudPresetTest, PresetsChangeOnlyCoverageAndDensity)
+{
+    VolumetricCloudSettings base;
+    base.enabled = true;
+    base.layerBaseM = 300.0f;
+    base.layerTopM = 1800.0f;
+    base.resolutionDivisor = 2.0f;
+    base.sunIntensity = 5.0f;
+    base.coverage = 0.1f;
+    base.density = 3.0f;
+    float previousCoverage = -1.0f;
+    for (std::size_t i = 0; i < kVolumetricCloudPresetNames.size(); ++i) {
+        const VolumetricCloudSettings out = ApplyVolumetricCloudPreset(base, static_cast<VolumetricCloudPreset>(i));
+        EXPECT_TRUE(out.enabled) << kVolumetricCloudPresetNames[i];
+        EXPECT_FLOAT_EQ(out.layerBaseM, 300.0f);
+        EXPECT_FLOAT_EQ(out.layerTopM, 1800.0f);
+        EXPECT_FLOAT_EQ(out.resolutionDivisor, 2.0f);
+        EXPECT_FLOAT_EQ(out.sunIntensity, 5.0f);
+        EXPECT_GT(out.coverage, previousCoverage) << "coverage must grow from clear to overcast";
+        previousCoverage = out.coverage;
+        const VolumetricCloudSettings again = SanitizeVolumetricCloudSettings(out);
+        EXPECT_FLOAT_EQ(again.coverage, out.coverage);
+        EXPECT_FLOAT_EQ(again.density, out.density);
+    }
+}
+
+TEST(VolumetricCloudPresetTest, ScatteredIsTheDefaultLookAndNamesAreUnique)
+{
+    VolumetricCloudSettings base;
+    base.coverage = 0.9f;
+    const VolumetricCloudSettings scattered = ApplyVolumetricCloudPreset(base, VolumetricCloudPreset::Scattered);
+    const VolumetricCloudSettings defaults;
+    EXPECT_FLOAT_EQ(scattered.coverage, defaults.coverage);
+    EXPECT_FLOAT_EQ(scattered.density, defaults.density);
+    const std::set<std::string> names(kVolumetricCloudPresetNames.begin(), kVolumetricCloudPresetNames.end());
+    EXPECT_EQ(names.size(), kVolumetricCloudPresetNames.size());
+    EXPECT_EQ(static_cast<std::size_t>(VolumetricCloudPreset::Overcast) + 1, kVolumetricCloudPresetNames.size());
+}
+
+// The history needs a camera basis. The engine's own inverse is too coarse far from the origin and can
+// fail the square-pixel test, so the basis comes from the eye-relative inverse.
+TEST(VolumetricCloudTemporalTest, RelativeBasisStaysValidFarFromTheOrigin)
+{
+    const Vec3 eye(2000.0f, 2.0f, -5000.0f);
+    const Vec3 forward = Normalize(Vec3(0.2f, 0.05f, 1.0f));
+    const Mat4 view = Mat4::LookAtLH(eye, eye + forward, Vec3::Up());
+    for (const Extent2D extent : { Extent2D{ 703, 408 }, Extent2D{ 923, 588 }, Extent2D{ 1343, 688 }, Extent2D{ 223, 188 },
+             Extent2D{ 884, 432 } }) {
+        const float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
+        const Mat4 projection = Mat4::PerspectiveFovLH_ZO(1.0471976f, aspect, 0.1f, 1000.0f);
+        const CloudRelativeCamera camera = MakeCloudRelativeCamera(projection * view, eye);
+        ASSERT_TRUE(camera.valid);
+        const fx::CameraBasis basis = fx::DeriveCameraBasis(Vec3::Zero(), camera.inverse, extent);
+        EXPECT_TRUE(basis.valid) << extent.width << "x" << extent.height;
+        EXPECT_GT(Dot(basis.forward, forward), 0.999f) << extent.width << "x" << extent.height;
+    }
 }
 
 } // namespace

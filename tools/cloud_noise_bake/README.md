@@ -2,6 +2,10 @@
 
 Offline tool that bakes the tileable cloud noise assets once and saves them to files. Plain C++20, no dependency except `third_party/stb` (header only).
 
+## Automatic bake in the build
+
+`cmake --build build --target GreatTamanaEditor` builds this tool (`build\tools\cloud_noise_bake.exe`) and runs it once into `build\assets\clouds`, the folder the engine reads at run time (see `cmake\CloudNoiseAssets.cmake`). It reruns only when an output is missing or the tool changed. The build never touches the network: the blue noise comes from `data\LDR_LLL1_0.png` (CC0, `data\LICENSE.txt`). Output is byte-identical to the manual run below.
+
 ## Build and run
 
 ```

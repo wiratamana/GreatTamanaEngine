@@ -43,6 +43,7 @@ include(CompileShaders)
 include(GenerateGlslConstants)
 include(MingwRuntime)
 include(GteProject)
+include(CloudNoiseAssets)
 
 # --- Third-party dependencies --------------------------------------------------
 find_package(Threads REQUIRED)

@@ -50,7 +50,7 @@ struct VolumetricCloudSettings {
     float fadeStart = 0.5f; // Fraction of the max distance where the clouds start to thin out.
 
     // Density model.
-    float coverage = 0.65f;
+    float coverage = 0.65f; // Sky share under cloud: 0.2 a few puffs, 0.65 scattered, 1 overcast.
     float density = 1.0f;
     float extinction = 0.03f; // Per metre at density 1.
     float weatherScaleM = 12000.0f;
@@ -231,6 +231,13 @@ static_assert(std::is_trivially_copyable_v<VolumetricCloudResolveParamsGpu>);
 
 // Clamps every field into its documented range; a non-finite number falls back to the default.
 VolumetricCloudSettings SanitizeVolumetricCloudSettings(const VolumetricCloudSettings& candidate) noexcept;
+
+// Sky looks that set only the coverage and density. Everything else is kept, `enabled` included.
+enum class VolumetricCloudPreset : std::uint8_t { Clear, Scattered, Broken, Overcast };
+inline constexpr std::array<const char*, 4> kVolumetricCloudPresetNames{ "clear", "scattered", "broken", "overcast" };
+
+VolumetricCloudSettings ApplyVolumetricCloudPreset(
+    const VolumetricCloudSettings& current, VolumetricCloudPreset preset) noexcept;
 
 VolumetricCloudSlicePush MakeVolumetricCloudSlicePush(const VolumetricCloudSettings& settings) noexcept;
 

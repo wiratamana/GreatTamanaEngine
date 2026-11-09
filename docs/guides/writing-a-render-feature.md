@@ -6,7 +6,7 @@
 - A feature is a folder `src/Features/<Name>/`, a class derived from `fx::Feature`, and one macro line.
 - No edit in CMake, `Core` or `Editor`. The root `CMakeLists.txt` finds the folder by itself.
 - Feature code uses only the kit (`gte::fx`). No Vulkan, no `Renderer`, no raw handles.
-- Eleven features ship today. `ToneMapping` is the smallest. Copy it. `ToonCharacter` is the model for a colour redraw of chosen entities. `TemporalAa` is the model for history and ping-pong targets.
+- Twelve features ship today. `ToneMapping` is the smallest. Copy it. `ToonCharacter` is the model for a colour redraw of chosen entities. `TemporalAa` is the model for history and ping-pong targets.
 - A feature is compiled into the engine. There is no hot reload. Rebuild after each change.
 
 ## Before you start
@@ -216,7 +216,7 @@ curl.exe "http://127.0.0.1:8080/get_logs?category=FeatureKit"
 
 ## Related
 - [Feature kit reference](../reference/feature-kit.md) — every verb and resource type
-- [Render features](../reference/render-features/README.md) — the eleven shipped features
+- [Render features](../reference/render-features/README.md) — the twelve shipped features
 - [Render graph](../architecture/render-graph.md) — pass kinds, toggles, pools
 - [Render honesty](../conventions/render-honesty.md) — toggle and Frame Debugger rules
 - [Volumetric resources](../conventions/volumetric-resources.md) — 3D textures

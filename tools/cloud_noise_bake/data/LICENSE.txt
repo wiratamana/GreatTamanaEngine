@@ -1,0 +1,3 @@
+LDR_LLL1_0.png (128x128 blue noise) from https://github.com/Calinou/free-blue-noise-textures (folder 128_128).
+Licensed under CC0 1.0 Universal (see COPYING.txt in that repository). No attribution required.
+Vendored so the build never needs the network.

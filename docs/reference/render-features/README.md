@@ -1,10 +1,10 @@
 # Render features
 
-> Master table of the 11 built-in render features: order, toggles, data flow, defaults. Read this before any single feature page.
+> Master table of the 12 built-in render features: order, toggles, data flow, defaults. Read this before any single feature page.
 > Verified against code: 2026-11-04
 
 ## TL;DR
-- 11 features ship in `src/Features/`. All use the feature kit (`fx::`), none touches Vulkan.
+- 12 features ship in `src/Features/`. All use the feature kit (`fx::`), none touches Vulkan.
 - Order in a frame: stage first, then priority (low number runs first).
 - Features share data through channels, never by including each other.
 - Settings live in memory only. Scene files do not save them. Set them again after a load.
@@ -25,6 +25,7 @@
 | `Bloom` | Glow around very bright pixels | [bloom](bloom.md) | `Bloom` |
 | `ToonCharacter` | Cel shading and outline for marked characters | [toon-character](toon-character.md) | `ToonCharacter` |
 | `TemporalAa` | Temporal anti-aliasing with a sub-pixel jitter (Game view only) | [temporal-aa](temporal-aa.md) | `TemporalAa` |
+| `VolumetricCloud` | Ray-marched cloud layer, low-res march with temporal upsampling | [volumetric-cloud](volumetric-cloud.md) | `VolumetricCloud` |
 
 ## Order in the frame
 
@@ -39,6 +40,7 @@
 | PreOpaque | 30, 35, 40, 40, 45, 46 | `<Feature>.FrameStamp` | Shadow, Ssgi, Gtao, ToneMapping, VolumetricLight, Bloom | none (`Always`) |
 | PreOpaque | 47 | `TemporalAa.FrameStamp` | TemporalAa | none (`Always`) |
 | PreOpaque | 48 | `TemporalAa.Jitter` | TemporalAa | none (`Always`) |
+| PreOpaque | 49 | `VolumetricCloud.FrameStamp` | VolumetricCloud | none (`Always`) |
 | Opaque | -10 | `GpuDrivenScene.SceneCull` | GpuDrivenScene | none (`Always`) |
 | Opaque | 0 | `GpuDrivenScene.Opaque` | GpuDrivenScene | `GpuDrivenScene.*` passes |
 | Opaque | 100 | `ToonCharacter.Surface` | ToonCharacter | `ToonCharacter.Surface.Draw` |
@@ -54,13 +56,14 @@
 | PostComposite | -1600 | `Ssgi.Composite` | Ssgi | `Ssgi.Composite.Draw` |
 | PostComposite | -1500 | `Gtao.Composite` | Gtao | `Gtao.Composite.Draw` |
 | PostComposite | -1000 | `AtmosphereComposite` | Atmosphere | `AtmosphereAerialPerspectiveCompositePass`, `AtmosphereComposite.CopyToPrivateTarget` |
+| PostComposite | -900 | `VolumetricCloud` | VolumetricCloud | `VolumetricCloud.March.Dispatch`, `...Resolve.Dispatch`, `...Debug.Dispatch`, `...CopyToPrivateTarget` |
 | PostComposite | -500 | `Shadow.Composite` | Shadow | `Shadow.Composite.Draw` |
 | PostComposite | -250 | `VolumetricLight.Composite` | VolumetricLight | `VolumetricLight.Composite.Dispatch`, `...CopyToPrivateTarget` |
 | PostComposite | -150 | `TemporalAa` | TemporalAa | `TemporalAa.Resolve.Dispatch`, `TemporalAa.CopyToPrivateTarget` |
 | PostComposite | -100 | `Bloom` | Bloom | `Bloom.Prefilter`, `Bloom.Down0..4`, `Bloom.Up0..4`, `Bloom.CopyToPrivateTarget` |
 | PostComposite | 1000 | `ToneMapping` | ToneMapping | `ToneMapping.Dispatch`, `ToneMapping.CopyToPrivateTarget` |
 
-- Blend of the composite entries: `ScreenSpaceMask` for Ssgi, Gtao, Shadow. `AlphaOver` for Atmosphere, VolumetricLight. `Replace` for TemporalAa and ToneMapping. `Additive` for Bloom.
+- Blend of the composite entries: `ScreenSpaceMask` for Ssgi, Gtao, Shadow. `AlphaOver` for Atmosphere, VolumetricLight. `Replace` for TemporalAa, ToneMapping and VolumetricCloud. `Additive` for Bloom.
 - The three ToonCharacter draws claim or redraw the entities of marked characters. See [toon-character](toon-character.md).
 - `PostTransparent` and `PreUI` stages are not used by any built-in feature.
 - `Always` entries are not render passes. A pass toggle cannot switch them off.
@@ -93,7 +96,7 @@ TemporalAa.Jitter (PreOpaque) --> engine draw projection --> scene color and dep
 
 | In the Scene view (secondary) | Features |
 |---|---|
-| Off at start | Gtao, Ssgi, VolumetricLight, Atmosphere aerial volume, Atmosphere composite, TemporalAa (not supported there) |
+| Off at start | Gtao, Ssgi, VolumetricLight, VolumetricCloud, Atmosphere aerial volume, Atmosphere composite, TemporalAa (not supported there) |
 | On at start | Shadow, SceneLighting, GpuDrivenScene, ToneMapping, Bloom, ToonCharacter, sky background, Atmosphere LUTs, sun light |
 
 - Turn one on: `curl.exe "http://127.0.0.1:8080/render_graph/set_feature_enabled?name=Gtao.Occlusion&enabled=true&view=secondary"`.
@@ -116,6 +119,7 @@ TemporalAa.Jitter (PreOpaque) --> engine draw projection --> scene color and dep
 |---|---|---|
 | `GameViewComposited`, `SceneViewComposited` | Atmosphere | Linear HDR after aerial perspective |
 | `GameViewVolumetricLight`, `SceneViewVolumetricLight` | VolumetricLight | Linear HDR after shafts |
+| `GameViewVolumetricCloud`, `SceneViewVolumetricCloud` | VolumetricCloud | Linear HDR after clouds |
 | `GameViewToneMapped`, `SceneViewToneMapped` | ToneMapping | Display values, RGBA8 |
 
 - Per-view feature textures are named `<Owner>::<Name>.GameView` or `.SceneView`. Ask `/list_textures` for the exact name.

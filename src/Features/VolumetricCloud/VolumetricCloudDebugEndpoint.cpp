@@ -157,16 +157,25 @@ fx::FeatureDebugResult VolumetricCloudDebugEndpoint::Set(std::span<const fx::Fea
 fx::FeatureDebugResult VolumetricCloudDebugEndpoint::Invoke(
     std::string_view action, std::span<const fx::FeatureDebugArg> args)
 {
-    if (action != "reset_defaults") {
+    constexpr std::string_view kPresetPrefix = "preset_";
+    std::optional<VolumetricCloudPreset> preset;
+    if (action.starts_with(kPresetPrefix)) {
+        for (std::size_t i = 0; i < kVolumetricCloudPresetNames.size(); ++i) {
+            if (action.substr(kPresetPrefix.size()) == kVolumetricCloudPresetNames[i]) {
+                preset = static_cast<VolumetricCloudPreset>(i);
+            }
+        }
+    }
+    if (action != "reset_defaults" && !preset) {
         fx::FeatureDebugResult result;
         result.ok = false;
-        result.message = "unknown action; supported: reset_defaults";
+        result.message = "unknown action; supported: reset_defaults, preset_clear, preset_scattered, preset_broken, preset_overcast";
         return result;
     }
     if (!args.empty()) {
-        return Fail(args.front().key, "reset_defaults takes no arguments");
+        return Fail(args.front().key, "this action takes no arguments");
     }
-    m_feature.ApplySettings(VolumetricCloudSettings{});
+    m_feature.ApplySettings(preset ? ApplyVolumetricCloudPreset(m_feature.Settings(), *preset) : VolumetricCloudSettings{});
     return GetState();
 }
 

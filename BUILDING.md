@@ -1,4 +1,4 @@
-﻿# Building
+# Building
 > How to build and run the engine on Windows. For anyone who just cloned the repo.
 > Verified against code: 2026-11-02
 
@@ -85,6 +85,9 @@ Shaders are compiled to SPIR-V at build time. The Vulkan SDK is not needed.
 - CMake uses `glslc` if it finds one: `-DGLSLC_EXECUTABLE=...`, then `PATH`, then `VULKAN_SDK`, then `C:/VulkanSDK`.
 - If there is none, CMake downloads glslang 16.6.0 into `build/_tools`. Options: `GTE_FETCH_GLSLANG` (default ON), `GTE_GLSLANG_URL`, `GTE_GLSLANG_SHA256`.
 - With `-DGTE_FETCH_GLSLANG=OFF` and no compiler, configure fails at the first shader and tells you what to install.
+
+## Cloud noise assets
+The `GreatTamanaEditor` target bakes the cloud noise (`tools/cloud_noise_bake`) into `build/assets/clouds` (about 10 MB, 4 s). It runs only when an output is missing or the tool changed. It needs no network: the blue-noise source is in `tools/cloud_noise_bake/data`. Delete `build/assets/clouds` to force a re-bake.
 
 ## Troubleshooting
 | Symptom | Cause | Fix |
