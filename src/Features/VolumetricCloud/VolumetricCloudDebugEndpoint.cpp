@@ -57,6 +57,16 @@ std::string_view StatusName(VolumetricCloudFrameStatus status) noexcept
     return "NotRendered";
 }
 
+std::string_view SkyLightName(VolumetricCloudSkyLight light) noexcept
+{
+    switch (light) {
+    case VolumetricCloudSkyLight::Standalone: return "Standalone";
+    case VolumetricCloudSkyLight::Atmosphere: return "Atmosphere";
+    case VolumetricCloudSkyLight::Unavailable: return "Unavailable";
+    }
+    return "Standalone";
+}
+
 const VolumetricCloudFloatSetting* FindFloatSetting(std::string_view key) noexcept
 {
     for (const VolumetricCloudFloatSetting& entry : kVolumetricCloudFloatSettings) {
@@ -113,7 +123,9 @@ fx::FeatureDebugResult VolumetricCloudDebugEndpoint::GetState() const
     Add(out, "game.status", std::string(StatusName(m_feature.Snapshot(rg::ViewScope::Primary).status)));
     Add(out, "game.historyUsed", m_feature.Snapshot(rg::ViewScope::Primary).historyUsed);
     Add(out, "game.divisor", static_cast<std::int64_t>(m_feature.Snapshot(rg::ViewScope::Primary).divisor));
+    Add(out, "game.skyLight", std::string(SkyLightName(m_feature.Snapshot(rg::ViewScope::Primary).skyLight)));
     Add(out, "scene.status", std::string(StatusName(m_feature.Snapshot(rg::ViewScope::Secondary).status)));
+    Add(out, "scene.skyLight", std::string(SkyLightName(m_feature.Snapshot(rg::ViewScope::Secondary).skyLight)));
     return out;
 }
 

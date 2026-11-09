@@ -5,6 +5,7 @@
 layout(local_size_x = 8, local_size_y = 8) in;
 
 #include "SceneDepthConstants.glsl"
+#include "AtmosphereCommon.glsl"
 
 // Member names and order match VolumetricCloudParamsGpu.
 layout(std430, binding = 0) readonly buffer VolumetricCloudParams {
@@ -28,6 +29,8 @@ layout(std430, binding = 0) readonly buffer VolumetricCloudParams {
     vec4 drainePhase;               // x Henyey-Greenstein g, y Draine g, z Draine alpha, w Draine weight.
     uvec4 lowRes;                   // x divisor, yz sample offset inside the block.
     uvec4 fullSize;                 // xy view size in pixels.
+    vec4 atmosphereMode;            // x 1 = lit by the atmosphere LUTs, y sky intensity, z air scale, w sky ambient gain.
+    vec4 atmosphereCamera;          // xyz camera position in atmosphere space (km).
 } params;
 
 layout(binding = 1) uniform sampler2D sourceDepth;
@@ -37,6 +40,14 @@ layout(binding = 4) uniform sampler2D weatherMap;    // R low coverage, G high c
 layout(binding = 5) uniform sampler2D blueNoise;
 layout(binding = 6, rgba16f) uniform writeonly image2D lowColorOut; // Cloud light in rgb, transmittance in a.
 layout(binding = 7, rgba16f) uniform writeonly image2D lowAuxOut;   // x cloud distance, y complete up to (km).
+
+// Sky LUTs of the atmosphere; bound to stand-ins when the standalone look is used.
+layout(std430, binding = 8) readonly buffer AtmosphereParameters {
+    AtmosphereParametersGpu values;
+} atmosphere;
+layout(binding = 9) uniform sampler2D transmittanceLut;
+layout(binding = 10) uniform sampler2D multiScatteringLut;
+layout(binding = 11) uniform sampler2D skyViewLut;
 
 const float kNoSurfaceKm = 1000.0;
 
@@ -184,6 +195,7 @@ float CloudDensityAt(vec3 position, float detailAmount)
 }
 
 #include "VolumetricCloudLighting.glsl"
+#include "VolumetricCloudAtmosphere.glsl"
 
 // Marches [tStart, tEnd]. Returns light in rgb and the transmittance in a; `cloudDistance` is the mean
 // distance of the cloud, weighted by how much each step adds to the picture (0 when there is none).
@@ -202,7 +214,8 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, out 
 
     vec3 sunDirection = params.sunDirectionAndIntensity.xyz;
     vec3 sunRadiance = params.sunColorAndAmbient.rgb * params.sunDirectionAndIntensity.w;
-    vec3 ambientRadiance = params.ambientColor.rgb * params.sunColorAndAmbient.w;
+    bool integrated = AtmosphereOn();
+    vec3 ambientRadiance = integrated ? gSkyAmbient : params.ambientColor.rgb * params.sunColorAndAmbient.w;
 
     float stepLength = baseStep + tStart * growth;
     float t = tStart + jitter * params.density.w * stepLength;
@@ -250,10 +263,16 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, out 
 
         float fade = 1.0 - smoothstep(fadeBegin, maxDistance, t);
         float extinction = d * params.density.y * fade;
-        // A far cloud counts as less opaque, so the sky behind it shows through.
-        float opacity = (1.0 - exp(-extinction * stepLength)) * exp(-t / params.lightMisc.z);
+        // Standalone: a far cloud counts as less opaque, so the sky behind it shows through. With the
+        // atmosphere the air between the eye and the cloud does that, see AirInscatter().
+        float haze = integrated ? 1.0 : exp(-t / params.lightMisc.z);
+        float opacity = (1.0 - exp(-extinction * stepLength)) * haze;
 
-        if (sunLit) {
+        vec3 sampleSun = sunRadiance;
+        if (integrated) {
+            sampleSun *= SunTransmittanceAt(AtmospherePosition(rd * t), sunDirection);
+        }
+        if (sunLit && dot(sampleSun, sampleSun) > 0.0) {
             if (lightAge == 0u) {
                 sunOpticalDepth = SunOpticalDepth(position, sunDirection);
             }
@@ -269,7 +288,7 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, out 
         li.distanceAlongRay = t;
         li.viewDirection = rd;
         li.sunDirection = sunDirection;
-        li.sunRadiance = sunRadiance;
+        li.sunRadiance = sampleSun;
         li.ambientRadiance = ambientRadiance;
         li.sunOpticalDepth = sunOpticalDepth;
         light += transmittance * CloudSourceRadiance(li) * opacity;
@@ -334,8 +353,18 @@ void main()
 
     float bn = texture(blueNoise, (vec2(pixel) + 0.5) / kBlueNoiseSize).r;
     float jitter = fract(bn + kGoldenRatio * float(params.counts.y & 63u));
+    if (AtmosphereOn()) {
+        gSkyAmbient = SkyAmbientRadiance();
+    }
     float cloudDistance;
     vec4 cloud = MarchClouds(eye, rd, tStart, tEnd, jitter, cloudDistance);
+    if (AtmosphereOn() && cloud.a < 1.0 && cloudDistance > 0.0) {
+        // Seen through the air: the cloud light is dimmed and the air in front of the cloud adds its own light.
+        vec3 airTransmittance;
+        vec3 sunIlluminance = params.sunColorAndAmbient.rgb;
+        vec3 air = AirInscatter(rd, cloudDistance * 0.001, params.sunDirectionAndIntensity.xyz, sunIlluminance, airTransmittance);
+        cloud.rgb = cloud.rgb * airTransmittance + (1.0 - cloud.a) * air * params.atmosphereMode.y;
+    }
     if (any(isnan(cloud)) || any(isinf(cloud))) {
         cloud = vec4(0.0, 0.0, 0.0, 1.0);
         cloudDistance = 0.0;

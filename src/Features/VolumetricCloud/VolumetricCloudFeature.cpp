@@ -4,12 +4,16 @@
 #include "../../Core/PixelFormat.h"
 #include "../../Game/Lighting/DirectionalLightResolver.h"
 
+#include <algorithm>
+#include <optional>
+
 namespace gte {
 
 namespace {
 
 constexpr std::int32_t kFrameStampPriority = 49;
 constexpr std::int32_t kCompositePriority = -900; // After the aerial composite, so sky pixels are final.
+constexpr float kMetresPerKilometer = 1000.0f;    // World units are metres, like the sky model.
 
 } // namespace
 
@@ -158,8 +162,37 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
     facts.viewWidth = full.width;
     facts.viewHeight = full.height;
 
+    // The atmosphere's tables light the clouds when asked for and published; the standalone look otherwise.
+    // The march shader has the table bindings either way, so stand-ins fill them in the standalone case.
+    const std::optional<AtmosphereSharedLuts> sharedLuts = m_sharedLuts.Fetch(f);
+    const std::optional<AtmosphereViewLuts> viewLuts = m_viewLuts.Fetch(f);
+    const bool tablesReady = sharedLuts && viewLuts && sharedLuts->transmittance.IsValid()
+        && sharedLuts->multiScattering.IsValid() && viewLuts->skyView.IsValid();
+    const bool wanted = m_settings.atmosphereMode >= 0.5f;
+    facts.atmosphereLit = wanted && tablesReady;
+    snapshot.skyLight = facts.atmosphereLit ? VolumetricCloudSkyLight::Atmosphere
+        : (wanted ? VolumetricCloudSkyLight::Unavailable : VolumetricCloudSkyLight::Standalone);
+    AtmosphereParametersGpu air;
+    fx::Texture transmittanceLut = weather;
+    fx::Texture multiScatteringLut = weather;
+    fx::Texture skyViewLut = weather;
+    if (facts.atmosphereLit) {
+        air = sharedLuts->parameters;
+        transmittanceLut = sharedLuts->transmittance;
+        multiScatteringLut = sharedLuts->multiScattering;
+        skyViewLut = viewLuts->skyView;
+        facts.skyIntensity = viewLuts->skyIntensity;
+        // Planet-centred frame like the sky: only the height above the ground matters.
+        const float heightKm = std::max(f.View().eye.y, 0.0f) / kMetresPerKilometer;
+        facts.atmosphereCameraKm = Vec3(0.0f, air.planetRadiusKm + heightKm, 0.0f);
+    }
+
     const bool marched = f.Compute(m_marchShader, "VolumetricCloud.March.Dispatch")
                              .Params(view.params, MakeVolumetricCloudParams(m_settings, facts))
+                             .Params("atmosphere", view.atmosphereParams, air)
+                             .Bind("transmittanceLut", transmittanceLut)
+                             .Bind("multiScatteringLut", multiScatteringLut)
+                             .Bind("skyViewLut", skyViewLut)
                              .Bind("sourceDepth", fx::Depth(f.SceneDepth()))
                              .Bind("shapeVolume", shape)
                              .Bind("detailVolume", detail)

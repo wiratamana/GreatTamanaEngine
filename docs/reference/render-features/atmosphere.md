@@ -22,6 +22,7 @@
 | `AtmosphereComposite` | PostComposite, -1000, `AlphaOver` | Applies the volume to the scene. Blits to the private target | `AtmosphereAerialPerspectiveCompositePass`, `AtmosphereComposite.CopyToPrivateTarget` |
 
 - Channels: `SharedLuts`, `ViewLuts`, `AerialVolume`, `SunLight`. It reads `Shadow.Receiver`.
+- `SharedLuts` and `ViewLuts` carry the types of `src/Game/Lighting/AtmosphereSkyLuts.h` (`AtmosphereSharedLuts`, `AtmosphereViewLuts` with the sky intensity), so another feature can read the transmittance, multi-scattering and sky-view tables. The VolumetricCloud feature does. The GPU structs (`AtmosphereParametersGpu`, `AtmosphereFrameUniforms`) live in the same header, the shared GLSL math in `src/Shaders/AtmosphereCommon.glsl`.
 - With the volume pass off, nothing is published. The composite then does nothing.
 - In the Scene view, the aerial volume and composite start **off**. The LUTs, sun light and sky stay on.
 - Output texture: `GameViewComposited` / `SceneViewComposited` (linear HDR).

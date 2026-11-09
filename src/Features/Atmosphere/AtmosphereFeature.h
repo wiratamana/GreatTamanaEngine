@@ -4,6 +4,7 @@
 #include "AtmosphereDebugEndpoint.h"
 #include "AtmosphereTypes.h"
 #include "../../Core/FeatureKit/FeatureKit.h"
+#include "../../Game/Lighting/AtmosphereSkyLuts.h"
 #include "../../Game/Lighting/SunLightModulation.h"
 #include "../../Game/Lighting/SunShadowReceiver.h"
 
@@ -11,18 +12,8 @@ namespace gte {
 
 inline constexpr const char* kAtmosphereFeatureName = "Atmosphere";
 
-// View-independent LUTs of one frame, made once by the shared callback and read by every view.
-struct AtmosphereSharedLuts {
-    fx::Texture transmittance;
-    fx::Texture multiScattering;
-    AtmosphereParametersGpu parameters;
-};
-
-// One view's sky-view LUT and frame uniforms. The texture is invalid when its pass did not run this frame.
-struct AtmosphereViewLuts {
-    fx::Texture skyView;
-    AtmosphereFrameUniforms frameUniforms;
-};
+// AtmosphereSharedLuts and AtmosphereViewLuts, the two channel payloads of the sky LUTs, are declared in
+// AtmosphereSkyLuts.h so other features can read them.
 
 // One view's aerial perspective volume and shaft delta image, with the values the composite must use.
 // The shaft delta is invalid when the volume was made without shadows.
@@ -98,8 +89,8 @@ private:
     fx::ComputeShader m_compositeUnshadowedShader{ "AtmosphereAerialPerspectiveCompositeUnshadowed" };
     fx::FullscreenShader m_skyBackgroundShader{ "AtmosphereSkyBackground" };
 
-    fx::Channel<AtmosphereSharedLuts> m_sharedLuts{ "SharedLuts" };
-    fx::Channel<AtmosphereViewLuts> m_viewLuts{ "ViewLuts" };
+    fx::Channel<AtmosphereSharedLuts> m_sharedLuts{ kAtmosphereSharedLutsChannel };
+    fx::Channel<AtmosphereViewLuts> m_viewLuts{ kAtmosphereViewLutsChannel };
     fx::Channel<AtmosphereAerialResult> m_aerial{ "AerialVolume" };
     fx::Channel<SunLightModulation> m_sunLight{ kSunLightModulationChannel };
     fx::ChannelReader<SunShadowReceiver> m_receiver{ kSunShadowReceiverOwner, kSunShadowReceiverChannel };

@@ -91,6 +91,12 @@ struct VolumetricCloudFrameFacts {
     std::uint64_t frameIndex = 0;
     std::uint32_t viewWidth = 1;
     std::uint32_t viewHeight = 1;
+
+    // Set when the atmosphere's tables light the clouds: the sun is then passed as plain illuminance, because
+    // the transmittance and the planet's shadow come from the tables.
+    bool atmosphereLit = false;
+    float skyIntensity = 1.0f;
+    Vec3 atmosphereCameraKm = Vec3::Zero(); // Camera in atmosphere space.
 };
 
 VolumetricCloudParamsGpu MakeVolumetricCloudParams(
@@ -122,6 +128,13 @@ VolumetricCloudResolveParamsGpu MakeVolumetricCloudResolveParams(const Volumetri
 // CPU twin of the tap test in VolumetricCloudResolve.comp: may a march result be used at a pixel whose scene
 // lies `pixelEndKm` away? `tapEndKm` is how far that march looked, `tapDistanceKm` where its cloud sits.
 bool CloudTapUsable(float tapEndKm, float tapDistanceKm, float tapTransmittance, float pixelEndKm) noexcept;
+
+// Final colour of a cloud pixel seen through air. `cloudLight` is the cloud's own light, `airTransmittance` and
+// `airLight` the air between the eye and the cloud, `cloudTransmittance` what the cloud lets through of the
+// scene behind it. A scene that already holds the air light of the same distance (the sky) comes back
+// unchanged where the cloud lets everything through.
+float CloudAerialComposite(float scene, float cloudTransmittance, float cloudLight, float airTransmittance,
+    float airLight) noexcept;
 
 // Distance that stands for "no surface", in km.
 inline constexpr float kCloudNoSurfaceKm = 1000.0f;

@@ -288,7 +288,73 @@ TEST(VolumetricCloudParamsTest, BlockLayoutMatchesTheShader)
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, lightScatter), 288u);
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, lightMisc), 304u);
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, drainePhase), 320u);
-    EXPECT_EQ(sizeof(VolumetricCloudParamsGpu), 368u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, atmosphereMode), 368u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, atmosphereCamera), 384u);
+    EXPECT_EQ(sizeof(VolumetricCloudParamsGpu), 400u);
+}
+
+TEST(VolumetricCloudParamsTest, TheAtmosphereModePassesTheSunUntouchedAndTheCamera)
+{
+    VolumetricCloudSettings s = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    s.airScale = 3.0f;
+    s.skyAmbient = 0.5f;
+    VolumetricCloudFrameFacts facts;
+    facts.sunIlluminance = Vec3(3.0f, 2.0f, 1.0f);
+    facts.sunTint = Vec3(0.1f, 0.1f, 0.1f);
+    // A sun under the horizon still goes in as it is: the tables hold the planet's shadow.
+    facts.sunDirection = Vec3(0.0f, -1.0f, 0.0f);
+    facts.atmosphereLit = true;
+    facts.skyIntensity = 6.0f;
+    facts.atmosphereCameraKm = Vec3(0.0f, 6373.0f, 0.0f);
+    const VolumetricCloudParamsGpu p = MakeVolumetricCloudParams(s, facts);
+    EXPECT_FLOAT_EQ(p.sunColorAndAmbient[0], 3.0f);
+    EXPECT_FLOAT_EQ(p.sunColorAndAmbient[1], 2.0f);
+    EXPECT_FLOAT_EQ(p.sunColorAndAmbient[2], 1.0f);
+    EXPECT_FLOAT_EQ(p.atmosphereMode[0], 1.0f);
+    EXPECT_FLOAT_EQ(p.atmosphereMode[1], 6.0f);
+    EXPECT_FLOAT_EQ(p.atmosphereMode[2], 3.0f);
+    EXPECT_FLOAT_EQ(p.atmosphereMode[3], 0.5f);
+    EXPECT_FLOAT_EQ(p.atmosphereCamera[1], 6373.0f);
+
+    facts.atmosphereLit = false;
+    EXPECT_FLOAT_EQ(MakeVolumetricCloudParams(s, facts).atmosphereMode[0], 0.0f);
+}
+
+TEST(VolumetricCloudParamsTest, TheAtmosphereIsAskedForByDefaultAndTheSettingsStaySane)
+{
+    const VolumetricCloudSettings defaults;
+    EXPECT_FLOAT_EQ(defaults.atmosphereMode, 1.0f);
+    EXPECT_FLOAT_EQ(defaults.airScale, 1.0f);
+    EXPECT_FLOAT_EQ(defaults.skyAmbient, 1.0f);
+    // Without the tables the facts keep the standalone look: the sun goes in tinted and the flag stays off.
+    VolumetricCloudFrameFacts facts;
+    facts.sunTint = Vec3(0.5f, 0.5f, 0.5f);
+    facts.sunDirection = Vec3(0.0f, 1.0f, 0.0f);
+    facts.sunIlluminance = Vec3(2.0f, 2.0f, 2.0f);
+    const VolumetricCloudParamsGpu p = MakeVolumetricCloudParams(SanitizeVolumetricCloudSettings(defaults), facts);
+    EXPECT_FLOAT_EQ(p.atmosphereMode[0], 0.0f);
+    EXPECT_FLOAT_EQ(p.sunColorAndAmbient[0], 1.0f);
+}
+
+TEST(VolumetricCloudLightingTest, AirLeavesASceneThatHoldsTheSameAirLightUnchanged)
+{
+    // A sky pixel: scene = air light of the distance + the air's transmittance times the sky behind.
+    const float airLight = 0.3f;
+    const float airTransmittance = 0.6f;
+    const float behind = 2.0f;
+    const float scene = airLight + airTransmittance * behind;
+    // No cloud: the pixel stays as it is.
+    EXPECT_NEAR(CloudAerialComposite(scene, 1.0f, 0.0f, airTransmittance, airLight), scene, 1e-6f);
+    // A solid cloud shows its own light through the air plus the air light, and none of the sky behind.
+    EXPECT_NEAR(CloudAerialComposite(scene, 0.0f, 5.0f, airTransmittance, airLight), 5.0f * airTransmittance + airLight, 1e-6f);
+    // Half-covered: the sky behind is dimmed by the cloud only, the air light stays whole.
+    const float half = CloudAerialComposite(scene, 0.5f, 1.0f, airTransmittance, airLight);
+    EXPECT_NEAR(half, airLight + airTransmittance * (1.0f + 0.5f * behind), 1e-5f);
+}
+
+TEST(VolumetricCloudLightingTest, WithoutAirTheCompositeIsTheOldSceneTimesTransmittancePlusLight)
+{
+    EXPECT_FLOAT_EQ(CloudAerialComposite(2.0f, 0.25f, 0.7f, 1.0f, 0.0f), 2.0f * 0.25f + 0.7f);
 }
 
 TEST(VolumetricCloudParamsTest, PacksTheLightingSettings)
@@ -483,18 +549,23 @@ TEST(VolumetricCloudShaderNamesTest, MarchExposesBoundNames)
     ASSERT_NE(params, nullptr);
     EXPECT_EQ(params->type, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     EXPECT_EQ(params->access, ReflectedAccess::ReadOnly);
-    for (const char* sampler : { "sourceDepth", "shapeVolume", "detailVolume", "weatherMap", "blueNoise" }) {
+    for (const char* sampler : { "sourceDepth", "shapeVolume", "detailVolume", "weatherMap", "blueNoise",
+             "transmittanceLut", "multiScatteringLut", "skyViewLut" }) {
         const ReflectedDescriptorBinding* binding = Find(result, sampler);
         ASSERT_NE(binding, nullptr) << sampler;
         EXPECT_EQ(binding->type, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) << sampler;
     }
+    const ReflectedDescriptorBinding* atmosphere = Find(result, "atmosphere");
+    ASSERT_NE(atmosphere, nullptr);
+    EXPECT_EQ(atmosphere->type, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    EXPECT_EQ(atmosphere->access, ReflectedAccess::ReadOnly);
     for (const char* output : { "lowColorOut", "lowAuxOut" }) {
         const ReflectedDescriptorBinding* binding = Find(result, output);
         ASSERT_NE(binding, nullptr) << output;
         EXPECT_EQ(binding->type, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) << output;
         EXPECT_EQ(binding->access, ReflectedAccess::WriteOnly) << output;
     }
-    EXPECT_EQ(result.descriptorBindings.size(), 8u);
+    EXPECT_EQ(result.descriptorBindings.size(), 12u);
     EXPECT_FALSE(result.hasPushConstantRange);
 }
 

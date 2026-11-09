@@ -104,6 +104,12 @@ struct VolumetricCloudSettings {
     float freshBlend = 0.2f;        // Same for the pixel that was marched itself.
     float clampExpand = 0.0f;       // Relative growth of the neighbourhood box the history is clamped to; 0 = no clamp.
     float motionBlend = 0.5f;       // Extra weight of the new samples where the picture moves by a pixel or more.
+
+    // Atmosphere. 1 lights the clouds from the atmosphere's look-up tables and falls back to the standalone
+    // look (0) while the atmosphere publishes none.
+    float atmosphereMode = 1.0f;
+    float airScale = 1.0f;          // Factor on the air's scattering between the eye and a cloud (mode 1).
+    float skyAmbient = 1.0f;        // Factor on the sky light that reaches the clouds (mode 1).
 };
 
 // One tunable float: its endpoint key, field and range.
@@ -170,10 +176,21 @@ inline constexpr std::array kVolumetricCloudFloatSettings{
     VolumetricCloudFloatSetting{ "freshBlend", &VolumetricCloudSettings::freshBlend, 0.01f, 1.0f },
     VolumetricCloudFloatSetting{ "clampExpand", &VolumetricCloudSettings::clampExpand, 0.0f, 4.0f },
     VolumetricCloudFloatSetting{ "motionBlend", &VolumetricCloudSettings::motionBlend, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "atmosphereMode", &VolumetricCloudSettings::atmosphereMode, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "airScale", &VolumetricCloudSettings::airScale, 0.0f, 50.0f },
+    VolumetricCloudFloatSetting{ "skyAmbient", &VolumetricCloudSettings::skyAmbient, 0.0f, 10.0f },
+};
+
+// Where the light of the clouds came from in the last frame.
+enum class VolumetricCloudSkyLight : std::uint8_t {
+    Standalone,  // The settings only (mode 0).
+    Atmosphere,  // The atmosphere's look-up tables (mode 1).
+    Unavailable, // Mode 1 was asked for but the atmosphere published no tables; the standalone look was used.
 };
 
 struct VolumetricCloudViewSnapshot {
     VolumetricCloudFrameStatus status = VolumetricCloudFrameStatus::NotRendered;
+    VolumetricCloudSkyLight skyLight = VolumetricCloudSkyLight::Standalone;
     std::uint64_t frameIndex = 0;
     bool historyUsed = false;       // The resolve pass blended the history of the last frame.
     std::uint32_t divisor = 1;      // March resolution divisor of the last frame.
@@ -211,8 +228,10 @@ struct VolumetricCloudParamsGpu {
     float drainePhase[4] = {};          // x Henyey-Greenstein g, y Draine g, z Draine alpha, w Draine weight.
     std::uint32_t lowRes[4] = {};       // x divisor, yz sample offset inside the block, w unused.
     std::uint32_t fullSize[4] = {};     // xy view size in pixels.
+    float atmosphereMode[4] = {};       // x 1 = lit by the atmosphere, y sky intensity, z air scale, w sky ambient gain.
+    float atmosphereCamera[4] = {};     // xyz camera position in atmosphere space (km).
 };
-static_assert(sizeof(VolumetricCloudParamsGpu) == 64 + 19 * 16);
+static_assert(sizeof(VolumetricCloudParamsGpu) == 64 + 21 * 16);
 static_assert(std::is_trivially_copyable_v<VolumetricCloudParamsGpu>);
 
 // std430 block of VolumetricCloudResolve.comp; member order matches the shader.

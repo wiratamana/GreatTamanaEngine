@@ -33,6 +33,16 @@ const char* StatusText(VolumetricCloudFrameStatus status) noexcept
     return "Unknown";
 }
 
+const char* SkyLightText(VolumetricCloudSkyLight light) noexcept
+{
+    switch (light) {
+    case VolumetricCloudSkyLight::Standalone: return "standalone";
+    case VolumetricCloudSkyLight::Atmosphere: return "atmosphere tables";
+    case VolumetricCloudSkyLight::Unavailable: return "standalone (the atmosphere published no tables)";
+    }
+    return "standalone";
+}
+
 void DrawStatus(const VolumetricCloudViewSnapshot& game, const VolumetricCloudViewSnapshot& scene)
 {
     const ImVec4 green(0.4f, 0.9f, 0.4f, 1.0f);
@@ -40,6 +50,7 @@ void DrawStatus(const VolumetricCloudViewSnapshot& game, const VolumetricCloudVi
     ImGui::TextColored(game.status == VolumetricCloudFrameStatus::Ok ? green : orange, "Game view: %s", StatusText(game.status));
     if (game.status == VolumetricCloudFrameStatus::Ok) {
         ImGui::Text("March 1/%u, history %s", game.divisor, game.historyUsed ? "in use" : "not used");
+        ImGui::Text("Sky light: %s", SkyLightText(game.skyLight));
     }
     ImGui::Text("Scene view: %s", StatusText(scene.status));
 }
@@ -83,7 +94,16 @@ bool BuildVolumetricCloudPanel(
     changed |= ImGui::SliderFloat("Ambient intensity", &edit.ambientIntensity, 0.0f, 4.0f);
     changed |= ImGui::SliderFloat("Silver lining", &edit.silverIntensity, 0.0f, 2.0f);
     changed |= ImGui::SliderFloat("Powder", &edit.powder, 0.0f, 1.0f);
-    changed |= ImGui::DragFloat("Haze distance (m)", &edit.hazeDistanceM, 500.0f, 1000.0f, 1000000.0f);
+    changed |= ImGui::DragFloat("Haze distance (m, standalone)", &edit.hazeDistanceM, 500.0f, 1000.0f, 1000000.0f);
+
+    ImGui::SeparatorText("Atmosphere");
+    bool fromAtmosphere = edit.atmosphereMode >= 0.5f;
+    if (ImGui::Checkbox("Light from the atmosphere tables", &fromAtmosphere)) {
+        edit.atmosphereMode = fromAtmosphere ? 1.0f : 0.0f;
+        changed = true;
+    }
+    changed |= ImGui::SliderFloat("Sky ambient", &edit.skyAmbient, 0.0f, 4.0f);
+    changed |= ImGui::SliderFloat("Air scale", &edit.airScale, 0.0f, 8.0f);
 
     ImGui::SeparatorText("Quality");
     int divisorIndex = 0;

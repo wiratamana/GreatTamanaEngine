@@ -4,6 +4,7 @@
 #include "VolumetricCloudTypes.h"
 #include "../../Core/FeatureKit/FeatureKit.h"
 #include "../../Core/FeatureKit/ScreenSpaceView.h"
+#include "../../Game/Lighting/AtmosphereSkyLuts.h"
 #include "../../Game/Lighting/SunLightModulation.h"
 
 #include <array>
@@ -15,6 +16,7 @@ namespace gte {
 struct VolumetricCloudViewState {
     fx::GpuParams<VolumetricCloudParamsGpu> params;
     fx::GpuParams<VolumetricCloudResolveParamsGpu> resolveParams;
+    fx::GpuParams<AtmosphereParametersGpu> atmosphereParams;
     VolumetricCloudViewSnapshot snapshot;
     float windOffset[2] = {};
     float previousWindOffset[2] = {};
@@ -81,6 +83,8 @@ private:
     fx::ComputeShader m_slice2dShader{ "VolumetricCloudSlice2D" };
     fx::ViewOutput m_output{ "VolumetricCloud" };
     fx::ChannelReader<SunLightModulation> m_sunLight{ kSunLightModulationOwner, kSunLightModulationChannel };
+    fx::ChannelReader<AtmosphereSharedLuts> m_sharedLuts{ kAtmosphereLutOwner, kAtmosphereSharedLutsChannel };
+    fx::ChannelReader<AtmosphereViewLuts> m_viewLuts{ kAtmosphereLutOwner, kAtmosphereViewLutsChannel };
 };
 
 } // namespace gte

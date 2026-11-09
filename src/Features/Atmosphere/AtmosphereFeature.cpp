@@ -12,6 +12,7 @@
 namespace gte {
 
 static_assert(std::string_view(kSunLightModulationOwner) == std::string_view(kAtmosphereFeatureName));
+static_assert(std::string_view(kAtmosphereLutOwner) == std::string_view(kAtmosphereFeatureName));
 
 namespace {
 
@@ -168,6 +169,7 @@ void AtmosphereFeature::ViewLuts(fx::PreOpaqueFrame& f)
     AtmosphereViewState& view = m_views.For(f.Scope());
     AtmosphereViewLuts luts;
     luts.frameUniforms = MakeFrameUniforms(f.Scene(), f.View(), m_settings);
+    luts.skyIntensity = m_settings.skyIntensity;
 
     if (f.PassEnabled("AtmosphereSkyViewLutPass")) {
         const fx::Texture skyView = view.skyView.Acquire(f, kSkyViewSize, PixelFormat::RGBA16_Float);

@@ -9,6 +9,7 @@
 - Marches at 1/4 per axis (1/16 of the pixels) and accumulates over frames. About 2 to 2.6 ms at 884x432 on an Intel Iris Xe.
 - Scene depth limits every ray, so clouds never draw over a mountain or an object in front of them.
 - Off in the Scene view by default. On in the Game view once enabled.
+- Sun colour, sky light and distance haze come from the Atmosphere look-up tables (`atmosphereMode` 1, the default). Without them the clouds fall back to a standalone look.
 
 ## Where in the frame
 | Registration | Stage | Priority | Toggle names |
@@ -24,11 +25,25 @@ The composite writes `scene * T + cloud` itself and uses `Replace`. The engine `
 | Source | Use |
 |---|---|
 | Scene color and scene depth of the view | Pixel colour behind the cloud. Depth (standard Z) is the far limit of the ray |
-| `Atmosphere.SunLight` channel (`SunLightModulation`) | Sun tint at sunset and the ambient scale. Missing channel gives neutral values |
+| `Atmosphere.SunLight` channel (`SunLightModulation`) | Standalone look only: sun tint at sunset and the ambient scale. Missing channel gives neutral values |
+| `Atmosphere.SharedLuts`, `Atmosphere.ViewLuts` channels | Transmittance, multi-scattering and sky-view LUTs, the planet constants and the sky intensity (see Atmosphere below) |
 | First active ECS `DirectionalLight` | Sun direction and illuminance. With none, a fixed placeholder sun is used |
 | `assets/clouds/*.gtvol` | Baked noise, see below |
 
-The clouds do not read the Atmosphere LUTs. Haze fades a cloud into the sky colour already in the scene colour.
+## Atmosphere
+This is the hybrid option: the clouds stay a separate feature and read the sky tables the Atmosphere publishes. The channel payloads (`AtmosphereSharedLuts`, `AtmosphereViewLuts`) and the GPU structs of the sky live in `src/Game/Lighting/AtmosphereSkyLuts.h`, and the shared GLSL math in `src/Shaders/AtmosphereCommon.glsl`. The clouds never include the Atmosphere feature.
+
+`atmosphereMode` 1 (default) uses the tables. It falls back to 0 on its own when the Atmosphere publishes none (feature off, or its LUT passes switched off). `game.skyLight` then reads `Unavailable` and the picture is the standalone one.
+
+| What | `atmosphereMode` 0 (standalone) | `atmosphereMode` 1 (tables) |
+|---|---|---|
+| Sun colour | sun light x tint channel x smooth sun visibility at the camera | sun illuminance x transmittance LUT at each cloud sample (its altitude and sun angle) x planet shadow |
+| Sky light | sun luminance x tint x ambient scale | sky-view LUT: the zenith and a ring of 4 at 35 degrees, x sky intensity x `skyAmbient`. One lookup set per marched pixel |
+| Distance | cloud opacity falls with `exp(-t / hazeDistanceM)` into the sky pixel behind | the air between the eye and the cloud: `final = scene*T + cloud*Tair + (1-T)*Lair`. `Lair` is 8 samples of single and multiple scattering from the LUTs along the ray up to the mean cloud distance, `Tair` its transmittance |
+
+Units are the sky's: atmosphere space is km from the planet centre, the camera at `(0, R + height)` like the Atmosphere feature, world units are metres. The cloud shell radius (`planetRadiusKm`) and the Atmosphere planet radius are separate numbers; keep them equal.
+`final = scene*T + cloud*Tair + (1-T)*Lair` leaves a sky pixel unchanged where the cloud lets everything through, because the sky already holds the air light of the same distance. The aerial perspective volume of the Atmosphere only reaches 0.5 km after its auto scale, so it is not used.
+`hazeDistanceM` has no effect in mode 1. `sunIntensity` and `ambientIntensity` scale the sun term in both modes; `ambientIntensity` only in mode 0, `skyAmbient` only in mode 1. `airScale` multiplies the air's scattering and extinction between the eye and the cloud (1 is physical).
 
 ## How it works
 1. **March** (compute, 1/`resolutionDivisor` of the view). Each low-res texel marches one real pixel of its block. The pixel walks a Bayer order, so 16 frames cover the full grid at divisor 4. A ray starts on the layer shell, jittered by blue noise, takes long steps over empty air, steps back on the first hit and then takes short steps with the detail noise and a sun march (Beer-Lambert optical depth, dual lobe Henyey-Greenstein, silver lining, 3 multiple scattering octaves, powder, sky ambient). It stores light, transmittance, the mean cloud distance and how far the ray looked.
@@ -103,7 +118,7 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `silverG` | 0.97 | 0.5..0.999 | Eccentricity of that lobe |
 | `powder` | 0.5 | 0..1 | Dark edge effect when looking away from the sun |
 | `ambientBottom` | 0.12 | 0..1 | Sky light left at the layer base, relative to the top |
-| `hazeDistanceM` | 45000 | 1000..1e+07 | Distance at which a cloud has faded to 1/e into the sky behind it |
+| `hazeDistanceM` | 45000 | 1000..1e+07 | Mode 0 only: distance at which a cloud has faded to 1/e into the sky behind it |
 | `lightDetail` | 0 | 0..1 | Share of the fine erosion the nearest sun sample uses |
 | `lightStride` | 2 | 1..8 | Lit samples that share one sun march |
 | `resolutionDivisor` | 4 | 1..4 | March at 1/n of the view size per axis. 1, 2 or 4 (others round) |
@@ -112,6 +127,9 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `freshBlend` | 0.2 | 0.01..1 | Same for the pixel that was marched itself |
 | `clampExpand` | 0 | 0..4 | Growth of the box the history is clamped to. 0 = no clamp |
 | `motionBlend` | 0.5 | 0..1 | Extra weight of new samples where the picture moves a pixel or more |
+| `atmosphereMode` | 1 | 0..1 | 1 lights the clouds from the Atmosphere tables (falls back to 0 when none are published), 0 is the standalone look |
+| `airScale` | 1 | 0..50 | Mode 1: factor on the air's scattering and extinction between the eye and a cloud |
+| `skyAmbient` | 1 | 0..10 | Mode 1: factor on the sky light that reaches the clouds |
 
 ## Cloud coverage knobs
 | Want | Set |
@@ -133,6 +151,7 @@ Name for `/feature_debug`: `VolumetricCloud`. Actions: `reset_defaults`, `preset
 | `game.status`, `scene.status` | `NotRendered`, `Ok`, `Disabled`, `AssetMissing`, `ShadersNotReady`, `TargetFailed`, `PassDisabled`, `NoValidCamera` |
 | `game.historyUsed` | The resolve pass blended the history of the last frame |
 | `game.divisor` | March divisor of the last frame |
+| `game.skyLight`, `scene.skyLight` | `Standalone` (mode 0), `Atmosphere` (mode 1 in use) or `Unavailable` (mode 1 asked for, no tables, standalone look used) |
 | `game.assets.shape/detail/weather/blueNoise` | Loaded size, or `not loaded` |
 
 Texture for `/get_texture`: `GameViewVolumetricCloud` (also `SceneViewVolumetricCloud`).
@@ -164,7 +183,9 @@ Memory per view: 4 full-size RGBA16F history targets (about 12 MB at 884x432), s
 - The noise has no mips. Detail fades out with distance instead.
 - Divisor 4 is soft. A newly exposed screen edge and the first frames after a resize or a camera cut show the raw 4x4 pattern for up to about 16 frames.
 - TemporalAa (-150) sees the clouds as normal pixels. Its jitter is not fed into the march pattern. TemporalAa, Gtao and Ssgi reported `NoValidCamera` with the camera 5 km from the origin in a test (their camera basis check uses the coarse engine matrix). The clouds do not depend on that check.
-- Atmosphere LUTs are not read: sun colour comes from the sun light record and the tint channel, haze from the pixel behind the cloud. A sun below the horizon gives no sun light and dark clouds.
+- Mode 1 reads the sky of the camera's height only: one sky-view lookup set for the whole picture and the camera's position for the air. Clouds that are far away and high see the same sky light as the ones overhead.
+- Clouds do not shadow the ground, the aerial perspective shafts or the sun glow of the sky. They only dim what is behind them. A sun glow behind a cloud is dimmed by the cloud transmittance, like any other pixel.
+- Mode 1 follows the planet's shadow: at a sun angle just below the horizon only the high far clouds stay lit and the rest go dark, as the sky does. Mode 0 keeps lighting them with a fixed twilight tint.
 - The layer is a sphere shell around a planet centred below the camera. Horizontal camera position does not bend it.
 - Perspective cameras only. A view with no valid `invViewProjection` gives `NoValidCamera`.
 - The Game camera far plane is 1000 m. The scene depth limit works inside that range; beyond it the sky shows through.

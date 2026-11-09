@@ -353,7 +353,12 @@ VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     const float sunVisibility = SmoothStep(-0.05f, 0.15f, facts.sunDirection.y);
     fx::PackVec3(p.sunDirectionAndIntensity, facts.sunDirection, safe.sunIntensity);
     const Vec3 sun = facts.sunIlluminance * facts.sunTint;
-    fx::PackVec3(p.sunColorAndAmbient, sun * sunVisibility, safe.ambientIntensity);
+    // With the atmosphere's tables the sun goes in untouched: they hold its colour and the planet's shadow.
+    if (facts.atmosphereLit) {
+        fx::PackVec3(p.sunColorAndAmbient, facts.sunIlluminance, safe.ambientIntensity);
+    } else {
+        fx::PackVec3(p.sunColorAndAmbient, sun * sunVisibility, safe.ambientIntensity);
+    }
 
     const float luminance = 0.2126f * sun.x + 0.7152f * sun.y + 0.0722f * sun.z;
     const float ambient = luminance * facts.ambientScale * (0.15f + 0.85f * sunVisibility);
@@ -415,6 +420,11 @@ VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     p.lowRes[2] = offset.y;
     p.fullSize[0] = facts.viewWidth;
     p.fullSize[1] = facts.viewHeight;
+    p.atmosphereMode[0] = facts.atmosphereLit ? 1.0f : 0.0f;
+    p.atmosphereMode[1] = facts.skyIntensity;
+    p.atmosphereMode[2] = safe.airScale;
+    p.atmosphereMode[3] = safe.skyAmbient;
+    fx::PackVec3(p.atmosphereCamera, facts.atmosphereCameraKm);
     return p;
 }
 
@@ -471,6 +481,12 @@ VolumetricCloudResolveParamsGpu MakeVolumetricCloudResolveParams(const Volumetri
     p.sizes[2] = resolve.lowWidth;
     p.sizes[3] = resolve.lowHeight;
     return p;
+}
+
+float CloudAerialComposite(float scene, float cloudTransmittance, float cloudLight, float airTransmittance,
+    float airLight) noexcept
+{
+    return scene * cloudTransmittance + cloudLight * airTransmittance + (1.0f - cloudTransmittance) * airLight;
 }
 
 bool CloudTapUsable(float tapEndKm, float tapDistanceKm, float tapTransmittance, float pixelEndKm) noexcept

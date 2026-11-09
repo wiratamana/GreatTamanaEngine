@@ -179,7 +179,7 @@ TEST(ShaderContractTest, ShadowLookupKeepsTheRealWorldPosition)
 TEST(ShaderContractTest, SurfaceClampAndPlanetVisibilityHaveOracleNameParity)
 {
     const std::filesystem::path dir(GTE_TEST_ATMOSPHERE_SHADER_DIR);
-    const std::string common = ReadText(dir / "AtmosphereCommon.glsl");
+    const std::string common = ReadText(std::filesystem::path(GTE_TEST_SHADERS_DIR) / "AtmosphereCommon.glsl");
     ASSERT_FALSE(common.empty());
     EXPECT_NE(common.find("vec3 ClampSampleToSurfaceKm("), std::string::npos);
     EXPECT_NE(common.find("float PlanetVisibility("), std::string::npos);
