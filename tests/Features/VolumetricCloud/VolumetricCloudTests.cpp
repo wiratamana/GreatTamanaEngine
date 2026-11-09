@@ -11,11 +11,16 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <set>
 #include <span>
+#include <sstream>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace gte {
 namespace {
@@ -813,6 +818,92 @@ TEST(VolumetricCloudTemporalTest, RelativeBasisStaysValidFarFromTheOrigin)
         EXPECT_TRUE(basis.valid) << extent.width << "x" << extent.height;
         EXPECT_GT(Dot(basis.forward, forward), 0.999f) << extent.width << "x" << extent.height;
     }
+}
+
+struct GlslMember {
+    std::string name;
+    std::uint32_t offset = 0;
+};
+
+std::string ReadShaderText(const char* file)
+{
+    std::ifstream in(std::filesystem::path(GTE_TEST_CLOUD_SHADER_DIR) / file, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+// Members of `buffer <block> { ... } params;` with their std430 offsets; every member is a mat4 or a 4-vector.
+std::vector<GlslMember> ParseBlock(const std::string& source, const std::string& block)
+{
+    std::vector<GlslMember> members;
+    const std::size_t head = source.find("buffer " + block);
+    const std::size_t open = source.find('{', head);
+    const std::size_t close = source.find("} params;", open);
+    if (head == std::string::npos || open == std::string::npos || close == std::string::npos) {
+        return members;
+    }
+    std::istringstream lines(source.substr(open + 1, close - open - 1));
+    std::string line;
+    std::uint32_t offset = 0;
+    while (std::getline(lines, line)) {
+        line = line.substr(0, line.find("//"));
+        std::istringstream words(line);
+        std::string type;
+        std::string name;
+        if (!(words >> type >> name) || name.empty() || name.back() != ';') {
+            continue;
+        }
+        name.pop_back();
+        members.push_back({ name, offset });
+        offset += type == "mat4" ? 64u : 16u;
+    }
+    return members;
+}
+
+void ExpectBlock(const std::vector<GlslMember>& glsl, const std::vector<std::pair<const char*, std::size_t>>& cpp)
+{
+    ASSERT_EQ(glsl.size(), cpp.size());
+    for (std::size_t i = 0; i < cpp.size(); ++i) {
+        EXPECT_EQ(glsl[i].name, cpp[i].first);
+        EXPECT_EQ(glsl[i].offset, cpp[i].second) << cpp[i].first;
+    }
+}
+
+TEST(VolumetricCloudParamsTest, GlslBlocksHaveTheCppMembersAtTheCppOffsets)
+{
+#define GTE_CLOUD_MEMBER(type, member) { #member, offsetof(type, member) }
+    ExpectBlock(ParseBlock(ReadShaderText("VolumetricCloud.comp"), "VolumetricCloudParams"),
+        { GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, invViewProjection),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, eyeAndPlanetRadius),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, sunDirectionAndIntensity),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, sunColorAndAmbient),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, ambientColor), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, layer),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, weather), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, noise),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, density), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, heightShape),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, march), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, counts),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, skip), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, lightMarch),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, lightPhase), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, lightScatter),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, lightMisc), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, drainePhase),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, lowRes), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, fullSize),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, atmosphereMode),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, atmosphereCamera) });
+    ExpectBlock(ParseBlock(ReadShaderText("VolumetricCloudResolve.comp"), "VolumetricCloudResolveParams"),
+        { GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, invViewProjection),
+            GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, prevViewProjection),
+            GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, eye),
+            GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, windDelta),
+            GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, blend),
+            GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, motion),
+            GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, counts),
+            GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, sizes) });
+#undef GTE_CLOUD_MEMBER
+}
+
+TEST(VolumetricCloudTemporalTest, ResolveShaderTapRuleUsesTheSameToleranceAsTheReference)
+{
+    const std::string source = ReadShaderText("VolumetricCloudResolve.comp");
+    EXPECT_NE(source.find("const float kRelative = 0.03;"), std::string::npos);
+    EXPECT_NE(source.find("const float kSlackKm = 0.02;"), std::string::npos);
+    EXPECT_NE(source.find("const float kClearTransmittance = 0.999;"), std::string::npos);
 }
 
 } // namespace

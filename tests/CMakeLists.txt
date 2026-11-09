@@ -115,6 +115,7 @@ gte_test_path_defines(GreatTamanaEngineTests "${CMAKE_SOURCE_DIR}/src"
     GTE_TEST_SHADERS_DIR=Shaders
     GTE_TEST_SHADOW_SHADER_DIR=Features/Shadow/Shaders
     GTE_TEST_ATMOSPHERE_SHADER_DIR=Features/Atmosphere/Shaders
+    GTE_TEST_CLOUD_SHADER_DIR=Features/VolumetricCloud/Shaders
     GTE_TEST_VOLUMETRIC_SHADER_DIR=Features/VolumetricLight/Shaders
     GTE_TEST_LIGHTING_GLSL_PATH=Shaders/DirectionalLighting.glsl
     GTE_TEST_MATERIAL_PARAMS_GLSL_PATH=Shaders/MaterialParams.glsl
