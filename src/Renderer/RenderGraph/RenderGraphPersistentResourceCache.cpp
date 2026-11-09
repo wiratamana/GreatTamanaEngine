@@ -182,7 +182,6 @@ void RenderGraphPersistentResourceCache::RecordFinalLayout(PersistentSlotRef slo
 
 void RenderGraphPersistentResourceCache::BeginFrame(std::uint64_t currentFrame, std::uint64_t staleThresholdFrames)
 {
-    m_retired.clear(); // The previous frame has been submitted and waited on by now.
     for (auto it = m_entries.begin(); it != m_entries.end();) {
         if (IsStaleCacheEntry(it->second.lastUsedFrame, currentFrame, staleThresholdFrames)) {
             ReleaseSlot(it->second.slot);
@@ -252,7 +251,6 @@ std::vector<PersistentSlotRef> RenderGraphPersistentResourceCache::FlushPendingR
     }
 
     resized.reserve(m_pendingResizes.size());
-    m_retired.reserve(m_retired.size() + m_pendingResizes.size());
     for (const PendingResize& pending : m_pendingResizes) {
         PersistentResourceCacheEntry* entry = EntryFor(pending.slot);
         if (entry == nullptr || !entry->texture.has_value()) {
@@ -266,7 +264,8 @@ std::vector<PersistentSlotRef> RenderGraphPersistentResourceCache::FlushPendingR
                 /*allowDepthSampledAccess=*/false, /*createDepthCompanion=*/false, /*createColorImage=*/true,
                 HasFlag(entry->desc.usage, TextureUsage::TransferSrc),
                 HasFlag(entry->desc.usage, TextureUsage::TransferDst));
-            m_retired.push_back(std::move(*entry->texture)); // Capacity reserved above, move is noexcept.
+            // The frame being recorded still names the old image: the renderer frees it when that frame is done.
+            m_renderer->Retire(std::move(*entry->texture));
             entry->texture.emplace(std::move(fresh));
         } catch (const std::exception& e) {
             GTE_LOG_ERROR("RenderGraphPersistentResourceCache",

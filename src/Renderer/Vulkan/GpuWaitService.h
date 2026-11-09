@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cstdint>
 #include <mutex>
+#include <span>
 
 namespace gte {
 
@@ -51,6 +52,10 @@ public:
 
     [[nodiscard]] BlockOutcome WaitFence(VkFence fence, std::chrono::nanoseconds timeout, WaitClass waitClass,
         BlockSite site, const char* detail) noexcept;
+
+    // Waits until every fence in `fences` is signaled (bounded). An empty span completes at once.
+    [[nodiscard]] BlockOutcome WaitFences(std::span<const VkFence> fences, std::chrono::nanoseconds timeout,
+        WaitClass waitClass, BlockSite site, const char* detail) noexcept;
 
     // Drains the graphics queue (bounded), then the rest of the device (not bounded).
     [[nodiscard]] BlockOutcome WaitIdle(std::chrono::nanoseconds timeout, BlockSite site, const char* detail) noexcept;

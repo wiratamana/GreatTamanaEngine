@@ -38,7 +38,7 @@ void Frame::SetSceneUniformBytes(std::span<const std::byte> bytes)
         ReportOnce("SetSceneUniforms() needs a frame that belongs to a render callback");
         return;
     }
-    m_context->core->GetSceneServicesDescriptorSet().UpdateGlobalUniformBlock(m_context->view, bytes);
+    m_context->core->GetSceneServicesDescriptorSet().UpdateGlobalUniformBlock(m_context->view, bytes, OffscreenTicket());
 }
 
 } // namespace gte::fx

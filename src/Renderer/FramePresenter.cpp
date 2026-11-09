@@ -11,7 +11,9 @@
 #include "RenderGraph/RenderGraphBuilder.h"
 #include "Vulkan/VulkanDevice.h"
 
+#include <array>
 #include <cstddef>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -26,6 +28,25 @@ void ThrowIfNotCompleted(const char* what, BlockOutcome outcome)
     if (outcome != BlockOutcome::Completed) {
         throw std::runtime_error(std::string(what) + ": GPU wait " + ToString(outcome));
     }
+}
+
+// Orders every earlier submitted command before this command buffer's work. Record it first in every offscreen
+// slot and present command buffer: it lets GPU-only resources keep a single copy across frames.
+// Valid only while one graphics queue exists.
+void RecordFrameBoundaryBarrier(VkCommandBuffer cmd) noexcept
+{
+    VkMemoryBarrier2 barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+    barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    barrier.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+    barrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+
+    VkDependencyInfo dependency{};
+    dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dependency.memoryBarrierCount = 1;
+    dependency.pMemoryBarriers = &barrier;
+    vkCmdPipelineBarrier2(cmd, &dependency);
 }
 
 } // namespace
@@ -95,6 +116,17 @@ void FramePresenter::CreateCommandObjects()
     if (vkAllocateCommandBuffers(m_device, &offscreenAllocInfo, &m_offscreenCommandBuffer) != VK_SUCCESS) {
         throw std::runtime_error("FramePresenter: vkAllocateCommandBuffers failed (offscreen)");
     }
+
+    // One buffer per offscreen ring slot for the overlapped main frame.
+    VkCommandBufferAllocateInfo slotAllocInfo{};
+    slotAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    slotAllocInfo.commandPool = m_commandPool;
+    slotAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    slotAllocInfo.commandBufferCount = kFramesInFlight;
+
+    if (vkAllocateCommandBuffers(m_device, &slotAllocInfo, m_offscreenSlotCommandBuffers.data()) != VK_SUCCESS) {
+        throw std::runtime_error("FramePresenter: vkAllocateCommandBuffers failed (offscreen slots)");
+    }
 }
 
 void FramePresenter::OnResize(int width, int height)
@@ -150,14 +182,64 @@ DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTe
     return drawStats;
 }
 
+std::optional<OffscreenFrameTicket> FramePresenter::BeginOffscreenFrame()
+{
+    // The frame submitted into this slot two frames ago must be done before the slot is reused.
+    return m_offscreen.BeginFrame([this](std::uint32_t slot) {
+        return m_vulkanDevice->Waits().WaitFence(m_frameSync.OffscreenSlotFence(slot), kFrameWaitTimeout,
+            WaitClass::Frame, BlockSite::PreviousOffscreen, "offscreen slot");
+    });
+}
+
+BlockOutcome FramePresenter::WaitAllOffscreen(BlockSite site, const char* detail) noexcept
+{
+    return m_offscreen.DrainAll([&](std::span<const std::uint32_t> slots) {
+        std::array<VkFence, kFramesInFlight> fences{};
+        for (std::size_t i = 0; i < slots.size(); ++i) {
+            fences[i] = m_frameSync.OffscreenSlotFence(slots[i]);
+        }
+        return m_vulkanDevice->Waits().WaitFences(
+            std::span<const VkFence>(fences.data(), slots.size()), kIdleWaitTimeout, WaitClass::Upload, site, detail);
+    });
+}
+
+void FramePresenter::ReleaseRetired(AbandonedWork& abandoned, bool gpuIdle) noexcept
+{
+    if (gpuIdle) {
+        m_offscreen.Retired().ReleaseAll();
+        return;
+    }
+    for (std::shared_ptr<void>& owner : m_offscreen.Retired().TakeAll()) {
+        abandoned.Park(std::move(owner));
+    }
+}
+
+std::uint32_t FramePresenter::OffscreenRecordSlot() const noexcept
+{
+    switch (m_offscreenOpen) {
+    case OffscreenOpen::Slot:
+        return m_offscreen.Current().slot;
+    case OffscreenOpen::Legacy:
+        return m_legacyRecordSlot;
+    case OffscreenOpen::None:
+        break;
+    }
+    return 0;
+}
+
 VkCommandBuffer FramePresenter::BeginOffscreenRecording()
 {
-    if (m_offscreenOpen) {
+    if (m_offscreenOpen != OffscreenOpen::None) {
         throw std::logic_error("offscreen recording is already open");
     }
+    // The legacy path records on the same queue and may reuse pooled resources: no overlapped frame may still run.
+    ThrowIfNotCompleted(
+        "BeginOffscreenRecording", WaitAllOffscreen(BlockSite::PreviousOffscreen, "offscreen drain"));
     ThrowIfNotCompleted("BeginOffscreenRecording",
         m_vulkanDevice->Waits().WaitFence(m_frameSync.OffscreenFence(), kFrameWaitTimeout, WaitClass::Frame,
             BlockSite::PreviousOffscreen, "offscreen fence"));
+    // Both waits completed: nothing submitted so far is still running.
+    m_offscreen.CollectAfterCompletedWait();
 
     vkResetCommandBuffer(m_offscreenCommandBuffer, 0);
 
@@ -166,31 +248,71 @@ VkCommandBuffer FramePresenter::BeginOffscreenRecording()
     if (vkBeginCommandBuffer(m_offscreenCommandBuffer, &beginInfo) != VK_SUCCESS) {
         throw std::runtime_error("vkBeginCommandBuffer failed (offscreen)");
     }
-    m_offscreenOpen = true;
+    m_offscreenOpen = OffscreenOpen::Legacy;
     return m_offscreenCommandBuffer;
+}
+
+VkCommandBuffer FramePresenter::BeginAsyncOffscreenRecording(const OffscreenFrameTicket& ticket)
+{
+    if (m_offscreenOpen != OffscreenOpen::None) {
+        throw std::logic_error("offscreen recording is already open");
+    }
+    const OffscreenFrameTicket current = m_offscreen.Current();
+    if (!m_offscreen.Ring().FrameOpen() || ticket.slot != current.slot || ticket.serial != current.serial) {
+        throw std::logic_error("offscreen frame ticket is not the current frame");
+    }
+
+    // The slot wait of BeginOffscreenFrame() proved the buffer's previous submit finished.
+    const VkCommandBuffer cmd = m_offscreenSlotCommandBuffers[ticket.slot];
+    vkResetCommandBuffer(cmd, 0);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
+        throw std::runtime_error("vkBeginCommandBuffer failed (offscreen slot)");
+    }
+    RecordFrameBoundaryBarrier(cmd);
+    m_offscreenOpen = OffscreenOpen::Slot;
+    return cmd;
 }
 
 void FramePresenter::EndOffscreenRecording()
 {
-    m_offscreenOpen = false;
+    m_offscreenOpen = OffscreenOpen::None;
     if (vkEndCommandBuffer(m_offscreenCommandBuffer) != VK_SUCCESS) {
         throw std::runtime_error("vkEndCommandBuffer failed (offscreen)");
     }
     SubmitOffscreenAndWait(m_frameSync.OffscreenFence(), "EndOffscreenRecording");
 }
 
+void FramePresenter::EndOffscreenSlotRecording()
+{
+    const std::uint32_t slot = m_offscreen.Current().slot;
+    const VkCommandBuffer cmd = m_offscreenSlotCommandBuffers[slot];
+    m_offscreenOpen = OffscreenOpen::None;
+    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+        throw std::runtime_error("vkEndCommandBuffer failed (offscreen slot)");
+    }
+    SubmitOffscreenBuffer(cmd, m_frameSync.OffscreenSlotFence(slot), "EndOffscreenSlotRecording");
+    m_offscreen.NoteSubmitted();
+}
+
 void FramePresenter::DiscardOffscreen() noexcept
 {
     // Legal while recording, also inside an open rendering instance; the buffer was never submitted.
-    vkResetCommandBuffer(m_offscreenCommandBuffer, 0);
-    m_offscreenOpen = false;
+    // A slot frame stays open: its slot, serial and fence are untouched and the next attempt reuses them.
+    const VkCommandBuffer cmd = m_offscreenOpen == OffscreenOpen::Slot
+        ? m_offscreenSlotCommandBuffers[m_offscreen.Current().slot]
+        : m_offscreenCommandBuffer;
+    vkResetCommandBuffer(cmd, 0);
+    m_offscreenOpen = OffscreenOpen::None;
 }
 
-void FramePresenter::SubmitOffscreenAndWait(VkFence offscreenFence, const char* what)
+void FramePresenter::SubmitOffscreenBuffer(VkCommandBuffer cmd, VkFence fence, const char* what)
 {
     VkCommandBufferSubmitInfo cmdSubmitInfo{};
     cmdSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
-    cmdSubmitInfo.commandBuffer = m_offscreenCommandBuffer;
+    cmdSubmitInfo.commandBuffer = cmd;
 
     VkSubmitInfo2 submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
@@ -198,12 +320,17 @@ void FramePresenter::SubmitOffscreenAndWait(VkFence offscreenFence, const char* 
     submitInfo.pCommandBufferInfos = &cmdSubmitInfo;
 
     // Reset only now: a failure before this point leaves the fence signaled for the next frame.
-    vkResetFences(m_device, 1, &offscreenFence);
-    if (m_vulkanDevice->SubmitToGraphicsQueue(submitInfo, offscreenFence) != VK_SUCCESS) {
+    vkResetFences(m_device, 1, &fence);
+    if (m_vulkanDevice->SubmitToGraphicsQueue(submitInfo, fence) != VK_SUCCESS) {
         // The fence is unsignaled and nothing will signal it: stop all further waits and submits.
         m_vulkanDevice->Waits().MarkDeviceLost();
         throw std::runtime_error(std::string("vkQueueSubmit2 failed (") + what + ")");
     }
+}
+
+void FramePresenter::SubmitOffscreenAndWait(VkFence offscreenFence, const char* what)
+{
+    SubmitOffscreenBuffer(m_offscreenCommandBuffer, offscreenFence, what);
 
     ThrowIfNotCompleted(what,
         m_vulkanDevice->Waits().WaitFence(
@@ -241,6 +368,7 @@ void FramePresenter::RecoverAcquiredImage(std::uint32_t imageIndex, bool fenceRe
                     waits.MarkDeviceLost();
                     return;
                 }
+                RecordFrameBoundaryBarrier(cmd);
                 const rg::ResourceState previous{
                     VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE
                 };
@@ -377,6 +505,7 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph,
         if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
             throw std::runtime_error("vkBeginCommandBuffer failed (render graph present)");
         }
+        RecordFrameBoundaryBarrier(cmd);
 
         RenderTarget target;
         target.image = m_swapchain.Image(imageIndex);

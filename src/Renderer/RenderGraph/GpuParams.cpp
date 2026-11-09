@@ -5,6 +5,7 @@
 #include "../Renderer.h"
 #include "../../Core/Logging.h"
 
+#include <cassert>
 #include <exception>
 #include <string>
 #include <utility>
@@ -35,9 +36,46 @@ GpuParamsUploadDecision DecideGpuParamsUpload(
 }
 
 GpuParamsBuffer::GpuParamsBuffer() noexcept = default;
-GpuParamsBuffer::~GpuParamsBuffer() = default;
-GpuParamsBuffer::GpuParamsBuffer(GpuParamsBuffer&&) noexcept = default;
-GpuParamsBuffer& GpuParamsBuffer::operator=(GpuParamsBuffer&&) noexcept = default;
+
+GpuParamsBuffer::~GpuParamsBuffer()
+{
+    RetireCopies();
+}
+
+GpuParamsBuffer::GpuParamsBuffer(GpuParamsBuffer&& other) noexcept
+    : m_buffers(std::move(other.m_buffers))
+    , m_ledger(other.m_ledger)
+    , m_size(std::exchange(other.m_size, 0))
+    , m_refusalLogged(other.m_refusalLogged)
+    , m_renderer(std::exchange(other.m_renderer, nullptr))
+{
+}
+
+GpuParamsBuffer& GpuParamsBuffer::operator=(GpuParamsBuffer&& other) noexcept
+{
+    if (this != &other) {
+        RetireCopies();
+        m_buffers = std::move(other.m_buffers);
+        m_ledger = other.m_ledger;
+        m_size = std::exchange(other.m_size, 0);
+        m_refusalLogged = other.m_refusalLogged;
+        m_renderer = std::exchange(other.m_renderer, nullptr);
+    }
+    return *this;
+}
+
+// A frame in flight may still read a copy, so the renderer frees it later instead of the GPU being drained.
+void GpuParamsBuffer::RetireCopies() noexcept
+{
+    if (m_renderer == nullptr) {
+        return;
+    }
+    for (std::unique_ptr<GpuBuffer>& copy : m_buffers) {
+        if (copy != nullptr) {
+            m_renderer->Retire(std::move(copy));
+        }
+    }
+}
 
 bool GpuParamsBuffer::Upload(RenderGraphBuilder& builder, const void* data, std::size_t size, const char* debugName)
 {
@@ -64,6 +102,15 @@ bool GpuParamsBuffer::Upload(RenderGraphBuilder& builder, const void* data, std:
     if (refusal == nullptr && decision == GpuParamsUploadDecision::Create && builder.RendererOrNull() == nullptr) {
         refusal = "the builder has no renderer";
     }
+    const OffscreenFrameTicket& ticket = builder.FrameTicket();
+    const std::uint32_t copy = RingCopyOf(ticket, kGpuFramesInFlight);
+    if (refusal == nullptr && decision == GpuParamsUploadDecision::Overwrite) {
+        if (m_buffers[copy] == nullptr) {
+            refusal = "the copy of this frame slot does not exist";
+        } else if (!m_ledger.Writable(ticket)) {
+            refusal = "the copy of this frame slot is still in use by the GPU"; // Never write it.
+        }
+    }
     if (refusal != nullptr) {
         LogRefusalOnce(std::string("Upload to \"") + (debugName != nullptr ? debugName : "") + "\" refused: " + refusal + ".");
         return false;
@@ -71,16 +118,22 @@ bool GpuParamsBuffer::Upload(RenderGraphBuilder& builder, const void* data, std:
 
     try {
         if (decision == GpuParamsUploadDecision::Create) {
-            auto buffer = std::make_unique<GpuBuffer>(builder.OwningRenderer().Device(), size, debugName,
-                GpuBufferUse::Storage | GpuBufferUse::HostWrite);
-            if (!buffer->Upload(data, size)) {
+            // Every slot gets its copy up front, so no frame allocates in the middle of recording.
+            std::array<std::unique_ptr<GpuBuffer>, kGpuFramesInFlight> created;
+            for (std::unique_ptr<GpuBuffer>& slotCopy : created) {
+                slotCopy = std::make_unique<GpuBuffer>(builder.OwningRenderer().Device(), size, debugName,
+                    GpuBufferUse::Storage | GpuBufferUse::HostWrite);
+            }
+            if (!created[copy]->Upload(data, size)) {
                 return false;
             }
-            m_buffer = std::move(buffer);
+            m_buffers = std::move(created);
+            m_renderer = &builder.OwningRenderer();
             m_size = size;
-        } else if (!m_buffer->Upload(data, size)) {
+        } else if (!m_buffers[copy]->Upload(data, size)) {
             return false;
         }
+        m_ledger.NoteUpload(ticket, builder.FrameIndex());
     } catch (const std::exception& e) {
         LogRefusalOnce(std::string("Upload to \"") + (debugName != nullptr ? debugName : "") + "\" failed: " + e.what());
         return false;
@@ -88,9 +141,18 @@ bool GpuParamsBuffer::Upload(RenderGraphBuilder& builder, const void* data, std:
     return true;
 }
 
-BufferObjectHandle GpuParamsBuffer::Handle() const noexcept
+BufferObjectHandle GpuParamsBuffer::Handle(const RenderGraphBuilder& builder) const noexcept
 {
-    return m_buffer != nullptr ? m_buffer->Handle() : BufferObjectHandle::Invalid;
+    const OffscreenFrameTicket& ticket = builder.FrameTicket();
+    const GpuBuffer* copy = m_buffers[RingCopyOf(ticket, kGpuFramesInFlight)].get();
+    if (copy == nullptr) {
+        return BufferObjectHandle::Invalid;
+    }
+    if (!m_ledger.UploadedThisFrame(ticket, builder.FrameIndex())) {
+        assert(false && "GpuParamsBuffer::Handle() needs an Upload() in the same frame");
+        return BufferObjectHandle::Invalid;
+    }
+    return copy->Handle();
 }
 
 } // namespace gte::rg

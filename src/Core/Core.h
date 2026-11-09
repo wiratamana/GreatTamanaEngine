@@ -63,8 +63,10 @@ struct FrameStats {
 class Core {
 public:
     // `forceGpuValidation` turns the GPU API validation on in any build type.
+    // `offscreenFramesInFlight` above 1 lets the CPU build the next frame while the GPU draws the main views.
     Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices, bool forceGpuValidation = false,
-        PresentPolicy presentPolicy = PresentPolicy::Capped);
+        PresentPolicy presentPolicy = PresentPolicy::Capped,
+        std::uint32_t offscreenFramesInFlight = kDefaultOffscreenFramesInFlight);
 
     // Defined out-of-line in Core.cpp to support incomplete types in unique_ptr.
     ~Core();
@@ -338,6 +340,23 @@ private:
 
     // Per-pass rows of the same frame for the profiler. Reserved once.
     std::vector<Profiling::GpuPassRow> m_gpuPassRowScratch;
+
+    // Overlapped offscreen frames only: the slot ticket of the frame being built, taken at the top of the frame.
+    // It stays until that frame is submitted, so a skipped frame keeps its slot.
+    std::optional<OffscreenFrameTicket> m_offscreenTicket;
+    bool m_offscreenSlotWaitAttempted = false; // Set by Update(), cleared when BuildFrame() ends.
+
+    // Waits for the slot of the next overlapped frame and reads the stamps of the frame that last used it.
+    void AcquireOffscreenFrame();
+
+    // The frame slot the CPU writes GPU-visible memory for this frame: a synchronous ticket without overlap, the
+    // taken slot with it, empty when no slot is free.
+    std::optional<OffscreenFrameTicket> FrameWriteTicket() const noexcept;
+
+    // Opens the offscreen recording of this frame: overlapped in the slot of m_offscreenTicket, otherwise (or when a
+    // capture is armed) the synchronous one. `slotWaitAttempted` tells whether Update() already tried the slot wait.
+    // Throws when the slot is not free.
+    [[nodiscard]] OffscreenRecording BeginOffscreenRecordingForFrame(bool slotWaitAttempted);
 
     // Publishes the per-view GPU numbers of the newest synchronous snapshot to the profiler.
     void PublishGpuMetrics(bool primaryActive, bool secondaryActive);

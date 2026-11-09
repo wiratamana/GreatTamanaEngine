@@ -43,14 +43,15 @@ public:
 
     // Returns the set for this identity, rewritten with `writes`. Never throws:
     // allocation failure is logged once and yields DescriptorSetHandle::Invalid.
+    // `slot` is the offscreen frame slot (0 for synchronous and present graphs): each slot owns its own set.
     DescriptorSetHandle Resolve(const char* passName, ViewScope viewScope, VkDescriptorSetLayout layout,
-        const std::vector<DescriptorWrite>& writes, std::uint64_t instance = 0);
+        const std::vector<DescriptorWrite>& writes, std::uint64_t instance = 0, std::uint32_t slot = 0);
 
     // Frees sets unused for more than `staleFrames`. The age guard keeps in-flight command buffers safe.
     void BeginFrame(std::uint64_t currentFrame, std::uint64_t staleFrames = kDefaultStaleFrames);
 
-    // Frees every set allocated against `layout`. A destroyed shader queues its release; the queue drains once
-    // per frame in BeginPersistentResourceFrame, never inside Execute (frames in flight may still use the sets).
+    // Frees every set allocated against `layout`, for every slot. A destroyed shader queues its release; the queue
+    // drains once per frame in BeginPersistentResourceFrame, never inside Execute (frames in flight may use the sets).
     void Release(VkDescriptorSetLayout layout);
 
     static constexpr std::uint64_t kDefaultStaleFrames = 600;
@@ -66,6 +67,8 @@ private:
     // Identities whose allocation failed back off per key; a failing key is never retried every frame.
     static constexpr std::size_t kMaxFailingKeys = 64;
     using FailingKeys = BoundedRetryGates<ComputeBindingKey, ComputeBindingKeyHash, ComputeBindingKeyEqual, kMaxFailingKeys>;
+
+    struct SetsToFree;
 
     void FreeEntry(const Entry& entry) noexcept;
 

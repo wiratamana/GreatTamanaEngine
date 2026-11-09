@@ -238,26 +238,27 @@ SceneServicesDescriptorSet::SceneServicesDescriptorSet(Renderer& renderer)
     m_dummyGlobalUniformBuffer.Upload(zeroBytes.data(), zeroBytes.size());
 }
 
-SceneServicesDescriptorSet::~SceneServicesDescriptorSet() = default;
+SceneServicesDescriptorSet::~SceneServicesDescriptorSet()
+{
+    // A frame in flight may still read a lighting buffer: the renderer frees them once it is done.
+    if (m_renderer != nullptr && !m_perViewUniformBuffers.empty()) {
+        m_renderer->Retire(std::move(m_perViewUniformBuffers));
+    }
+}
 
 DescriptorSetHandle SceneServicesDescriptorSet::Rewrite(
-    rg::RenderViewId view, const std::array<ResolvedSlot, kSceneServiceSlotCount>& resolved)
+    rg::RenderViewId view, const std::array<ResolvedSlot, kSceneServiceSlotCount>& resolved, std::uint32_t frameSlot)
 {
     SceneServiceRegistrySealedFlag() = true; // Startup-only registration: this is the first-ever call's permanent cutoff.
 
-    DescriptorSetHandle handle = DescriptorSetHandle::Invalid;
-    for (PerViewSet& entry : m_perViewSets) {
-        if (entry.view == view) {
-            handle = entry.handle;
-            break;
-        }
-    }
+    const std::uint32_t ringSlot = frameSlot % kGpuFramesInFlight;
+    DescriptorSetHandle handle = DescriptorSetFor(view, ringSlot);
     VkDescriptorSet set = Native(handle);
     const bool freshlyAllocated = (set == VK_NULL_HANDLE);
     if (freshlyAllocated) {
         set = m_renderer->AllocateDescriptorSet(m_layout.Native()).Native();
         handle = RegisterDescriptorSet(set);
-        m_perViewSets.push_back(PerViewSet{ view, handle });
+        m_perViewSets.push_back(PerViewSet{ view, ringSlot, handle });
     }
 
     std::array<VkDescriptorImageInfo, kSceneServiceSlotCount> imageInfos{};
@@ -315,10 +316,11 @@ DescriptorSetHandle SceneServicesDescriptorSet::Rewrite(
     return handle;
 }
 
-DescriptorSetHandle SceneServicesDescriptorSet::DescriptorSetFor(rg::RenderViewId view) const noexcept
+DescriptorSetHandle SceneServicesDescriptorSet::DescriptorSetFor(rg::RenderViewId view, std::uint32_t frameSlot) const noexcept
 {
+    const std::uint32_t ringSlot = frameSlot % kGpuFramesInFlight;
     for (const PerViewSet& entry : m_perViewSets) {
-        if (entry.view == view) {
+        if (entry.view == view && entry.slot == ringSlot) {
             return entry.handle;
         }
     }
@@ -332,48 +334,59 @@ const Texture2D& SceneServicesDescriptorSet::DummyImage2DTextureFor(std::uint32_
     return m_dummyImage2DTextures.at(slotIndex);
 }
 
-void SceneServicesDescriptorSet::UpdateGlobalUniformBlock(rg::RenderViewId view, std::span<const std::byte> bytes)
+void SceneServicesDescriptorSet::UpdateGlobalUniformBlock(
+    rg::RenderViewId view, std::span<const std::byte> bytes, const OffscreenFrameTicket& ticket)
 {
     assert(bytes.size() <= static_cast<std::size_t>(kSceneGlobalUniformBlockSize)
         && "UpdateGlobalUniformBlock: payload exceeds the fixed ceiling - grow kSceneGlobalUniformBlockSize.");
 
+    const std::uint32_t ringSlot = RingCopyOf(ticket, kGpuFramesInFlight);
     PerViewUniformBuffer* entry = nullptr;
     for (PerViewUniformBuffer& candidate : m_perViewUniformBuffers) {
-        if (candidate.view == view) {
+        if (candidate.view == view && candidate.slot == ringSlot) {
             entry = &candidate;
             break;
         }
     }
     const bool freshlyCreatedBuffer = (entry == nullptr);
     if (freshlyCreatedBuffer) {
-        m_perViewUniformBuffers.push_back(PerViewUniformBuffer{ view,
+        m_perViewUniformBuffers.push_back(PerViewUniformBuffer{ view, ringSlot,
             m_renderer->CreateBuffer(kSceneGlobalUniformBlockSize, BufferUsage::UniformBuffer,
-                BufferMemoryUsage::CpuToGpu, "SceneGlobalUniformBlock") });
+                BufferMemoryUsage::CpuToGpu, "SceneGlobalUniformBlock"),
+            RingCopyUse{} });
         entry = &m_perViewUniformBuffers.back();
+    }
+    // A frame in flight may still read this copy: never write it.
+    if (!entry->use.Claim(ticket)) {
+        if (!m_rejectedWriteLogged) {
+            m_rejectedWriteLogged = true;
+            GTE_LOG_ERROR("SceneServicesDescriptorSet",
+                "UpdateGlobalUniformBlock() refused: the lighting block of this frame slot is still in use by the GPU.");
+        }
+        return;
     }
     // The mapped buffer handle never changes, so every later frame only memcpy's fresh bytes.
     entry->buffer.Upload(bytes.data(), bytes.size());
 
-    // Allocate the shared per-view set lazily here too: the first caller for a view creates it and the
+    // Allocate the per-(view, slot) set lazily here too: the first caller for it creates it and the
     // other reuses it. Do not turn this into an assert; a PreOpaque depth pass may touch the view first.
-    DescriptorSetHandle handle = DescriptorSetHandle::Invalid;
-    for (PerViewSet& perView : m_perViewSets) {
-        if (perView.view == view) {
-            handle = perView.handle;
-            break;
-        }
-    }
+    DescriptorSetHandle handle = DescriptorSetFor(view, ringSlot);
     VkDescriptorSet set = Native(handle);
     const bool freshlyAllocatedSet = (set == VK_NULL_HANDLE);
     if (freshlyAllocatedSet) {
         set = m_renderer->AllocateDescriptorSet(m_layout.Native()).Native();
         handle = RegisterDescriptorSet(set);
-        m_perViewSets.push_back(PerViewSet{ view, handle });
+        m_perViewSets.push_back(PerViewSet{ view, ringSlot, handle });
     }
 
     // Point binding 8 at the buffer only once: updating a set that may still be in flight is unsafe (crashes some
     // drivers). Only the frame the buffer or set is new touches it; later frames just refresh the bytes via Upload().
     if (freshlyCreatedBuffer || freshlyAllocatedSet) {
+        // A set that already served frames (lighting enabled late) may be read by a frame in flight.
+        if (!freshlyAllocatedSet
+            && m_renderer->DrainGpuForResourceRelease("scene lighting buffer") != BlockOutcome::Completed) {
+            return;
+        }
         VkDescriptorBufferInfo bufferInfo{ entry->buffer.Native(), 0, kSceneGlobalUniformBlockSize };
         VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
         write.dstSet = set;

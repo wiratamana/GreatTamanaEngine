@@ -45,7 +45,7 @@ TEST(ComputePassTest, ChainOnABareBuilderIsInert)
         .Dispatch(Extent2D{ 8, 8 });
 
     EXPECT_EQ(builder.DeclaredPassCount(), 0u);
-    EXPECT_EQ(params.Handle(), BufferObjectHandle::Invalid);
+    EXPECT_EQ(params.Handle(builder), BufferObjectHandle::Invalid);
 }
 
 TEST(ComputePassTest, InertChainWithoutDispatchDoesNotAssert)

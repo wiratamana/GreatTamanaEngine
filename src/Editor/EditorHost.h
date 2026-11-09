@@ -39,8 +39,10 @@ class EditorHost {
 public:
     // `forceGpuValidation` turns the GPU API validation on in any build type.
     // `presentPolicy` Uncapped removes the vsync cap (benchmarks).
+    // `offscreenFramesInFlight` above 1 lets the CPU build the next frame while the GPU draws the main views.
     EditorHost(const std::string& title, int width, int height, bool forceGpuValidation,
-        PresentPolicy presentPolicy = PresentPolicy::Capped);
+        PresentPolicy presentPolicy = PresentPolicy::Capped,
+        std::uint32_t offscreenFramesInFlight = kDefaultOffscreenFramesInFlight);
     ~EditorHost() = default;
 
     EditorHost(const EditorHost&) = delete;

@@ -105,9 +105,11 @@ public:
     AnimationSystem::SkinningMode GetSkinningMode() const noexcept { return m_animationSystem.GetSkinningMode(); }
 
     // Called once per frame after Update(); see AnimationSystem::CollectModelsNeedingGpuSkinningThisFrame().
-    std::vector<AnimationSystem::GpuSkinningDispatchRequest> CollectGpuSkinningDispatchRequests() const
+    // `ticket` is the frame slot Update() wrote the bone matrices for.
+    std::vector<AnimationSystem::GpuSkinningDispatchRequest> CollectGpuSkinningDispatchRequests(
+        const OffscreenFrameTicket& ticket = OffscreenFrameTicket{}) const
     {
-        return m_animationSystem.CollectModelsNeedingGpuSkinningThisFrame();
+        return m_animationSystem.CollectModelsNeedingGpuSkinningThisFrame(ticket);
     }
 
     // The shared compute-pipeline pair the GPU skinning passes dispatch against.

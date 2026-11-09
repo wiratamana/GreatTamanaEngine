@@ -8,6 +8,7 @@
 #include "../Profiling/NameTable.h"
 #include "../Profiling/ScopeTimer.h"
 #include "GpuViewMetrics.h"
+#include "OffscreenFramePolicy.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../Renderer/Culling/ClusterCullMath.h"
 #include "../Renderer/RenderGraph/FullscreenPass.h"
@@ -89,8 +90,8 @@ std::optional<ScenePassReadHandles> ResolveScenePassReadHandles(
 } // namespace
 
 Core::Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices, bool forceGpuValidation,
-    PresentPolicy presentPolicy)
-    : m_renderer(surfaceProvider, forceGpuValidation, presentPolicy)
+    PresentPolicy presentPolicy, std::uint32_t offscreenFramesInFlight)
+    : m_renderer(surfaceProvider, forceGpuValidation, presentPolicy, offscreenFramesInFlight)
     , m_sceneServicesDescriptorSet(m_renderer)
     , m_renderViewRegistry(m_renderer)
     , m_renderGraph(m_renderer)
@@ -116,6 +117,10 @@ Core::Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices, bool 
 Core::~Core()
 {
     m_renderer.SetTimingObserver(nullptr);
+    // No overlapped offscreen frame may still run while the members it uses are destroyed.
+    if (m_renderer.WaitForOffscreenFrames(BlockSite::Shutdown, "~Core") != BlockOutcome::Completed) {
+        GTE_LOG_ERROR("Core", "overlapped offscreen frames did not finish before shutdown");
+    }
 }
 
 // Initializes built-in capability orchestrators.
@@ -387,12 +392,51 @@ bool Core::RegisterRenderPass(FrameEvent event, const char* debugName, std::int3
 
 void Core::Update(const InputFrame& input, float deltaTime)
 {
+    // First, so everything this frame writes for the GPU can target the buffers of its own slot.
+    m_offscreenSlotWaitAttempted = true;
+    AcquireOffscreenFrame();
+    m_engineContext.gpuFrame = FrameWriteTicket();
+
     const bool steppedThisFrame = input.playbackPaused && input.stepRequested;
     m_engineContext.time.Advance(static_cast<double>(deltaTime), input.playbackPaused, steppedThisFrame, kFixedStepSeconds);
 
     if (input.inputState != nullptr) {
         m_game.Update(m_engineContext, *input.inputState);
     }
+}
+
+void Core::AcquireOffscreenFrame()
+{
+    if (!m_renderer.OverlapsOffscreenFrames()) {
+        return;
+    }
+    m_offscreenTicket = m_renderer.BeginOffscreenFrame();
+    if (m_offscreenTicket.has_value()) {
+        // The wait proved the frame that last used this slot finished, so its GPU stamps can be read once.
+        m_renderGraph.ResolveOffscreenGpuFrame(m_offscreenTicket->slot);
+    }
+}
+
+// The slot this frame's CPU writes into GPU-visible memory target; empty when no slot is free.
+std::optional<OffscreenFrameTicket> Core::FrameWriteTicket() const noexcept
+{
+    return WriteTicketFor(m_renderer.OverlapsOffscreenFrames(), m_offscreenTicket);
+}
+
+OffscreenRecording Core::BeginOffscreenRecordingForFrame(bool slotWaitAttempted)
+{
+    const bool overlapped = m_renderer.OverlapsOffscreenFrames();
+    if (ChooseOffscreenRecordingPath(overlapped, m_captureArmedThisFrame) == OffscreenRecordingPath::Legacy) {
+        return m_renderer.BeginOffscreenRecording(FrameWriteTicket().value_or(OffscreenFrameTicket{}).slot);
+    }
+    // A host that never called Update() takes the slot here; one whose wait failed does not wait again.
+    if (BuildMustAcquireSlot(m_offscreenTicket.has_value(), slotWaitAttempted)) {
+        AcquireOffscreenFrame();
+    }
+    if (!m_offscreenTicket.has_value()) {
+        throw std::runtime_error("offscreen frame slot is not free");
+    }
+    return m_renderer.BeginAsyncOffscreenRecording(*m_offscreenTicket);
 }
 
 // Finds active view data by view ID.
@@ -998,8 +1042,10 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             };
             const std::size_t claimScope = rg::ViewScopeIndex(TranslateLegacyViewScope(frame.currentView));
             const std::uint64_t frameIndex = frame.builder.FrameIndex();
+            const std::uint32_t frameSlot = frame.builder.FrameTicket().slot;
             desc.execute = [this, aspectWidthOverHeight, isPrimaryView, viewProjectionOverride, jittered, frameDebuggerCapture,
-                                publishedServiceSlots, currentViewForServices, claimScope, frameIndex](rg::PassContext& ctx) {
+                                publishedServiceSlots, currentViewForServices, claimScope, frameIndex,
+                                frameSlot](rg::PassContext& ctx) {
                 std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolvedServiceSlots{};
                 for (std::uint32_t slotIndex = 0; slotIndex < kSceneServiceSlotCount; ++slotIndex) {
                     if (publishedServiceSlots[slotIndex].has_value()) {
@@ -1017,7 +1063,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                     }
                 }
                 const DescriptorSetHandle sceneServicesSet =
-                    m_sceneServicesDescriptorSet.Rewrite(currentViewForServices, resolvedServiceSlots);
+                    m_sceneServicesDescriptorSet.Rewrite(currentViewForServices, resolvedServiceSlots, frameSlot);
                 // Read at execute time: chains declared after this pass fill the set during declaration.
                 const EntityMarkSet& claimed = m_claimedEntities[claimScope];
                 SceneCullCounts cullCounts;
@@ -1307,6 +1353,9 @@ const char* Core::ViewResourceName(rg::ViewScope scope) const noexcept
 
 void Core::BuildFrame()
 {
+    // Taken now so every early return below still clears it.
+    const bool slotWaitAttempted = std::exchange(m_offscreenSlotWaitAttempted, false);
+
     // Per-frame claims, candidates and exclusions are cleared first so a frame that ends early leaves none behind.
     for (EntityMarkSet& claimed : m_claimedEntities) {
         claimed.Clear();
@@ -1376,13 +1425,18 @@ void Core::BuildFrame()
 
     // Execute offscreen rendering for the primary and secondary views.
     if (primaryTarget != nullptr || secondaryTarget != nullptr) {
+        // Slot whose GPU stamps were recorded but whose frame was not submitted (overlapped frames only).
+        std::optional<std::uint32_t> unsubmittedSlot;
         try {
             GTE_PROFILE_SCOPE("Offscreen");
             m_timingAdapter.SetGraphLabel("Offscreen");
-            OffscreenRecording recording = [this]() -> OffscreenRecording {
+            OffscreenRecording recording = [this, slotWaitAttempted]() -> OffscreenRecording {
                 GTE_PROFILE_SCOPE("Offscreen.Begin");
-                return m_renderer.BeginOffscreenRecording();
+                return BeginOffscreenRecordingForFrame(slotWaitAttempted);
             }();
+            if (recording.IsAsync()) {
+                unsubmittedSlot = recording.Ticket().slot;
+            }
             if (FaultFires(FaultKind::OffscreenThrow)) {
                 throw std::runtime_error("injected offscreen fault");
             }
@@ -1390,11 +1444,12 @@ void Core::BuildFrame()
             // One render list serves the candidate build and every scene draw of this frame's graph.
             RenderSystem::SharedListScope renderList(m_game.GetRenderSystem());
             m_renderGraph.Execute(offscreenCmd, rg::ExecuteTimingMode::SynchronousImmediateReadback,
-                [&](rg::RenderGraphBuilder& b) {
+                recording.Ticket(), [&](rg::RenderGraphBuilder& b) {
                     GTE_PROFILE_SCOPE("Offscreen.Declare");
                     {
                         GTE_PROFILE_SCOPE("Offscreen.Collect");
-                        m_gpuSkinningRequestsThisFrame = m_game.CollectGpuSkinningDispatchRequests();
+                        m_gpuSkinningRequestsThisFrame = m_game.CollectGpuSkinningDispatchRequests(
+                            FrameWriteTicket().value_or(OffscreenFrameTicket{}));
                         m_gpuSkinningHandlesThisFrame.clear();
                         m_gpuSkinningHandlesThisFrame.reserve(m_gpuSkinningRequestsThisFrame.size());
                         for (const AnimationSystem::GpuSkinningDispatchRequest& request :
@@ -1552,12 +1607,23 @@ void Core::BuildFrame()
                 GTE_PROFILE_SCOPE("Offscreen.Submit");
                 recording.Submit();
             }
+            if (recording.IsAsync()) {
+                // Submitted: the frame owns its slot now and the next one takes the next.
+                unsubmittedSlot.reset();
+                m_offscreenTicket.reset();
+            }
             {
                 GTE_PROFILE_SCOPE("Offscreen.Finalize");
-                m_renderGraph.FinalizeSynchronousGpuTiming();
+                // An overlapped frame is still running: its stamps are read after a later slot wait.
+                if (!recording.IsAsync()) {
+                    m_renderGraph.FinalizeSynchronousGpuTiming();
+                }
                 PublishGpuMetrics(primaryTarget != nullptr, secondaryTarget != nullptr);
             }
         } catch (const std::exception& e) {
+            if (unsubmittedSlot.has_value()) {
+                m_renderGraph.DropOffscreenGpuFrame(*unsubmittedSlot);
+            }
             // A failure that repeats every frame is logged once per distinct message.
             const std::string failure = std::string("RenderGraph offscreen Execute() failed: ") + e.what();
             if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
@@ -1569,6 +1635,9 @@ void Core::BuildFrame()
                 m_editorLayer->FrameDebuggerNotifyOffscreenFailed();
             }
         } catch (...) {
+            if (unsubmittedSlot.has_value()) {
+                m_renderGraph.DropOffscreenGpuFrame(*unsubmittedSlot);
+            }
             const std::string failure = "RenderGraph offscreen Execute() failed: unknown exception";
             if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
                 GTE_LOG_ERROR("Core", failure);

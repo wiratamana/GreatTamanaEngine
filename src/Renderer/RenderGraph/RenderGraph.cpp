@@ -396,7 +396,8 @@ bool RenderGraph::BuildDescriptorWrites(const PassRecord& pass, const std::vecto
 }
 
 DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRecord& pass,
-    const std::vector<PhysicalTexture>& physicalTextures, const std::vector<PhysicalBuffer>& physicalBuffers)
+    const std::vector<PhysicalTexture>& physicalTextures, const std::vector<PhysicalBuffer>& physicalBuffers,
+    std::uint32_t slot)
 {
     if (pass.bindings.empty()) {
         return DescriptorSetHandle::Invalid;
@@ -412,7 +413,7 @@ DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRe
     }
 
     const DescriptorSetHandle set =
-        m_computeBindingCache.Resolve(pass.name, pass.viewScope, layout, writes, pass.bindingInstance);
+        m_computeBindingCache.Resolve(pass.name, pass.viewScope, layout, writes, pass.bindingInstance, slot);
     if (set == DescriptorSetHandle::Invalid) {
         ReportSkippedOnce(pass, std::nullopt, "descriptor set could not be allocated.");
     }
@@ -711,10 +712,12 @@ void RenderGraph::RegisterDebugVolumeTextureSnapshots(ExecuteTimingMode timingMo
     }
 }
 
-void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode timingMode, CompiledGraphInput input,
-    const std::vector<TextureHandle>& finalOutputs)
+void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode timingMode,
+    const OffscreenFrameTicket& ticket, CompiledGraphInput input, const std::vector<TextureHandle>& finalOutputs)
 {
     const bool isPipelined = (timingMode == ExecuteTimingMode::PipelinedDeferredReadback);
+    // An overlapped offscreen frame resolves its stamps later, after the slot wait of a following frame.
+    const bool lateGpu = !isPipelined && ticket.IsAsync();
 
     // A synchronous execution starts a new frame: unclaim pool entries and free the stale ones.
     if (!isPipelined) {
@@ -728,8 +731,8 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         ++m_debugTextureFrameCounter;
     }
 
-    // The pipelined stamps go into the region of the frame slot the presenter picked.
-    const std::uint32_t pipelinedBufferIndex = isPipelined ? m_pipelinedGpuSlot : 0;
+    // The stamps go into the region of the frame slot: the presenter's pick when pipelined, the ticket's otherwise.
+    const std::uint32_t gpuBufferIndex = isPipelined ? m_pipelinedGpuSlot : ticket.slot % kGpuFramesInFlight;
 
     PhaseScope compileScope(m_timingObserver, RenderPhase::Compile);
     const CompiledGraph compiled = Compile(input, std::span<const TextureHandle>(finalOutputs));
@@ -742,10 +745,9 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     std::vector<PassGpuStats> passStats(input.passes.size());
 
     // Plan the stamps of this execution: one reset of the frame's region, then a start stamp per executed pass.
-    GpuFrameData& gpuData = isPipelined ? m_pipelinedGpu[pipelinedBufferIndex] : m_synchronousGpu;
-    if (gpuData.pending) {
+    GpuFrameData& gpuData = isPipelined ? m_pipelinedGpu[gpuBufferIndex] : m_synchronousGpu[gpuBufferIndex];
+    if ((isPipelined ? m_pipelinedStamps : m_synchronousStamps).BeginRecord(gpuBufferIndex)) {
         ++m_droppedGpuFrames; // The previous frame in this slot was never read.
-        gpuData.pending = false;
     }
     const bool gpuActive = m_timingMode == TimingMode::Enabled && m_timestampPool.IsSupported()
         && m_timestampPool.IsCaptureEnabled();
@@ -760,6 +762,9 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     }
     if (isPipelined && !gpuActive) {
         m_pipelinedResolved = ResolvedGpuFrame{}; // Never show an old number while capture is off.
+    }
+    if (lateGpu && !gpuActive) {
+        m_offscreenResolved = ResolvedGpuFrame{};
     }
     if (gpuActive) {
         const std::size_t executedCount = compiled.executionOrder.size();
@@ -776,7 +781,8 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             isPipelined ? kGpuRecordBudgetPipelined : kGpuRecordBudgetSynchronous);
         gpuData.records.assign(gpuData.plan.recordCount, GpuPassRecord{});
         gpuData.captured = true;
-        m_timestampPool.ResetRegion(cmd, isPipelined, pipelinedBufferIndex);
+        gpuData.serial = ticket.serial;
+        m_timestampPool.ResetRegion(cmd, isPipelined, gpuBufferIndex);
     }
 
     PhaseScope recordScope(m_timingObserver, RenderPhase::Record);
@@ -786,7 +792,7 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
 
         // The start stamp comes before the pass's barriers so a barrier's cost is measured, not hidden.
         if (gpuActive) {
-            m_timestampPool.WriteStamp(cmd, isPipelined, pipelinedBufferIndex, gpuData.assignments[ordinal].startQuery);
+            m_timestampPool.WriteStamp(cmd, isPipelined, gpuBufferIndex, gpuData.assignments[ordinal].startQuery);
         }
 
         // Apply resource barriers for reads before writes.
@@ -804,7 +810,7 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
 
         // Fine mode stamps again once the barriers are recorded; coarse mode keeps one stamp per pass.
         if (gpuActive) {
-            m_timestampPool.WriteStamp(cmd, isPipelined, pipelinedBufferIndex, gpuData.assignments[ordinal].workQuery);
+            m_timestampPool.WriteStamp(cmd, isPipelined, gpuBufferIndex, gpuData.assignments[ordinal].workQuery);
         }
 
         // Find depth write texture handle, if any. Per-layer array writes and non-2D textures are attached
@@ -826,7 +832,8 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         DrawStats passDrawStats;
         PassContext ctx = BuildPassContext(cmd, physicalTextures, physicalBuffers, passDrawStats);
 
-        ctx.computeDescriptorSet = ResolveComputeBindingDescriptorSet(pass, physicalTextures, physicalBuffers);
+        ctx.computeDescriptorSet = ResolveComputeBindingDescriptorSet(
+            pass, physicalTextures, physicalBuffers, isPipelined ? 0u : gpuBufferIndex);
 
         // A refused pass or one with an unresolved descriptor set must not record: barriers already ran.
         bool skipExecute = pass.skipExecute;
@@ -994,9 +1001,9 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     }
 
     if (gpuActive) {
-        m_timestampPool.WriteStamp(cmd, isPipelined, pipelinedBufferIndex, gpuData.plan.endQuery);
-        m_timestampPool.WriteStamp(cmd, isPipelined, pipelinedBufferIndex, gpuData.plan.finalQuery);
-        gpuData.pending = true;
+        m_timestampPool.WriteStamp(cmd, isPipelined, gpuBufferIndex, gpuData.plan.endQuery);
+        m_timestampPool.WriteStamp(cmd, isPipelined, gpuBufferIndex, gpuData.plan.finalQuery);
+        (isPipelined ? m_pipelinedStamps : m_synchronousStamps).MarkPending(gpuBufferIndex);
     }
 
     recordScope.End();
@@ -1078,6 +1085,10 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         }
         m_pipelinedSnapshot = std::move(snapshot);
     } else {
+        // An overlapped frame's own stamps arrive later; the newest resolved frame's records apply by position and name.
+        if (lateGpu && m_offscreenResolved.valid) {
+            ApplyResolvedGpu(m_offscreenResolved, snapshot);
+        }
         m_synchronousSnapshot = std::move(snapshot);
     }
 }
@@ -1085,8 +1096,6 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
 RenderGraph::ResolvedGpuFrame RenderGraph::ResolveGpuFrame(
     GpuFrameData& data, bool pipelined, std::uint32_t bufferIndex, std::uint64_t frameIndex)
 {
-    data.pending = false;
-
     const std::uint32_t queryCount = m_timestampPool.QueryCount(pipelined);
     m_gpuValues.assign(queryCount, 0);
     m_gpuAvailable.assign(queryCount, 0);
@@ -1142,16 +1151,32 @@ void RenderGraph::ApplyResolvedGpu(const ResolvedGpuFrame& resolved, RenderGraph
 
 void RenderGraph::FinalizeSynchronousGpuTiming()
 {
-    if (!m_synchronousGpu.pending) {
+    if (!m_synchronousStamps.TakePending(0)) {
         return;
     }
-    const ResolvedGpuFrame resolved = ResolveGpuFrame(m_synchronousGpu, /*pipelined=*/false, /*bufferIndex=*/0, 0);
+    const ResolvedGpuFrame resolved = ResolveGpuFrame(m_synchronousGpu[0], /*pipelined=*/false, /*bufferIndex=*/0, 0);
     ApplyResolvedGpu(resolved, m_synchronousSnapshot);
+}
+
+void RenderGraph::ResolveOffscreenGpuFrame(std::uint32_t slot)
+{
+    if (!m_synchronousStamps.TakePending(slot)) {
+        return;
+    }
+    GpuFrameData& data = m_synchronousGpu[slot];
+    m_offscreenResolved = ResolveGpuFrame(data, /*pipelined=*/false, slot, data.serial);
+}
+
+void RenderGraph::DropOffscreenGpuFrame(std::uint32_t slot) noexcept
+{
+    if (m_synchronousStamps.TakePending(slot)) {
+        ++m_droppedGpuFrames;
+    }
 }
 
 void RenderGraph::ResolvePipelinedGpuFrame(std::uint32_t slot, std::uint64_t frameIndex)
 {
-    if (slot >= kGpuFramesInFlight || !m_pipelinedGpu[slot].pending) {
+    if (!m_pipelinedStamps.TakePending(slot)) {
         return;
     }
     m_pipelinedResolved = ResolveGpuFrame(m_pipelinedGpu[slot], /*pipelined=*/true, slot, frameIndex);
@@ -1159,9 +1184,7 @@ void RenderGraph::ResolvePipelinedGpuFrame(std::uint32_t slot, std::uint64_t fra
 
 void RenderGraph::DropPipelinedGpuFrame(std::uint32_t slot) noexcept
 {
-    if (slot < kGpuFramesInFlight) {
-        m_pipelinedGpu[slot].pending = false;
-    }
+    static_cast<void>(m_pipelinedStamps.TakePending(slot));
     ++m_droppedGpuFrames;
 }
 

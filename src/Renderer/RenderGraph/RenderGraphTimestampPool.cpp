@@ -21,7 +21,7 @@ RenderGraphTimestampPool::RenderGraphTimestampPool(VkDevice device, const GpuTim
 
     m_synchronousQueryCount = GpuQueryCount(synchronousRecordBudget);
     m_pipelinedQueryCount = GpuQueryCount(pipelinedRecordBudget);
-    m_synchronousPool.emplace(m_device, m_synchronousQueryCount);
+    m_synchronousPool.emplace(m_device, m_synchronousQueryCount * m_framesInFlight);
     m_pipelinedPool.emplace(m_device, m_pipelinedQueryCount * m_framesInFlight);
     m_scratch.resize(2 * static_cast<std::size_t>(std::max(m_synchronousQueryCount, m_pipelinedQueryCount)));
 }
@@ -33,12 +33,12 @@ std::uint32_t RenderGraphTimestampPool::QueryCount(bool pipelined) const noexcep
 
 std::uint32_t RenderGraphTimestampPool::RegionBase(bool pipelined, std::uint32_t bufferIndex) const noexcept
 {
-    return pipelined ? bufferIndex * m_pipelinedQueryCount : 0;
+    return TimestampRegionBase(QueryCount(pipelined), bufferIndex);
 }
 
 void RenderGraphTimestampPool::ResetRegion(VkCommandBuffer cmd, bool pipelined, std::uint32_t bufferIndex) noexcept
 {
-    if (!IsSupported() || (pipelined && bufferIndex >= m_framesInFlight)) {
+    if (!IsSupported() || bufferIndex >= m_framesInFlight) {
         return;
     }
     const VkQueryPool pool = pipelined ? m_pipelinedPool->Native() : m_synchronousPool->Native();
@@ -49,7 +49,7 @@ void RenderGraphTimestampPool::WriteStamp(
     VkCommandBuffer cmd, bool pipelined, std::uint32_t bufferIndex, std::int32_t query) noexcept
 {
     if (!IsSupported() || query < 0 || static_cast<std::uint32_t>(query) >= QueryCount(pipelined)
-        || (pipelined && bufferIndex >= m_framesInFlight)) {
+        || bufferIndex >= m_framesInFlight) {
         return;
     }
     const VkQueryPool pool = pipelined ? m_pipelinedPool->Native() : m_synchronousPool->Native();
@@ -64,7 +64,7 @@ GpuReadCall RenderGraphTimestampPool::Read(bool pipelined, std::uint32_t bufferI
     if (!IsSupported()) {
         return GpuReadCall::Ok;
     }
-    if (pipelined && bufferIndex >= m_framesInFlight) {
+    if (bufferIndex >= m_framesInFlight) {
         return GpuReadCall::Failed;
     }
 

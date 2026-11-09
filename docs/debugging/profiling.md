@@ -1,6 +1,6 @@
 # Profiling
 > The CPU and GPU frame profiler: what it measures, how to read it, how to add a scope. For anyone chasing a slow frame.
-> Verified against code: 2026-10-31
+> Verified against code: 2026-11-09
 
 ## TL;DR
 - `src/Profiling/` holds the CPU event log, the frame history and plain data. It has no SDL, Vulkan or ImGui code.
@@ -178,6 +178,7 @@ Panel layout, top to bottom. The first screen is the summary and the graph.
 ## Frame stages
 - `Core::BuildFrame` and `Core::Present` bracket the stages: `Render.Prepare`, `Offscreen.*`, `Present`.
 - `Offscreen` has `Begin`, `Declare`, `Compile`, `Record`, `Finish`, `FinalizeViews`, `Submit`, `Finalize`.
+- `Offscreen.Begin` opens the frame command buffer. `Offscreen.Submit` submits it; in the default mode it also waits for the GPU. `Offscreen.Finalize` publishes GPU metrics; in overlap mode they come from an older frame.
 - Render waits show as `GpuWait(Site:detail)`. Worker waits show as `Wait.Workers`.
 - Provider and pass scopes are `Declare.<provider>` and `Pass.<name>`.
 - Every render feature callback runs inside `Feature.<feature name>`. It sits inside the `Declare.*` bucket of its stage. This includes features from a project DLL. Scope names come from `FeatureScopeName()` in `src/Core/RenderTimingAdapter.h`.
@@ -188,6 +189,7 @@ Panel layout, top to bottom. The first screen is the summary and the graph.
 - Barrier time exists only in the fine stamp mode. The coarse mode reads `null`.
 - A graph with timing disabled writes no stamps and reads `Inactive`. Capture off reads `Absent`.
 - GPU bars are not aligned to CPU time. No calibrated timestamp extension is enabled, so `timeline.aligned` is `false`.
+- With `--frames-in-flight=2` the offscreen GPU rows arrive late. The stamps of a frame are read at the top of a later frame (1 to 2 frames), and the newest resolved frame fills the pass rows and `gpu_span`. Use medians. `GpuWait(PreviousOffscreen:offscreen slot)` is the CPU waiting for the GPU. `GpuWait(Offscreen:offscreen submit)` exists only in the default serial mode. Judge speed by `frame`, not by `cpu_busy` or `gpu_span`.
 - A cluster count is never shown as triangles. Cluster counts come from `GET /feature_debug/state`.
 
 ## Switches

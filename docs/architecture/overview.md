@@ -1,6 +1,6 @@
 # Architecture overview
 > How the engine starts, runs one frame, and splits work across layers and threads. Read this first.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-11-09
 
 ## TL;DR
 - Two static libraries: `gte_core` (no SDL, no ImGui) and `gte_editor` (SDL3, ImGui). The program is `GreatTamanaEditor`.
@@ -42,13 +42,14 @@ main.cpp
 | `--reimport <source> <dest.gta>` | Headless import. No window. Exit code 0 or 1. |
 | `--vulkan-validation` | Vulkan validation on, in any build type. |
 | `--no-vsync` | Uncapped present. For benchmarks only. |
+| `--frames-in-flight=<1\|2>` | Offscreen frames in flight. `1` (default) waits for the GPU after each submit. `2` lets the CPU build the next frame meanwhile. See [Rendering](rendering.md). |
 
 ### One frame
 `EditorHost::Run()` repeats these steps:
 1. Start the profiler frame. Clear per-frame input flags.
 2. Poll SDL events (see [Events](#events)).
 3. Drain network commands: engine command, Hi-Z demo menu, project hot reload.
-4. Call `Core::Update()`. It advances `Time`, then runs `Game::Update()`.
+4. Call `Core::Update()`. It takes the offscreen frame slot, advances `Time`, then runs `Game::Update()`.
 5. Stamp the log frame number. Start the ImGui frame.
 6. Drain more commands: editor UI, feature debug, Frame Debugger, render graph control, asset import, project load.
 7. `Renderer::BeginFrame()` clears last frame's queued draws.

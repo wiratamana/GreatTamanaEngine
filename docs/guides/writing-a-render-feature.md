@@ -186,6 +186,7 @@ If a channel or scene slot of yours is read by another pass that can be toggled 
 | Add a kit verb | New small `.cpp` in `src/Core/FeatureKit/`. Never hand a feature a raw handle |
 | Need a GPU feature the kit lacks | Add it inside `src/Renderer/` behind a Vulkan-free interface |
 | Use a 3D texture | See [Volumetric resources](../conventions/volumetric-resources.md) |
+| Write a buffer from the CPU every frame | Use `fx::GpuParams` or a `HostWrite` `fx::PersistentBuffer`: they keep one copy per frame slot. A buffer of your own that a pass reads while the CPU rewrites it needs one copy per `Frame::OffscreenTicket().slot` too, because `--frames-in-flight=2` lets the GPU read the old frame. See [Rendering](../architecture/rendering.md#frames-in-flight) |
 
 ## Check it worked
 

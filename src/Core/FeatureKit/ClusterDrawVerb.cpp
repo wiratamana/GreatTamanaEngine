@@ -715,7 +715,8 @@ public:
             return false;
         }
 
-        // Acquire imports each buffer once per frame; nothing is declared yet.
+        // Acquire imports each buffer once per frame; nothing is declared yet. Every lane of the frame gets the
+        // same instance ring copy, and a slot is the same part in every lane, so the per-copy content memo holds.
         PersistentBuffer* instanceBuffer = state.Instances(part.slot);
         const std::uint64_t instanceBytes = part.instanceCount * sizeof(ClusterInstanceGpu);
         run.instances = instanceBuffer->Acquire(frame, instanceBytes);
@@ -855,14 +856,17 @@ public:
         const MaterialToken material = part.usesMaterialSet ? part.material : MaterialToken{};
         const Pipeline* pipeline = part.pipeline;
         rg::ClusterDrawBindings* bindings = s.bindings;
-        const std::size_t bindingIndex = s.state->BindingIndex(context.scope, lane, part.slot);
+        // The frame's ring copy: its sets and its instance buffer are not read by an earlier frame still in flight.
+        const std::uint32_t frameSlot = context.builder->FrameTicket().slot;
+        const std::size_t bindingIndex = s.state->BindingIndex(
+            context.scope, lane, part.slot, RingCopyOf(context.builder->FrameTicket(), ClusterDrawState::InstanceRingCopies()));
         const rg::RenderViewId view = context.view;
         const bool depthOnly = s.depthOnly;
         const Mat4 viewProjection = s.camera.viewProjection;
         const std::uint32_t drawTag = ClusterDrawTagFor(s.phaseTint && !s.depthOnly, s.TwoRounds(), round);
         // The mesh and material are looked up again at execute time; a missing one draws nothing.
         auto resolveInputs = [core, token, material, pipeline, bindings, bindingIndex, view, depthOnly, viewProjection,
-                                 drawTag]() {
+                                 drawTag, frameSlot]() {
             rg::IndirectDrawInputs inputs;
             inputs.mesh = core->ResolveClusterMesh(token);
             inputs.pipeline = pipeline;
@@ -871,7 +875,7 @@ public:
             inputs.clusterBindingIndex = bindingIndex;
             inputs.drawTag = drawTag;
             if (!depthOnly) {
-                inputs.sceneSet = core->GetSceneServicesDescriptorSet().DescriptorSetFor(view);
+                inputs.sceneSet = core->GetSceneServicesDescriptorSet().DescriptorSetFor(view, frameSlot);
             }
             if (material.IsValid()) {
                 inputs.materialSet = core->ResolveClusterMaterialSet(material);

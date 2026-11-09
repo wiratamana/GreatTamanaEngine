@@ -7,9 +7,9 @@
 
 namespace gte {
 
-// RAII owner of the synchronization objects frames need: per frame in flight an image-available
-// semaphore and an in-flight fence; one render-finished semaphore per swapchain image; and one fence for
-// the separate synchronous offscreen submit path. Does not own the VkDevice, which must outlive it.
+// RAII owner of the synchronization objects frames need: per frame in flight an image-available semaphore, an
+// in-flight fence and an offscreen slot fence; one render-finished semaphore per swapchain image; and one fence for
+// the synchronous offscreen path. Does not own the VkDevice, which must outlive it.
 class VulkanFrameSync {
 public:
     VulkanFrameSync(VkDevice device, std::uint32_t framesInFlight, std::uint32_t swapchainImageCount);
@@ -32,7 +32,11 @@ public:
     // present using it may still be pending.
     VkSemaphore RenderFinishedSemaphore(std::uint32_t imageIndex) const { return m_renderFinishedSemaphores[imageIndex]; }
 
+    // The legacy fence of the synchronous offscreen path (one command buffer, waited right after submit).
     VkFence OffscreenFence() const noexcept { return m_offscreenFence; }
+
+    // One fence per offscreen ring slot, created signaled. Signals when the frame submitted into the slot is done.
+    VkFence OffscreenSlotFence(std::uint32_t slot) const { return m_offscreenSlotFences[slot]; }
 
 private:
     void CreatePerFrameObjects(std::uint32_t framesInFlight);
@@ -44,6 +48,7 @@ private:
 
     std::vector<VkSemaphore> m_imageAvailableSemaphores;
     std::vector<VkFence> m_inFlightFences;
+    std::vector<VkFence> m_offscreenSlotFences;
     std::vector<VkSemaphore> m_renderFinishedSemaphores;
     VkFence m_offscreenFence = VK_NULL_HANDLE;
 };

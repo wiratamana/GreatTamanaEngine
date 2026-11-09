@@ -32,6 +32,7 @@ VulkanFrameSync::VulkanFrameSync(VulkanFrameSync&& other) noexcept
     : m_device(std::exchange(other.m_device, VK_NULL_HANDLE))
     , m_imageAvailableSemaphores(std::move(other.m_imageAvailableSemaphores))
     , m_inFlightFences(std::move(other.m_inFlightFences))
+    , m_offscreenSlotFences(std::move(other.m_offscreenSlotFences))
     , m_renderFinishedSemaphores(std::move(other.m_renderFinishedSemaphores))
     , m_offscreenFence(std::exchange(other.m_offscreenFence, VK_NULL_HANDLE))
 {
@@ -44,6 +45,7 @@ VulkanFrameSync& VulkanFrameSync::operator=(VulkanFrameSync&& other) noexcept
         m_device = std::exchange(other.m_device, VK_NULL_HANDLE);
         m_imageAvailableSemaphores = std::move(other.m_imageAvailableSemaphores);
         m_inFlightFences = std::move(other.m_inFlightFences);
+        m_offscreenSlotFences = std::move(other.m_offscreenSlotFences);
         m_renderFinishedSemaphores = std::move(other.m_renderFinishedSemaphores);
         m_offscreenFence = std::exchange(other.m_offscreenFence, VK_NULL_HANDLE);
     }
@@ -62,10 +64,12 @@ void VulkanFrameSync::CreatePerFrameObjects(std::uint32_t framesInFlight)
     // Pre-sized with null handles so Destroy() can free only what was created if a vkCreate* fails.
     m_imageAvailableSemaphores.resize(framesInFlight, VK_NULL_HANDLE);
     m_inFlightFences.resize(framesInFlight, VK_NULL_HANDLE);
+    m_offscreenSlotFences.resize(framesInFlight, VK_NULL_HANDLE);
 
     for (std::uint32_t i = 0; i < framesInFlight; ++i) {
         if (vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_imageAvailableSemaphores[i]) != VK_SUCCESS ||
-            vkCreateFence(m_device, &fenceInfo, nullptr, &m_inFlightFences[i]) != VK_SUCCESS) {
+            vkCreateFence(m_device, &fenceInfo, nullptr, &m_inFlightFences[i]) != VK_SUCCESS ||
+            vkCreateFence(m_device, &fenceInfo, nullptr, &m_offscreenSlotFences[i]) != VK_SUCCESS) {
             Destroy();
             throw std::runtime_error("VulkanFrameSync: failed to create per-frame semaphore/fence.");
         }
@@ -121,6 +125,13 @@ void VulkanFrameSync::Destroy() noexcept
         }
     }
     m_inFlightFences.clear();
+
+    for (VkFence fence : m_offscreenSlotFences) {
+        if (fence != VK_NULL_HANDLE) {
+            vkDestroyFence(m_device, fence, nullptr);
+        }
+    }
+    m_offscreenSlotFences.clear();
 
     if (m_offscreenFence != VK_NULL_HANDLE) {
         vkDestroyFence(m_device, m_offscreenFence, nullptr);

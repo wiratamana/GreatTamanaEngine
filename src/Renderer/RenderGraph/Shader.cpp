@@ -35,6 +35,7 @@ constexpr std::size_t kMaxGraphicsPipelines = 8;
 
 // An evicted pipeline may still be referenced by commands recorded this frame or by frames in flight.
 constexpr std::uint64_t kRetireFrames = 3;
+static_assert(kRetireFrames > kGpuFramesInFlight);
 
 struct FullscreenKeyHash {
     std::size_t operator()(const FullscreenKey& key) const noexcept

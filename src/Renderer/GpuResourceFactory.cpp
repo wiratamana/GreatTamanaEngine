@@ -4,6 +4,7 @@
 #include "Compute/ComputePipeline.h"
 #include "GpuWaitFailure.h"
 #include "DescriptorSet.h"
+#include "GpuTiming.h" // kGpuFramesInFlight for the pool budget static_asserts.
 #include "MipChain.h"
 #include "GraphicsHandleRegistry.h" // RegisterDescriptorSet() - sets leave this file as engine handles.
 #include "SceneServicesDescriptorSet.h" // gte::kSceneServiceSlotCount for the pool budget static_asserts.
@@ -75,18 +76,19 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
     }
 
     // First compute descriptor pool; more are added on demand (see AllocateDescriptorSet()).
-    constexpr PoolCapacity kInitialComputePool{ .sets = 256,
-        .storageBuffers = 256,
-        .storageImages = 128,
-        .combinedSamplers = 128,
+    // Sized for kGpuFramesInFlight copies of every per-frame set so the start-up log gains no warning.
+    constexpr PoolCapacity kInitialComputePool{ .sets = 512,
+        .storageBuffers = 1024,
+        .storageImages = 256,
+        .combinedSamplers = 512,
         .uniformBuffers = 64 };
 
-    // Scene services for 2 views (kSceneServiceSlotCount samplers each) must fit the first pool.
-    static_assert(gte::kSceneServiceSlotCount * 2 <= kInitialComputePool.combinedSamplers,
-        "Scene services for 2 views must fit the first compute pool's sampler budget.");
+    // Scene services for 2 views and every frame slot (kSceneServiceSlotCount samplers each) must fit the first pool.
+    static_assert(gte::kSceneServiceSlotCount * 2 * gte::kGpuFramesInFlight <= kInitialComputePool.combinedSamplers,
+        "Scene services for 2 views and every frame slot must fit the first compute pool's sampler budget.");
 
-    // Uniform buffers in the first pool: one per scene-services view (2) plus the asset preview and the bone viewer.
-    constexpr std::uint32_t kKnownUniformBufferConsumers = 2 + 1 + 1;
+    // Uniform buffers in the first pool: one per scene-services (view, slot) plus the asset preview and the bone viewer.
+    constexpr std::uint32_t kKnownUniformBufferConsumers = 2 * gte::kGpuFramesInFlight + 1 + 1;
     static_assert(kKnownUniformBufferConsumers <= kInitialComputePool.uniformBuffers,
         "The known uniform buffer consumers must fit the first compute pool.");
 
@@ -396,37 +398,59 @@ Mesh GpuResourceFactory::CreateMesh(const void* vertexData, uint64_t vertexDataS
     return Mesh(std::move(vertexBuffer), vertexCount, std::move(indexBuffer), indexCount);
 }
 
+namespace {
+
+// Host-visible, persistently mapped copies, one per frame slot, all holding `vertexData`.
+std::shared_ptr<SlotRingBuffer> MakeSkinnedVertexRing(
+    const GpuResourceFactory& factory, const void* vertexData, uint64_t vertexDataSize, const char* debugName)
+{
+    std::vector<std::shared_ptr<Buffer>> copies;
+    copies.reserve(kGpuFramesInFlight);
+    for (std::uint32_t copy = 0; copy < kGpuFramesInFlight; ++copy) {
+        auto buffer = std::make_shared<Buffer>(factory.CreateBuffer(
+            vertexDataSize, BufferUsage::VertexBuffer, BufferMemoryUsage::CpuToGpu, debugName));
+        buffer->Upload(vertexData, static_cast<std::size_t>(vertexDataSize));
+        copies.push_back(std::move(buffer));
+    }
+    return std::make_shared<SlotRingBuffer>(std::move(copies));
+}
+
+} // namespace
+
 Mesh GpuResourceFactory::CreateSkinnedMesh(const void* vertexData, uint64_t vertexDataSize,
     std::uint32_t vertexCount, const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
     const char* debugName) const
 {
-    // Host-visible, persistently mapped vertex buffer: rewritten every frame via Mesh::UpdateVertexData().
-    Buffer vertexBuffer = CreateBuffer(vertexDataSize, BufferUsage::VertexBuffer, BufferMemoryUsage::CpuToGpu,
-        debugName);
-    vertexBuffer.Upload(vertexData, static_cast<std::size_t>(vertexDataSize));
-
-    // Indices never change while a mesh animates: static, device-local.
+    // Rewritten every frame via Mesh::UpdateVertexData(). Indices never change while a mesh animates: static, device-local.
+    std::shared_ptr<SlotRingBuffer> vertexRing = MakeSkinnedVertexRing(*this, vertexData, vertexDataSize, debugName);
     Buffer indexBuffer =
         CreateDeviceLocalBuffer(indexData, indexDataSize, BufferUsage::IndexBuffer, debugName);
 
-    return Mesh(std::move(vertexBuffer), vertexCount, std::move(indexBuffer), indexCount);
+    return Mesh(std::move(vertexRing), vertexCount, std::move(indexBuffer), indexCount);
 }
 
-std::shared_ptr<Buffer> GpuResourceFactory::CreateSharedMeshVertexBuffer(
+std::shared_ptr<SlotRingBuffer> GpuResourceFactory::CreateSharedMeshVertexBuffer(
     const void* vertexData, uint64_t vertexDataSize, const char* debugName) const
 {
-    Buffer vertexBuffer =
-        CreateDeviceLocalBuffer(vertexData, vertexDataSize, BufferUsage::VertexBuffer, debugName);
-    return std::make_shared<Buffer>(std::move(vertexBuffer));
+    std::vector<std::shared_ptr<Buffer>> copies;
+    copies.push_back(std::make_shared<Buffer>(
+        CreateDeviceLocalBuffer(vertexData, vertexDataSize, BufferUsage::VertexBuffer, debugName)));
+    return std::make_shared<SlotRingBuffer>(std::move(copies));
 }
 
-std::shared_ptr<Buffer> GpuResourceFactory::CreateSharedSkinnedMeshVertexBuffer(
+std::shared_ptr<SlotRingBuffer> GpuResourceFactory::CreateSharedSkinnedMeshVertexBuffer(
     const void* vertexData, uint64_t vertexDataSize, const char* debugName) const
 {
-    Buffer vertexBuffer = CreateBuffer(vertexDataSize, BufferUsage::VertexBuffer, BufferMemoryUsage::CpuToGpu,
-        debugName);
-    vertexBuffer.Upload(vertexData, static_cast<std::size_t>(vertexDataSize));
-    return std::make_shared<Buffer>(std::move(vertexBuffer));
+    return MakeSkinnedVertexRing(*this, vertexData, vertexDataSize, debugName);
+}
+
+Mesh GpuResourceFactory::CreateMeshFromSharedVertexBuffer(std::shared_ptr<SlotRingBuffer> sharedVertexBuffer,
+    std::uint32_t vertexCount, const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
+    const char* debugName) const
+{
+    Buffer indexBuffer =
+        CreateDeviceLocalBuffer(indexData, indexDataSize, BufferUsage::IndexBuffer, debugName);
+    return Mesh(std::move(sharedVertexBuffer), vertexCount, std::move(indexBuffer), indexCount);
 }
 
 Mesh GpuResourceFactory::CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer> sharedVertexBuffer,

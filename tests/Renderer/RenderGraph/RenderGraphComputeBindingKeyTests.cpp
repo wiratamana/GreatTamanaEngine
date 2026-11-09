@@ -89,6 +89,50 @@ TEST(ComputeBindingKeyTest, ManyInstancesOfOneNameAreManyEntries)
     EXPECT_EQ(hit->second, 17);
 }
 
+TEST(ComputeBindingKeyTest, TheFrameSlotIsPartOfEqualityAndHash)
+{
+    const ComputeBindingKeyEqual eq;
+    const ComputeBindingKeyHash hash;
+    const ComputeBindingKeyView slot0{ "Pass", ViewScope::Primary, FakeLayout(8), 3, 0 };
+    const ComputeBindingKeyView slot1{ "Pass", ViewScope::Primary, FakeLayout(8), 3, 1 };
+    EXPECT_TRUE(eq(slot0, ComputeBindingKeyView{ "Pass", ViewScope::Primary, FakeLayout(8), 3, 0 }));
+    EXPECT_FALSE(eq(slot0, slot1));
+    EXPECT_NE(hash(slot0), hash(slot1));
+    // A key built with four fields is slot 0.
+    EXPECT_TRUE(eq(slot0, ComputeBindingKeyView{ "Pass", ViewScope::Primary, FakeLayout(8), 3 }));
+    EXPECT_TRUE(eq(ComputeBindingKey{ "Pass", ViewScope::Primary, FakeLayout(8), 3 }, slot0));
+}
+
+TEST(ComputeBindingKeyTest, EveryFrameSlotOfOnePassIsItsOwnEntry)
+{
+    Map map;
+    constexpr std::uint32_t kSlots = 3; // More than the ring has, so no slot count is baked in.
+    for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
+        map.emplace(ComputeBindingKey{ "Gtao.Main", ViewScope::Primary, FakeLayout(8), 0, slot }, static_cast<int>(slot));
+    }
+    EXPECT_EQ(map.size(), std::size_t{ kSlots });
+    for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
+        const auto hit = map.find(ComputeBindingKeyView{ "Gtao.Main", ViewScope::Primary, FakeLayout(8), 0, slot });
+        ASSERT_NE(hit, map.end());
+        EXPECT_EQ(hit->second, static_cast<int>(slot));
+    }
+}
+
+TEST(ComputeBindingKeyTest, ReleasingALayoutFindsTheEntriesOfEverySlot)
+{
+    // Release(layout) matches on the layout alone, so each slot copy of the key shares it.
+    Map map;
+    for (std::uint32_t slot = 0; slot < 3; ++slot) {
+        map.emplace(ComputeBindingKey{ "Pass", ViewScope::Primary, FakeLayout(8), 0, slot }, 0);
+        map.emplace(ComputeBindingKey{ "Pass", ViewScope::Primary, FakeLayout(16), 0, slot }, 0);
+    }
+    std::size_t matching = 0;
+    for (const auto& entry : map) {
+        matching += entry.first.layout == FakeLayout(8) ? 1u : 0u;
+    }
+    EXPECT_EQ(matching, 3u);
+}
+
 TEST(DescriptorWritesNeedRewriteTest, IdenticalBufferWritesAreNotRewritten)
 {
     const std::vector<DescriptorWrite> writes = {

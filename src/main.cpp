@@ -8,9 +8,11 @@
 #include "Core/LogSink.h"
 #include "Editor/Logger.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -40,6 +42,25 @@ bool HasFlag(int argc, char* argv[], const char* flag)
     return false;
 }
 
+// "--frames-in-flight=<n>": how many offscreen frames the CPU may run ahead of the GPU. An invalid value is
+// reported and ignored.
+std::uint32_t OffscreenFramesInFlightFromArgs(int argc, char* argv[])
+{
+    constexpr std::string_view kPrefix = "--frames-in-flight=";
+    for (int i = 1; i < argc; ++i) {
+        const std::string_view arg(argv[i]);
+        if (arg.substr(0, kPrefix.size()) != kPrefix) {
+            continue;
+        }
+        if (const std::optional<std::uint32_t> parsed = gte::ParseOffscreenFramesInFlight(arg.substr(kPrefix.size()))) {
+            return *parsed;
+        }
+        std::fprintf(stderr, "Ignoring %s: the value must be 1 to %u\n", argv[i], gte::kGpuFramesInFlight);
+        break;
+    }
+    return gte::kDefaultOffscreenFramesInFlight;
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -56,9 +77,10 @@ int main(int argc, char* argv[])
     // "--no-vsync" removes the present cap (benchmarks only).
     const gte::PresentPolicy presentPolicy =
         HasFlag(argc, argv, "--no-vsync") ? gte::PresentPolicy::Uncapped : gte::PresentPolicy::Capped;
+    const std::uint32_t framesInFlight = OffscreenFramesInFlightFromArgs(argc, argv);
 
     try {
-        gte::EditorHost host("Great Tamana Engine", 1280, 720, forceValidation, presentPolicy);
+        gte::EditorHost host("Great Tamana Engine", 1280, 720, forceValidation, presentPolicy, framesInFlight);
         return host.Run();
     } catch (const std::exception& e) {
         std::fprintf(stderr, "Fatal error: %s\n", e.what());

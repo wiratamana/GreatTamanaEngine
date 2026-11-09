@@ -56,11 +56,21 @@ GpuWaitService::~GpuWaitService()
 BlockOutcome GpuWaitService::WaitFence(VkFence fence, std::chrono::nanoseconds timeout, WaitClass waitClass,
     BlockSite site, const char* detail) noexcept
 {
+    return WaitFences(std::span<const VkFence>(&fence, 1), timeout, waitClass, site, detail);
+}
+
+BlockOutcome GpuWaitService::WaitFences(std::span<const VkFence> fences, std::chrono::nanoseconds timeout,
+    WaitClass waitClass, BlockSite site, const char* detail) noexcept
+{
     if (m_policy.Lost()) {
         return BlockOutcome::DeviceLost;
     }
+    if (fences.empty()) {
+        return BlockOutcome::Completed;
+    }
     BeginBlock(site, detail);
-    const VkResult result = vkWaitForFences(m_device, 1, &fence, VK_TRUE, ToTicks(timeout));
+    const VkResult result = vkWaitForFences(
+        m_device, static_cast<std::uint32_t>(fences.size()), fences.data(), VK_TRUE, ToTicks(timeout));
     return EndBlock(waitClass, site, detail, FromVkResult(result));
 }
 

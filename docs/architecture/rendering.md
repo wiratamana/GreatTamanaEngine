@@ -1,6 +1,6 @@
 # Rendering
 > One-page overview of how a frame is drawn: layers, frame flow, formats and materials. Read this first, then the deep docs.
-> Verified against code: 2026-11-04
+> Verified against code: 2026-11-09
 
 ## TL;DR
 - Only `src/Renderer/` touches Vulkan. Everything else uses `gte::rg` (render graph) and `gte::fx` (feature kit).
@@ -27,9 +27,9 @@ The rule and its CI checks are in [AGENTS.md](../../AGENTS.md#vulkan-boundary-st
 ## How it works
 Frame flow, as run by `EditorHost` and `Core`:
 
-1. `Core::Update()` advances time and runs game logic. Before it, `EditorHost` drains HTTP command bridges.
+1. `Core::Update()` first takes the offscreen frame slot (overlap mode waits for it here), then advances time and runs game logic. Before it, `EditorHost` drains HTTP command bridges.
 2. `Renderer::BeginFrame()` clears the queued CPU `Submit()` draws.
-3. `Core::BuildFrame()` runs the offscreen graph. It waits for the GPU, so the Game view is safe to read after it.
+3. `Core::BuildFrame()` runs the offscreen graph. In the default mode it waits for the GPU, so the Game view is safe to read after it. In overlap mode it does not. See "Frames in flight".
 4. `IEditorLayer::BuildUI()` builds ImGui. The Render Graph panel and `/render_graph` get their data.
 5. `Core::Present()` runs the present graph. Its GPU timing is read back later (pipelined).
 
@@ -39,7 +39,7 @@ Inside `BuildFrame()`:
 2. `Render.Prepare`: free unused GPU meshes and materials, pick the view targets.
 3. Declare the offscreen graph: GPU skinning, cluster candidates, then all providers.
 4. If a Frame Debugger capture is pending, add the replay passes.
-5. Compile, record, submit, wait. Then finalize the view textures for sampling.
+5. Compile and record. Finalize the view textures for sampling. Submit. In the default mode `BuildFrame()` then waits for the GPU. In overlap mode it does not.
 
 Providers are declared in two phases: `Before` and `After` the deferred passes. In each phase, `Once` providers go first.
 Deferred descriptions are sorted by `RenderPassEvent`. Feature providers draw straight into the builder.
@@ -57,6 +57,20 @@ Deferred descriptions are sorted by `RenderPassEvent`. Feature providers draw st
 | `PluginRenderFeatures` | per view | After | `AfterEverything` |
 
 The present graph has two providers: `PresentPrimaryView` and `Present`. See [Render graph](render-graph.md).
+
+## Frames in flight
+- The offscreen graph has a ring of `kGpuFramesInFlight` (2) frame slots. A slot owns a command buffer, a fence, a GPU timestamp region and one copy of every host-written buffer.
+- `--frames-in-flight=<1|2>` picks the mode. The default is `1` (`kDefaultOffscreenFramesInFlight`, `src/Renderer/OffscreenFramesInFlight.h`). It is the old serial path: one command buffer, `BuildFrame()` waits for the fence after the submit.
+- With `2`, `BuildFrame()` submits and returns. The CPU builds frame N+1 while the GPU still runs frame N.
+- `Core::Update()` waits first for the slot it will reuse (the frame submitted two frames ago). That wait comes before `Game::Update()`, so every CPU write into GPU-visible memory targets a copy that no running frame reads.
+- Every offscreen and present command buffer starts with one global barrier, in both modes. It orders the frame after everything submitted before it. That is why GPU-only resources stay single copy. It needs one graphics queue.
+- Host-written buffers are ringed: GPU params, the lighting uniform of each view, the cluster instance buffer, the CPU-skinned vertex buffer and the bone matrices. A write into a copy that a frame in flight still reads is refused.
+- Anything the CPU drops while a frame may still use it goes to one retire queue in `FramePresenter`. It is freed after a wait that really completed. A timed-out or device-lost wait never counts as completion.
+- Sync tools keep the old path: Cluster Viewer, Mesh Preview, headless tests and a Frame Debugger capture frame. They drain the ring first and then record and wait on the legacy command buffer.
+- Cost: the cluster ledger holds one extra instance buffer copy per scope. See [GPU-driven rendering](gpu-driven-rendering.md).
+- Display latency: a skinned pose shows up to one frame later than the CPU state. See [Animation and physics](animation-physics.md).
+- GPU timing: the stamps of an overlapped frame are read at the top of a later frame. The per-pass GPU rows and `gpu_span` then describe an older frame (1 to 2 frames), while the active-view flags come from the current frame. Compare medians. Judge speed by the frame time.
+- The present graph keeps its own two slots and its deferred GPU timing.
 
 ## Scene color and the display image
 Per view, the shipped features run like this:
@@ -136,6 +150,8 @@ Details: [PBR materials](../conventions/pbr-materials.md).
 5. Disabled passes must not run or leave side effects. See [Render honesty](../conventions/render-honesty.md).
 
 ## Gotchas
+- A host-written buffer that a pass reads (a plugin's own `rg::GpuBuffer` with `HostWrite`) must have one copy per frame slot. With `--frames-in-flight=2` the GPU may still read the old copy. See "Frames in flight".
+- In overlap mode the per-pass GPU rows come from an older frame. Read medians, not single frames.
 - A pass whose output nobody reads is culled with no error.
 - A provider that reads a deferred pass's texture must run in the `After` phase. Otherwise the writer is culled.
 - If the offscreen graph throws, the direct primary target is not blitted. Present clears the swapchain instead. The error is logged once.

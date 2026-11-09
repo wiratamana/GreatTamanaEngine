@@ -2,6 +2,7 @@
 
 #include "Frame.h"
 #include "FrameContext.h"
+#include "GpuReadbackPolicy.h"
 #include "PersistentTarget.h"
 #include "../Logging.h"
 #include "../../Renderer/Renderer.h"
@@ -19,7 +20,7 @@ namespace {
 
 constexpr const char* kLogCategory = "FeatureKit";
 constexpr std::size_t kCells = 3;
-constexpr std::uint64_t kSampleLagFrames = 2;
+static_assert(kCells > kReadbackSampleLagFrames, "the cell being written must not be the one being read");
 
 } // namespace
 
@@ -28,6 +29,7 @@ struct ReadbackCore::Impl {
         rg::GpuBuffer device;
         rg::GpuBuffer host;
         std::uint64_t frame = kNoFrame; // Frame whose copy was declared into `host`.
+        std::uint64_t serial = 0;       // Offscreen serial of that frame; 0 for a synchronous one.
     };
 
     // `names` come first: the buffers and the graph imports keep pointers into them.
@@ -139,23 +141,27 @@ void ReadbackCore::NoteCopied(const Frame& frame)
     }
     Impl::Slot& slot = m_impl->slots[rg::ViewScopeIndex(context->scope)];
     if (slot.created) {
-        slot.cells[frame.FrameIndex() % kCells].frame = frame.FrameIndex();
+        Impl::Cell& cell = slot.cells[frame.FrameIndex() % kCells];
+        cell.frame = frame.FrameIndex();
+        cell.serial = frame.OffscreenTicket().serial;
     }
 }
 
 bool ReadbackCore::Latest(const Frame& frame, void* out, std::uint64_t& recordedFrame) const
 {
     const std::uint64_t index = frame.FrameIndex();
-    if (index < kSampleLagFrames) {
+    if (index < kReadbackSampleLagFrames) {
         return false;
     }
     const Impl::Slot& slot = m_impl->slots[rg::ViewScopeIndex(frame.Scope())];
     if (!slot.created) {
         return false;
     }
-    // The cell after this frame's own is the one written two frames ago.
+    // The cell after this frame's own is the one written two frames ago, if that frame is done on the GPU.
     const Impl::Cell& cell = slot.cells[(index + 1) % kCells];
-    if (cell.frame != index - kSampleLagFrames || !cell.host.Download(out, m_impl->size)) {
+    if (!CellReadable(cell.frame, index, kReadbackSampleLagFrames, cell.serial,
+            CompletedSerialLimit(frame.OffscreenTicket()))
+        || !cell.host.Download(out, m_impl->size)) {
         return false;
     }
     recordedFrame = cell.frame;

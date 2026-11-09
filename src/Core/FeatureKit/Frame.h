@@ -6,6 +6,7 @@
 #include "SceneSlot.h"
 #include "Texture.h"
 #include "View.h"
+#include "../../Renderer/OffscreenFrameTicket.h"
 #include "../../Renderer/RenderGraph/StaticName.h"
 
 #include <cstddef>
@@ -76,6 +77,9 @@ public:
 
     // Real seconds since the previous frame, clamped to kMaxFrameDeltaSeconds. 0 without an engine context.
     float DeltaSeconds() const noexcept;
+
+    // Ring slot and progress of the offscreen frame this callback records into; the synchronous default without a context.
+    OffscreenFrameTicket OffscreenTicket() const noexcept;
 
     // True when `shader` is built (builds it now if needed). False while a failed build cools down.
     bool ShaderReady(ComputeShader& shader);

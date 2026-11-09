@@ -23,7 +23,9 @@
 #include "RenderGraphTypes.h"
 #include "../Culling/ClusterPassCounts.h"
 #include "../DrawStats.h"
+#include "../GpuStampSlotLedger.h"
 #include "../GpuTiming.h"
+#include "../OffscreenFrameTicket.h"
 
 #include <volk.h>
 
@@ -31,6 +33,7 @@
 #include <functional>
 #include <optional>
 #include <span>
+#include <utility>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -57,9 +60,18 @@ public:
     // A Disabled graph creates no query pool and writes no stamps; its GPU records read Inactive.
     explicit RenderGraph(Renderer& renderer, TimingMode timingMode = TimingMode::Enabled);
 
-    // Builds and executes passes using the provided build callback.
+    // Builds and executes passes using the provided build callback. Sees no offscreen ring slot: the synchronous
+    // paths and the present graph use slot 0.
     template <typename BuildFn>
     void Execute(const RecordingContext& cmd, ExecuteTimingMode timingMode, BuildFn&& build)
+    {
+        Execute(cmd, timingMode, OffscreenFrameTicket{}, std::forward<BuildFn>(build));
+    }
+
+    // Same, for a recording that belongs to offscreen ring slot `ticket.slot`: its GPU stamps go to that slot's region.
+    template <typename BuildFn>
+    void Execute(const RecordingContext& cmd, ExecuteTimingMode timingMode, const OffscreenFrameTicket& ticket,
+        BuildFn&& build)
     {
         RenderGraphBuilder builder;
         builder.SetDebugMetadataSink(m_debugMetadataSink);
@@ -67,13 +79,14 @@ public:
         builder.SetOnceLog(&m_onceLog);
         builder.SetPersistentResourceCache(&m_persistentResourceCache, timingMode, m_persistentResourceFrameCounter);
         builder.SetRenderer(m_renderer);
+        builder.SetOffscreenFrameTicket(ticket);
 
         if (m_debugMetadataSink != nullptr) {
             m_debugMetadataSink->BeginFrame();
         }
 
         const std::vector<TextureHandle> finalOutputs = build(builder);
-        ExecuteCompiledGraph(RecordingAccess::Native(cmd), timingMode, builder.Finish(), finalOutputs);
+        ExecuteCompiledGraph(RecordingAccess::Native(cmd), timingMode, ticket, builder.Finish(), finalOutputs);
     }
 
     // Returns the debug snapshot for the specified execution mode.
@@ -100,9 +113,16 @@ public:
     // stale size: they are recreated at the right size only after that Execute(), so its output is incomplete.
     bool PersistentTexturesResizedThisFrame() const noexcept { return m_persistentTexturesResizedThisFrame; }
 
-    // Synchronous regime: reads the stamps of the last Execute() once its submission completed, resolves them and
-    // fills the synchronous snapshot's GPU fields.
+    // Synchronous regime, slot 0: reads the stamps of the last Execute() once its submission completed, resolves them
+    // and fills the synchronous snapshot's GPU fields.
     void FinalizeSynchronousGpuTiming();
+
+    // Overlapped offscreen frames: reads the stamps of the frame last submitted into `slot` and keeps them as the
+    // newest resolved frame, which later snapshots show. Call only after a completed wait on that slot's fence.
+    void ResolveOffscreenGpuFrame(std::uint32_t slot);
+
+    // The frame recorded into `slot` was never submitted: its stamps are counted as lost and forgotten.
+    void DropOffscreenGpuFrame(std::uint32_t slot) noexcept;
 
     // Pipelined regime: the presenter picks the frame slot the next Execute() records its stamps into.
     void SetPipelinedGpuSlot(std::uint32_t slot) noexcept { m_pipelinedGpuSlot = slot % kGpuFramesInFlight; }
@@ -184,8 +204,8 @@ private:
         ResourceState lastWrite; // State of the last write usage; empty until the buffer is written.
     };
 
-    void ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode timingMode, CompiledGraphInput input,
-        const std::vector<TextureHandle>& finalOutputs);
+    void ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode timingMode, const OffscreenFrameTicket& ticket,
+        CompiledGraphInput input, const std::vector<TextureHandle>& finalOutputs);
 
     void EnsureTextureResolved(
         std::uint32_t index, const CompiledGraphInput& input, std::vector<PhysicalTexture>& physicalTextures);
@@ -204,8 +224,10 @@ private:
         AppliedBarrierInfo* outBarrierInfo = nullptr);
 
     // Returns Invalid if any declared binding cannot be resolved; never writes a partial descriptor set.
+    // `slot` picks the set copy of the offscreen frame being recorded.
     DescriptorSetHandle ResolveComputeBindingDescriptorSet(const PassRecord& pass,
-        const std::vector<PhysicalTexture>& physicalTextures, const std::vector<PhysicalBuffer>& physicalBuffers);
+        const std::vector<PhysicalTexture>& physicalTextures, const std::vector<PhysicalBuffer>& physicalBuffers,
+        std::uint32_t slot);
 
     // The descriptor writes of a pass's bindings; false if any binding cannot be resolved.
     bool BuildDescriptorWrites(const PassRecord& pass, const std::vector<PhysicalTexture>& physicalTextures,
@@ -253,10 +275,10 @@ private:
     GpuStampMode m_gpuStampMode = GpuStampMode::Fine;
 
     // Stamps recorded by one Execute() and not yet read: the plan, one assignment per executed pass, the records
-    // with their identity filled in, and each pass's name hash. The pipelined regime holds one per frame slot.
+    // with their identity filled in, and each pass's name hash. Both regimes hold one per frame slot.
     struct GpuFrameData {
-        bool pending = false;
         bool captured = false; // Capture was on when the stamps were recorded.
+        std::uint64_t serial = 0; // Offscreen serial of the frame that recorded the stamps; 0 when synchronous.
         GpuStampPlan plan;
         std::vector<GpuStampAssignment> assignments;
         std::vector<GpuPassRecord> records;
@@ -273,15 +295,19 @@ private:
         std::vector<GpuPassRecord> perPass;
     };
 
-    // Reads the pool region of `data` once and resolves it. Clears `data.pending`.
+    // Reads the pool region of `data` once and resolves it. The caller has already claimed the slot's stamps.
     ResolvedGpuFrame ResolveGpuFrame(GpuFrameData& data, bool pipelined, std::uint32_t bufferIndex,
         std::uint64_t frameIndex);
 
     // Copies `resolved` into `snapshot`; a pass takes its record only when its position and name hash match.
     static void ApplyResolvedGpu(const ResolvedGpuFrame& resolved, RenderGraphSnapshot& snapshot);
 
-    GpuFrameData m_synchronousGpu;
+    GpuFrameData m_synchronousGpu[kGpuFramesInFlight]; // Slot 0 serves the synchronous paths.
     GpuFrameData m_pipelinedGpu[kGpuFramesInFlight];
+    // Which slots of each regime hold stamps that were recorded and not read yet.
+    BasicGpuStampSlotLedger<kGpuFramesInFlight> m_synchronousStamps;
+    BasicGpuStampSlotLedger<kGpuFramesInFlight> m_pipelinedStamps;
+    ResolvedGpuFrame m_offscreenResolved; // The newest overlapped offscreen frame whose stamps were read back.
     ResolvedGpuFrame m_pipelinedResolved; // The newest pipelined frame whose stamps were read back.
     std::uint32_t m_pipelinedGpuSlot = 0;
     std::uint32_t m_droppedGpuFrames = 0;

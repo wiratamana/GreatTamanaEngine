@@ -3,6 +3,7 @@
 #include "BoundedOnceSet.h"
 #include "PersistentSlotTable.h"
 #include "RenderGraphTypes.h"
+#include "../GpuTiming.h"
 #include "../RenderTexture.h"
 
 #include <cstdint>
@@ -48,6 +49,8 @@ struct PersistentResourceCacheEntry {
 
 // Frames an identity may go unrequested before BeginFrame() evicts it.
 inline constexpr std::uint64_t kPersistentResourceStaleThresholdFrames = 300;
+// An idle resource is evicted only long after every frame in flight is done with it.
+static_assert(kPersistentResourceStaleThresholdFrames > kGpuFramesInFlight);
 
 // Distinct refused identities remembered so each refusal is logged once.
 inline constexpr std::size_t kRefusalLogCapacity = 64;
@@ -128,7 +131,6 @@ private:
     PersistentSlotTable m_slots;
     std::vector<PersistentResourceCacheEntry*> m_slotEntries; // Indexed by slot index.
     std::vector<PendingResize> m_pendingResizes;
-    std::vector<RenderTexture> m_retired; // Freed at the next BeginFrame().
     BoundedOnceSet<kRefusalLogCapacity> m_refusalsLogged; // Identities whose refusal was already logged.
 };
 

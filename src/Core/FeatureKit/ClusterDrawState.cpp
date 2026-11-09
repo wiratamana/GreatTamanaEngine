@@ -130,7 +130,7 @@ ClusterDrawState::ClusterDrawState(std::string_view baseName, ClusterDrawShape s
         }
     }
     m_instanceUploadSerial.assign(rg::kViewScopeCount * m_shape.partSlots, 0);
-    m_instanceContent.assign(rg::kViewScopeCount * m_shape.partSlots, InstanceContent{});
+    m_instanceContent.assign(rg::kViewScopeCount * m_shape.partSlots * InstanceRingCopies(), InstanceContent{});
 
     constexpr BufferUse kInstanceUse = BufferUse::Storage | BufferUse::HostWrite;
     constexpr BufferUse kVisibleUse = BufferUse::Storage;
@@ -140,7 +140,8 @@ ClusterDrawState::ClusterDrawState(std::string_view baseName, ClusterDrawShape s
 
     for (std::uint32_t slot = 0; slot < m_shape.partSlots; ++slot) {
         const std::string suffix = ".P" + std::to_string(slot);
-        m_instances.push_back(std::make_unique<PersistentBuffer>(m_base + ".Instances" + suffix, kInstanceUse));
+        m_instances.push_back(
+            std::make_unique<PersistentBuffer>(m_base + ".Instances" + suffix, kInstanceUse, InstanceRingCopies()));
         m_history.push_back(std::make_unique<PersistentBuffer>(m_base + ".History" + suffix, kHistoryUse));
         m_stats.push_back(std::make_unique<GpuReadback<ClusterStatsWords>>(m_base + ".Stats" + suffix));
     }
@@ -346,14 +347,16 @@ void ClusterDrawState::NoteInstanceUploaded(const Frame& frame, std::uint32_t sl
 
 bool ClusterDrawState::InstanceContentIs(const Frame& frame, std::uint32_t slot, const InstanceContent& want) const noexcept
 {
+    const std::uint32_t copy = RingCopyOf(frame.OffscreenTicket(), InstanceRingCopies());
     return InRange(0, slot) && want.group.epoch != 0
-        && m_instanceContent[rg::ViewScopeIndex(frame.Scope()) * m_shape.partSlots + slot] == want;
+        && m_instanceContent[InstanceContentIndex(rg::ViewScopeIndex(frame.Scope()), slot, copy)] == want;
 }
 
 void ClusterDrawState::NoteInstanceContent(const Frame& frame, std::uint32_t slot, const InstanceContent& content) noexcept
 {
     if (InRange(0, slot)) {
-        m_instanceContent[rg::ViewScopeIndex(frame.Scope()) * m_shape.partSlots + slot] = content;
+        const std::uint32_t copy = RingCopyOf(frame.OffscreenTicket(), InstanceRingCopies());
+        m_instanceContent[InstanceContentIndex(rg::ViewScopeIndex(frame.Scope()), slot, copy)] = content;
     }
 }
 
@@ -453,20 +456,26 @@ rg::ClusterDrawBindings* ClusterDrawState::Bindings(detail::FrameContext& contex
     if (m_bindings == nullptr) {
         m_bindings = std::make_unique<rg::ClusterDrawBindings>(context.core->GetRenderer());
     }
-    // One set per (view scope, lane, slot) of the two real scopes.
-    const std::size_t needed = 2 * static_cast<std::size_t>(m_shape.lanes) * m_shape.partSlots;
+    // One set per (ring copy, view scope, lane, slot) of the two real scopes. A copy's sets are made when the frame
+    // slot of that copy first runs, so a synchronous run never allocates the second copy.
+    const std::size_t perCopy = 2 * static_cast<std::size_t>(m_shape.lanes) * m_shape.partSlots;
+    const std::uint32_t copy =
+        context.builder != nullptr ? RingCopyOf(context.builder->FrameTicket(), InstanceRingCopies()) : 0u;
+    const std::size_t needed = (static_cast<std::size_t>(copy) + 1) * perCopy;
     if (m_bindings->SetCount() < needed && !m_bindings->Prepare(needed)) {
         return nullptr;
     }
     return m_bindings.get();
 }
 
-std::size_t ClusterDrawState::BindingIndex(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot) const noexcept
+std::size_t ClusterDrawState::BindingIndex(
+    rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot, std::uint32_t copy) const noexcept
 {
-    if (!InRange(lane, slot) || scope == rg::ViewScope::Shared) {
+    if (!InRange(lane, slot) || scope == rg::ViewScope::Shared || copy >= InstanceRingCopies()) {
         return std::numeric_limits<std::size_t>::max();
     }
-    return ClusterChainIndex(rg::ViewScopeIndex(scope) - 1, lane, slot, m_shape);
+    const std::size_t perCopy = 2 * static_cast<std::size_t>(m_shape.lanes) * m_shape.partSlots;
+    return copy * perCopy + ClusterChainIndex(rg::ViewScopeIndex(scope) - 1, lane, slot, m_shape);
 }
 
 std::uint64_t ClusterDrawState::HeldBytes(rg::ViewScope scope) const noexcept
@@ -501,8 +510,10 @@ ClusterReserveResult ClusterDrawState::CheckChainBytes(rg::ViewScope scope, std:
     const std::uint64_t recordedInstances = m_instanceBytes[scopeIndex * m_shape.partSlots + slot];
     want.lane = std::max(recordedLane,
         ClusterChainBytes(instanceCount, workItems, ClusterChainShape{ twoPhase, true, historyWords }));
+    // The lane buffers stay one copy; only the host-written instance buffer has a copy per ring slot.
     want.instances = std::max(recordedInstances,
-        ClusterBufferCapacity(instanceCount * std::uint64_t{ sizeof(ClusterInstanceGpu) }));
+        std::uint64_t{ InstanceRingCopies() }
+            * ClusterBufferCapacity(instanceCount * std::uint64_t{ sizeof(ClusterInstanceGpu) }));
     const std::uint64_t others = HeldBytes(scope) - recordedLane - recordedInstances;
     const std::uint64_t total = want.lane + want.instances;
     if (!FitsClusterBudget(others, total, kClusterDrawBudgetBytes)) {

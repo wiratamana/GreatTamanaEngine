@@ -10,6 +10,8 @@
 #include "PersistentBuffer.h"
 #include "PersistentTarget.h"
 #include "../../Renderer/Culling/ClusterCullMath.h"
+#include "../../Renderer/GpuTiming.h"
+#include "../../Renderer/OffscreenRingGuard.h"
 #include "../../Renderer/RenderGraph/BuildRetryGate.h"
 #include "../../Renderer/RenderGraph/RenderGraphHandles.h"
 
@@ -152,13 +154,15 @@ public:
         bool operator==(const CandidateGroupId&) const noexcept = default;
     };
 
-    // What a slot's instance buffer holds, so an unchanged group is not rebuilt and uploaded again.
+    // What a slot's instance buffer holds, so an unchanged group is not rebuilt and uploaded again. Kept per ring
+    // copy: a copy trusts only what was written into it, never what another copy holds.
     struct InstanceContent {
         CandidateGroupId group;
         std::uint64_t generation = 0; // Buffer generation when it was written.
 
         bool operator==(const InstanceContent&) const noexcept = default;
     };
+    // Both use the ring copy of the frame's slot.
     bool InstanceContentIs(const Frame& frame, std::uint32_t slot, const InstanceContent& want) const noexcept;
     void NoteInstanceContent(const Frame& frame, std::uint32_t slot, const InstanceContent& content) noexcept;
 
@@ -205,15 +209,16 @@ public:
 
     // The cached pipeline of `key`. Null while it is missing or backing off after a failed build.
     const Pipeline* ResolvePipeline(detail::FrameContext& context, const ClusterPipelineKey& key);
-
     // Binding sets of the chains, created on first use. Null when the renderer refuses.
-    // Index with BindingIndex(). Only the two view scopes have sets.
+    // Index with BindingIndex(). Only the two view scopes have sets. A frame slot has its own copy of every set,
+    // created when that slot first runs: a set is rewritten while its frame records, never while an earlier frame reads it.
     rg::ClusterDrawBindings* Bindings(detail::FrameContext& context);
-    std::size_t BindingIndex(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot) const noexcept;
+    // Set of (scope, lane, slot) for ring copy `copy` (the frame's slot, see RingCopyOf()).
+    std::size_t BindingIndex(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot, std::uint32_t copy) const noexcept;
 
     // Checks the buffer budget of one chain (per-state and process-wide) and records its capacity. A two-phase
     // chain is recorded on its first lane and covers both lanes and the history. Nothing is recorded unless Ok.
-    // The instance buffer of a slot is charged once. `historyWords` empty = one history word per work item.
+    // The instance buffer of a slot is charged once per ring copy. `historyWords` empty = one history word per work item.
     ClusterReserveResult TryReserveChainBytes(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot,
         std::uint64_t instanceCount, std::uint64_t workItems, bool twoPhase,
         std::optional<std::uint64_t> historyWords = std::nullopt);
@@ -222,8 +227,11 @@ public:
         std::uint64_t instanceCount, std::uint64_t workItems, bool twoPhase,
         std::optional<std::uint64_t> historyWords = std::nullopt) const;
 
-    // Capacity bytes recorded for one scope (all lanes and slots).
+    // Capacity bytes recorded for one scope (all lanes and slots, every ring copy of the instance buffers).
     std::uint64_t HeldBytes(rg::ViewScope scope) const noexcept;
+
+    // Ring copies of the per-slot instance buffer: one per frame slot, since the CPU writes it every frame.
+    static constexpr std::uint32_t InstanceRingCopies() noexcept { return kGpuFramesInFlight; }
 
     // Call once per view callback. `declaredChain` restarts the idle count of the frame's scope.
     void NoteFrame(const Frame& frame, bool declaredChain) noexcept;
@@ -248,7 +256,13 @@ private:
     }
     // The lane whose visible, commands and count buffers `lane` uses.
     std::uint32_t BufferLane(std::uint32_t lane) const noexcept { return m_shape.shareLaneBuffers ? 0u : lane; }
-    // Capacity a chain wants: its own lane buffers, and the instance buffer of its slot (shared by every lane).
+    // Index of one memo entry: (scope, slot, ring copy).
+    std::size_t InstanceContentIndex(std::size_t scope, std::uint32_t slot, std::uint32_t copy) const noexcept
+    {
+        return (scope * m_shape.partSlots + slot) * InstanceRingCopies() + copy;
+    }
+    // Capacity a chain wants: its own lane buffers, and the instance buffer of its slot (shared by every lane,
+    // one copy per ring slot).
     struct ChainWant {
         std::uint64_t lane = 0;
         std::uint64_t instances = 0;
@@ -277,7 +291,7 @@ private:
     std::array<SpanKey, rg::kViewScopeCount> m_candidateSpans;
     std::vector<std::uint64_t> m_instanceUploadSerial; // [scope][slot]
     std::vector<ClusterInstanceGpu> m_instanceScratch;
-    std::vector<InstanceContent> m_instanceContent; // [scope][slot]
+    std::vector<InstanceContent> m_instanceContent; // [scope][slot][ring copy]
     std::array<SingleGroupMemo, 2> m_singleGroups; // [depthOnly]
     std::vector<KeyMemo> m_setKeys;
     std::vector<KeyMemo> m_historyKeys;
@@ -299,7 +313,7 @@ private:
     std::unique_ptr<rg::ClusterDrawBindings> m_bindings;
 
     std::vector<std::uint64_t> m_chainBytes;    // [scope][lane][slot] recorded lane capacity (without instances)
-    std::vector<std::uint64_t> m_instanceBytes; // [scope][slot] recorded instance buffer capacity, charged once
+    std::vector<std::uint64_t> m_instanceBytes; // [scope][slot] recorded instance buffer capacity, every ring copy
     std::array<std::uint64_t, rg::kViewScopeCount> m_lastChainFrame;
     ClusterSurvivorTable m_survivors;
 };

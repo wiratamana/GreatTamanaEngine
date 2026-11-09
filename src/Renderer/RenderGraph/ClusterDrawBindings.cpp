@@ -37,13 +37,36 @@ ClusterDrawBindings& ClusterDrawBindings::operator=(ClusterDrawBindings&& other)
     return *this;
 }
 
+// Frees descriptor sets when destroyed, so the retire queue frees them once no frame in flight reads them.
+struct ClusterDrawBindings::SetsToFree {
+    SetsToFree(Renderer* owner, std::vector<DescriptorSetHandle> handles) noexcept
+        : renderer(owner)
+        , sets(std::move(handles))
+    {
+    }
+    SetsToFree(SetsToFree&& other) noexcept
+        : renderer(other.renderer)
+        , sets(std::move(other.sets))
+    {
+        other.sets.clear();
+    }
+    SetsToFree& operator=(SetsToFree&&) = delete;
+    ~SetsToFree()
+    {
+        for (const DescriptorSetHandle handle : sets) {
+            renderer->FreeDescriptorSet(Native(handle));
+            UnregisterDescriptorSet(handle);
+        }
+    }
+
+    Renderer* renderer;
+    std::vector<DescriptorSetHandle> sets;
+};
+
 void ClusterDrawBindings::ReleaseAll() noexcept
 {
-    for (const DescriptorSetHandle handle : m_sets) {
-        if (m_renderer != nullptr) {
-            m_renderer->FreeDescriptorSet(Native(handle));
-        }
-        UnregisterDescriptorSet(handle);
+    if (m_renderer != nullptr && !m_sets.empty()) {
+        m_renderer->Retire(SetsToFree(m_renderer, std::move(m_sets)));
     }
     m_sets.clear();
 }

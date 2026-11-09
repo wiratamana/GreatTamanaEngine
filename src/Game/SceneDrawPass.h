@@ -74,6 +74,7 @@ private:
     std::uint64_t m_epochAtDeclare = 0;
     const SceneServicesDescriptorSet* m_services = nullptr;
     rg::RenderViewId m_servicesView;
+    std::uint32_t m_frameSlot = 0; // Offscreen frame slot of the graph this pass is declared in.
 };
 
 } // namespace gte

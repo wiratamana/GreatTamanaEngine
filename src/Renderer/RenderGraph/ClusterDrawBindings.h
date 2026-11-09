@@ -15,7 +15,7 @@ namespace gte::rg {
 struct PassContext;
 
 // Owns the descriptor sets of cluster draws (binding 0 = visible list, binding 1 = instances).
-// One set per draw per frame. Create and destroy it only while the GPU is idle.
+// One set per draw per frame. Released sets are retired, not freed under a frame in flight.
 class ClusterDrawBindings {
 public:
     explicit ClusterDrawBindings(Renderer& renderer) noexcept;
@@ -38,6 +38,9 @@ public:
     DescriptorSetHandle Set(std::size_t index) const noexcept;
 
 private:
+    struct SetsToFree;
+
+    // Hands the sets to the renderer's retire queue: a frame in flight may still read them.
     void ReleaseAll() noexcept;
 
     Renderer* m_renderer = nullptr;

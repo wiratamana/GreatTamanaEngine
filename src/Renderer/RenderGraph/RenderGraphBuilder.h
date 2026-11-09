@@ -9,6 +9,7 @@
 #include "RenderGraphPersistentResourceCache.h"
 #include "RenderPassToggleRegistry.h"
 #include "../NameHash.h"
+#include "../OffscreenFrameTicket.h"
 #include "../RenderTarget.h"
 #include "../VolumeTarget.h"
 #include "../TextureArrayTarget.h"
@@ -283,6 +284,10 @@ public:
     // Real-frame counter of this graph execution (0 on a bare builder).
     std::uint64_t FrameIndex() const noexcept { return m_persistentCacheCurrentFrame; }
 
+    // Offscreen ring slot and serial of the frame this graph records; default (slot 0, serial 0) when synchronous.
+    void SetOffscreenFrameTicket(const OffscreenFrameTicket& ticket) noexcept { m_offscreenTicket = ticket; }
+    const OffscreenFrameTicket& FrameTicket() const noexcept { return m_offscreenTicket; }
+
     // Only code that calls OwningRenderer() needs a renderer; a bare builder has none.
     void SetRenderer(Renderer* renderer) noexcept { m_renderer = renderer; }
     Renderer* RendererOrNull() const noexcept { return m_renderer; }
@@ -447,6 +452,7 @@ private:
     ExecuteTimingMode m_persistentCacheTimingMode{};
     std::uint64_t m_persistentCacheCurrentFrame = 0;
     Renderer* m_renderer = nullptr;
+    OffscreenFrameTicket m_offscreenTicket;
 };
 
 } // namespace gte::rg

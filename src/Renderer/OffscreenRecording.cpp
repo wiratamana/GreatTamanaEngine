@@ -13,6 +13,13 @@ OffscreenRecording::OffscreenRecording(FramePresenter& presenter, Renderer* rend
 {
 }
 
+OffscreenRecording::OffscreenRecording(FramePresenter& presenter, Renderer* renderer, const OffscreenFrameTicket& ticket)
+    : m_presenter(&presenter)
+    , m_context(rg::RecordingAccess::Wrap(presenter.BeginAsyncOffscreenRecording(ticket), renderer))
+    , m_ticket(ticket)
+{
+}
+
 OffscreenRecording::~OffscreenRecording()
 {
     if (m_pending) {
@@ -26,7 +33,11 @@ void OffscreenRecording::Submit()
         throw std::logic_error("offscreen recording already submitted");
     }
     m_pending = false;
-    m_presenter->EndOffscreenRecording();
+    if (m_ticket.IsAsync()) {
+        m_presenter->EndOffscreenSlotRecording();
+    } else {
+        m_presenter->EndOffscreenRecording();
+    }
 }
 
 } // namespace gte

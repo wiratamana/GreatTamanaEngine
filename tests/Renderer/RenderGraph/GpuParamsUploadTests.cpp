@@ -43,7 +43,8 @@ TEST(GpuParamsUploadTest, UploadReturnsFalseAndLogsOnceWhenCreateFails)
     });
     ASSERT_FALSE(uploaded) << "a buffer larger than every memory heap must not be created";
 
-    EXPECT_EQ(params.Handle(), BufferObjectHandle::Invalid);
+    const RenderGraphBuilder bare;
+    EXPECT_EQ(params.Handle(bare), BufferObjectHandle::Invalid);
     EXPECT_EQ(CountErrorsByCategory(sink, "GpuParams"), 1);
 }
 

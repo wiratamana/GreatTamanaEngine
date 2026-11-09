@@ -17,6 +17,7 @@
 #include "Vulkan/ShaderStageMask.h"
 #include "VulkanFormatInfo.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstring>
 #include <memory>
@@ -55,12 +56,14 @@ std::unordered_set<VkDescriptorSet> g_liveUiTextures;
 
 } // namespace
 
-Renderer::Renderer(ISurfaceProvider& surfaceProvider, bool forceValidation, PresentPolicy presentPolicy)
+Renderer::Renderer(ISurfaceProvider& surfaceProvider, bool forceValidation, PresentPolicy presentPolicy,
+    std::uint32_t offscreenFramesInFlight)
     : m_instance("GreatTamanaEngine", surfaceProvider.VulkanInstanceExtensions(), kEnableValidation || forceValidation)
     , m_surface(m_instance.Native(), surfaceProvider)
     , m_device(m_instance.Native(), m_surface.Native())
     , m_depthFormat(m_device.PickDepthFormat())
     , m_presentPolicy(presentPolicy)
+    , m_offscreenFramesInFlight(std::clamp(offscreenFramesInFlight, 1u, kGpuFramesInFlight))
     , m_allocator(m_instance.Native(), m_device.Physical(), m_device.Native(), VK_API_VERSION_1_3)
     , m_presenter(m_device.Physical(), m_device.Native(), m_surface.Native(), m_device.GraphicsQueueFamily(),
           m_device.PresentQueueFamily(), m_device.PresentQueue(), surfaceProvider.Width(), surfaceProvider.Height(),
@@ -69,6 +72,7 @@ Renderer::Renderer(ISurfaceProvider& surfaceProvider, bool forceValidation, Pres
           m_depthFormat, m_memoryTracker, m_device, m_abandoned)
     , m_emptySetLayout(m_device.Native(), DescriptorSetLayoutBuilder(m_device.Native()).Build())
 {
+    m_presenter.SetOffscreenOverlap(m_offscreenFramesInFlight > 1);
     m_emptySet = m_resources.AllocateDescriptorSet(m_emptySetLayout.Native()).Native();
     m_bufferSetLayoutHandle = RegisterDescriptorSetLayout(m_resources.BufferDescriptorSetLayout());
     m_emptySetLayoutHandle = RegisterDescriptorSetLayout(m_emptySetLayout.Native());
@@ -81,6 +85,8 @@ Renderer::~Renderer()
         if (idle) {
             m_resources.FreeDescriptorSet(m_emptySet);
         }
+        // Retired objects die with the GPU idle; otherwise they are parked, because the GPU may still use them.
+        m_presenter.ReleaseRetired(m_abandoned, idle);
         // Leaked parked objects keep their allocations live; destroying the allocator would assert.
         const std::uint32_t parked = m_abandoned.Count();
         if (ShouldAbandonAllocator(idle, parked)) {
@@ -123,9 +129,25 @@ DrawStats Renderer::RenderOffscreen(
     return m_presenter.RenderOffscreen(m_frameRecorder, target, clearColor, recordExtra);
 }
 
-OffscreenRecording Renderer::BeginOffscreenRecording()
+OffscreenRecording Renderer::BeginOffscreenRecording(std::uint32_t recordSlot)
 {
+    m_presenter.SetLegacyRecordSlot(recordSlot);
     return OffscreenRecording(m_presenter, this);
+}
+
+std::optional<OffscreenFrameTicket> Renderer::BeginOffscreenFrame()
+{
+    return m_presenter.BeginOffscreenFrame();
+}
+
+OffscreenRecording Renderer::BeginAsyncOffscreenRecording(const OffscreenFrameTicket& ticket)
+{
+    return OffscreenRecording(m_presenter, this, ticket);
+}
+
+BlockOutcome Renderer::WaitForOffscreenFrames(BlockSite site, const char* detail) noexcept
+{
+    return m_presenter.WaitAllOffscreen(site, detail);
 }
 
 bool Renderer::PresentViaRenderGraph(rg::RenderGraph& graph,
@@ -421,7 +443,7 @@ void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& mo
         const bool hasIndexBuffer = mesh.HasIndexBuffer();
         const std::uint32_t indexCount = hasIndexBuffer ? mesh.IndexCount() : 0;
         FrameRecorder::IssueDrawCommand(m_currentGraphPassCmd, pipeline.Native(), pipeline.Layout(),
-            mesh.VertexBuffer(), mesh.VertexCount(), hasIndexBuffer ? mesh.IndexBuffer() : VK_NULL_HANDLE, indexCount,
+            mesh.VertexBuffer(m_presenter.OffscreenRecordSlot()), mesh.VertexCount(), hasIndexBuffer ? mesh.IndexBuffer() : VK_NULL_HANDLE, indexCount,
             modelMatrix, viewProjMatrix, effectiveMaterialDescriptorSet, effectiveSceneServicesSet);
         if (m_currentGraphPassRecordDrawStats) {
             m_currentGraphPassRecordDrawStats(hasIndexBuffer, mesh.VertexCount(), indexCount);
@@ -457,7 +479,7 @@ void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuff
         && "Renderer::SubmitIndirect(): the pipeline needs a material set.");
 
     FrameRecorder::IssueIndirectDrawCommand(m_currentGraphPassCmd, pipeline.Native(), pipeline.Layout(),
-        mesh.VertexBuffer(), mesh.IndexBuffer(), Native(bufferDescriptorSet), effectiveMaterialSet,
+        mesh.VertexBuffer(m_presenter.OffscreenRecordSlot()), mesh.IndexBuffer(), Native(bufferDescriptorSet), effectiveMaterialSet,
         effectiveSceneServicesSet, viewProjMatrix, indirectBuffer, indirectOffset, maxDrawCount, countBuffer,
         countBufferOffset, drawTag);
 }
@@ -634,19 +656,19 @@ Mesh Renderer::CreateSkinnedMesh(const void* vertexData, uint64_t vertexDataSize
         vertexData, vertexDataSize, vertexCount, indexData, indexDataSize, indexCount, debugName);
 }
 
-std::shared_ptr<Buffer> Renderer::CreateSharedMeshVertexBuffer(
+std::shared_ptr<SlotRingBuffer> Renderer::CreateSharedMeshVertexBuffer(
     const void* vertexData, uint64_t vertexDataSize, const char* debugName) const
 {
     return m_resources.CreateSharedMeshVertexBuffer(vertexData, vertexDataSize, debugName);
 }
 
-std::shared_ptr<Buffer> Renderer::CreateSharedSkinnedMeshVertexBuffer(
+std::shared_ptr<SlotRingBuffer> Renderer::CreateSharedSkinnedMeshVertexBuffer(
     const void* vertexData, uint64_t vertexDataSize, const char* debugName) const
 {
     return m_resources.CreateSharedSkinnedMeshVertexBuffer(vertexData, vertexDataSize, debugName);
 }
 
-Mesh Renderer::CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer> sharedVertexBuffer,
+Mesh Renderer::CreateMeshFromSharedVertexBuffer(std::shared_ptr<SlotRingBuffer> sharedVertexBuffer,
     std::uint32_t vertexCount, const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
     const char* debugName) const
 {

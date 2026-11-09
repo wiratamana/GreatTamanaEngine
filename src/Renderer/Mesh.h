@@ -2,30 +2,34 @@
 
 #include "Buffer.h"
 #include "Culling/CullingTypes.h" // AABB
+#include "OffscreenFrameTicket.h"
 #include "RenderGraph/GpuBuffer.h"
+#include "SlotRingBuffer.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <utility>
+#include <vector>
 
 namespace gte {
 
 // A vertex buffer, its vertex count and an optional index buffer. Create through Renderer.
 // The vertex buffer is shared, so several meshes (one per material part) can draw from one buffer with their own indices.
+// A host-written (skinned) vertex buffer is a ring with one copy per frame slot; every other one has a single copy.
 class Mesh {
 public:
     // Non-indexed.
     Mesh(Buffer vertexBuffer, std::uint32_t vertexCount)
-        : m_vertexBuffer(std::make_shared<Buffer>(std::move(vertexBuffer)))
+        : m_vertexBuffer(SingleCopy(std::make_shared<Buffer>(std::move(vertexBuffer))))
         , m_vertexCount(vertexCount)
     {
     }
 
     // Indexed, with a private vertex buffer.
     Mesh(Buffer vertexBuffer, std::uint32_t vertexCount, Buffer indexBuffer, std::uint32_t indexCount)
-        : m_vertexBuffer(std::make_shared<Buffer>(std::move(vertexBuffer)))
+        : m_vertexBuffer(SingleCopy(std::make_shared<Buffer>(std::move(vertexBuffer))))
         , m_vertexCount(vertexCount)
         , m_indexBuffer(std::move(indexBuffer))
         , m_indexCount(indexCount)
@@ -34,8 +38,18 @@ public:
 
     // Indexed, sharing a vertex buffer that other meshes may point at; only the index buffer is private.
     Mesh(std::shared_ptr<Buffer> sharedVertexBuffer, std::uint32_t vertexCount, Buffer indexBuffer,
+        std::uint32_t indexCount)
+        : m_vertexBuffer(SingleCopy(std::move(sharedVertexBuffer)))
+        , m_vertexCount(vertexCount)
+        , m_indexBuffer(std::move(indexBuffer))
+        , m_indexCount(indexCount)
+    {
+    }
+
+    // Indexed, sharing a vertex buffer ring; only the index buffer is private.
+    Mesh(std::shared_ptr<SlotRingBuffer> sharedVertexRing, std::uint32_t vertexCount, Buffer indexBuffer,
         std::uint32_t indexCount) noexcept
-        : m_vertexBuffer(std::move(sharedVertexBuffer))
+        : m_vertexBuffer(std::move(sharedVertexRing))
         , m_vertexCount(vertexCount)
         , m_indexBuffer(std::move(indexBuffer))
         , m_indexCount(indexCount)
@@ -48,9 +62,10 @@ public:
     Mesh(Mesh&&) noexcept = default;
     Mesh& operator=(Mesh&&) noexcept = default;
 
-    VkBuffer VertexBuffer() const noexcept { return m_vertexBuffer->Native(); }
+    // The vertex buffer a frame in `slot` reads. Equal for every slot unless the buffer is host-written.
+    VkBuffer VertexBuffer(std::uint32_t slot = 0) const noexcept { return m_vertexBuffer->Copy(slot).Native(); }
     // Engine handle of the vertex buffer; equal for meshes sharing one buffer.
-    BufferObjectHandle VertexBufferHandle() const noexcept { return m_vertexBuffer->ObjectHandle(); }
+    BufferObjectHandle VertexBufferHandle() const noexcept { return m_vertexBuffer->Copy(0).ObjectHandle(); }
     std::uint32_t VertexCount() const noexcept { return m_vertexCount; }
 
     // Check before calling IndexBuffer() or IndexCount().
@@ -59,11 +74,18 @@ public:
     std::uint32_t IndexCount() const noexcept { return m_indexCount; }
 
     // Identity of the vertex buffer: equal for meshes sharing it. An opaque token, never dereferenced.
-    const void* VertexBufferIdentity() const noexcept { return m_vertexBuffer.get(); }
+    const void* VertexBufferIdentity() const noexcept { return &m_vertexBuffer->Copy(0); }
 
-    // Overwrites the whole vertex buffer (`size` must match it). Throws unless the buffer is host-writable, which
-    // only skinned meshes have. A shared buffer changes for every mesh using it: call once per identity per frame.
-    void UpdateVertexData(const void* data, std::size_t size) { m_vertexBuffer->Upload(data, size); }
+    // The ring behind the vertex buffer; expires with the last mesh that shares it.
+    std::weak_ptr<SlotRingBuffer> VertexRing() const noexcept { return m_vertexBuffer; }
+
+    // Overwrites the whole vertex buffer copy of `ticket`'s slot (`size` must match it). Throws unless the buffer is
+    // host-writable, which only skinned meshes have. False when a frame in flight still reads that copy.
+    // A shared buffer changes for every mesh using it: call once per identity per frame.
+    bool UpdateVertexData(const void* data, std::size_t size, const OffscreenFrameTicket& ticket = {})
+    {
+        return m_vertexBuffer->Write(ticket, data, size);
+    }
 
     // Local-space bounds of the geometry, set once at load. Empty for meshes whose bounds were never computed.
     void SetLocalBounds(const AABB& bounds) noexcept { m_localBounds = bounds; }
@@ -83,7 +105,14 @@ public:
     }
 
 private:
-    std::shared_ptr<Buffer> m_vertexBuffer;
+    static std::shared_ptr<SlotRingBuffer> SingleCopy(std::shared_ptr<Buffer> buffer)
+    {
+        std::vector<std::shared_ptr<Buffer>> copies;
+        copies.push_back(std::move(buffer));
+        return std::make_shared<SlotRingBuffer>(std::move(copies));
+    }
+
+    std::shared_ptr<SlotRingBuffer> m_vertexBuffer;
     std::uint32_t m_vertexCount = 0;
 
     // Absent for a non-indexed mesh; always private to this mesh.

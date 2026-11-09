@@ -1,6 +1,8 @@
 #pragma once
 
 #include "../../Renderer/GpuSkinning/GpuSkinningPipelines.h"
+#include "../../Renderer/OffscreenFrameTicket.h"
+#include "../../Renderer/SlotRingBuffer.h"
 #include "../../Renderer/RenderGraph/GpuBuffer.h"
 #include "../../ECS/Entity.h"
 #include "../../ECS/Registry.h"
@@ -12,6 +14,7 @@
 #include "SkeletalRigCache.h"
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -73,9 +76,9 @@ public:
     void EvaluatePoses(Registry& registry, double deltaSeconds);
 
     // Skins and uploads from the ResolvedAnimationPose (physics-adjusted or not), each model once: the CPU path
-    // re-uploads vertex buffers, the GPU path uploads bone matrices and records a dispatch. Models are processed
-    // strictly one at a time because instances of one model share GPU mesh buffers.
-    void SkinAndUpload(Registry& registry);
+    // re-uploads vertex buffers, the GPU path uploads bone matrices and records a dispatch. Instances of one model
+    // share GPU mesh buffers, so models go one at a time. Writes only the copies of `ticket`'s frame slot.
+    void SkinAndUpload(Registry& registry, const OffscreenFrameTicket& ticket = OffscreenFrameTicket{});
 
     // One compute dispatch the skinning pass must record this frame, per model output group. A model is listed once,
     // so no output buffer is written twice. Empty in CpuJobSystem mode, with nothing animating, and on frozen frames.
@@ -87,10 +90,16 @@ public:
         // `outputHandle` is filled by whoever imports the output into the graph.
         GpuSkinningDispatch dispatch;
     };
-    std::vector<GpuSkinningDispatchRequest> CollectModelsNeedingGpuSkinningThisFrame() const;
+    // `ticket` names the frame slot the dispatch reads: the one SkinAndUpload() wrote the bone matrices for.
+    std::vector<GpuSkinningDispatchRequest> CollectModelsNeedingGpuSkinningThisFrame(
+        const OffscreenFrameTicket& ticket = OffscreenFrameTicket{}) const;
 
     // Called instead of SkinAndUpload() on a frozen frame, so no stale dispatch list is reported.
     void ClearGpuSkinningDispatchThisFrame() noexcept { m_gpuModelsNeedingDispatchThisFrame.clear(); }
+
+    // Refills the vertex buffer copy of `ticket`'s slot of every skinned mesh that is behind the newest one, so a
+    // frame that skins nothing still draws the current pose. Call on every frame that does not call SkinAndUpload().
+    void KeepSkinnedRingsCurrent(const OffscreenFrameTicket& ticket);
 
     // Appends every mesh handle the GPU skinning rig cache can swap a renderer to.
     void AppendGpuSkinningMeshHandles(std::vector<MeshHandle>& out) const { m_gpuRigCache.AppendBoundMeshHandles(out); }
@@ -101,8 +110,9 @@ private:
     void NoteSkinCandidate(Registry& registry, Entity entity, const std::string& meshGtaPath, SkinningMode mode);
 
     // Skins and uploads one model from one entity's pose. `mode` is the mode captured once at the start of
-    // SkinAndUpload().
-    void SkinAndUploadOneEntity(Registry& registry, Entity entity, const std::string& meshGtaPath, SkinningMode mode);
+    // SkinAndUpload(). `ticket` names the frame slot whose buffer copies are written.
+    void SkinAndUploadOneEntity(Registry& registry, Entity entity, const std::string& meshGtaPath, SkinningMode mode,
+        const OffscreenFrameTicket& ticket);
 
     RenderSystem& m_renderSystem;
     MeshInstantiationSystem& m_meshInstantiationSystem;
@@ -134,6 +144,9 @@ private:
         std::vector<MeshVertexUv> packedTextured;
     };
     std::unordered_map<std::string, AnimatorScratchBuffers> m_scratchBuffers;
+
+    // Vertex rings written so far. Each is kept current on frames that write nothing (see KeepSkinnedRingsCurrent()).
+    std::vector<std::weak_ptr<SlotRingBuffer>> m_writtenRings;
 };
 
 } // namespace gte

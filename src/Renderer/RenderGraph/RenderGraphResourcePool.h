@@ -2,6 +2,7 @@
 
 #include "RenderGraphTypes.h"
 #include "../Buffer.h"
+#include "../GpuTiming.h"
 #include "../RenderTexture.h"
 #include "../Texture.h"
 #include "../TextureArray2D.h"
@@ -21,6 +22,7 @@ namespace gte::rg {
 
 // Frames an unclaimed pool entry survives before it is freed; it must exceed the frames in flight.
 inline constexpr std::uint64_t kPoolStaleFrames = 120;
+static_assert(kPoolStaleFrames > kGpuFramesInFlight);
 
 // True when an entry is unclaimed and has been idle for more than `maxIdleFrames` frames.
 constexpr bool IsStalePoolEntry(bool claimed, std::uint64_t lastClaimedFrame, std::uint64_t currentFrame,

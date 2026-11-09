@@ -57,6 +57,11 @@ float Frame::DeltaSeconds() const noexcept
     return m_context != nullptr ? m_context->deltaSeconds : 0.0f;
 }
 
+OffscreenFrameTicket Frame::OffscreenTicket() const noexcept
+{
+    return m_context != nullptr && m_context->builder != nullptr ? m_context->builder->FrameTicket() : OffscreenFrameTicket{};
+}
+
 std::span<const ClusterInstance> Frame::ClusterCandidates() const noexcept
 {
     if (m_context == nullptr || m_context->core == nullptr || m_view.scope == rg::ViewScope::Shared) {

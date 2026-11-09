@@ -10,6 +10,9 @@
 
 namespace gte::rg {
 
+// A set unused this long is freed; every frame in flight is done with it by then.
+static_assert(RenderGraphComputeBindingCache::kDefaultStaleFrames > kGpuFramesInFlight);
+
 RenderGraphComputeBindingCache::RenderGraphComputeBindingCache(Renderer& renderer) noexcept
     : m_renderer(&renderer)
     , m_device(renderer.GetVulkanContextInfo().device)
@@ -25,13 +28,13 @@ void RenderGraphComputeBindingCache::FreeEntry(const Entry& entry) noexcept
 }
 
 DescriptorSetHandle RenderGraphComputeBindingCache::Resolve(const char* passName, ViewScope viewScope,
-    VkDescriptorSetLayout layout, const std::vector<DescriptorWrite>& writes, std::uint64_t instance)
+    VkDescriptorSetLayout layout, const std::vector<DescriptorWrite>& writes, std::uint64_t instance, std::uint32_t slot)
 {
     if (passName == nullptr || passName[0] == '\0' || layout == VK_NULL_HANDLE) {
         return DescriptorSetHandle::Invalid;
     }
 
-    const ComputeBindingKeyView lookup{ std::string_view(passName), viewScope, layout, instance };
+    const ComputeBindingKeyView lookup{ std::string_view(passName), viewScope, layout, instance, slot };
     auto it = m_entries.find(lookup);
     if (it == m_entries.end()) {
         if (!m_failingKeys.ShouldAttempt(lookup, m_currentFrame)) {
@@ -43,13 +46,13 @@ DescriptorSetHandle RenderGraphComputeBindingCache::Resolve(const char* passName
             entry.handle = RegisterDescriptorSet(entry.descriptorSet);
             entry.lastUsedFrame = m_currentFrame;
             try {
-                it = m_entries.emplace(ComputeBindingKey{ std::string(passName), viewScope, layout, instance }, entry).first;
+                it = m_entries.emplace(ComputeBindingKey{ std::string(passName), viewScope, layout, instance, slot }, entry).first;
             } catch (...) {
                 FreeEntry(entry);
                 throw;
             }
         } catch (const std::exception& e) {
-            const ComputeBindingKey key{ std::string(passName), viewScope, layout, instance };
+            const ComputeBindingKey key{ std::string(passName), viewScope, layout, instance, slot };
             if (m_failingKeys.OnFailure(key, m_currentFrame) == BuildRetryGate::FailureKind::First) {
                 GTE_LOG_ERROR("RenderGraphComputeBindingCache", std::string("Pass \"") + passName + "\": " + e.what());
             }
@@ -82,15 +85,47 @@ void RenderGraphComputeBindingCache::BeginFrame(std::uint64_t currentFrame, std:
     }
 }
 
+// Frees descriptor sets when destroyed, so the retire queue frees them once no frame in flight reads them.
+struct RenderGraphComputeBindingCache::SetsToFree {
+    SetsToFree(Renderer* owner, std::vector<VkDescriptorSet> list) noexcept
+        : renderer(owner)
+        , sets(std::move(list))
+    {
+    }
+    SetsToFree(SetsToFree&& other) noexcept
+        : renderer(other.renderer)
+        , sets(std::move(other.sets))
+    {
+        other.sets.clear();
+    }
+    SetsToFree& operator=(SetsToFree&&) = delete;
+    ~SetsToFree()
+    {
+        for (const VkDescriptorSet set : sets) {
+            renderer->FreeDescriptorSet(set);
+        }
+    }
+
+    Renderer* renderer;
+    std::vector<VkDescriptorSet> sets;
+};
+
 void RenderGraphComputeBindingCache::Release(VkDescriptorSetLayout layout)
 {
+    std::vector<VkDescriptorSet> released;
     for (auto it = m_entries.begin(); it != m_entries.end();) {
         if (it->first.layout == layout) {
-            FreeEntry(it->second);
+            if (it->second.handle != DescriptorSetHandle::Invalid) {
+                UnregisterDescriptorSet(it->second.handle);
+            }
+            released.push_back(it->second.descriptorSet);
             it = m_entries.erase(it);
         } else {
             ++it;
         }
+    }
+    if (!released.empty()) {
+        m_renderer->Retire(SetsToFree(m_renderer, std::move(released)));
     }
     m_failingKeys.EraseIf([layout](const ComputeBindingKey& key) { return key.layout == layout; });
 }

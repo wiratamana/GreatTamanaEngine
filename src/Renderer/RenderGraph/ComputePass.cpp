@@ -34,7 +34,7 @@ ComputePass& ComputePass::ParamsBytes(
         m_state.failed = true;
         return *this;
     }
-    return Bind(bindingName, params.Handle());
+    return Bind(bindingName, params.Handle(m_state.builder));
 }
 
 bool ComputePass::Dispatch(Extent2D requested, std::uint32_t depth)

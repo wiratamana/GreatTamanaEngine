@@ -104,16 +104,22 @@ public:
         const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
+    // A skinned mesh's vertex buffer is host-written: one copy per frame slot (see SlotRingBuffer).
     Mesh CreateSkinnedMesh(const void* vertexData, uint64_t vertexDataSize, std::uint32_t vertexCount,
         const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
-    std::shared_ptr<Buffer> CreateSharedMeshVertexBuffer(
+    std::shared_ptr<SlotRingBuffer> CreateSharedMeshVertexBuffer(
         const void* vertexData, uint64_t vertexDataSize, const char* debugName = nullptr) const;
 
-    std::shared_ptr<Buffer> CreateSharedSkinnedMeshVertexBuffer(
+    std::shared_ptr<SlotRingBuffer> CreateSharedSkinnedMeshVertexBuffer(
         const void* vertexData, uint64_t vertexDataSize, const char* debugName = nullptr) const;
 
+    Mesh CreateMeshFromSharedVertexBuffer(std::shared_ptr<SlotRingBuffer> sharedVertexBuffer,
+        std::uint32_t vertexCount, const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
+        const char* debugName = nullptr) const;
+
+    // Shares a buffer a pass writes on the GPU: a single copy.
     Mesh CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer> sharedVertexBuffer, std::uint32_t vertexCount,
         const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;

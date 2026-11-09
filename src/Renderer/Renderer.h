@@ -12,6 +12,8 @@
 #include "GpuWaitPolicy.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "Mesh.h"
+#include "OffscreenFrameTicket.h"
+#include "OffscreenFramesInFlight.h"
 #include "OffscreenRecording.h"
 #include "Pipeline.h"
 #include "RenderGraph/GpuBuffer.h"
@@ -73,11 +75,16 @@ class Renderer {
 public:
     // `forceValidation` turns API validation on in any build type (it is on by default in debug builds only).
     // `presentPolicy` is fixed for the renderer's lifetime; Uncapped is for benchmarks.
+    // `offscreenFramesInFlight` is clamped to 1..kGpuFramesInFlight; above 1 the main frame is not waited on.
     explicit Renderer(ISurfaceProvider& surfaceProvider, bool forceValidation,
-        PresentPolicy presentPolicy = PresentPolicy::Capped);
+        PresentPolicy presentPolicy = PresentPolicy::Capped,
+        std::uint32_t offscreenFramesInFlight = kDefaultOffscreenFramesInFlight);
     ~Renderer();
 
     PresentPolicy GetPresentPolicy() const noexcept { return m_presentPolicy; }
+
+    // True when the main offscreen frame is submitted without a wait and the CPU builds the next one meanwhile.
+    bool OverlapsOffscreenFrames() const noexcept { return m_offscreenFramesInFlight > 1; }
 
     // Logs once whether API validation is on, off, or was requested but is not installed.
     void LogValidationState() const;
@@ -92,9 +99,33 @@ public:
     DrawStats RenderOffscreen(RenderTexture& target, const std::array<float, 4>& clearColor,
         const std::function<void(rg::CommandBuffer&)>& recordExtra = {});
 
-    // Opens a recording of the dedicated offscreen command buffer. Throws when the GPU wait fails.
-    // Dropping it unsubmitted discards the recording; Submit() runs it and blocks (bounded) until done.
-    [[nodiscard]] OffscreenRecording BeginOffscreenRecording();
+    // Opens a recording of the dedicated offscreen command buffer. Throws when the GPU wait fails. Dropping it
+    // unsubmitted discards it; Submit() runs it and blocks (bounded) until done. It first waits for every overlapped
+    // frame. `recordSlot` is the frame slot whose host-written buffer copies it reads.
+    [[nodiscard]] OffscreenRecording BeginOffscreenRecording(std::uint32_t recordSlot = 0);
+
+    // Waits (bounded) until the offscreen slot of the next overlapped frame is free. Repeats return the same ticket
+    // until that frame is submitted. nullopt when the wait did not complete: skip the frame.
+    [[nodiscard]] std::optional<OffscreenFrameTicket> BeginOffscreenFrame();
+
+    // Opens a recording in the slot of `ticket` (from BeginOffscreenFrame()). Its Submit() does not wait.
+    // Dropping it unsubmitted discards the recording. Throws on failure or for a stale ticket.
+    [[nodiscard]] OffscreenRecording BeginAsyncOffscreenRecording(const OffscreenFrameTicket& ticket);
+
+    // Waits (bounded) for every overlapped offscreen frame. Anything but Completed means the GPU may still use them.
+    // Never throws.
+    [[nodiscard]] BlockOutcome WaitForOffscreenFrames(BlockSite site, const char* detail) noexcept;
+
+    // Keeps a dropped GPU object alive until the offscreen frame being built, and every frame before it, is done.
+    // Use this instead of draining the GPU. Main thread only.
+    template <class T>
+    void Retire(T&& object)
+    {
+        m_presenter.Retire(std::forward<T>(object));
+    }
+
+    // Retired objects not yet freed.
+    std::size_t RetiredPending() const noexcept { return m_presenter.RetiredPending(); }
 
     // Executes swapchain presentation passes using the render graph. False when no swapchain frame was available.
     bool PresentViaRenderGraph(rg::RenderGraph& graph,
@@ -256,15 +287,15 @@ public:
         const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
-    // Shared vertex buffer helpers for multi-part meshes.
-    std::shared_ptr<Buffer> CreateSharedMeshVertexBuffer(
+    // Shared vertex buffer helpers for multi-part meshes. A skinned one is a ring with one copy per frame slot.
+    std::shared_ptr<SlotRingBuffer> CreateSharedMeshVertexBuffer(
         const void* vertexData, uint64_t vertexDataSize, const char* debugName = nullptr) const;
 
-    std::shared_ptr<Buffer> CreateSharedSkinnedMeshVertexBuffer(
+    std::shared_ptr<SlotRingBuffer> CreateSharedSkinnedMeshVertexBuffer(
         const void* vertexData, uint64_t vertexDataSize, const char* debugName = nullptr) const;
 
-    Mesh CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer> sharedVertexBuffer, std::uint32_t vertexCount,
-        const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
+    Mesh CreateMeshFromSharedVertexBuffer(std::shared_ptr<SlotRingBuffer> sharedVertexBuffer,
+        std::uint32_t vertexCount, const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
     // The same, sharing the vertex buffer of a GpuBuffer (for example a skinning output).
@@ -404,6 +435,7 @@ private:
 
     VkFormat m_depthFormat = VK_FORMAT_UNDEFINED;
     PresentPolicy m_presentPolicy = PresentPolicy::Capped;
+    std::uint32_t m_offscreenFramesInFlight = kDefaultOffscreenFramesInFlight;
 
     std::shared_ptr<GpuMemoryTracker> m_memoryTracker = std::make_shared<GpuMemoryTracker>();
 

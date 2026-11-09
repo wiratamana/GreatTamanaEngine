@@ -61,7 +61,7 @@ public:
             m_state.failed = true;
             return *this;
         }
-        return Bind("params", params.Handle());
+        return Bind("params", params.Handle(m_state.builder));
     }
 
     // Dispatches over `size` elements, clamped to the first written storage image. Refused when a

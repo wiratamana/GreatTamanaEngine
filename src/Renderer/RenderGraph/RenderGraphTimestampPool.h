@@ -1,6 +1,6 @@
 #pragma once
 
-// GPU timestamp source: one query pool per regime, one region per frame in flight, reset and read once per frame.
+// GPU timestamp source: one query pool per regime, one region per frame slot, reset and read once per frame.
 // Gated by GTE_ENABLE_PROFILER and SetCaptureEnabled(). Needs a real device.
 
 #include "../GpuStampPlan.h"
@@ -15,6 +15,12 @@
 #include <vector>
 
 namespace gte::rg {
+
+// First query of frame slot `bufferIndex` in a pool whose regions hold `regionQueryCount` queries each.
+constexpr std::uint32_t TimestampRegionBase(std::uint32_t regionQueryCount, std::uint32_t bufferIndex) noexcept
+{
+    return bufferIndex * regionQueryCount;
+}
 
 class RenderGraphTimestampPool {
 public:

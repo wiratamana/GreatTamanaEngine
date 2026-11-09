@@ -1,6 +1,6 @@
 # Animation and physics
 > How a skinned MMD model gets its pose each frame: motion sampling, IK, Verlet hair physics, CPU or GPU skinning. For anyone touching pose, skinning or chain physics.
-> Verified against code: 2026-11-05
+> Verified against code: 2026-11-09
 
 ## TL;DR
 - Pose evaluation is pure CPU math in `src/Animation/`. It has no ECS, GPU or file code.
@@ -58,6 +58,9 @@ The only data shared between the stages is the `ResolvedAnimationPose` component
 - Every GPU-skinned part owns two `Mesh` objects: one for CPU mode and one for GPU mode. This doubles its memory on purpose. The mode switch swaps the handles.
 - GPU buffers (bind pose, weights, bone matrices, output) live in `GpuSkinningRigCache`. They are created at registration and never evicted.
 - Kernels: `SkinVerticesPositionNormal.comp` and `SkinVerticesPositionNormalUv.comp`. Tangent (PBR) meshes are not GPU-skinned.
+- Frame slots: both skinning writers run in `Game::Update`. The skinned vertex buffer (`SlotRingBuffer`) and the bone matrices (`BoneMatrixRing`) keep one copy per offscreen frame slot. A copy is written only when no frame in flight reads it. The GPU skinning output stays one copy.
+- Display latency: with `--frames-in-flight=2` a pose reaches the screen up to one frame after the CPU computed it, because the GPU may still draw the frame before. Physics results are the same for the same delta sequence, but pacing changes the deltas. Do not use the physics golden hash to test overlap.
+- A frozen frame (paused, no step) skips skinning. The next real write catches stale ring copies up from the newest one.
 - The draw pass declares a `VertexBufferRead` on each skin output (`DeclareGpuSkinningReads` in `src/Application/RenderPasses.cpp`). This orders the draw after the compute write. Do not remove it.
 
 ## Dynamic chain physics

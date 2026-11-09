@@ -274,7 +274,7 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
     // Textured submeshes: one shared vertex buffer is uploaded once; each submesh Mesh
     // points at it and differs only in its own index buffer/range.
     if (!texturedSlices.empty()) {
-        std::shared_ptr<Buffer> sharedTexturedVertexBuffer;
+        std::shared_ptr<SlotRingBuffer> sharedTexturedVertexBuffer;
         std::uint32_t texturedVertexCount = 0;
         if (tangentLayout) {
             const std::vector<MeshVertexTangent> vertices =

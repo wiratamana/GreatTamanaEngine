@@ -148,7 +148,7 @@ Constants live in `src/Renderer/Culling/ClusterCullMath.h` and `ClusterPassCount
 
 - A part over a limit, beyond the slots, or over a budget is not claimed. It logs once and draws on the CPU path.
 - A Hi-Z chain that does not fit the budget is first retried as a single-phase `Frustum` chain (`hizReason=OverBudget`). The CPU path is the last resort.
-- The instance buffer of a slot is charged once for all lanes. The history buffer holds one word per (instance, chunk of 16 clusters).
+- The instance buffer of a slot is charged once for all lanes, times `InstanceRingCopies()` (`kGpuFramesInFlight`, 2). The history buffer holds one word per (instance, chunk of 16 clusters).
 - The four Shadow cascade lanes share one visible, commands and count buffer per slot (`ClusterDrawShape::shareLaneBuffers`). They are charged once, at the largest lane. Parameter blocks stay per lane.
 - Sharing is safe only for depth-only lanes with no stats and no survivor reuse. The cascades must declare their passes one after another. Two-phase lanes never share.
 - A sharing state assigns the same slot to a part in every cascade, so a skipped part leaves a gap.
@@ -184,7 +184,9 @@ Constants live in `src/Renderer/Culling/ClusterCullMath.h` and `ClusterPassCount
 ## Gotchas
 - **Draw order changes.** Survivors are appended with `atomicAdd`, in runs of up to 16 per (instance, chunk). Two coincident triangles can swap winners (`MeshHasCoincidentTriangles`).
 - **No renderable changes during the frame.** The shared render list and the reuse cache assume nothing adds, removes or moves a renderable between declare and submit. Parented renderables are never cached.
-- **Synchronous graph only.** `GpuParams` and the instance buffer are written on the CPU at declare time. A pipelined regime makes the verb inert.
+- **Host-written buffers are per frame slot.** `GpuParams` and the instance buffer are written on the CPU at declare time. The offscreen graph may overlap frames (`--frames-in-flight=2`), so the instance buffer keeps one copy per slot, and its upload memo is kept per copy. The visible, commands, count and history buffers stay single copy: the frame boundary barrier orders them. The present graph is pipelined and still makes the verb inert.
+- **The ring costs memory.** Each scope holds `InstanceRingCopies() - 1` extra instance copies, in both modes: +4 MiB at 50000 instances (Frustum 58,720,512 and Hi-Z 109,576,704 bytes in `ledgerBytes`). At 100000 instances Hi-Z reads 219,152,896. NoCull in the same process as Hi-Z can now be refused earlier (derived: near 104900 instances with Shadow sharing, not measured).
+- **Declaration order matters across frames too.** Shadow lanes declare one after another, and a sharing state gives a part the same slot in every lane. All lanes of a frame therefore use the same instance ring copy. There is no runtime guard for this.
 - **Turned-off features keep memory.** A feature disabled with `set_feature_enabled` gets no callback, so `TickIdle` never runs. Its buffers stay in the ledger.
 - **Ledger can refuse a big chain.** The ledger only grows. After a big run in one process (for example Hi-Z at 100000 instances), re-enable the feature for 600 frames or restart before the next big test. The Shadow lanes share buffers, so Shadow is first refused near 152500 instances (process budget) and the work item limit is 190647 instances at 22 clusters each.
 - **Hi-Z scope.** Primary view only. Primitives, alpha-tested, skinned and transparent meshes get frustum culling only.

@@ -1,6 +1,6 @@
 # Render graph
 > The `gte::rg` API: how passes, shaders, buffers and recording work. For anyone who writes or changes render code.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-11-09
 
 ## TL;DR
 - Every frame, code declares passes into an `rg::RenderGraphBuilder`. The graph orders, culls, syncs and records them.
@@ -139,6 +139,7 @@ A target with a different format (for example a shadow map) needs its own pipeli
 4. Never log or throw from a frame path on every frame. Use `OnceErrorLog`, `BoundedOnceSet<N>` or `BuildRetryGate`.
 5. Every CPU wait on the GPU goes through `GpuWaitService`. `BlockingCallCheck` enforces it.
 6. A `BlockOutcome` other than `Completed` means the GPU may still use the resource. Do not free it.
+7. With `--frames-in-flight=2` the offscreen graph runs with a frame slot (`OffscreenFrameTicket`). A host-written buffer, descriptor set or readback cell that a pass uses needs one copy per slot. `GpuParams`, `PersistentBuffer` with `HostWrite` and compute binding sets already do this. Drop objects with `Renderer::Retire`, never free them while a frame may use them. See [Rendering](rendering.md#frames-in-flight).
 
 ## Gotchas
 - A pass whose output nobody reads is culled silently. Publish with a keep list or call `Keep*Output()`.

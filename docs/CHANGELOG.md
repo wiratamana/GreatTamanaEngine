@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [Frames in flight for the offscreen graph](#frames-in-flight-for-the-offscreen-graph-branch-featuretoon-shading-impl-2026-11-09) | `feature/toon-shading-impl` | 2026-11-09 |
 | [Shadow caster sweep, slot fix](#shadow-caster-sweep-slot-fix-branch-featuretoon-shading-impl-2026-11-09) | `feature/toon-shading-impl` | 2026-11-09 |
 | [Shadow lanes share buffers, write-after-read edges](#shadow-lanes-share-buffers-write-after-read-edges-branch-featuretoon-shading-impl-2026-11-09) | `feature/toon-shading-impl` | 2026-11-09 |
 | [GPU culling: cheaper CPU floor, instance-level cull, ledger fix](#gpu-culling-cheaper-cpu-floor-instance-level-cull-ledger-fix-branch-featuretoon-shading-impl-2026-11-05) | `feature/toon-shading-impl` | 2026-11-05 |
@@ -43,6 +44,20 @@
 | [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+
+## Frames in flight for the offscreen graph (branch `feature/toon-shading-impl`, 2026-11-09)
+
+- **Overlap switch.** `--frames-in-flight=<1|2>`. With `2` the CPU no longer waits on a fence after the offscreen submit, so frame N+1 is built while the GPU runs frame N. The default is `1`, the old serial path (`kDefaultOffscreenFramesInFlight`). Flipping it is a human decision.
+- **Slots.** The offscreen graph has a ring of `kGpuFramesInFlight` slots with their own command buffer, fence and timestamp region. `Core::Update()` waits for its slot before `Game::Update()`.
+- **Frame boundary barrier.** Every offscreen and present command buffer starts with one global barrier. GPU-only resources stay single copy. It also removes an old swapchain write-after-read hazard.
+- **Host-written buffers per slot.** GPU params, the lighting uniform per view, compute descriptor sets, the cluster instance buffer, the CPU-skinned vertex buffer and the bone matrices keep one copy per slot. A write into a copy that a frame in flight reads is refused.
+- **Retire queue.** Objects the CPU drops while a frame may use them are freed after a wait that really completed. A timed-out wait never counts.
+- **Ledger.** Each scope holds one extra instance buffer copy in both modes: +4 MiB at 50000 instances.
+- **Readbacks.** A cell is read only after the frame that wrote it is complete.
+- **GPU timing.** In overlap mode the GPU rows come from an older frame (1 to 2 frames).
+- **Display latency.** A skinned pose can show up to one frame later.
+- **Sync tools unchanged.** Cluster Viewer, Mesh Preview, headless tests and Frame Debugger capture frames drain the ring and use the legacy path.
+- **Not verified.** The skipped headless-Vulkan GPU tests, sync validation with a positive control, resize, minimize, device lost, shutdown under load, vsync judder, 3 or more cluster parts and a discrete GPU.
 
 ## Shadow caster sweep, slot fix (branch `feature/toon-shading-impl`, 2026-11-09)
 

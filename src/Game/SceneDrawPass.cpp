@@ -1,5 +1,6 @@
 #include "SceneDrawPass.h"
 
+#include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/SceneServicesDescriptorSet.h"
 
 #include <algorithm>
@@ -22,6 +23,7 @@ SceneDrawPass::SceneDrawPass(rg::RenderGraphBuilder& builder, RenderSystem& syst
     , m_system(&system)
     , m_registry(&registry)
     , m_renderer(&renderer)
+    , m_frameSlot(builder.FrameTicket().slot)
 {
 }
 
@@ -109,7 +111,7 @@ bool SceneDrawPass::Draw()
     }
     return m_mesh.Draw([system = m_system, registry = m_registry, renderer = m_renderer, liveEpoch = m_liveEpoch,
                            epochAtDeclare = m_epochAtDeclare, services = m_services, servicesView = m_servicesView,
-                           request = std::move(request)]() {
+                           frameSlot = m_frameSlot, request = std::move(request)]() {
         const bool stale = liveEpoch != nullptr && *liveEpoch != epochAtDeclare;
         // A selection from an older frame may be gone: draw nothing rather than everything.
         if (stale && request.onlyEntities != nullptr) {
@@ -126,7 +128,7 @@ bool SceneDrawPass::Draw()
         }
         if (services != nullptr) {
             SceneDrawRequest bound = request;
-            bound.sceneServicesSet = services->DescriptorSetFor(servicesView);
+            bound.sceneServicesSet = services->DescriptorSetFor(servicesView, frameSlot);
             DrawScene(*system, *registry, *renderer, bound);
             return;
         }

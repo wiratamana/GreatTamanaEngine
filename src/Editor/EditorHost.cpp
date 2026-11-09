@@ -418,12 +418,13 @@ EditorHost::SdlContext::~SdlContext()
     SDL_Quit();
 }
 
-EditorHost::EditorHost(const std::string& title, int width, int height, bool forceGpuValidation, PresentPolicy presentPolicy)
+EditorHost::EditorHost(const std::string& title, int width, int height, bool forceGpuValidation,
+    PresentPolicy presentPolicy, std::uint32_t offscreenFramesInFlight)
     : m_sdlContext()
     , m_window(title, width, height)
     // m_core is built from m_window (ISurfaceProvider) and m_hostServices (IHostServices); both exist by now.
     , m_hostServices()
-    , m_core(m_window, m_hostServices, forceGpuValidation, presentPolicy)
+    , m_core(m_window, m_hostServices, forceGpuValidation, presentPolicy, offscreenFramesInFlight)
     // References bound to m_core's own instances.
     , m_renderer(m_core.GetRenderer())
     , m_renderGraph(m_core.GetRenderGraph())

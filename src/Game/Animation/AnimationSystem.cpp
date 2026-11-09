@@ -41,6 +41,17 @@ constexpr std::uint32_t kMinVerticesPerBatch = 32768;
 static_assert(sizeof(MeshVertexUv) == 8 * sizeof(float));
 static_assert(sizeof(MeshVertex) == 6 * sizeof(float));
 
+// Adds `ring` once. The list holds weak owners, so a ring whose meshes are gone drops out on the next sweep.
+void RememberWrittenRing(std::vector<std::weak_ptr<SlotRingBuffer>>& rings, const std::weak_ptr<SlotRingBuffer>& ring)
+{
+    const auto same = [&ring](const std::weak_ptr<SlotRingBuffer>& known) {
+        return !known.owner_before(ring) && !ring.owner_before(known);
+    };
+    if (std::none_of(rings.begin(), rings.end(), same)) {
+        rings.push_back(ring);
+    }
+}
+
 // Per-batch job context: pointers into data owned by the caller, which outlives the dispatch and its wait.
 struct SkinPackBatchContext {
     const CompactSkinData* data;
@@ -274,8 +285,8 @@ void AnimationSystem::NoteSkinCandidate(
 }
 
 // Skins and uploads one model from one entity's pose, found through a playing animator or an enabled DynamicChainRig.
-void AnimationSystem::SkinAndUploadOneEntity(
-    Registry& registry, Entity entity, const std::string& meshGtaPath, SkinningMode mode)
+void AnimationSystem::SkinAndUploadOneEntity(Registry& registry, Entity entity, const std::string& meshGtaPath,
+    SkinningMode mode, const OffscreenFrameTicket& ticket)
 {
     const SkinnedMeshData* skinData = m_rigCache.TryGet(meshGtaPath);
     if (skinData == nullptr) {
@@ -295,7 +306,9 @@ void AnimationSystem::SkinAndUploadOneEntity(
         if (gpuEntry == nullptr) {
             return; // Never registered for GPU skinning.
         }
-        gpuEntry->boneMatricesBuffer.Upload(skinningMatrices.data(), skinningMatrices.size() * sizeof(Mat4));
+        if (!gpuEntry->boneMatrices.Upload(ticket, skinningMatrices.data(), skinningMatrices.size() * sizeof(Mat4))) {
+            return; // A frame in flight still reads this slot's copy: keep the last pose, skin nothing this frame.
+        }
 
         if (std::find(m_gpuModelsNeedingDispatchThisFrame.begin(), m_gpuModelsNeedingDispatchThisFrame.end(),
                 meshGtaPath)
@@ -323,21 +336,27 @@ void AnimationSystem::SkinAndUploadOneEntity(
     // The scratch arrays are kept per model between frames; resize() allocates only the first time.
     AnimatorScratchBuffers& scratch = m_scratchBuffers[meshGtaPath];
     for (const MeshAssetPartGroup& group : groups) {
+        bool written = false;
         if (group.textured) {
             std::vector<MeshVertexUv>& packed = scratch.packedTextured;
             packed.resize(vertexCount);
             SkinPackAllVertices(compactSkin, skinningMatrices, true, reinterpret_cast<float*>(packed.data()));
-            group.representativeMesh->UpdateVertexData(packed.data(), packed.size() * sizeof(MeshVertexUv));
+            written = group.representativeMesh->UpdateVertexData(
+                packed.data(), packed.size() * sizeof(MeshVertexUv), ticket);
         } else {
             std::vector<MeshVertex>& packed = scratch.packedUntextured;
             packed.resize(vertexCount);
             SkinPackAllVertices(compactSkin, skinningMatrices, false, reinterpret_cast<float*>(packed.data()));
-            group.representativeMesh->UpdateVertexData(packed.data(), packed.size() * sizeof(MeshVertex));
+            written = group.representativeMesh->UpdateVertexData(
+                packed.data(), packed.size() * sizeof(MeshVertex), ticket);
+        }
+        if (written) {
+            RememberWrittenRing(m_writtenRings, group.representativeMesh->VertexRing());
         }
     }
 }
 
-void AnimationSystem::SkinAndUpload(Registry& registry)
+void AnimationSystem::SkinAndUpload(Registry& registry, const OffscreenFrameTicket& ticket)
 {
     GTE_PROFILE_SCOPE("AnimationSystem::SkinAndUpload");
 
@@ -378,11 +397,27 @@ void AnimationSystem::SkinAndUpload(Registry& registry)
     }
 
     for (const SkinWinner& winner : m_skinWinnersThisFrame) {
-        SkinAndUploadOneEntity(registry, winner.entity, *winner.meshGtaPath, mode);
+        SkinAndUploadOneEntity(registry, winner.entity, *winner.meshGtaPath, mode, ticket);
     }
+    // A model that was not skinned this frame still has to draw its current pose from this slot's copy.
+    KeepSkinnedRingsCurrent(ticket);
 }
 
-std::vector<AnimationSystem::GpuSkinningDispatchRequest> AnimationSystem::CollectModelsNeedingGpuSkinningThisFrame() const
+void AnimationSystem::KeepSkinnedRingsCurrent(const OffscreenFrameTicket& ticket)
+{
+    std::erase_if(m_writtenRings, [&ticket](const std::weak_ptr<SlotRingBuffer>& weak) {
+        const std::shared_ptr<SlotRingBuffer> ring = weak.lock();
+        if (ring == nullptr) {
+            return true;
+        }
+        // Refused only while a frame in flight reads the copy; the next frame tries again.
+        static_cast<void>(ring->CatchUp(ticket));
+        return false;
+    });
+}
+
+std::vector<AnimationSystem::GpuSkinningDispatchRequest> AnimationSystem::CollectModelsNeedingGpuSkinningThisFrame(
+    const OffscreenFrameTicket& ticket) const
 {
     std::vector<GpuSkinningDispatchRequest> requests;
 
@@ -404,7 +439,7 @@ std::vector<AnimationSystem::GpuSkinningDispatchRequest> AnimationSystem::Collec
             request.name = group.debugName.c_str();
             request.dispatch.bindPose = &entry->bindPoseBuffer;
             request.dispatch.skinWeights = &entry->skinWeightsBuffer;
-            request.dispatch.boneMatrices = &entry->boneMatricesBuffer;
+            request.dispatch.boneMatrices = &entry->boneMatrices.CopyFor(ticket);
             request.dispatch.uv = group.isTextured && entry->uvBuffer.has_value() ? &*entry->uvBuffer : nullptr;
             request.dispatch.output = &group.outputVertexBuffer;
             request.dispatch.vertexCount = group.vertexCount;

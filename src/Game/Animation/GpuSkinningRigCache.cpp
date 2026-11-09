@@ -85,9 +85,8 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
     GpuBuffer skinWeightsBuffer = GpuBuffer::CreateWithData(device, packedSkinWeights.data(),
         packedSkinWeights.size() * sizeof(GpuSkinWeights), "GpuSkinningWeights", GpuBufferUse::Storage);
 
-    // The one input rewritten every animated frame.
-    GpuBuffer boneMatricesBuffer(device, sizeof(Mat4) * data.skeleton.bones.size(), "GpuSkinningBoneMatrices",
-        GpuBufferUse::Storage | GpuBufferUse::HostWrite);
+    // The one input rewritten every animated frame: one copy per frame slot.
+    BoneMatrixRing boneMatrices(device, sizeof(Mat4) * data.skeleton.bones.size());
 
     const bool anyTextured =
         std::any_of(groups.begin(), groups.end(), [](const MeshAssetPartGroup& group) { return group.textured; });
@@ -99,7 +98,7 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
     }
 
     GpuModelEntry entry{ std::move(bindPoseBuffer), std::move(skinWeightsBuffer), std::move(uvBuffer),
-        std::move(boneMatricesBuffer), {} };
+        std::move(boneMatrices), {} };
 
     const std::uint32_t vertexCount = static_cast<std::uint32_t>(data.bindPositions.size());
     entry.outputGroups.reserve(groups.size());
@@ -137,7 +136,12 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
         entry.outputGroups.push_back(std::move(outputGroup));
     }
 
-    m_models.insert_or_assign(absoluteGtaPath, std::move(entry));
+    // A model registered again keeps its old resources alive until the frames in flight are done with them.
+    if (const auto existing = m_models.find(absoluteGtaPath); existing != m_models.end()) {
+        renderer.Retire(std::move(existing->second));
+        m_models.erase(existing);
+    }
+    m_models.emplace(absoluteGtaPath, std::move(entry));
 }
 
 const GpuSkinningRigCache::GpuModelEntry* GpuSkinningRigCache::TryGet(const std::string& absoluteGtaPath) const

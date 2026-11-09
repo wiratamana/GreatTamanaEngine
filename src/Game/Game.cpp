@@ -38,15 +38,25 @@ void Game::Update(const EngineContext& engineContext, const InputState& /*input*
 
     // Frozen = paused and not stepping. Skip the simulation stages entirely rather than feeding them a zero
     // delta: cheaper, and independent of each system's zero-delta handling.
+    // No frame slot means a frame in flight may still read every buffer copy: nothing is written for the GPU then.
+    const std::optional<OffscreenFrameTicket>& gpuFrame = engineContext.gpuFrame;
     if (!time.IsFrozenThisFrame()) {
         // Three stages sharing only the ResolvedAnimationPose component: animation writes the pose, physics may
         // overwrite physics-driven bones, then animation skins and uploads whatever the pose holds.
         m_animationSystem.EvaluatePoses(m_registry, time.DeltaTime());
         m_physicsSystem.Update(m_registry, time.DeltaTime());
-        m_animationSystem.SkinAndUpload(m_registry);
+        if (gpuFrame.has_value()) {
+            m_animationSystem.SkinAndUpload(m_registry, *gpuFrame);
+        } else {
+            m_animationSystem.ClearGpuSkinningDispatchThisFrame();
+        }
     } else {
-        // Nothing simulated: drop any stale GPU-skinning dispatch request from the last simulated frame.
+        // Nothing simulated: drop any stale GPU-skinning dispatch request from the last simulated frame, and keep
+        // this slot's skinned vertex copies on the current pose.
         m_animationSystem.ClearGpuSkinningDispatchThisFrame();
+        if (gpuFrame.has_value()) {
+            m_animationSystem.KeepSkinnedRingsCurrent(*gpuFrame);
+        }
     }
 }
 

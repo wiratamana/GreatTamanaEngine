@@ -1,8 +1,13 @@
 #pragma once
 
+#include "../../Renderer/GpuTiming.h"
 #include "../../Renderer/MeshHandle.h"
+#include "../../Renderer/OffscreenFrameTicket.h"
+#include "../../Renderer/OffscreenRingGuard.h"
 #include "../../Renderer/RenderGraph/GpuBuffer.h"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -15,6 +20,37 @@ class Renderer;
 class RenderSystem;
 struct SkinnedMeshData;
 struct MeshAssetPart;
+
+// The bone matrices of one model: one host-written copy per frame slot, so the CPU never overwrites a copy that a
+// frame in flight still reads.
+class BoneMatrixRing {
+public:
+    BoneMatrixRing() = default;
+    BoneMatrixRing(rg::DeviceRef device, std::size_t byteSize)
+    {
+        for (rg::GpuBuffer& copy : m_copies) {
+            copy = rg::GpuBuffer(device, byteSize, "GpuSkinningBoneMatrices",
+                rg::GpuBufferUse::Storage | rg::GpuBufferUse::HostWrite);
+        }
+    }
+
+    // Writes the copy of `ticket`'s slot. False, nothing written, when a frame in flight still reads that copy.
+    bool Upload(const OffscreenFrameTicket& ticket, const void* data, std::size_t size)
+    {
+        const std::uint32_t copy = RingCopyOf(ticket, kGpuFramesInFlight);
+        return m_use[copy].Claim(ticket) && m_copies[copy].Upload(data, size);
+    }
+
+    // The copy a frame of `ticket`'s slot reads.
+    const rg::GpuBuffer& CopyFor(const OffscreenFrameTicket& ticket) const noexcept
+    {
+        return m_copies[RingCopyOf(ticket, kGpuFramesInFlight)];
+    }
+
+private:
+    std::array<rg::GpuBuffer, kGpuFramesInFlight> m_copies;
+    std::array<RingCopyUse, kGpuFramesInFlight> m_use;
+};
 
 // GPU resources of every GPU-skinned model: registered once per model, looked up every frame, never evicted.
 class GpuSkinningRigCache {
@@ -52,8 +88,9 @@ public:
         // Present only when at least one output group is textured.
         std::optional<rg::GpuBuffer> uvBuffer;
 
-        // Rewritten every frame the model animates on the GPU; mutable because TryGet() returns a const entry.
-        mutable rg::GpuBuffer boneMatricesBuffer;
+        // Rewritten every frame the model animates on the GPU, one copy per frame slot. Mutable because TryGet()
+        // returns a const entry.
+        mutable BoneMatrixRing boneMatrices;
 
         std::vector<OutputGroup> outputGroups;
 

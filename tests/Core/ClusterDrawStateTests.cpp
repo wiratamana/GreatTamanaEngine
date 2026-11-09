@@ -22,6 +22,27 @@ namespace {
 constexpr rg::ViewScope kGame = rg::ViewScope::Primary;
 constexpr rg::ViewScope kScene = rg::ViewScope::Secondary;
 
+// Copies of a slot's instance buffer the ledger charges; the lane buffers stay one copy.
+constexpr std::uint64_t kRingCopies = ClusterDrawState::InstanceRingCopies();
+static_assert(kRingCopies >= 1);
+
+std::uint64_t InstanceCapacity(std::uint64_t instances)
+{
+    return ClusterBufferCapacity(instances * sizeof(ClusterInstanceGpu));
+}
+
+// Bytes the ring adds on top of ClusterChainBytes(), which counts the instance buffer once.
+std::uint64_t ExtraInstanceCopies(std::uint64_t instances)
+{
+    return (kRingCopies - 1) * InstanceCapacity(instances);
+}
+
+// What a state holds for one chain: the lane buffers once and every ring copy of the instance buffer.
+std::uint64_t Charged(std::uint64_t instances, std::uint64_t work, bool twoPhase = false)
+{
+    return ClusterChainBytes(instances, work, twoPhase) + ExtraInstanceCopies(instances);
+}
+
 TEST(ClusterNamePoolTests, SameTextGivesSamePointer)
 {
     ClusterNamePool pool(8);
@@ -265,21 +286,29 @@ TEST(ClusterDrawStateTests, BuffersAreDistinctPerLaneAndSlot)
     EXPECT_EQ(state.History(3), nullptr);
 }
 
-TEST(ClusterDrawStateTests, BindingIndexCoversTwoScopesDensely)
+TEST(ClusterDrawStateTests, BindingIndexCoversTwoScopesAndEveryRingCopyDensely)
 {
     ClusterDrawState state("TestBindings", { 2, 3 });
     ASSERT_TRUE(state.Valid());
+    constexpr std::size_t kPerCopy = 12;
     std::set<std::size_t> seen;
-    for (const rg::ViewScope scope : { kGame, kScene }) {
-        for (std::uint32_t lane = 0; lane < 2; ++lane) {
-            for (std::uint32_t slot = 0; slot < 3; ++slot) {
-                seen.insert(state.BindingIndex(scope, lane, slot));
+    for (std::uint32_t copy = 0; copy < kRingCopies; ++copy) {
+        for (const rg::ViewScope scope : { kGame, kScene }) {
+            for (std::uint32_t lane = 0; lane < 2; ++lane) {
+                for (std::uint32_t slot = 0; slot < 3; ++slot) {
+                    const std::size_t index = state.BindingIndex(scope, lane, slot, copy);
+                    EXPECT_GE(index, copy * kPerCopy);
+                    EXPECT_LT(index, (copy + 1) * kPerCopy);
+                    seen.insert(index);
+                }
             }
         }
     }
-    EXPECT_EQ(seen.size(), 12u);
-    EXPECT_EQ(*seen.rbegin(), 11u);
-    EXPECT_EQ(state.BindingIndex(rg::ViewScope::Shared, 0, 0), std::numeric_limits<std::size_t>::max());
+    EXPECT_EQ(seen.size(), kPerCopy * kRingCopies);
+    EXPECT_EQ(*seen.rbegin(), kPerCopy * kRingCopies - 1);
+    constexpr std::size_t kNone = std::numeric_limits<std::size_t>::max();
+    EXPECT_EQ(state.BindingIndex(rg::ViewScope::Shared, 0, 0, 0), kNone);
+    EXPECT_EQ(state.BindingIndex(kGame, 0, 0, static_cast<std::uint32_t>(kRingCopies)), kNone);
 }
 
 TEST(ClusterDrawStateTests, ReserveRejectsBadIndices)
@@ -299,25 +328,25 @@ TEST(ClusterDrawStateTests, ATwoPhaseChainNeedsASecondLaneAndIsRecordedOnTheFirs
     ClusterDrawState twoLanes("TestTwoPhaseTwoLanes", { 2, 2 });
     EXPECT_EQ(twoLanes.TryReserveChainBytes(kGame, 1, 0, 1, 1000, true), ClusterReserveResult::BadIndex);
     ASSERT_EQ(twoLanes.TryReserveChainBytes(kGame, 0, 0, 1, 1000, true), ClusterReserveResult::Ok);
-    EXPECT_EQ(twoLanes.HeldBytes(kGame), ClusterChainBytes(1, 1000, true));
-    EXPECT_GT(twoLanes.HeldBytes(kGame), ClusterChainBytes(1, 1000, false));
+    EXPECT_EQ(twoLanes.HeldBytes(kGame), Charged(1, 1000, true));
+    EXPECT_GT(twoLanes.HeldBytes(kGame), Charged(1, 1000, false));
 }
 
 TEST(ClusterDrawStateTests, TheInstanceBufferOfASlotIsChargedOnceForAllLanes)
 {
-    constexpr std::uint64_t kInstances = 50000;
-    constexpr std::uint64_t kWork = 1100000;
+    constexpr std::uint64_t kInstances = 10000; // Small enough for two slots of four lanes and every ring copy.
+    constexpr std::uint64_t kWork = 220000;
     ClusterDrawState state("TestInstancesOnce", { 4, 2 });
     for (std::uint32_t lane = 0; lane < 4; ++lane) {
         ASSERT_EQ(state.TryReserveChainBytes(kGame, lane, 0, kInstances, kWork, false), ClusterReserveResult::Ok);
     }
     const std::uint64_t oneChain = ClusterChainBytes(kInstances, kWork, false);
-    const std::uint64_t instances = ClusterBufferCapacity(kInstances * sizeof(ClusterInstanceGpu));
-    EXPECT_EQ(state.HeldBytes(kGame), 4 * (oneChain - instances) + instances);
+    const std::uint64_t instances = InstanceCapacity(kInstances);
+    EXPECT_EQ(state.HeldBytes(kGame), 4 * (oneChain - instances) + kRingCopies * instances);
 
     // A second slot has its own instance buffer.
     ASSERT_EQ(state.TryReserveChainBytes(kGame, 0, 1, kInstances, kWork, false), ClusterReserveResult::Ok);
-    EXPECT_EQ(state.HeldBytes(kGame), 5 * (oneChain - instances) + 2 * instances);
+    EXPECT_EQ(state.HeldBytes(kGame), 5 * (oneChain - instances) + 2 * kRingCopies * instances);
 }
 
 TEST(ClusterDrawStateTests, AGrowingInstanceCountIsChargedEvenWhenAnotherLaneHoldsTheBuffer)
@@ -327,8 +356,7 @@ TEST(ClusterDrawStateTests, AGrowingInstanceCountIsChargedEvenWhenAnotherLaneHol
     ASSERT_EQ(state.TryReserveChainBytes(kGame, 1, 0, 1000, 20000, false), ClusterReserveResult::Ok);
     const std::uint64_t before = state.HeldBytes(kGame);
     ASSERT_EQ(state.TryReserveChainBytes(kGame, 0, 0, 100000, 20000, false), ClusterReserveResult::Ok);
-    EXPECT_EQ(state.HeldBytes(kGame), before - ClusterBufferCapacity(1000 * sizeof(ClusterInstanceGpu))
-        + ClusterBufferCapacity(100000 * sizeof(ClusterInstanceGpu)));
+    EXPECT_EQ(state.HeldBytes(kGame), before - kRingCopies * InstanceCapacity(1000) + kRingCopies * InstanceCapacity(100000));
 }
 
 TEST(ClusterDrawStateTests, CanReserveAnswersLikeTryReserveAndRecordsNothing)
@@ -357,7 +385,7 @@ TEST(ClusterDrawStateTests, ATwoPhaseChainCanBeRefusedWhileTheSingleChainFits)
     EXPECT_EQ(state.CanReserveChainBytes(kGame, 0, 3, kInstances, kWork, false), ClusterReserveResult::Ok);
     EXPECT_EQ(state.CanReserveChainBytes(kGame, 0, 3, kInstances, kWork, true, kHistoryWords),
         ClusterReserveResult::OverStateBudget);
-    EXPECT_EQ(state.HeldBytes(kGame), 3 * ClusterChainBytes(kInstances, kWork, false));
+    EXPECT_EQ(state.HeldBytes(kGame), 3 * Charged(kInstances, kWork));
 }
 
 TEST(ClusterDrawStateTests, ThePackedHistoryChargesAboutAChunkOfTheOldSize)
@@ -376,7 +404,7 @@ TEST(ClusterDrawStateTests, StateBudgetThenProcessCeiling)
 {
     constexpr std::uint64_t kInstances = 1;
     constexpr std::uint64_t kWork = 1000000;
-    const std::uint64_t chain = ClusterChainBytes(kInstances, kWork, false);
+    const std::uint64_t chain = Charged(kInstances, kWork);
     ASSERT_GT(chain, 0u);
     const std::uint64_t perScope = kClusterDrawBudgetBytes / chain; // Chains that fit one scope.
     ASSERT_GE(perScope, 1u);
@@ -485,9 +513,9 @@ TEST(ClusterDrawStateTests, SharedLanesChargeTheLargestLaneNotTheSum)
         EXPECT_EQ(shared.TryReserveChainBytes(kGame, lane, 0, kInstances, kWork, false), ClusterReserveResult::Ok);
         EXPECT_EQ(unshared.TryReserveChainBytes(kGame, lane, 0, kInstances, kWork, false), ClusterReserveResult::Ok);
     }
-    EXPECT_EQ(shared.HeldBytes(kGame), 54526208u);
-    EXPECT_EQ(shared.HeldBytes(kGame), ClusterChainBytes(kInstances, kWork, false));
-    EXPECT_EQ(unshared.HeldBytes(kGame), 205521920u);
+    EXPECT_EQ(shared.HeldBytes(kGame), 54526208u + ExtraInstanceCopies(kInstances));
+    EXPECT_EQ(shared.HeldBytes(kGame), Charged(kInstances, kWork));
+    EXPECT_EQ(unshared.HeldBytes(kGame), 205521920u + ExtraInstanceCopies(kInstances));
     // The saving is three lanes of 48 MiB + 256 B each.
     EXPECT_EQ(unshared.HeldBytes(kGame) - shared.HeldBytes(kGame), 150995712u);
 }
@@ -502,24 +530,24 @@ TEST(ClusterDrawStateTests, FourSharedLanesFitAt100000InstancesWhereUnsharedLane
         EXPECT_EQ(shared.TryReserveChainBytes(kGame, lane, 0, kInstances, kWork, false), ClusterReserveResult::Ok)
             << "lane " << lane;
     }
-    EXPECT_EQ(shared.HeldBytes(kGame), 109052160u);
+    EXPECT_EQ(shared.HeldBytes(kGame), 109052160u + ExtraInstanceCopies(kInstances));
 
     EXPECT_EQ(unshared.TryReserveChainBytes(kGame, 0, 0, kInstances, kWork, false), ClusterReserveResult::Ok);
     EXPECT_EQ(unshared.TryReserveChainBytes(kGame, 1, 0, kInstances, kWork, false), ClusterReserveResult::Ok);
     EXPECT_EQ(unshared.TryReserveChainBytes(kGame, 2, 0, kInstances, kWork, false), ClusterReserveResult::OverStateBudget);
     EXPECT_EQ(unshared.TryReserveChainBytes(kGame, 3, 0, kInstances, kWork, false), ClusterReserveResult::OverStateBudget);
-    EXPECT_EQ(unshared.HeldBytes(kGame), 209715712u);
+    EXPECT_EQ(unshared.HeldBytes(kGame), 209715712u + ExtraInstanceCopies(kInstances));
 }
 
 TEST(ClusterDrawStateTests, TheSharedRecordGrowsToTheLargestLaneAndNeverShrinks)
 {
     ClusterDrawState state("TestShareGrow", kSharedShape);
     ASSERT_EQ(state.TryReserveChainBytes(kGame, 0, 0, 1, 1000, false), ClusterReserveResult::Ok);
-    EXPECT_EQ(state.HeldBytes(kGame), ClusterChainBytes(1, 1000, false));
+    EXPECT_EQ(state.HeldBytes(kGame), Charged(1, 1000));
     ASSERT_EQ(state.TryReserveChainBytes(kGame, 1, 0, 1, 2000000, false), ClusterReserveResult::Ok);
-    EXPECT_EQ(state.HeldBytes(kGame), ClusterChainBytes(1, 2000000, false));
+    EXPECT_EQ(state.HeldBytes(kGame), Charged(1, 2000000));
     ASSERT_EQ(state.TryReserveChainBytes(kGame, 2, 0, 1, 1000, false), ClusterReserveResult::Ok);
-    EXPECT_EQ(state.HeldBytes(kGame), ClusterChainBytes(1, 2000000, false));
+    EXPECT_EQ(state.HeldBytes(kGame), Charged(1, 2000000));
 }
 
 TEST(ClusterDrawStateTests, AGrowingInstanceCountIsStillChargedOnceOnSharedLanes)
@@ -527,7 +555,7 @@ TEST(ClusterDrawStateTests, AGrowingInstanceCountIsStillChargedOnceOnSharedLanes
     ClusterDrawState state("TestShareInstances", kSharedShape);
     ASSERT_EQ(state.TryReserveChainBytes(kGame, 0, 0, 1000, 20000, false), ClusterReserveResult::Ok);
     ASSERT_EQ(state.TryReserveChainBytes(kGame, 3, 0, 100000, 20000, false), ClusterReserveResult::Ok);
-    EXPECT_EQ(state.HeldBytes(kGame), ClusterChainBytes(100000, 20000, false));
+    EXPECT_EQ(state.HeldBytes(kGame), Charged(100000, 20000));
 }
 
 TEST(ClusterDrawStateTests, TwoPhaseIsRefusedOnASharingState)
@@ -546,18 +574,19 @@ TEST(ClusterDrawStateTests, SharedSlotsAreChargedSeparatelyAndScopesAreIndepende
         ASSERT_EQ(state.TryReserveChainBytes(kGame, lane, 0, 50000, 1100000, false), ClusterReserveResult::Ok);
         ASSERT_EQ(state.TryReserveChainBytes(kScene, lane, 0, 50000, 1100000, false), ClusterReserveResult::Ok);
     }
-    EXPECT_EQ(state.HeldBytes(kGame), 54526208u);
-    EXPECT_EQ(state.HeldBytes(kScene), 54526208u);
+    const std::uint64_t one = 54526208u + ExtraInstanceCopies(50000);
+    EXPECT_EQ(state.HeldBytes(kGame), one);
+    EXPECT_EQ(state.HeldBytes(kScene), one);
     ASSERT_EQ(state.TryReserveChainBytes(kGame, 2, 1, 50000, 1100000, false), ClusterReserveResult::Ok);
-    EXPECT_EQ(state.HeldBytes(kGame), 2u * 54526208u);
-    EXPECT_EQ(state.HeldBytes(kScene), 54526208u);
+    EXPECT_EQ(state.HeldBytes(kGame), 2u * one);
+    EXPECT_EQ(state.HeldBytes(kScene), one);
 }
 
 TEST(ClusterDrawStateTests, TheProcessLedgerCountsASharedStateOncePerScope)
 {
     constexpr std::uint64_t kInstances = 100000;
     constexpr std::uint64_t kWork = 2200000;
-    constexpr std::uint64_t kOne = 109052160; // 104 MiB: one lane and the instance buffer.
+    const std::uint64_t kOne = 109052160 + ExtraInstanceCopies(kInstances); // One lane and the instance buffer copies.
     const std::uint64_t before = ProcessClusterLedger().Total();
     std::vector<std::unique_ptr<ClusterDrawState>> states;
     for (int i = 0; i < 4; ++i) {

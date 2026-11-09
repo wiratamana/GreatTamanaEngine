@@ -11,12 +11,14 @@
 
 namespace gte::rg {
 
-// Identity of one descriptor set: pass name, view scope, layout and an instance number (0 unless a pass repeats).
+// Identity of one descriptor set: pass name, view scope, layout, an instance number (0 unless a pass repeats)
+// and the offscreen frame slot whose frame writes it (0 outside an overlapped frame).
 struct ComputeBindingKey {
     std::string name;
     ViewScope scope = ViewScope::Shared;
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
     std::uint64_t instance = 0;
+    std::uint32_t slot = 0;
 };
 
 // Allocation-free lookup form of ComputeBindingKey.
@@ -25,14 +27,15 @@ struct ComputeBindingKeyView {
     ViewScope scope = ViewScope::Shared;
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
     std::uint64_t instance = 0;
+    std::uint32_t slot = 0;
 };
 
 namespace detail {
 
-constexpr std::size_t HashBindingKey(
-    std::string_view name, ViewScope scope, std::uintptr_t layout, std::uint64_t instance) noexcept
+constexpr std::size_t HashBindingKey(std::string_view name, ViewScope scope, std::uintptr_t layout,
+    std::uint64_t instance, std::uint32_t slot) noexcept
 {
-    std::uint64_t h = 1469598103934665603ull; // FNV-1a over name, scope, layout bytes, then instance bytes.
+    std::uint64_t h = 1469598103934665603ull; // FNV-1a over name, scope, layout bytes, instance bytes, then slot.
     for (const char c : name) {
         h = (h ^ static_cast<unsigned char>(c)) * 1099511628211ull;
     }
@@ -43,6 +46,7 @@ constexpr std::size_t HashBindingKey(
     for (int i = 0; i < 8; ++i) {
         h = (h ^ ((instance >> (i * 8)) & 0xFFu)) * 1099511628211ull;
     }
+    h = (h ^ static_cast<std::uint64_t>(slot)) * 1099511628211ull;
     return static_cast<std::size_t>(h);
 }
 
@@ -54,11 +58,11 @@ struct ComputeBindingKeyHash {
 
     std::size_t operator()(const ComputeBindingKey& k) const noexcept
     {
-        return detail::HashBindingKey(k.name, k.scope, reinterpret_cast<std::uintptr_t>(k.layout), k.instance);
+        return detail::HashBindingKey(k.name, k.scope, reinterpret_cast<std::uintptr_t>(k.layout), k.instance, k.slot);
     }
     std::size_t operator()(const ComputeBindingKeyView& k) const noexcept
     {
-        return detail::HashBindingKey(k.name, k.scope, reinterpret_cast<std::uintptr_t>(k.layout), k.instance);
+        return detail::HashBindingKey(k.name, k.scope, reinterpret_cast<std::uintptr_t>(k.layout), k.instance, k.slot);
     }
 };
 
@@ -68,7 +72,7 @@ struct ComputeBindingKeyEqual {
     template <typename A, typename B>
     bool operator()(const A& a, const B& b) const noexcept
     {
-        return a.scope == b.scope && a.layout == b.layout && a.instance == b.instance
+        return a.scope == b.scope && a.layout == b.layout && a.instance == b.instance && a.slot == b.slot
             && std::string_view(a.name) == std::string_view(b.name);
     }
 };
