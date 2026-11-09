@@ -41,6 +41,32 @@ CloudShellSegment ComputeCloudShellSegment(
 // Wind drift of the noise lookups: advances `offset` (x, z in metres) by `dt` seconds.
 void AdvanceCloudWind(float (&offset)[2], float speed, float directionDegrees, float dt) noexcept;
 
+// Phase functions, normalised so they integrate to 1 over the sphere. `cosTheta` is the cosine between the
+// view ray and the direction toward the sun, so +1 looks into the sun.
+float CloudHenyeyGreenstein(float cosTheta, float g) noexcept;
+float CloudDraine(float cosTheta, float g, float alpha) noexcept;
+
+// Draine constants for 10 micrometre droplets, mixed with a very forward Henyey-Greenstein lobe.
+inline constexpr float kCloudDraineHgG = 0.9881f;
+inline constexpr float kCloudDraineG = 0.5567f;
+inline constexpr float kCloudDraineAlpha = 21.9955f;
+inline constexpr float kCloudDraineWeight = 0.4824f;
+
+// Phase of one scattering octave; `eccentricity` scales every g (1 = the full model, 0 = isotropic).
+float CloudPhase(const VolumetricCloudSettings& safe, float cosTheta, float eccentricity) noexcept;
+
+// Beer-Lambert transmittance for an optical depth.
+float CloudBeer(float opticalDepth) noexcept;
+
+// Sun light reaching a sample: the sum over octaves of b^i * phase_i * exp(-tau * a^i), plus the silver lobe.
+float CloudSunScatter(const VolumetricCloudSettings& safe, float cosTheta, float opticalDepth) noexcept;
+
+// One energy-conserving march step: the fraction of the light behind that the step absorbs.
+float CloudStepOpacity(float extinction, float stepLength) noexcept;
+
+// Adds one step to a front-to-back accumulation. `source` is the radiance per unit of absorbed light.
+void CloudAccumulateStep(float& light, float& transmittance, float source, float opacity) noexcept;
+
 // What the per-frame parameter block needs besides the settings.
 struct VolumetricCloudFrameFacts {
     Mat4 invViewProjection = Mat4::Identity();

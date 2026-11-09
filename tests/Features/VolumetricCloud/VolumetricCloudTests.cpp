@@ -280,6 +280,26 @@ TEST(VolumetricCloudParamsTest, BlockLayoutMatchesTheShader)
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, march), 208u);
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, counts), 224u);
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, skip), 240u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, lightMarch), 256u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, lightPhase), 272u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, lightScatter), 288u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, lightMisc), 304u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, drainePhase), 320u);
+    EXPECT_EQ(sizeof(VolumetricCloudParamsGpu), 336u);
+}
+
+TEST(VolumetricCloudParamsTest, PacksTheLightingSettings)
+{
+    VolumetricCloudSettings s = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    s.sunSteps = 6.0f;
+    s.phaseModel = 1.0f;
+    s.hazeDistanceM = 30000.0f;
+    const VolumetricCloudParamsGpu p = MakeVolumetricCloudParams(s, VolumetricCloudFrameFacts{});
+    EXPECT_FLOAT_EQ(p.lightMarch[0], 6.0f);
+    EXPECT_FLOAT_EQ(p.lightMisc[0], 1.0f);
+    EXPECT_FLOAT_EQ(p.lightMisc[2], 30000.0f);
+    EXPECT_FLOAT_EQ(p.drainePhase[2], kCloudDraineAlpha);
+    EXPECT_FLOAT_EQ(p.lightPhase[0], s.forwardG);
 }
 
 TEST(VolumetricCloudParamsTest, PacksTheSettingsAndTheFrame)
@@ -313,6 +333,115 @@ TEST(VolumetricCloudParamsTest, ASunBelowTheHorizonGivesNoSunLight)
     const VolumetricCloudParamsGpu p = MakeVolumetricCloudParams(VolumetricCloudSettings{}, facts);
     EXPECT_FLOAT_EQ(p.sunColorAndAmbient[0], 0.0f);
     EXPECT_GT(p.ambientColor[2], 0.0f);
+}
+
+// Integral of a phase function over the sphere: 2 pi times the integral over cos(theta).
+template <typename Phase>
+double SphereIntegral(Phase&& phase)
+{
+    constexpr int kSamples = 400000;
+    double sum = 0.0;
+    for (int i = 0; i < kSamples; ++i) {
+        const double c = -1.0 + 2.0 * (i + 0.5) / kSamples;
+        sum += phase(static_cast<float>(c));
+    }
+    return sum * (2.0 / kSamples) * 2.0 * 3.14159265358979;
+}
+
+TEST(VolumetricCloudLightingTest, PhaseFunctionsIntegrateToOne)
+{
+    for (const float g : { -0.5f, -0.2f, 0.0f, 0.3f, 0.8f }) {
+        EXPECT_NEAR(SphereIntegral([&](float c) { return CloudHenyeyGreenstein(c, g); }), 1.0, 2e-3) << g;
+        EXPECT_NEAR(SphereIntegral([&](float c) { return CloudDraine(c, g, kCloudDraineAlpha); }), 1.0, 2e-3) << g;
+    }
+    // A very forward lobe needs a finer grid than the others, so it gets a looser bound.
+    EXPECT_NEAR(SphereIntegral([&](float c) { return CloudHenyeyGreenstein(c, kCloudDraineHgG); }), 1.0, 2e-2);
+}
+
+TEST(VolumetricCloudLightingTest, MixedPhasesIntegrateToOneAtEveryOctave)
+{
+    VolumetricCloudSettings s = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    for (const float model : { 0.0f, 1.0f }) {
+        s.phaseModel = model;
+        for (const float eccentricity : { 1.0f, 0.5f, 0.25f, 0.0f }) {
+            const double integral = SphereIntegral([&](float c) { return CloudPhase(s, c, eccentricity); });
+            EXPECT_NEAR(integral, 1.0, 2e-2) << "model " << model << " ecc " << eccentricity;
+        }
+    }
+}
+
+TEST(VolumetricCloudLightingTest, ForwardLobeFacesTheSunAndIsotropicAtZeroEccentricity)
+{
+    const VolumetricCloudSettings s = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    EXPECT_GT(CloudPhase(s, 1.0f, 1.0f), CloudPhase(s, -1.0f, 1.0f));
+    EXPECT_NEAR(CloudPhase(s, 0.7f, 0.0f), 1.0f / (4.0f * 3.14159265f), 1e-5f);
+}
+
+TEST(VolumetricCloudLightingTest, BeerFallsMonotonicallyFromOne)
+{
+    EXPECT_FLOAT_EQ(CloudBeer(0.0f), 1.0f);
+    EXPECT_FLOAT_EQ(CloudBeer(-3.0f), 1.0f);
+    EXPECT_NEAR(CloudBeer(1.0f), std::exp(-1.0f), 1e-6f);
+    EXPECT_LT(CloudBeer(2.0f), CloudBeer(1.0f));
+}
+
+TEST(VolumetricCloudLightingTest, SunScatterFallsWithOpticalDepthAndThinCloudsShowTheSilverEdge)
+{
+    VolumetricCloudSettings s = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    EXPECT_GT(CloudSunScatter(s, 0.0f, 0.1f), CloudSunScatter(s, 0.0f, 3.0f));
+    const float withSilver = CloudSunScatter(s, 0.99f, 0.05f);
+    s.silverIntensity = 0.0f;
+    EXPECT_GT(withSilver, CloudSunScatter(s, 0.99f, 0.05f));
+    // Away from the sun the silver lobe adds almost nothing.
+    s = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    const float plain = CloudSunScatter(s, -0.5f, 0.05f);
+    s.silverIntensity = 0.0f;
+    EXPECT_NEAR(plain, CloudSunScatter(s, -0.5f, 0.05f), 1e-3f);
+}
+
+TEST(VolumetricCloudLightingTest, MultipleScatteringKeepsDeepCloudsFromGoingBlack)
+{
+    VolumetricCloudSettings one = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    one.msOctaves = 1.0f;
+    one.silverIntensity = 0.0f;
+    VolumetricCloudSettings many = one;
+    many.msOctaves = 4.0f;
+    EXPECT_GT(CloudSunScatter(many, -0.3f, 6.0f), CloudSunScatter(one, -0.3f, 6.0f));
+}
+
+TEST(VolumetricCloudLightingTest, StepIntegrationConservesEnergyForAnyStepSize)
+{
+    // A white furnace: the source equals 1, so light + transmittance must come to exactly 1.
+    const float extinction = 0.02f;
+    const float length = 600.0f;
+    const float exact = 1.0f - std::exp(-extinction * length);
+    for (const int steps : { 1, 3, 17, 200 }) {
+        float light = 0.0f;
+        float transmittance = 1.0f;
+        for (int i = 0; i < steps; ++i) {
+            CloudAccumulateStep(light, transmittance, 1.0f, CloudStepOpacity(extinction, length / steps));
+        }
+        EXPECT_NEAR(light + transmittance, 1.0f, 1e-5f) << steps;
+        EXPECT_NEAR(light, exact, 1e-5f) << steps;
+    }
+}
+
+TEST(VolumetricCloudLightingTest, StepOpacityStaysInsideZeroAndOne)
+{
+    EXPECT_FLOAT_EQ(CloudStepOpacity(0.0f, 100.0f), 0.0f);
+    EXPECT_FLOAT_EQ(CloudStepOpacity(-1.0f, 100.0f), 0.0f);
+    EXPECT_LE(CloudStepOpacity(1000.0f, 1000.0f), 1.0f);
+    EXPECT_GT(CloudStepOpacity(0.01f, 50.0f), 0.0f);
+}
+
+TEST(VolumetricCloudLightingTest, EveryLightingSettingIsReachableAndSane)
+{
+    const VolumetricCloudSettings d;
+    EXPECT_GE(d.sunSteps, 1.0f);
+    EXPECT_GE(d.msOctaves, 1.0f);
+    EXPECT_LT(d.msAttenuation, 1.0f + 1e-6f);
+    EXPECT_LT(d.backwardG, 0.0f);
+    EXPECT_GT(d.forwardG, 0.0f);
 }
 
 const ReflectedDescriptorBinding* Find(const ShaderReflectionResult& result, const std::string& name)

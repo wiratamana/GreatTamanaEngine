@@ -13,6 +13,7 @@ constexpr float kMinLayerThicknessM = 50.0f;
 constexpr float kMinStepM = 1e-4f;
 // A camera standing on the ground looks into it, even with rounding at 6371 km.
 constexpr float kGroundSlackM = 0.5f;
+constexpr float kMinPhaseDenominator = 1e-4f;
 // Radiance of the blue sky light, relative to the sun's luminance.
 constexpr float kAmbientTint[3] = { 0.55f, 0.7f, 1.0f };
 
@@ -163,6 +164,63 @@ void AdvanceCloudWind(float (&offset)[2], float speed, float directionDegrees, f
     offset[1] += std::sin(radians) * speed * dt;
 }
 
+float CloudHenyeyGreenstein(float cosTheta, float g) noexcept
+{
+    const float g2 = g * g;
+    const float denominator = std::max(1.0f + g2 - 2.0f * g * cosTheta, kMinPhaseDenominator);
+    return (1.0f - g2) / (4.0f * kPi * denominator * std::sqrt(denominator));
+}
+
+float CloudDraine(float cosTheta, float g, float alpha) noexcept
+{
+    const float shape = (1.0f + alpha * cosTheta * cosTheta) / (1.0f + alpha * (1.0f + 2.0f * g * g) / 3.0f);
+    return CloudHenyeyGreenstein(cosTheta, g) * shape;
+}
+
+float CloudPhase(const VolumetricCloudSettings& safe, float cosTheta, float eccentricity) noexcept
+{
+    if (safe.phaseModel >= 0.5f) {
+        const float hg = CloudHenyeyGreenstein(cosTheta, kCloudDraineHgG * eccentricity);
+        const float draine = CloudDraine(cosTheta, kCloudDraineG * eccentricity, kCloudDraineAlpha);
+        return (1.0f - kCloudDraineWeight) * hg + kCloudDraineWeight * draine;
+    }
+    const float forward = CloudHenyeyGreenstein(cosTheta, safe.forwardG * eccentricity);
+    const float backward = CloudHenyeyGreenstein(cosTheta, safe.backwardG * eccentricity);
+    return forward + (backward - forward) * safe.backwardMix;
+}
+
+float CloudBeer(float opticalDepth) noexcept
+{
+    return std::exp(-std::max(opticalDepth, 0.0f));
+}
+
+float CloudSunScatter(const VolumetricCloudSettings& safe, float cosTheta, float opticalDepth) noexcept
+{
+    float sum = 0.0f;
+    float attenuation = 1.0f;
+    float contribution = 1.0f;
+    float eccentricity = 1.0f;
+    const int octaves = static_cast<int>(std::lround(safe.msOctaves));
+    for (int i = 0; i < octaves; ++i) {
+        sum += contribution * CloudPhase(safe, cosTheta, eccentricity) * CloudBeer(opticalDepth * attenuation);
+        attenuation *= safe.msAttenuation;
+        contribution *= safe.msContribution;
+        eccentricity *= safe.msEccentricity;
+    }
+    return sum + safe.silverIntensity * CloudHenyeyGreenstein(cosTheta, safe.silverG) * CloudBeer(opticalDepth);
+}
+
+float CloudStepOpacity(float extinction, float stepLength) noexcept
+{
+    return 1.0f - std::exp(-std::max(extinction, 0.0f) * std::max(stepLength, 0.0f));
+}
+
+void CloudAccumulateStep(float& light, float& transmittance, float source, float opacity) noexcept
+{
+    light += transmittance * source * opacity;
+    transmittance *= 1.0f - opacity;
+}
+
 VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     const VolumetricCloudSettings& safe, const VolumetricCloudFrameFacts& facts) noexcept
 {
@@ -207,7 +265,28 @@ VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     p.counts[0] = static_cast<std::uint32_t>(std::lround(safe.maxSteps));
     p.counts[1] = static_cast<std::uint32_t>(facts.frameIndex & 0xFFFFFFFFu);
     p.counts[2] = static_cast<std::uint32_t>(std::lround(safe.emptyToCoarse));
+    p.counts[3] = static_cast<std::uint32_t>(std::lround(safe.lightStride));
     p.skip[0] = safe.clearSkip;
+    p.lightMarch[0] = std::round(safe.sunSteps);
+    p.lightMarch[1] = safe.lightReach;
+    p.lightMarch[2] = std::round(safe.msOctaves);
+    p.lightMarch[3] = safe.powder;
+    p.lightPhase[0] = safe.forwardG;
+    p.lightPhase[1] = safe.backwardG;
+    p.lightPhase[2] = safe.backwardMix;
+    p.lightPhase[3] = safe.silverIntensity;
+    p.lightScatter[0] = safe.silverG;
+    p.lightScatter[1] = safe.msAttenuation;
+    p.lightScatter[2] = safe.msContribution;
+    p.lightScatter[3] = safe.msEccentricity;
+    p.lightMisc[0] = std::round(safe.phaseModel);
+    p.lightMisc[1] = safe.ambientBottom;
+    p.lightMisc[2] = safe.hazeDistanceM;
+    p.lightMisc[3] = safe.lightDetail;
+    p.drainePhase[0] = kCloudDraineHgG;
+    p.drainePhase[1] = kCloudDraineG;
+    p.drainePhase[2] = kCloudDraineAlpha;
+    p.drainePhase[3] = kCloudDraineWeight;
     return p;
 }
 

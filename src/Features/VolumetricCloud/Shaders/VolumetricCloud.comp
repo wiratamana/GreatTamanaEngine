@@ -18,8 +18,13 @@ layout(std430, binding = 0) readonly buffer VolumetricCloudParams {
     vec4 density;                   // x density factor, y extinction (1/m), z peak min, w jitter strength.
     vec4 heightShape;               // x base roundness, y top roundness, z density ramp, w density top fade.
     vec4 march;                     // x base step (m), y step growth, z coarse multiplier, w min transmittance.
-    uvec4 counts;                   // x max steps, y frame index, z empty samples to coarse.
+    uvec4 counts;                   // x max steps, y frame index, z empty samples to coarse, w sun march stride.
     vec4 skip;                      // x clear-weather stride multiplier.
+    vec4 lightMarch;                // x sun steps, y reach fraction of the thickness, z octaves, w powder.
+    vec4 lightPhase;                // x forward g, y backward g, z backward mix, w silver intensity.
+    vec4 lightScatter;              // x silver g, y octave attenuation, z octave contribution, w octave eccentricity.
+    vec4 lightMisc;                 // x phase model, y ambient at the base, z haze distance (m), w light detail.
+    vec4 drainePhase;               // x Henyey-Greenstein g, y Draine g, z Draine alpha, w Draine weight.
 } params;
 
 layout(binding = 1) uniform sampler2D sourceColor;
@@ -197,6 +202,11 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter)
     float transmittance = 1.0;
     bool coarse = true;
     uint emptyRun = 0u;
+    // The sun march runs every few lit samples; the samples in between reuse its optical depth.
+    bool sunLit = dot(sunRadiance, sunRadiance) > 0.0;
+    uint lightStride = max(params.counts.w, 1u);
+    uint lightAge = 0u;
+    float sunOpticalDepth = 0.0;
 
     for (uint i = 0u; i < maxSteps && t < tEnd && transmittance > params.march.w; ++i) {
         stepLength = baseStep + t * growth;
@@ -232,7 +242,15 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter)
 
         float fade = 1.0 - smoothstep(fadeBegin, maxDistance, t);
         float extinction = d * params.density.y * fade;
-        float stepTransmittance = exp(-extinction * stepLength);
+        // A far cloud counts as less opaque, so the sky behind it shows through.
+        float opacity = (1.0 - exp(-extinction * stepLength)) * exp(-t / params.lightMisc.z);
+
+        if (sunLit) {
+            if (lightAge == 0u) {
+                sunOpticalDepth = SunOpticalDepth(position, sunDirection);
+            }
+            lightAge = (lightAge + 1u) % lightStride;
+        }
 
         CloudLightInput li;
         li.position = position;
@@ -245,8 +263,9 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter)
         li.sunDirection = sunDirection;
         li.sunRadiance = sunRadiance;
         li.ambientRadiance = ambientRadiance;
-        light += transmittance * CloudSourceRadiance(li) * (1.0 - stepTransmittance);
-        transmittance *= stepTransmittance;
+        li.sunOpticalDepth = sunOpticalDepth;
+        light += transmittance * CloudSourceRadiance(li) * opacity;
+        transmittance *= 1.0 - opacity;
         t += stepLength;
     }
 

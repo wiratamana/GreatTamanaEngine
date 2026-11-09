@@ -76,9 +76,26 @@ struct VolumetricCloudSettings {
     float minTransmittance = 0.05f;
     float jitter = 1.0f;
 
-    // Placeholder light, replaced by the lighting stage.
-    float sunIntensity = 0.6f;
-    float ambientIntensity = 0.35f;
+    // Lighting. Intensities scale the sun and sky radiance the engine hands over.
+    float sunIntensity = 8.0f;
+    float ambientIntensity = 0.28f;
+    float sunSteps = 5.0f;          // Samples of the march toward the sun.
+    float lightReach = 0.5f;        // Length of that march, as a fraction of the layer thickness.
+    float msOctaves = 3.0f;         // Multiple scattering octaves.
+    float msAttenuation = 0.5f;     // Per octave factor on the optical depth.
+    float msContribution = 0.5f;    // Per octave factor on the light.
+    float msEccentricity = 0.5f;    // Per octave factor on the phase eccentricity.
+    float phaseModel = 0.0f;        // 0 dual lobe Henyey-Greenstein, 1 Henyey-Greenstein plus Draine.
+    float forwardG = 0.8f;
+    float backwardG = -0.35f;
+    float backwardMix = 0.3f;
+    float silverIntensity = 0.2f;   // Weight of the narrow forward lobe that lights thin edges facing the sun.
+    float silverG = 0.97f;
+    float powder = 0.5f;            // Dark edge effect when looking away from the sun.
+    float ambientBottom = 0.12f;    // Sky light left at the layer base, relative to the top.
+    float hazeDistanceM = 45000.0f; // Distance at which a cloud has faded to 1/e into the sky behind it.
+    float lightDetail = 0.0f;       // Share of the fine erosion the nearest sun sample uses.
+    float lightStride = 2.0f;       // Lit samples that share one sun march.
 };
 
 // One tunable float: its endpoint key, field and range.
@@ -122,6 +139,23 @@ inline constexpr std::array kVolumetricCloudFloatSettings{
     VolumetricCloudFloatSetting{ "jitter", &VolumetricCloudSettings::jitter, 0.0f, 1.0f },
     VolumetricCloudFloatSetting{ "sunIntensity", &VolumetricCloudSettings::sunIntensity, 0.0f, 100.0f },
     VolumetricCloudFloatSetting{ "ambientIntensity", &VolumetricCloudSettings::ambientIntensity, 0.0f, 100.0f },
+    VolumetricCloudFloatSetting{ "sunSteps", &VolumetricCloudSettings::sunSteps, 1.0f, 12.0f },
+    VolumetricCloudFloatSetting{ "lightReach", &VolumetricCloudSettings::lightReach, 0.05f, 2.0f },
+    VolumetricCloudFloatSetting{ "msOctaves", &VolumetricCloudSettings::msOctaves, 1.0f, 6.0f },
+    VolumetricCloudFloatSetting{ "msAttenuation", &VolumetricCloudSettings::msAttenuation, 0.05f, 1.0f },
+    VolumetricCloudFloatSetting{ "msContribution", &VolumetricCloudSettings::msContribution, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "msEccentricity", &VolumetricCloudSettings::msEccentricity, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "phaseModel", &VolumetricCloudSettings::phaseModel, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "forwardG", &VolumetricCloudSettings::forwardG, 0.0f, 0.99f },
+    VolumetricCloudFloatSetting{ "backwardG", &VolumetricCloudSettings::backwardG, -0.99f, 0.0f },
+    VolumetricCloudFloatSetting{ "backwardMix", &VolumetricCloudSettings::backwardMix, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "silverIntensity", &VolumetricCloudSettings::silverIntensity, 0.0f, 4.0f },
+    VolumetricCloudFloatSetting{ "silverG", &VolumetricCloudSettings::silverG, 0.5f, 0.999f },
+    VolumetricCloudFloatSetting{ "powder", &VolumetricCloudSettings::powder, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "ambientBottom", &VolumetricCloudSettings::ambientBottom, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "hazeDistanceM", &VolumetricCloudSettings::hazeDistanceM, 1000.0f, 10000000.0f },
+    VolumetricCloudFloatSetting{ "lightDetail", &VolumetricCloudSettings::lightDetail, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "lightStride", &VolumetricCloudSettings::lightStride, 1.0f, 8.0f },
 };
 
 struct VolumetricCloudViewSnapshot {
@@ -152,10 +186,15 @@ struct VolumetricCloudParamsGpu {
     float density[4] = {};              // x density factor, y extinction (1/m), z peak min, w jitter strength.
     float heightShape[4] = {};          // x base roundness, y top roundness, z density ramp, w density top fade.
     float march[4] = {};                // x base step (m), y step growth, z coarse multiplier, w min transmittance.
-    std::uint32_t counts[4] = {};       // x max steps, y frame index, z empty samples to coarse, w unused.
+    std::uint32_t counts[4] = {};       // x max steps, y frame index, z empty samples to coarse, w sun march stride.
     float skip[4] = {};                 // x clear-weather stride multiplier.
+    float lightMarch[4] = {};           // x sun steps, y reach fraction of the thickness, z octaves, w powder.
+    float lightPhase[4] = {};           // x forward g, y backward g, z backward mix, w silver intensity.
+    float lightScatter[4] = {};         // x silver g, y octave attenuation, z octave contribution, w octave eccentricity.
+    float lightMisc[4] = {};            // x phase model, y ambient at the base, z haze distance (m), w light detail.
+    float drainePhase[4] = {};          // x Henyey-Greenstein g, y Draine g, z Draine alpha, w Draine weight.
 };
-static_assert(sizeof(VolumetricCloudParamsGpu) == 64 + 12 * 16);
+static_assert(sizeof(VolumetricCloudParamsGpu) == 64 + 17 * 16);
 static_assert(std::is_trivially_copyable_v<VolumetricCloudParamsGpu>);
 
 // Clamps every field into its documented range; a non-finite number falls back to the default.
