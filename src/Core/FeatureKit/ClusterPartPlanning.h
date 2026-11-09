@@ -46,6 +46,14 @@ struct ClusterSlotAssignment {
 // Slots go to the parts with the most work items first. Ties are broken by mesh token, then material token.
 ClusterSlotAssignment AssignClusterPartSlots(std::span<const ClusterPartSize> parts, std::uint32_t slotCount);
 
+inline constexpr std::uint32_t kNoClusterSlot = std::numeric_limits<std::uint32_t>::max();
+
+// The slot of every input part of `assignment`; kNoClusterSlot for a dropped part.
+std::vector<std::uint32_t> ClusterSlotsOf(const ClusterSlotAssignment& assignment, std::size_t partCount);
+
+// The assignment that fixed slots describe: `assigned` in slot order, `dropped` for the kNoClusterSlot entries.
+ClusterSlotAssignment ClusterAssignmentFromSlots(std::span<const std::uint32_t> slots);
+
 // A box the frustum test can use: finite and not inverted. An instance without mesh bounds has an inverted box.
 inline bool IsUsableInstanceBox(const AABB& box) noexcept
 {

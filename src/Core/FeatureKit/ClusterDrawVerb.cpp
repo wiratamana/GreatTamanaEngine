@@ -375,6 +375,12 @@ void PlanChain(ClusterDrawChain::Impl& s)
         eligible.push_back(std::move(group));
     }
 
+    // A state whose lanes share buffers needs every lane to put a part in the same slot, so the slots are fixed
+    // before the skip: a part keeps its slot, a skipped one leaves a gap.
+    std::vector<std::uint32_t> fixedSlots;
+    if (state.Shape().shareLaneBuffers) {
+        fixedSlots = ClusterSlotsOf(AssignClusterPartSlots(sizes, state.Shape().partSlots), sizes.size());
+    }
     // Parts wholly outside the cull frustum get no pass and no slot; their entities are still claimed.
     // Every view decides from the cull camera and the shared candidates alone, so all views agree.
     {
@@ -415,6 +421,9 @@ void PlanChain(ClusterDrawChain::Impl& s)
                     pipelines[kept] = pipelines[i];
                     sizes[kept] = sizes[i];
                     clusterCounts[kept] = clusterCounts[i];
+                    if (!fixedSlots.empty()) {
+                        fixedSlots[kept] = fixedSlots[i];
+                    }
                 }
                 ++kept;
             }
@@ -422,10 +431,15 @@ void PlanChain(ClusterDrawChain::Impl& s)
             pipelines.resize(kept);
             sizes.resize(kept);
             clusterCounts.resize(kept);
+            if (!fixedSlots.empty()) {
+                fixedSlots.resize(kept);
+            }
         }
     }
 
-    const ClusterSlotAssignment assignment = AssignClusterPartSlots(sizes, state.Shape().partSlots);
+    const ClusterSlotAssignment assignment = fixedSlots.empty()
+        ? AssignClusterPartSlots(sizes, state.Shape().partSlots)
+        : ClusterAssignmentFromSlots(fixedSlots);
     for (const std::uint32_t index : assignment.dropped) {
         s.noSlotInstances += static_cast<std::uint32_t>(eligible[index].instances.size());
     }
@@ -498,7 +512,7 @@ void PlanChain(ClusterDrawChain::Impl& s)
     std::uint32_t slot = 0;
     std::uint32_t toggledOffParts = 0;
     for (const std::uint32_t index : assignment.assigned) {
-        const std::uint32_t thisSlot = slot++;
+        const std::uint32_t thisSlot = fixedSlots.empty() ? slot++ : fixedSlots[index];
         ClusterMeshGroup& group = eligible[index];
         const std::uint64_t instanceCount = group.instances.size();
         const std::uint64_t workItems = instanceCount * clusterCounts[index];
@@ -677,6 +691,8 @@ public:
         const std::uint32_t rounds = s.twoPhase ? 2 : 1;
         for (std::uint32_t round = 0; round < rounds; ++round) {
             const std::uint32_t lane = LaneOf(round);
+            // Lanes that share buffers get one handle per frame, so the graph orders the next lane after this draw.
+            // That holds only while a lane declares all its passes before the next lane starts.
             run.visible[round] = state.Visible(lane, part.slot)->Acquire(frame, part.workItems * kClusterVisibleBytes);
             run.commands[round] = state.Commands(lane, part.slot)->Acquire(frame, part.workItems * kClusterCommandBytes);
             run.count[round] = state.Count(lane, part.slot)->Acquire(frame, kClusterCountBytes);

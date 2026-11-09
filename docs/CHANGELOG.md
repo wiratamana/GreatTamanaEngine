@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [Shadow lanes share buffers, write-after-read edges](#shadow-lanes-share-buffers-write-after-read-edges-branch-featuretoon-shading-impl-2026-11-09) | `feature/toon-shading-impl` | 2026-11-09 |
 | [GPU culling: cheaper CPU floor, instance-level cull, ledger fix](#gpu-culling-cheaper-cpu-floor-instance-level-cull-ledger-fix-branch-featuretoon-shading-impl-2026-11-05) | `feature/toon-shading-impl` | 2026-11-05 |
 | [Toon light follows the world light](#toon-light-follows-the-world-light-branch-featuretoon-shading-impl-2026-11-04) | `feature/toon-shading-impl` | 2026-11-04 |
 | [Temporal anti-aliasing](#temporal-anti-aliasing-branch-featuretoon-shading-impl-2026-11-04) | `feature/toon-shading-impl` | 2026-11-04 |
@@ -41,6 +42,12 @@
 | [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+
+## Shadow lanes share buffers, write-after-read edges (branch `feature/toon-shading-impl`, 2026-11-09)
+
+- **Shared lane buffers.** The four Shadow cascade lanes share one visible, commands and count buffer per slot (`ClusterDrawShape::shareLaneBuffers`). The ledger charges the largest lane once. At 100000 instances all four lanes now fit the budget.
+- **Stable slots.** A depth-only chain that shares buffers gives a part the same slot in every cascade.
+- **Render graph.** `Compile()` adds write-after-read edges between kept passes. They never change the order or keep a pass alive.
 
 ## GPU culling: cheaper CPU floor, instance-level cull, ledger fix (branch `feature/toon-shading-impl`, 2026-11-05)
 

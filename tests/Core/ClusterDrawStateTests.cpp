@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <memory>
 #include <set>
 #include <string>
 #include <unordered_set>
@@ -399,6 +400,156 @@ TEST(ClusterDrawStateTests, TheMainViewRunsOneLanePerPhaseAndStaysInsideTheGpuRe
     ASSERT_TRUE(state.Valid());
     EXPECT_EQ(state.AllPassNames().size(), static_cast<std::size_t>(kMainViewLanes) * kMainViewPartSlots * kClusterPassKindCount);
     EXPECT_STREQ(state.PassName(1, 7, ClusterPassKind::Cull), "TestMainShape.L1.P7.Cull");
+}
+
+constexpr ClusterDrawShape kSharedShape{ 4, 1, true };
+
+TEST(ClusterDrawStateTests, SharedLanesUseTheBuffersOfLaneZeroButKeepOwnNamesAndParameters)
+{
+    ClusterDrawState state("TestShareBuffers", { 4, 2, true });
+    ASSERT_TRUE(state.Valid());
+    std::set<const void*> params;
+    for (std::uint32_t slot = 0; slot < 2; ++slot) {
+        for (std::uint32_t lane = 0; lane < 4; ++lane) {
+            EXPECT_EQ(state.Visible(lane, slot), state.Visible(0, slot));
+            EXPECT_EQ(state.Commands(lane, slot), state.Commands(0, slot));
+            EXPECT_EQ(state.Count(lane, slot), state.Count(0, slot));
+            EXPECT_NE(state.Params(kGame, lane, slot), state.Params(kScene, lane, slot));
+            params.insert(state.Params(kGame, lane, slot));
+            params.insert(state.Params(kScene, lane, slot));
+        }
+    }
+    EXPECT_NE(state.Visible(0, 0), state.Visible(0, 1));
+    EXPECT_NE(state.Commands(0, 0), state.Commands(0, 1));
+    EXPECT_NE(state.Count(0, 0), state.Count(0, 1));
+    EXPECT_NE(state.Visible(0, 0), state.Commands(0, 0));
+    EXPECT_EQ(params.size(), 2u * 4u * 2u);
+    EXPECT_EQ(params.count(nullptr), 0u);
+    EXPECT_EQ(state.Visible(4, 0), nullptr);
+    EXPECT_EQ(state.Count(0, 2), nullptr);
+
+    const std::vector<std::string> names = state.AllPassNames();
+    EXPECT_EQ(names.size(), 4u * 2u * kClusterPassKindCount);
+    EXPECT_EQ(std::unordered_set<std::string>(names.begin(), names.end()).size(), names.size());
+    EXPECT_STREQ(state.PassName(3, 1, ClusterPassKind::Draw), "TestShareBuffers.L3.P1.Draw");
+    EXPECT_NE(state.TableName(kGame, 1, 0), state.TableName(kGame, 0, 0));
+}
+
+TEST(ClusterDrawStateTests, UnsharedLanesKeepOneBufferEach)
+{
+    ClusterDrawState state("TestNoShare", { 4, 1 });
+    ASSERT_TRUE(state.Valid());
+    std::set<const void*> buffers;
+    for (std::uint32_t lane = 0; lane < 4; ++lane) {
+        buffers.insert(state.Visible(lane, 0));
+        buffers.insert(state.Commands(lane, 0));
+        buffers.insert(state.Count(lane, 0));
+    }
+    EXPECT_EQ(buffers.size(), 12u);
+}
+
+TEST(ClusterDrawStateTests, SharedLanesChargeTheLargestLaneNotTheSum)
+{
+    constexpr std::uint64_t kInstances = 50000;
+    constexpr std::uint64_t kWork = 1100000;
+    ClusterDrawState shared("TestShareMax", kSharedShape);
+    ClusterDrawState unshared("TestShareMaxOff", { 4, 1 });
+    for (std::uint32_t lane = 0; lane < 4; ++lane) {
+        EXPECT_EQ(shared.TryReserveChainBytes(kGame, lane, 0, kInstances, kWork, false), ClusterReserveResult::Ok);
+        EXPECT_EQ(unshared.TryReserveChainBytes(kGame, lane, 0, kInstances, kWork, false), ClusterReserveResult::Ok);
+    }
+    EXPECT_EQ(shared.HeldBytes(kGame), 54526208u);
+    EXPECT_EQ(shared.HeldBytes(kGame), ClusterChainBytes(kInstances, kWork, false));
+    EXPECT_EQ(unshared.HeldBytes(kGame), 205521920u);
+    // The saving is three lanes of 48 MiB + 256 B each.
+    EXPECT_EQ(unshared.HeldBytes(kGame) - shared.HeldBytes(kGame), 150995712u);
+}
+
+TEST(ClusterDrawStateTests, FourSharedLanesFitAt100000InstancesWhereUnsharedLanesAreRefused)
+{
+    constexpr std::uint64_t kInstances = 100000;
+    constexpr std::uint64_t kWork = 2200000;
+    ClusterDrawState shared("TestShare100k", kSharedShape);
+    ClusterDrawState unshared("TestShare100kOff", { 4, 1 });
+    for (std::uint32_t lane = 0; lane < 4; ++lane) {
+        EXPECT_EQ(shared.TryReserveChainBytes(kGame, lane, 0, kInstances, kWork, false), ClusterReserveResult::Ok)
+            << "lane " << lane;
+    }
+    EXPECT_EQ(shared.HeldBytes(kGame), 109052160u);
+
+    EXPECT_EQ(unshared.TryReserveChainBytes(kGame, 0, 0, kInstances, kWork, false), ClusterReserveResult::Ok);
+    EXPECT_EQ(unshared.TryReserveChainBytes(kGame, 1, 0, kInstances, kWork, false), ClusterReserveResult::Ok);
+    EXPECT_EQ(unshared.TryReserveChainBytes(kGame, 2, 0, kInstances, kWork, false), ClusterReserveResult::OverStateBudget);
+    EXPECT_EQ(unshared.TryReserveChainBytes(kGame, 3, 0, kInstances, kWork, false), ClusterReserveResult::OverStateBudget);
+    EXPECT_EQ(unshared.HeldBytes(kGame), 209715712u);
+}
+
+TEST(ClusterDrawStateTests, TheSharedRecordGrowsToTheLargestLaneAndNeverShrinks)
+{
+    ClusterDrawState state("TestShareGrow", kSharedShape);
+    ASSERT_EQ(state.TryReserveChainBytes(kGame, 0, 0, 1, 1000, false), ClusterReserveResult::Ok);
+    EXPECT_EQ(state.HeldBytes(kGame), ClusterChainBytes(1, 1000, false));
+    ASSERT_EQ(state.TryReserveChainBytes(kGame, 1, 0, 1, 2000000, false), ClusterReserveResult::Ok);
+    EXPECT_EQ(state.HeldBytes(kGame), ClusterChainBytes(1, 2000000, false));
+    ASSERT_EQ(state.TryReserveChainBytes(kGame, 2, 0, 1, 1000, false), ClusterReserveResult::Ok);
+    EXPECT_EQ(state.HeldBytes(kGame), ClusterChainBytes(1, 2000000, false));
+}
+
+TEST(ClusterDrawStateTests, AGrowingInstanceCountIsStillChargedOnceOnSharedLanes)
+{
+    ClusterDrawState state("TestShareInstances", kSharedShape);
+    ASSERT_EQ(state.TryReserveChainBytes(kGame, 0, 0, 1000, 20000, false), ClusterReserveResult::Ok);
+    ASSERT_EQ(state.TryReserveChainBytes(kGame, 3, 0, 100000, 20000, false), ClusterReserveResult::Ok);
+    EXPECT_EQ(state.HeldBytes(kGame), ClusterChainBytes(100000, 20000, false));
+}
+
+TEST(ClusterDrawStateTests, TwoPhaseIsRefusedOnASharingState)
+{
+    ClusterDrawState state("TestShareTwoPhase", kSharedShape);
+    EXPECT_EQ(state.TryReserveChainBytes(kGame, 0, 0, 1, 1000, true), ClusterReserveResult::BadIndex);
+    EXPECT_EQ(state.CanReserveChainBytes(kGame, 0, 0, 1, 1000, true), ClusterReserveResult::BadIndex);
+    EXPECT_EQ(state.HeldBytes(kGame), 0u);
+    EXPECT_EQ(state.TryReserveChainBytes(kGame, 0, 0, 1, 1000, false), ClusterReserveResult::Ok);
+}
+
+TEST(ClusterDrawStateTests, SharedSlotsAreChargedSeparatelyAndScopesAreIndependent)
+{
+    ClusterDrawState state("TestShareScopes", { 4, 2, true });
+    for (std::uint32_t lane = 0; lane < 4; ++lane) {
+        ASSERT_EQ(state.TryReserveChainBytes(kGame, lane, 0, 50000, 1100000, false), ClusterReserveResult::Ok);
+        ASSERT_EQ(state.TryReserveChainBytes(kScene, lane, 0, 50000, 1100000, false), ClusterReserveResult::Ok);
+    }
+    EXPECT_EQ(state.HeldBytes(kGame), 54526208u);
+    EXPECT_EQ(state.HeldBytes(kScene), 54526208u);
+    ASSERT_EQ(state.TryReserveChainBytes(kGame, 2, 1, 50000, 1100000, false), ClusterReserveResult::Ok);
+    EXPECT_EQ(state.HeldBytes(kGame), 2u * 54526208u);
+    EXPECT_EQ(state.HeldBytes(kScene), 54526208u);
+}
+
+TEST(ClusterDrawStateTests, TheProcessLedgerCountsASharedStateOncePerScope)
+{
+    constexpr std::uint64_t kInstances = 100000;
+    constexpr std::uint64_t kWork = 2200000;
+    constexpr std::uint64_t kOne = 109052160; // 104 MiB: one lane and the instance buffer.
+    const std::uint64_t before = ProcessClusterLedger().Total();
+    std::vector<std::unique_ptr<ClusterDrawState>> states;
+    for (int i = 0; i < 4; ++i) {
+        states.push_back(std::make_unique<ClusterDrawState>("TestShareProcess" + std::to_string(i), kSharedShape));
+        for (std::uint32_t lane = 0; lane < 4; ++lane) {
+            ASSERT_EQ(states.back()->TryReserveChainBytes(kGame, lane, 0, kInstances, kWork, false), ClusterReserveResult::Ok);
+        }
+    }
+    EXPECT_EQ(ProcessClusterLedger().Total() - before, 4 * kOne);
+    ClusterDrawState fifth("TestShareProcess5", kSharedShape);
+    EXPECT_EQ(fifth.TryReserveChainBytes(kGame, 0, 0, kInstances, kWork, false), ClusterReserveResult::OverProcessBudget);
+}
+
+TEST(ClusterDrawStateTests, ADefaultShapeDoesNotShareLaneBuffers)
+{
+    EXPECT_FALSE(ClusterDrawShape{}.shareLaneBuffers);
+    EXPECT_FALSE((ClusterDrawShape{ 4, 4 }).shareLaneBuffers);
+    ClusterDrawState state("TestDefaultShape", { 4, 4 });
+    EXPECT_FALSE(state.Shape().shareLaneBuffers);
 }
 
 TEST(HizPyramidTests, BaseAndTopPassNamesAreUniqueAndStableAcrossRebuilds)

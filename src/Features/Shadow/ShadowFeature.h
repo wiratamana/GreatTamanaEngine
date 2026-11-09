@@ -18,6 +18,8 @@ inline constexpr std::uint32_t kShadowClusterLanes = kMaxShadowCascades;
 inline constexpr std::uint32_t kShadowClusterPartSlots = kDepthOnlyPartSlots;
 inline constexpr std::string_view kShadowClusterBaseName = "Shadow.Cluster";
 static_assert(kShadowClusterLanes <= kDepthOnlyLanes, "one cluster lane per cascade");
+// The cascades are drawn one after another, so their lanes share the working buffers of lane 0.
+inline constexpr fx::ClusterDrawShape kShadowClusterShape{ kShadowClusterLanes, kShadowClusterPartSlots, true };
 
 // The passes of `names` that a cluster chain declares for a depth-only target (the stats pass is never used there).
 std::vector<std::string> ShadowClusterDeclaredPasses(const std::vector<std::string>& names);
@@ -75,8 +77,7 @@ private:
     fx::ComputeShader m_depthReduceShader{ "ShadowDepthReduce" };
     fx::FullscreenShader m_compositeShader{ "ShadowComposite" };
     fx::SceneShaderSet m_depthShaders = fx::SceneShaderSet::DepthOnly("ShadowDepth");
-    fx::ClusterDrawState m_clusterState{ kShadowClusterBaseName,
-        fx::ClusterDrawShape{ kShadowClusterLanes, kShadowClusterPartSlots } };
+    fx::ClusterDrawState m_clusterState{ kShadowClusterBaseName, kShadowClusterShape };
     fx::Channel<ShadowMapData> m_mapData{ "Map" };
     fx::Channel<SunShadowReceiver> m_receiverData{ kSunShadowReceiverChannel };
     fx::Channel<fx::Texture> m_maskData{ "Mask" };

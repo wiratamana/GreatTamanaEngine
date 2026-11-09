@@ -39,6 +39,8 @@ struct FrameContext;
 struct ClusterDrawShape {
     std::uint32_t lanes = 1;     // Independent draw sequences per frame: one per depth-only target, or one per occlusion phase.
     std::uint32_t partSlots = 1; // Distinct meshes drawn per lane.
+    // Lanes declared one after another reuse lane 0's visible, commands and count buffers. Never for two-phase lanes.
+    bool shareLaneBuffers = false;
 };
 
 enum class ClusterPassKind : std::uint8_t { Reset, Cull, Draw, Stats };
@@ -89,7 +91,7 @@ public:
 
     // Per-slot instance records, shared by the lanes of one frame.
     PersistentBuffer* Instances(std::uint32_t slot) noexcept;
-    // Per-lane, per-slot working buffers.
+    // Per-lane, per-slot working buffers. With shareLaneBuffers every lane gets the buffer of lane 0.
     PersistentBuffer* Visible(std::uint32_t lane, std::uint32_t slot) noexcept;
     PersistentBuffer* Commands(std::uint32_t lane, std::uint32_t slot) noexcept;
     PersistentBuffer* Count(std::uint32_t lane, std::uint32_t slot) noexcept;
@@ -224,6 +226,8 @@ private:
     {
         return Valid() && lane < m_shape.lanes && slot < m_shape.partSlots;
     }
+    // The lane whose visible, commands and count buffers `lane` uses.
+    std::uint32_t BufferLane(std::uint32_t lane) const noexcept { return m_shape.shareLaneBuffers ? 0u : lane; }
     // Capacity a chain wants: its own lane buffers, and the instance buffer of its slot (shared by every lane).
     struct ChainWant {
         std::uint64_t lane = 0;

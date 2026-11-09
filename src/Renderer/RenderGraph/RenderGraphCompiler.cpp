@@ -44,6 +44,7 @@ bool ContainsBufferHandle(std::span<const BufferHandle> handles, const BufferHan
 
 // Builds the dependency graph, culls passes that feed no output, and orders the rest.
 // Edges only point forward, so the cycle throw below is a defensive check.
+// Hazards: read-after-write and write-after-write edges decide culling; write-after-read edges only order.
 CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> finalOutputs)
 {
     const std::int32_t passCount = static_cast<std::int32_t>(input.passes.size());
@@ -129,6 +130,35 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
             });
     };
 
+    // Readers of each resource since its last write, kept as linked lists in one pool (no per-resource allocation).
+    struct ReaderNode {
+        std::int32_t pass;
+        std::int32_t next;
+    };
+    std::vector<ReaderNode> readerPool;
+    std::vector<std::int32_t> textureReaders(input.textures.size(), -1);
+    std::vector<std::int32_t> bufferReaders(input.buffers.size(), -1);
+
+    // Resolves the reader-list head for a usage; nullptr when the handle is out of range.
+    auto readerHeadFor = [&](const ResourceUsage& usage) -> std::int32_t* {
+        return DispatchByKind(usage,
+            [&](TextureHandle h) -> std::int32_t* {
+                return h.index < textureReaders.size() ? &textureReaders[h.index] : nullptr;
+            },
+            [&](BufferHandle h) -> std::int32_t* {
+                return h.index < bufferReaders.size() ? &bufferReaders[h.index] : nullptr;
+            });
+    };
+
+    // Write-after-read: the reader must finish before the next writer overwrites the resource.
+    // These pairs only order kept passes. They never keep a pass alive (a culled reader stays culled).
+    struct WarEdge {
+        std::int32_t reader;
+        std::int32_t writer;
+        auto operator<=>(const WarEdge&) const = default;
+    };
+    std::vector<WarEdge> warEdges;
+
     // Collected while walking reads; reported once the walk finishes.
     std::vector<RenderPassEventContradiction> fastContradictions;
 
@@ -171,15 +201,32 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
                     [](BufferHandle h) { return h.index; });
                 fastContradictions.push_back(contradiction);
             }
+
+            // A pass lists each resource once among the readers since the last write.
+            std::int32_t* readerHead = readerHeadFor(usage);
+            if (readerHead != nullptr && (*readerHead < 0 || readerPool[static_cast<std::size_t>(*readerHead)].pass != i)) {
+                readerPool.push_back(ReaderNode{ i, *readerHead });
+                *readerHead = static_cast<std::int32_t>(readerPool.size() - 1);
+            }
         }
 
         // WAW: keep effective order between writers of one resource, then become its last writer.
-        // An out-of-range slot gets no edge and no write.
+        // WAR: every reader since the last write precedes this writer. Out-of-range handles are ignored.
         for (const ResourceUsage& usage : pass.writes) {
             std::int32_t* slot = lastWriterSlotFor(usage);
             if (slot != nullptr) {
                 addEdge(*slot, i);
                 *slot = i;
+            }
+            std::int32_t* readerHead = readerHeadFor(usage);
+            if (readerHead != nullptr) {
+                for (std::int32_t node = *readerHead; node >= 0; node = readerPool[static_cast<std::size_t>(node)].next) {
+                    const std::int32_t reader = readerPool[static_cast<std::size_t>(node)].pass;
+                    if (reader != i) {
+                        warEdges.push_back(WarEdge{ reader, i });
+                    }
+                }
+                *readerHead = -1;
             }
         }
     }
@@ -260,6 +307,21 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
         }
     }
 
+    // Keep write-after-read pairs between kept passes only, grouped by reader: warFirst[n]..warFirst[n+1].
+    std::erase_if(warEdges, [&kept](const WarEdge& edge) {
+        return !kept[static_cast<std::size_t>(edge.reader)] || !kept[static_cast<std::size_t>(edge.writer)];
+    });
+    std::sort(warEdges.begin(), warEdges.end());
+    warEdges.erase(std::unique(warEdges.begin(), warEdges.end()), warEdges.end());
+    std::vector<std::size_t> warFirst(static_cast<std::size_t>(passCount) + 1, 0);
+    for (const WarEdge& edge : warEdges) {
+        ++warFirst[static_cast<std::size_t>(edge.reader) + 1];
+        ++inDegree[static_cast<std::size_t>(edge.writer)];
+    }
+    for (std::size_t n = 1; n < warFirst.size(); ++n) {
+        warFirst[n] += warFirst[n - 1];
+    }
+
     // Holds effective positions (indices into effectiveOrder), not pass indices.
     std::set<std::int32_t> readyByEffectivePosition;
     for (std::int32_t i = 0; i < passCount; ++i) {
@@ -282,6 +344,12 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
                 if (--inDegree[static_cast<std::size_t>(successor)] == 0) {
                     readyByEffectivePosition.insert(effectivePosition[static_cast<std::size_t>(successor)]);
                 }
+            }
+        }
+        for (std::size_t e = warFirst[static_cast<std::size_t>(node)]; e < warFirst[static_cast<std::size_t>(node) + 1]; ++e) {
+            const std::int32_t writer = warEdges[e].writer;
+            if (--inDegree[static_cast<std::size_t>(writer)] == 0) {
+                readyByEffectivePosition.insert(effectivePosition[static_cast<std::size_t>(writer)]);
             }
         }
     }

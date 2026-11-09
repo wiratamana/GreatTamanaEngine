@@ -17,6 +17,42 @@ TEST(ShadowClusterLaneTest, OneLaneAndFourPartSlotsPerCascade)
     EXPECT_EQ(kShadowClusterPartSlots, 4u);
 }
 
+TEST(ShadowClusterLaneTest, TheCascadeLanesShareTheWorkingBuffersOfLaneZero)
+{
+    EXPECT_TRUE(kShadowClusterShape.shareLaneBuffers);
+    EXPECT_EQ(kShadowClusterShape.lanes, kShadowClusterLanes);
+    EXPECT_EQ(kShadowClusterShape.partSlots, kShadowClusterPartSlots);
+
+    fx::ClusterDrawState state{ kShadowClusterBaseName, kShadowClusterShape };
+    ASSERT_TRUE(state.Valid()) << state.Error();
+    for (std::uint32_t slot = 0; slot < kShadowClusterPartSlots; ++slot) {
+        for (std::uint32_t lane = 1; lane < kShadowClusterLanes; ++lane) {
+            EXPECT_EQ(state.Visible(lane, slot), state.Visible(0, slot));
+            EXPECT_EQ(state.Commands(lane, slot), state.Commands(0, slot));
+            EXPECT_EQ(state.Count(lane, slot), state.Count(0, slot));
+        }
+    }
+    // Every cascade still has its own pass names, so the profiler shows four lanes.
+    EXPECT_STREQ(state.PassName(3, 0, fx::ClusterPassKind::Draw), "Shadow.Cluster.L3.P0.Draw");
+}
+
+TEST(ShadowClusterLaneTest, AllFourCascadesFitTheStateBudgetWhereFourSeparateLanesDoNot)
+{
+    constexpr std::uint64_t kInstances = 100000;
+    constexpr std::uint64_t kWork = 2200000;
+    fx::ClusterDrawState shared{ "Test.ShadowShared", kShadowClusterShape };
+    fx::ClusterDrawState separate{ "Test.ShadowSeparate", fx::ClusterDrawShape{ kShadowClusterLanes, kShadowClusterPartSlots } };
+    constexpr rg::ViewScope kPrimary = rg::ViewScope::Primary;
+    int sharedFit = 0;
+    int separateFit = 0;
+    for (std::uint32_t lane = 0; lane < kShadowClusterLanes; ++lane) {
+        sharedFit += shared.TryReserveChainBytes(kPrimary, lane, 0, kInstances, kWork, false) == fx::ClusterReserveResult::Ok;
+        separateFit += separate.TryReserveChainBytes(kPrimary, lane, 0, kInstances, kWork, false) == fx::ClusterReserveResult::Ok;
+    }
+    EXPECT_EQ(sharedFit, 4);
+    EXPECT_EQ(separateFit, 2);
+}
+
 TEST(ShadowClusterLaneTest, DeclaredPassesSkipTheStatsPass)
 {
     const fx::ClusterDrawState state{ kShadowClusterBaseName, fx::ClusterDrawShape{ kShadowClusterLanes, kShadowClusterPartSlots } };

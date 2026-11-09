@@ -1,4 +1,4 @@
-﻿# Render graph
+# Render graph
 > The `gte::rg` API: how passes, shaders, buffers and recording work. For anyone who writes or changes render code.
 > Verified against code: 2026-10-30
 
@@ -32,6 +32,9 @@
 6. Execute lambdas run in order and record into the command buffer.
 
 A disagreement between event and real dependency is logged (assert in debug). The event is a tag. It must agree with the real dependencies.
+
+`Compile()` builds read-after-write, write-after-write and write-after-read edges. The last kind only orders kept passes. It never keeps a pass alive, so a culled reader stays culled. The order of kept passes is the declaration order inside one `RenderPassEvent`.
+Passes that share one buffer (for example the Shadow cascade lanes) must declare all their passes one lane after another. `Compile()` does not check this.
 
 ## Concepts
 | Word | Meaning |

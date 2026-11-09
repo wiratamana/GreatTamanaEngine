@@ -51,9 +51,9 @@ struct RenderPassEventContradiction {
     std::uint32_t resourceIndex = 0;
 };
 
-// Orders passes by data dependency (ties by RenderPassEvent, then declaration order) and culls passes
-// with no path to a root: `finalOutputs`, the Keep*Output() sets and persistent textures. Event
-// contradictions go to stderr (assert in debug). Writes PassRecord::isCulled; throws on a cycle.
+// Orders passes by data hazards (read-after-write, write-after-write, write-after-read; ties by RenderPassEvent,
+// then declaration order) and culls passes with no path to a root: `finalOutputs`, the Keep*Output() sets and
+// persistent textures. Event contradictions go to stderr (assert in debug). Writes PassRecord::isCulled; throws on a cycle.
 CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> finalOutputs);
 
 } // namespace gte::rg

@@ -1,6 +1,6 @@
 # GPU-driven rendering
 > How the engine culls clusters on the GPU and draws the survivors with one indirect call. For anyone who touches the cluster path, culling or Hi-Z.
-> Verified against code: 2026-11-05
+> Verified against code: 2026-11-09
 
 ## TL;DR
 - A big mesh is cut into clusters. A compute pass culls them per view. One counted indirect draw renders the survivors.
@@ -148,6 +148,9 @@ Constants live in `src/Renderer/Culling/ClusterCullMath.h` and `ClusterPassCount
 - A part over a limit, beyond the slots, or over a budget is not claimed. It logs once and draws on the CPU path.
 - A Hi-Z chain that does not fit the budget is first retried as a single-phase `Frustum` chain (`hizReason=OverBudget`). The CPU path is the last resort.
 - The instance buffer of a slot is charged once for all lanes. The history buffer holds one word per (instance, chunk of 16 clusters).
+- The four Shadow cascade lanes share one visible, commands and count buffer per slot (`ClusterDrawShape::shareLaneBuffers`). They are charged once, at the largest lane. Parameter blocks stay per lane.
+- Sharing is safe only for depth-only lanes with no stats and no survivor reuse. The cascades must declare their passes one after another. Two-phase lanes never share.
+- A sharing state assigns the same slot to a part in every cascade, so a skipped part leaves a gap.
 - Instance counts are never cut.
 
 ## Key files
@@ -182,7 +185,7 @@ Constants live in `src/Renderer/Culling/ClusterCullMath.h` and `ClusterPassCount
 - **No renderable changes during the frame.** The shared render list and the reuse cache assume nothing adds, removes or moves a renderable between declare and submit. Parented renderables are never cached.
 - **Synchronous graph only.** `GpuParams` and the instance buffer are written on the CPU at declare time. A pipelined regime makes the verb inert.
 - **Turned-off features keep memory.** A feature disabled with `set_feature_enabled` gets no callback, so `TickIdle` never runs. Its buffers stay in the ledger.
-- **Ledger can refuse a big chain.** After many cluster lanes (for example Shadow at 100000 instances), re-enable the feature for 600 frames or restart before a big Hi-Z test.
+- **Ledger can refuse a big chain.** The ledger only grows. After a big run in one process (for example Hi-Z at 100000 instances), re-enable the feature for 600 frames or restart before the next big test. The Shadow lanes share buffers, so Shadow is first refused near 152500 instances (process budget) and the work item limit is 190647 instances at 22 clusters each.
 - **Hi-Z scope.** Primary view only. Primitives, alpha-tested, skinned and transparent meshes get frustum culling only.
 - **Box test only.** Hi-Z tests axis-aligned cluster boxes.
 - **No cancel inside a build.** A cluster build cannot stop inside one meshoptimizer call. With one job worker it runs inline and stalls the editor.

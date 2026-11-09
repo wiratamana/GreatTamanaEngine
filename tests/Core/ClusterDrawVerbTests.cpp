@@ -101,6 +101,61 @@ TEST(ClusterPartPlanningTest, NoSlotsDropsEveryPart)
     EXPECT_EQ(assignment.dropped.size(), 2u);
 }
 
+TEST(ClusterPartPlanningTest, SlotsOfAnAssignmentListEveryPartAndMarkTheDroppedOnes)
+{
+    const MaterialToken none;
+    const std::array<ClusterPartSize, 3> parts = { ClusterPartSize{ MeshToken{ 1, 1 }, none, 1, 1 },
+        ClusterPartSize{ MeshToken{ 2, 1 }, none, 9, 1 }, ClusterPartSize{ MeshToken{ 3, 1 }, none, 5, 1 } };
+    const std::vector<std::uint32_t> slots = ClusterSlotsOf(AssignClusterPartSlots(parts, 2), parts.size());
+    EXPECT_EQ(slots, (std::vector<std::uint32_t>{ kNoClusterSlot, 0, 1 }));
+}
+
+TEST(ClusterPartPlanningTest, FixedSlotsGiveBackTheAssignmentInSlotOrder)
+{
+    const std::vector<std::uint32_t> slots = { 2, kNoClusterSlot, 0, 1 };
+    const ClusterSlotAssignment assignment = ClusterAssignmentFromSlots(slots);
+    EXPECT_EQ(assignment.assigned, (std::vector<std::uint32_t>{ 2, 3, 0 }));
+    EXPECT_EQ(assignment.dropped, (std::vector<std::uint32_t>{ 1 }));
+    EXPECT_TRUE(ClusterAssignmentFromSlots({}).assigned.empty());
+}
+
+// The lanes of a state that shares buffers must agree on the slot of every part, whatever each lane skips.
+TEST(ClusterPartPlanningTest, ALaneThatSkipsAPartLeavesTheSlotsOfTheOthersUnchanged)
+{
+    const MaterialToken none;
+    const std::array<ClusterPartSize, 3> all = { ClusterPartSize{ MeshToken{ 1, 1 }, none, 50, 22 },
+        ClusterPartSize{ MeshToken{ 2, 1 }, none, 30, 22 }, ClusterPartSize{ MeshToken{ 3, 1 }, none, 10, 22 } };
+    const std::vector<std::uint32_t> fixed = ClusterSlotsOf(AssignClusterPartSlots(all, 4), all.size());
+    ASSERT_EQ(fixed, (std::vector<std::uint32_t>{ 0, 1, 2 }));
+
+    // Lane A skips the middle part: the survivors are compacted like PlanChain does.
+    std::vector<std::uint32_t> laneA = { fixed[0], fixed[2] };
+    const ClusterSlotAssignment assignment = ClusterAssignmentFromSlots(laneA);
+    EXPECT_EQ(assignment.assigned, (std::vector<std::uint32_t>{ 0, 1 }));
+    EXPECT_EQ(laneA[assignment.assigned[0]], 0u);
+    EXPECT_EQ(laneA[assignment.assigned[1]], 2u); // Slot 2, not slot 1 as a fresh assignment would give.
+
+    // Without the fix, the same survivors get dense slots that differ from lane B, which skips nothing.
+    const std::array<ClusterPartSize, 2> survivors = { all[0], all[2] };
+    const std::vector<std::uint32_t> dense = ClusterSlotsOf(AssignClusterPartSlots(survivors, 4), survivors.size());
+    EXPECT_EQ(dense, (std::vector<std::uint32_t>{ 0, 1 }));
+    EXPECT_NE(dense[1], fixed[2]);
+}
+
+TEST(ClusterPartPlanningTest, FixedSlotsDropThePartsThatFoundNoSlotInAnyLane)
+{
+    const MaterialToken none;
+    std::array<ClusterPartSize, 5> parts;
+    for (std::uint32_t i = 0; i < parts.size(); ++i) {
+        parts[i] = ClusterPartSize{ MeshToken{ i + 1, 1 }, none, 100 - i, 1 };
+    }
+    const std::vector<std::uint32_t> fixed = ClusterSlotsOf(AssignClusterPartSlots(parts, 4), parts.size());
+    EXPECT_EQ(fixed, (std::vector<std::uint32_t>{ 0, 1, 2, 3, kNoClusterSlot }));
+    const ClusterSlotAssignment assignment = ClusterAssignmentFromSlots(fixed);
+    EXPECT_EQ(assignment.assigned.size(), 4u);
+    EXPECT_EQ(assignment.dropped, (std::vector<std::uint32_t>{ 4 }));
+}
+
 TEST(ClusterPartPlanningTest, ADepthOnlyLaneNeverGetsTheConeTestOrBackFaceCulling)
 {
     const ClusterCullFlags requested = ClusterCullFlags::Frustum | ClusterCullFlags::BackfaceCone;

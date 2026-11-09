@@ -201,17 +201,17 @@ PersistentBuffer* ClusterDrawState::Instances(std::uint32_t slot) noexcept
 
 PersistentBuffer* ClusterDrawState::Visible(std::uint32_t lane, std::uint32_t slot) noexcept
 {
-    return InRange(lane, slot) ? m_visible[ChainIndex(0, lane, slot)].get() : nullptr;
+    return InRange(lane, slot) ? m_visible[ChainIndex(0, BufferLane(lane), slot)].get() : nullptr;
 }
 
 PersistentBuffer* ClusterDrawState::Commands(std::uint32_t lane, std::uint32_t slot) noexcept
 {
-    return InRange(lane, slot) ? m_commands[ChainIndex(0, lane, slot)].get() : nullptr;
+    return InRange(lane, slot) ? m_commands[ChainIndex(0, BufferLane(lane), slot)].get() : nullptr;
 }
 
 PersistentBuffer* ClusterDrawState::Count(std::uint32_t lane, std::uint32_t slot) noexcept
 {
-    return InRange(lane, slot) ? m_count[ChainIndex(0, lane, slot)].get() : nullptr;
+    return InRange(lane, slot) ? m_count[ChainIndex(0, BufferLane(lane), slot)].get() : nullptr;
 }
 
 GpuReadback<ClusterStatsWords>* ClusterDrawState::Stats(std::uint32_t slot) noexcept
@@ -491,11 +491,13 @@ ClusterReserveResult ClusterDrawState::CheckChainBytes(rg::ViewScope scope, std:
     std::uint64_t instanceCount, std::uint64_t workItems, bool twoPhase, std::optional<std::uint64_t> historyWords,
     ChainWant& want) const
 {
-    if (!InRange(lane, slot) || scope == rg::ViewScope::Shared || (twoPhase && lane + 1 >= m_shape.lanes)) {
+    const bool twoPhaseOnSharedLanes = twoPhase && m_shape.shareLaneBuffers;
+    if (!InRange(lane, slot) || scope == rg::ViewScope::Shared || twoPhaseOnSharedLanes
+        || (twoPhase && lane + 1 >= m_shape.lanes)) {
         return ClusterReserveResult::BadIndex;
     }
     const std::size_t scopeIndex = rg::ViewScopeIndex(scope);
-    const std::uint64_t recordedLane = m_chainBytes[ChainIndex(scopeIndex, lane, slot)];
+    const std::uint64_t recordedLane = m_chainBytes[ChainIndex(scopeIndex, BufferLane(lane), slot)];
     const std::uint64_t recordedInstances = m_instanceBytes[scopeIndex * m_shape.partSlots + slot];
     want.lane = std::max(recordedLane,
         ClusterChainBytes(instanceCount, workItems, ClusterChainShape{ twoPhase, true, historyWords }));
@@ -530,7 +532,7 @@ ClusterReserveResult ClusterDrawState::TryReserveChainBytes(rg::ViewScope scope,
         return result;
     }
     const std::size_t scopeIndex = rg::ViewScopeIndex(scope);
-    std::uint64_t& recordedLane = m_chainBytes[ChainIndex(scopeIndex, lane, slot)];
+    std::uint64_t& recordedLane = m_chainBytes[ChainIndex(scopeIndex, BufferLane(lane), slot)];
     std::uint64_t& recordedInstances = m_instanceBytes[scopeIndex * m_shape.partSlots + slot];
     const std::uint64_t others = HeldBytes(scope) - recordedLane - recordedInstances;
     // The check above passed, so the ledger raise cannot fail; its entry now holds this scope's new total.

@@ -69,6 +69,35 @@ ClusterSlotAssignment AssignClusterPartSlots(std::span<const ClusterPartSize> pa
     return result;
 }
 
+std::vector<std::uint32_t> ClusterSlotsOf(const ClusterSlotAssignment& assignment, std::size_t partCount)
+{
+    std::vector<std::uint32_t> slots(partCount, kNoClusterSlot);
+    for (std::size_t slot = 0; slot < assignment.assigned.size(); ++slot) {
+        if (assignment.assigned[slot] < partCount) {
+            slots[assignment.assigned[slot]] = static_cast<std::uint32_t>(slot);
+        }
+    }
+    return slots;
+}
+
+ClusterSlotAssignment ClusterAssignmentFromSlots(std::span<const std::uint32_t> slots)
+{
+    ClusterSlotAssignment result;
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> bySlot; // (slot, part index)
+    for (std::size_t i = 0; i < slots.size(); ++i) {
+        if (slots[i] == kNoClusterSlot) {
+            result.dropped.push_back(static_cast<std::uint32_t>(i));
+        } else {
+            bySlot.emplace_back(slots[i], static_cast<std::uint32_t>(i));
+        }
+    }
+    std::sort(bySlot.begin(), bySlot.end());
+    for (const auto& entry : bySlot) {
+        result.assigned.push_back(entry.second);
+    }
+    return result;
+}
+
 ClusterPartBox UnionInstanceBoxes(std::span<const AABB> instanceBoxes, std::span<const std::uint32_t> indices) noexcept
 {
     if (indices.empty()) {
