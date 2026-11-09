@@ -179,6 +179,33 @@ TEST(ClusterDrawStateTests, RebuiltStateReusesInternedNames)
     EXPECT_EQ(first.PassName(0, 1, ClusterPassKind::Cull), name);
 }
 
+TEST(ClusterDrawStateTests, ASingleGroupMemoIsFoundOnlyForItsEpochCountAndKind)
+{
+    ClusterDrawState state("TestSingleGroup", { 1, 1 });
+    ClusterDrawState::SingleGroupMemo memo;
+    memo.epoch = 7;
+    memo.count = 50000;
+    memo.depthOnly = true;
+    memo.mesh = MeshToken{ 3, 2 };
+    EXPECT_FALSE(state.FindSingleGroup(7, 50000, true).has_value());
+
+    state.StoreSingleGroup(memo);
+    const auto hit = state.FindSingleGroup(7, 50000, true);
+    ASSERT_TRUE(hit.has_value());
+    EXPECT_EQ(hit->mesh, memo.mesh);
+    EXPECT_FALSE(state.FindSingleGroup(8, 50000, true).has_value());
+    EXPECT_FALSE(state.FindSingleGroup(7, 49999, true).has_value());
+    EXPECT_FALSE(state.FindSingleGroup(7, 50000, false).has_value());
+    EXPECT_FALSE(state.FindSingleGroup(0, 50000, true).has_value());
+
+    // A colour memo does not evict the depth-only one.
+    ClusterDrawState::SingleGroupMemo colour = memo;
+    colour.depthOnly = false;
+    state.StoreSingleGroup(colour);
+    EXPECT_TRUE(state.FindSingleGroup(7, 50000, true).has_value());
+    EXPECT_TRUE(state.FindSingleGroup(7, 50000, false).has_value());
+}
+
 TEST(ClusterDrawStateTests, DifferentBasesNeverShareNames)
 {
     ClusterDrawState a("TestBaseA", { 1, 2 });

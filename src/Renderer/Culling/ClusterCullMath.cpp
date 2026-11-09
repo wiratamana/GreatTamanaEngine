@@ -63,13 +63,7 @@ ClusterCullParams MakeClusterCullParams(const Mat4& cullViewProjection, const Ve
     bool orthographic, std::uint32_t instanceCount, std::uint32_t clusterCount, ClusterCullFlags flags) noexcept
 {
     ClusterCullParams params{};
-    const std::array<Plane, 6> planes = ExtractFrustumPlanes(cullViewProjection);
-    for (std::size_t i = 0; i < planes.size(); ++i) {
-        params.planes[i][0] = planes[i].normal.x;
-        params.planes[i][1] = planes[i].normal.y;
-        params.planes[i][2] = planes[i].normal.z;
-        params.planes[i][3] = planes[i].distance;
-    }
+    SetClusterCullPlanes(params, ExtractFrustumPlanes(cullViewProjection));
     std::memcpy(params.viewProjection, cullViewProjection.Data(), sizeof(params.viewProjection));
     params.eyeOrDirection[0] = eyeOrDirection.x;
     params.eyeOrDirection[1] = eyeOrDirection.y;
@@ -80,6 +74,16 @@ ClusterCullParams MakeClusterCullParams(const Mat4& cullViewProjection, const Ve
         std::min<std::uint64_t>(std::uint64_t{ instanceCount } * clusterCount, 0xFFFFFFFFull));
     params.counts[3] = static_cast<std::uint32_t>(flags) | (orthographic ? kClusterCullFlagOrthographic : 0u);
     return params;
+}
+
+void SetClusterCullPlanes(ClusterCullParams& params, const std::array<Plane, 6>& planes) noexcept
+{
+    for (std::size_t i = 0; i < planes.size(); ++i) {
+        params.planes[i][0] = planes[i].normal.x;
+        params.planes[i][1] = planes[i].normal.y;
+        params.planes[i][2] = planes[i].normal.z;
+        params.planes[i][3] = planes[i].distance;
+    }
 }
 
 void SetClusterCullInstanceBox(ClusterCullParams& params, const AABB& box) noexcept

@@ -232,6 +232,11 @@ void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
         }
     };
 
+    // The caster bound assumes rays that meet at the eye, so an orthographic view keeps the cascade box.
+    const bool boundCasters = cfg.cullCasters && IsPerspectiveViewProjection(f.View().viewProjection);
+    const float viewWidth = static_cast<float>(f.View().extent.width);
+    const float viewHeight = static_cast<float>(f.View().extent.height);
+
     for (std::uint32_t c = 0; allEnabled && c < set.count; ++c) {
         const fx::Texture map = maps[c];
         if (!map.IsValid()) {
@@ -239,6 +244,12 @@ void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
             continue;
         }
         data.maps[c] = map;
+
+        // Casters that cannot shadow what this cascade's receivers read are culled with the swept camera slice.
+        ShadowCasterPlanes casterBound;
+        if (boundCasters) {
+            casterBound = BuildShadowCasterPlanes(frustum, set, c, cfg, viewWidth, viewHeight);
+        }
 
         // The cluster chain plans first so the CPU draw skips what it takes over; it loads the map the CPU draw clears.
         // A plan that is not ready leaves the CPU draw complete.
@@ -249,12 +260,18 @@ void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
             .CullCamera(cascadeCamera)
             .Culling(cfg.cullCasters ? ClusterCullFlags::Frustum : ClusterCullFlags::None)
             .DepthOnlyTarget(map);
+        if (casterBound.valid) {
+            clusterChain.CullPlanes(casterBound.planes);
+        }
         const fx::ClusterPlan clusterPlan = clusterChain.Plan();
 
         fx::SceneDrawChain chain = f.SceneDraw(kCascadeDrawNames[c]);
         chain.Shaders(m_depthShaders).Camera(set.cascades[c].viewProjection).ClearDepthTarget(map, 1.0f);
         if (cfg.cullCasters) {
             chain.CullToFrustum(cfg.casterCullPaddingFraction);
+            if (casterBound.valid) {
+                chain.CullPlanes(casterBound.planes);
+            }
         }
         if (clusterPlan.ready) {
             chain.Exclude(clusterPlan.exclusion);

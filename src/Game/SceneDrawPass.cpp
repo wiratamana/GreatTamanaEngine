@@ -2,6 +2,7 @@
 
 #include "../Renderer/SceneServicesDescriptorSet.h"
 
+#include <algorithm>
 #include <cassert>
 #include <utility>
 
@@ -54,6 +55,13 @@ SceneDrawPass& SceneDrawPass::CullToFrustum(float paddingFraction)
     return *this;
 }
 
+SceneDrawPass& SceneDrawPass::CullPlanes(std::span<const Plane> planes)
+{
+    m_extraPlaneCount = static_cast<std::uint32_t>(std::min<std::size_t>(planes.size(), m_extraPlanes.size()));
+    std::copy_n(planes.begin(), m_extraPlaneCount, m_extraPlanes.begin());
+    return *this;
+}
+
 SceneDrawPass& SceneDrawPass::ExcludeEntities(const EntityMarkSet* entities, const std::uint64_t* liveEpoch)
 {
     m_excluded = entities;
@@ -96,6 +104,8 @@ bool SceneDrawPass::Draw()
     request.onlyEntities = m_only;
     if (m_cullPadding.has_value()) {
         request.cull = SceneCullRequest{ m_viewProjection, *m_cullPadding };
+        request.cull->extraPlanes = m_extraPlanes;
+        request.cull->extraPlaneCount = m_extraPlaneCount;
     }
     return m_mesh.Draw([system = m_system, registry = m_registry, renderer = m_renderer, liveEpoch = m_liveEpoch,
                            epochAtDeclare = m_epochAtDeclare, services = m_services, servicesView = m_servicesView,

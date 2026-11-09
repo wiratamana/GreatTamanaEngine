@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ShadowTypes.h"
+#include "../../Core/FeatureKit/ClusterDrawTypes.h"
 #include "../../Game/Lighting/SunShadowReceiver.h"
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
@@ -83,6 +84,26 @@ ShadowViewFrustum ExtractViewFrustum(const Vec3& eye, const Mat4& invViewProject
 ShadowCascadeSet BuildShadowCascades(const ShadowViewFrustum& frustum, const Vec3& directionTowardSun,
     const ShadowSettings& safe, std::uint32_t resolution,
     std::optional<ShadowDepthRange> sdsmRange = std::nullopt) noexcept;
+
+// World units a lookup may be moved toward the sun before its cascade is picked (the toon shader's reach; covers
+// models up to scale 1.33).
+inline constexpr float kShadowLookupReachWorld = 16.0f;
+
+// Outer bound of what cascade `c` can change: planes of the convex hull of the camera slice swept toward the sun.
+// A caster fully outside any plane cannot shadow a point that a receiver reads from this cascade. `valid` is false
+// when no safe bound exists (orthographic or noisy camera, invalid input); the caller keeps the cascade box then.
+struct ShadowCasterPlanes {
+    bool valid = false;
+    fx::ExtraCullPlanes planes;
+};
+
+// True when the matrix is a perspective projection (an orthographic one ends in row (0, 0, 0, 1)).
+bool IsPerspectiveViewProjection(const Mat4& viewProjection) noexcept;
+
+// `safe` must be sanitized; `viewWidthPixels` x `viewHeightPixels` is the view size (pads the camera jitter).
+ShadowCasterPlanes BuildShadowCasterPlanes(const ShadowViewFrustum& frustum, const ShadowCascadeSet& set,
+    std::uint32_t cascade, const ShadowSettings& safe, float viewWidthPixels, float viewHeightPixels,
+    float lookupReachWorld = kShadowLookupReachWorld) noexcept;
 
 // GPU parameter block of the mask pass. `safe` must be sanitized.
 ShadowMaskParamsGpu MakeShadowMaskParams(

@@ -4,6 +4,7 @@
 #include "ECS/EntityMarkSet.h"
 #include "Math/Mat4.h"
 #include "../Core/GraphicsHandles.h" // DescriptorSetHandle
+#include "Renderer/Culling/CullingTypes.h"
 #include "Renderer/Pipeline.h"
 #include "Renderer/PipelineHandle.h"
 
@@ -40,12 +41,18 @@ struct SceneCullCounts {
     std::uint32_t unbounded = 0; // No local bounds; always kept.
 };
 
+// Most extra cull planes a SceneCullRequest holds.
+inline constexpr std::uint32_t kSceneCullExtraPlanes = 16;
+
 // Skip entities whose world bounds (padded by a fraction of their largest extent) lie outside this view-projection.
+// An entity is also skipped when its padded bounds lie outside any extra plane (inside: dot(normal, p) + distance >= 0).
 // `counts` is non-owning, zeroed and written only during the draw call; nullptr skips tallying.
 struct SceneCullRequest {
     Mat4 viewProjection = Mat4::Identity();
     float paddingFraction = 0.0f;
     SceneCullCounts* counts = nullptr;
+    std::array<Plane, kSceneCullExtraPlanes> extraPlanes{};
+    std::uint32_t extraPlaneCount = 0;
 };
 
 // Plain data describing one DrawScene() call.

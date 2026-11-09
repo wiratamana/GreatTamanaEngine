@@ -125,6 +125,11 @@ bool IsBoundsOutsideFrustum(const std::array<Plane, 6>& planes, const std::optio
 
 bool IsAABBOutsideFrustum(const std::array<Plane, 6>& planes, const AABB& worldBounds) noexcept
 {
+    return IsAABBOutsideAnyPlane(planes, worldBounds);
+}
+
+bool IsAABBOutsideAnyPlane(std::span<const Plane> planes, const AABB& worldBounds) noexcept
+{
     const Vec3& lo = worldBounds.min;
     const Vec3& hi = worldBounds.max;
     if (!IsFinite(lo) || !IsFinite(hi) || lo.x > hi.x || lo.y > hi.y || lo.z > hi.z) {

@@ -74,6 +74,7 @@ A part is one (mesh, material) pair. A colour view has 12 part slots and 2 lanes
 - **No camera.** No active camera, or a matrix that is not finite, gives `cullCamera=none`. Nothing is culled.
 - **Cone test.** Off by default. It is correct for closed meshes only, because the CPU path draws both sides of a face.
 - **Depth-only lanes** never use the cone test or the pyramid.
+- **Caster planes.** A depth-only lane may pass extra cull planes (`ClusterDrawChain::CullPlanes`): the camera slice swept toward the sun. `PlanChain` picks the best 6 planes from the camera planes plus the extras. It keeps the extras only when they reject more of the sampled candidate boxes. The shader and `ClusterCullParams` layout do not change. A lane with no caster in range gets no pass.
 
 ### Two-round Hi-Z occlusion
 Occlusion is exact for the current frame. Only the primary view builds a pyramid.

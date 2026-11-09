@@ -108,6 +108,8 @@ struct ShadowCascade {
     float depthRange = 0.0f;   // Ortho depth span, world units.
     std::int64_t gridX = 0;    // Snapped light-space center in whole texels (0 when not stabilized).
     std::int64_t gridY = 0;
+    Vec3 lightForward;         // Direction the light travels.
+    double lightNearZ = 0.0;   // Light-space depth of the map's near plane; casters closer to the sun are clipped.
 };
 
 struct ShadowCascadeSet {

@@ -36,6 +36,10 @@ public:
     // Skips entities whose padded world bounds fall outside the camera's view-projection.
     SceneDrawPass& CullToFrustum(float paddingFraction);
 
+    // With CullToFrustum(): also skips entities whose padded bounds lie outside any of these planes. At most
+    // kSceneCullExtraPlanes are kept; the planes are copied.
+    SceneDrawPass& CullPlanes(std::span<const Plane> planes);
+
     // Entities the draw skips. Read when the pass executes, so the set must outlive the frame's graph. Null skips none.
     // With `liveEpoch`, a changed epoch at execute time means the set is gone: debug asserts, release skips nothing.
     SceneDrawPass& ExcludeEntities(const EntityMarkSet* entities, const std::uint64_t* liveEpoch = nullptr);
@@ -62,6 +66,8 @@ private:
     PipelineOverrideSet m_overrides;
     Mat4 m_viewProjection = Mat4::Identity();
     std::optional<float> m_cullPadding;
+    std::array<Plane, kSceneCullExtraPlanes> m_extraPlanes{};
+    std::uint32_t m_extraPlaneCount = 0;
     const EntityMarkSet* m_excluded = nullptr;
     const EntityMarkSet* m_only = nullptr;
     const std::uint64_t* m_liveEpoch = nullptr;

@@ -13,9 +13,12 @@
 #include "../../Renderer/RenderGraph/PassKindDefaults.h"
 #include "../../Renderer/RenderGraph/RecordedPass.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <exception>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <utility>
@@ -45,8 +48,14 @@ struct PlannedPart {
     std::size_t instanceCount = 0;
     ClusterDrawState::CandidateGroupId groupId; // Epoch 0 unless the part is a group of the shared candidate list.
     std::vector<std::uint32_t> candidates; // Indices into the chain's instances, in draw order.
-    std::vector<Entity> entities;
+    std::vector<Entity> ownEntities;        // Gathered when the part is not the whole candidate list.
+    std::span<const Entity> sharedEntities; // The candidate entities of the frame when it is.
     ClusterCullParams params{};
+
+    std::span<const Entity> Entities() const noexcept
+    {
+        return sharedEntities.empty() ? std::span<const Entity>(ownEntities) : sharedEntities;
+    }
 };
 
 std::string TokenText(MeshToken token)
@@ -93,6 +102,7 @@ struct ClusterDrawChain::Impl {
     std::span<const ClusterInstance> instances;
     ClusterCamera camera;
     ClusterCamera cullCamera;
+    ExtraCullPlanes extraPlanes;
     bool hasCamera = false;
     bool hasCullCamera = false;
     ClusterCullFlags flags = ClusterCullFlags::Frustum;
@@ -176,6 +186,13 @@ ClusterDrawChain& ClusterDrawChain::CullCamera(const ClusterCamera& camera)
 {
     m_impl->cullCamera = camera;
     m_impl->hasCullCamera = true;
+    return *this;
+}
+
+ClusterDrawChain& ClusterDrawChain::CullPlanes(const ExtraCullPlanes& planes)
+{
+    m_impl->extraPlanes = planes;
+    m_impl->extraPlanes.count = std::min(planes.count, kMaxExtraCullPlanes);
     return *this;
 }
 
@@ -319,6 +336,15 @@ void PlanChain(ClusterDrawChain::Impl& s)
         frame.ReportOnce(std::string("Pass '") + anchorName.value + "': the cull camera is not finite");
         return;
     }
+    // A non-finite extra plane would reject real geometry: drop them all and keep the camera frustum.
+    for (std::uint32_t i = 0; i < s.extraPlanes.count; ++i) {
+        const Plane& plane = s.extraPlanes.planes[i];
+        if (!(std::isfinite(plane.normal.x) && std::isfinite(plane.normal.y) && std::isfinite(plane.normal.z)
+                && std::isfinite(plane.distance))) {
+            s.extraPlanes.count = 0;
+            break;
+        }
+    }
 
     // Without a usable pyramid the chain is the plain single-phase chain.
     if (s.wantsTwoPhase && !s.depthOnly) {
@@ -337,7 +363,27 @@ void PlanChain(ClusterDrawChain::Impl& s)
 
     // Parts that can run a chain, with their sizes. A colour draw splits a mesh by material; a depth-only draw does not.
     const ClusterLimits limits = ClusterLimitsFor(caps);
-    std::vector<ClusterMeshGroup> groups = GroupInstances(s.instances, !s.depthOnly);
+    // A group of the shared candidate list is fully identified by the list's epoch, so its keys and records are reusable.
+    const std::span<const ClusterInstance> sharedCandidates = frame.ClusterCandidates();
+    const std::uint64_t candidateEpoch =
+        (s.instances.data() == sharedCandidates.data() && s.instances.size() == sharedCandidates.size())
+        ? frame.ClusterCandidateEpoch() : 0;
+    std::vector<ClusterMeshGroup> groups;
+    const std::optional<ClusterDrawState::SingleGroupMemo> knownGroup =
+        candidateEpoch != 0 ? state.FindSingleGroup(candidateEpoch, s.instances.size(), s.depthOnly) : std::nullopt;
+    if (knownGroup) {
+        // Every candidate of this epoch shares one mesh and material, as the last chain found.
+        ClusterMeshGroup& group =
+            groups.emplace_back(ClusterMeshGroup{ knownGroup->mesh, knownGroup->material, knownGroup->kind, {} });
+        group.instances.resize(s.instances.size());
+        std::iota(group.instances.begin(), group.instances.end(), std::uint32_t{ 0 });
+    } else {
+        groups = GroupInstances(s.instances, !s.depthOnly);
+        if (candidateEpoch != 0 && groups.size() == 1) {
+            state.StoreSingleGroup(ClusterDrawState::SingleGroupMemo{
+                candidateEpoch, s.instances.size(), s.depthOnly, groups[0].mesh, groups[0].material, groups[0].kind });
+        }
+    }
     std::vector<ClusterMeshGroup> eligible;
     std::vector<PartPipeline> pipelines;
     std::vector<ClusterPartSize> sizes;
@@ -383,15 +429,25 @@ void PlanChain(ClusterDrawChain::Impl& s)
     }
     // Parts wholly outside the cull frustum get no pass and no slot; their entities are still claimed.
     // Every view decides from the cull camera and the shared candidates alone, so all views agree.
+    // Extra planes replace camera planes only when they reject more of the sampled candidate boxes.
+    std::optional<std::array<Plane, 6>> chosenPlanes;
+    std::span<const Entity> wholeListEntities; // Set when Core's entity array of the candidates is already built.
     {
         GTE_PROFILE_SCOPE("ClusterPart.Skip");
-        const auto planes = TryExtractFrustumPlanes(cullCamera.viewProjection);
+        std::optional<std::array<Plane, 6>> planes = TryExtractFrustumPlanes(cullCamera.viewProjection);
         const bool canSkip = planes.has_value() && HasClusterCullFlag(flags, ClusterCullFlags::Frustum)
             && !eligible.empty() && s.instances.data() == frame.ClusterCandidates().data();
+        if (canSkip && s.extraPlanes.count > 0) {
+            chosenPlanes = ChooseCullPlanes(*planes, s.extraPlanes, frame.ClusterCandidateBounds());
+            planes = chosenPlanes;
+        }
         if (canSkip) {
             const std::vector<std::uint8_t> skips = PlanClusterPartSkips(
                 planes, flags, frame.ClusterCandidateBounds(), frame.ClusterCandidateUnion(), eligible);
             const std::span<const Entity> candidateEntities = frame.ClusterCandidateEntities();
+            if (candidateEntities.size() == s.instances.size()) {
+                wholeListEntities = candidateEntities;
+            }
             std::size_t partialEntities = 0;
             for (std::size_t i = 0; i < eligible.size(); ++i) {
                 if (skips[i] != 0 && eligible[i].instances.size() != candidateEntities.size()) {
@@ -450,11 +506,6 @@ void PlanChain(ClusterDrawChain::Impl& s)
 
     // The secondary view draws the primary view's survivors when every planned part was published for the same
     // instances, cull camera and tests. Otherwise it culls on its own.
-    // A group of the shared candidate list is fully identified by the list's epoch, so its keys and records are reusable.
-    const std::span<const ClusterInstance> sharedCandidates = frame.ClusterCandidates();
-    const std::uint64_t candidateEpoch =
-        (s.instances.data() == sharedCandidates.data() && s.instances.size() == sharedCandidates.size())
-        ? frame.ClusterCandidateEpoch() : 0;
     std::vector<ClusterDrawState::CandidateGroupId> groupIds(eligible.size());
     for (std::size_t i = 0; i < eligible.size(); ++i) {
         groupIds[i] = ClusterDrawState::CandidateGroupId{
@@ -555,12 +606,19 @@ void PlanChain(ClusterDrawChain::Impl& s)
         part.instanceCount = group.instances.size();
         part.groupId = groupIds[index];
         part.candidates = std::move(group.instances);
-        part.entities.reserve(part.candidates.size());
-        for (const std::uint32_t candidate : part.candidates) {
-            part.entities.push_back(s.instances[candidate].entity);
+        if (!wholeListEntities.empty() && part.candidates.size() == wholeListEntities.size()) {
+            part.sharedEntities = wholeListEntities;
+        } else {
+            part.ownEntities.reserve(part.candidates.size());
+            for (const std::uint32_t candidate : part.candidates) {
+                part.ownEntities.push_back(s.instances[candidate].entity);
+            }
         }
         part.params = MakeClusterCullParams(cullCamera.viewProjection, cullCamera.eyeOrDirection,
             cullCamera.orthographic, static_cast<std::uint32_t>(instanceCount), part.clusterCount, flags);
+        if (chosenPlanes.has_value()) {
+            SetClusterCullPlanes(part.params, *chosenPlanes);
+        }
         if (const Mesh* boxMesh = core.ResolveClusterMesh(group.mesh); boxMesh != nullptr && boxMesh->ClusterBounds()) {
             SetClusterCullInstanceBox(part.params, *boxMesh->ClusterBounds());
         }
@@ -720,8 +778,8 @@ public:
             run.historyKey = *known;
         } else {
             const std::uint64_t meshToken = (std::uint64_t{ part.mesh.index } << 32) | part.mesh.generation;
-            ClusterHistoryHasher hasher(meshToken, part.clusterCount, historyQuery.generation, part.entities.size() * 2);
-            for (const Entity& entity : part.entities) {
+            ClusterHistoryHasher hasher(meshToken, part.clusterCount, historyQuery.generation, part.Entities().size() * 2);
+            for (const Entity& entity : part.Entities()) {
                 hasher.Add(entity.index);
                 hasher.Add(entity.generation);
             }
@@ -950,7 +1008,7 @@ void RecordChain(ClusterDrawChain::Impl& s)
     partEntities.reserve(s.parts.size());
     for (std::size_t i = 0; i < s.parts.size(); ++i) {
         const PlannedPart& part = s.parts[i];
-        partEntities.push_back(part.entities);
+        partEntities.push_back(part.Entities());
         if (ClusterProgressOf(steps[i], twoRounds) != ClusterChainProgress::Draw) {
             frame.ReportOnce(std::string("Pass '") + PassNameOf(*s.state, s.lane, part.slot, ClusterPassKind::Draw).value
                 + "': the chain stopped before the draw; the CPU draw is used for this mesh");

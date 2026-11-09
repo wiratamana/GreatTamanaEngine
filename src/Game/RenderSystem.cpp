@@ -127,6 +127,10 @@ const std::vector<DrawCommand>& RenderSystem::BuildSharedList(Registry& registry
     }
 
     CollectRenderables(registry, m_sharedList);
+    m_sharedEntities.resize(m_sharedList.size());
+    for (std::size_t i = 0; i < m_sharedList.size(); ++i) {
+        m_sharedEntities[i] = m_sharedList[i].entity;
+    }
     ++m_sharedListEpoch;
     if (m_listCooldown > 0) {
         --m_listCooldown;
@@ -256,6 +260,7 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
         CollectRenderables(registry, ownCommands);
     }
     const std::vector<DrawCommand>& commands = m_sharedListRegistry == &registry ? m_sharedList : ownCommands;
+    const Entity* const denseEntities = m_sharedListRegistry == &registry ? m_sharedEntities.data() : nullptr;
     const bool hasOverrideSet = pipelineOverrideSet.has_value();
 
     // An unusable matrix means no culling: a fallback plane would reject real geometry.
@@ -270,16 +275,17 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
 
     std::size_t consideredCount = 0;
 
-    for (const DrawCommand& command : commands) {
+    for (std::size_t index = 0; index < commands.size(); ++index) {
         if (maxDrawCount.has_value() && consideredCount >= *maxDrawCount) {
             break;
         }
         ++consideredCount;
 
         // A batched entity is drawn by its indirect pass, but still counts toward maxDrawCount.
-        if (batchedEntities.Contains(command.entity)) {
+        if (batchedEntities.Contains(denseEntities != nullptr ? denseEntities[index] : commands[index].entity)) {
             continue;
         }
+        const DrawCommand& command = commands[index];
 
         // Checked before any layout or pipeline lookup, so unselected entities never log a warning.
         if (onlyEntities != nullptr && !onlyEntities->Contains(command.entity)) {
@@ -289,8 +295,14 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
         const Mesh* mesh = m_meshes.TryGet(command.mesh);
         if (cullPlanes.has_value() && mesh != nullptr) {
             const bool bounded = mesh->LocalBounds().has_value();
-            const bool outside =
+            bool outside =
                 IsBoundsOutsideFrustum(*cullPlanes, mesh->LocalBounds(), command.model, cull->paddingFraction);
+            if (!outside && bounded && cull->extraPlaneCount > 0) {
+                const AABB padded =
+                    PadAABB(TransformAABB(*mesh->LocalBounds(), command.model), cull->paddingFraction);
+                outside = IsAABBOutsideAnyPlane(
+                    std::span<const Plane>(cull->extraPlanes.data(), cull->extraPlaneCount), padded);
+            }
             if (counts != nullptr) {
                 ++(bounded ? counts->tested : counts->unbounded);
                 counts->culled += outside ? 1u : 0u;

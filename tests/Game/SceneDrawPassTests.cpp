@@ -47,5 +47,12 @@ TEST(SceneCullRequestTest, AggregateInitKeepsCountsOptionalAndZeroed)
     EXPECT_EQ(counts.unbounded, 0u);
 }
 
+TEST(SceneCullRequestTest, AggregateInitLeavesNoExtraPlanes)
+{
+    const SceneCullRequest request{ Mat4::Identity(), 0.05f, nullptr };
+    EXPECT_EQ(request.extraPlaneCount, 0u);
+    EXPECT_EQ(request.extraPlanes.size(), kSceneCullExtraPlanes);
+}
+
 } // namespace
 } // namespace gte

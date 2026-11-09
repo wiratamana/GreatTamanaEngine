@@ -30,6 +30,10 @@ public:
     ClusterDrawChain& Camera(const ClusterCamera& camera);
     ClusterDrawChain& CullCamera(const ClusterCamera& camera);
 
+    // Extra half-spaces the frustum cull may use instead of some camera planes. Only a frustum cull of the shared
+    // candidates uses them; a chain picks the six that reject the most. Each plane must be a valid bound of the draw.
+    ClusterDrawChain& CullPlanes(const ExtraCullPlanes& planes);
+
     // Which tests run. The back-face cone test is ignored for a depth-only target.
     ClusterDrawChain& Culling(ClusterCullFlags flags);
 

@@ -180,6 +180,26 @@ public:
     std::optional<std::uint64_t> FindHistoryKey(const KeyQuery& query) const noexcept;
     void StoreHistoryKey(const KeyQuery& query, std::uint64_t key);
 
+    // The one group of the shared candidate list of `epoch`, when every candidate shares one mesh and material.
+    // Saves the grouping scan of the next chain. Epoch 0 never matches.
+    struct SingleGroupMemo {
+        std::uint64_t epoch = 0;
+        std::uint64_t count = 0;
+        bool depthOnly = false;
+        MeshToken mesh;
+        MaterialToken material;
+        ClusterMaterialKind kind = ClusterMaterialKind::None;
+    };
+    std::optional<SingleGroupMemo> FindSingleGroup(std::uint64_t epoch, std::uint64_t count, bool depthOnly) const noexcept
+    {
+        const SingleGroupMemo& memo = m_singleGroups[depthOnly ? 1 : 0];
+        if (epoch == 0 || memo.epoch != epoch || memo.count != count || memo.depthOnly != depthOnly) {
+            return std::nullopt;
+        }
+        return memo;
+    }
+    void StoreSingleGroup(const SingleGroupMemo& memo) noexcept { m_singleGroups[memo.depthOnly ? 1 : 0] = memo; }
+
     // Staging array for the instance records of one upload; keeps its capacity between frames.
     std::vector<ClusterInstanceGpu>& InstanceScratch() noexcept { return m_instanceScratch; }
 
@@ -258,6 +278,7 @@ private:
     std::vector<std::uint64_t> m_instanceUploadSerial; // [scope][slot]
     std::vector<ClusterInstanceGpu> m_instanceScratch;
     std::vector<InstanceContent> m_instanceContent; // [scope][slot]
+    std::array<SingleGroupMemo, 2> m_singleGroups; // [depthOnly]
     std::vector<KeyMemo> m_setKeys;
     std::vector<KeyMemo> m_historyKeys;
     std::vector<std::unique_ptr<PersistentBuffer>> m_instances;

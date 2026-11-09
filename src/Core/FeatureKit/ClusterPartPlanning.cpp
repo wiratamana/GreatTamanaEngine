@@ -145,6 +145,99 @@ std::vector<std::uint8_t> PlanClusterPartSkips(const std::optional<std::array<Pl
     return skips;
 }
 
+namespace {
+
+// True when the usable box lies fully behind `plane`.
+bool PlaneRejectsBox(const Plane& plane, const AABB& box) noexcept
+{
+    const float x = plane.normal.x >= 0.0f ? box.max.x : box.min.x;
+    const float y = plane.normal.y >= 0.0f ? box.max.y : box.min.y;
+    const float z = plane.normal.z >= 0.0f ? box.max.z : box.min.z;
+    return plane.normal.x * x + plane.normal.y * y + plane.normal.z * z + plane.distance < 0.0f;
+}
+
+} // namespace
+
+std::array<Plane, 6> SelectCullPlanes(std::span<const Plane> pool, std::span<const AABB> sampleBoxes)
+{
+    std::array<Plane, 6> camera{};
+    for (std::size_t i = 0; i < camera.size() && i < pool.size(); ++i) {
+        camera[i] = pool[i];
+    }
+    if (pool.size() <= camera.size()) {
+        return camera;
+    }
+
+    std::vector<AABB> samples;
+    samples.reserve(sampleBoxes.size());
+    for (const AABB& box : sampleBoxes) {
+        if (IsUsableInstanceBox(box)) {
+            samples.push_back(box);
+        }
+    }
+    if (samples.empty()) {
+        return camera;
+    }
+
+    std::vector<std::uint8_t> rejected(samples.size(), 0);
+    std::vector<std::uint8_t> used(pool.size(), 0);
+    std::array<Plane, 6> chosen{};
+    std::size_t rejectedCount = 0;
+    for (std::size_t pick = 0; pick < chosen.size(); ++pick) {
+        std::size_t best = 0;
+        std::size_t bestGain = 0;
+        bool found = false;
+        for (std::size_t p = 0; p < pool.size(); ++p) {
+            if (used[p] != 0) {
+                continue;
+            }
+            std::size_t gain = 0;
+            for (std::size_t i = 0; i < samples.size(); ++i) {
+                gain += (rejected[i] == 0 && PlaneRejectsBox(pool[p], samples[i])) ? 1 : 0;
+            }
+            if (!found || gain > bestGain) {
+                best = p;
+                bestGain = gain;
+                found = true;
+            }
+        }
+        used[best] = 1;
+        chosen[pick] = pool[best];
+        for (std::size_t i = 0; i < samples.size(); ++i) {
+            if (rejected[i] == 0 && PlaneRejectsBox(pool[best], samples[i])) {
+                rejected[i] = 1;
+                ++rejectedCount;
+            }
+        }
+    }
+
+    std::size_t cameraCount = 0;
+    for (const AABB& box : samples) {
+        bool out = false;
+        for (const Plane& plane : camera) {
+            out = out || PlaneRejectsBox(plane, box);
+        }
+        cameraCount += out ? 1 : 0;
+    }
+    return rejectedCount > cameraCount ? chosen : camera;
+}
+
+std::array<Plane, 6> ChooseCullPlanes(
+    const std::array<Plane, 6>& camera, const ExtraCullPlanes& extra, std::span<const AABB> candidateBounds)
+{
+    std::vector<Plane> pool(camera.begin(), camera.end());
+    const std::size_t extraCount = std::min<std::size_t>(extra.count, extra.planes.size());
+    pool.insert(pool.end(), extra.planes.begin(), extra.planes.begin() + extraCount);
+
+    const std::size_t stride = std::max<std::size_t>(1, candidateBounds.size() / kCullPlaneSampleCount);
+    std::vector<AABB> samples;
+    samples.reserve(kCullPlaneSampleCount + 1);
+    for (std::size_t i = 0; i < candidateBounds.size() && samples.size() < kCullPlaneSampleCount; i += stride) {
+        samples.push_back(candidateBounds[i]);
+    }
+    return SelectCullPlanes(pool, samples);
+}
+
 ClusterVisibleCount SumClusterCounts(std::span<const ClusterCountSample> samples) noexcept
 {
     ClusterVisibleCount total;

@@ -9,6 +9,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace gte {
@@ -35,6 +36,9 @@ std::array<Plane, 6> ExtractFrustumPlanes(const Mat4& viewProjection);
 // True when `worldBounds` lies fully behind one plane. Conservative: a touching box is never rejected,
 // and a box with a non-finite value or min > max is never rejected.
 bool IsAABBOutsideFrustum(const std::array<Plane, 6>& planes, const AABB& worldBounds) noexcept;
+
+// Same test against any number of planes: true when `worldBounds` lies fully behind at least one of them.
+bool IsAABBOutsideAnyPlane(std::span<const Plane> planes, const AABB& worldBounds) noexcept;
 
 // Grows `box` on every side by `fractionOfLargestExtent` times its largest extent.
 // A negative or non-finite fraction counts as 0.

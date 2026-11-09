@@ -304,5 +304,88 @@ TEST(ClusterPartSkipTest, ADowngradedHiZChainReportsTheBudgetReason)
     EXPECT_EQ(ClusterHizReasonOf(HizReason::OverBudget, true, true, false), HizReason::None);
 }
 
+std::size_t RejectedBy(const std::array<Plane, 6>& planes, const std::vector<AABB>& boxes)
+{
+    std::size_t rejected = 0;
+    for (const AABB& box : boxes) {
+        rejected += IsAABBOutsideFrustum(planes, box) ? 1 : 0;
+    }
+    return rejected;
+}
+
+// An extra plane that keeps only x <= limit.
+Plane KeepBelowX(float limit)
+{
+    return Plane{ Vec3(-1.0f, 0.0f, 0.0f), limit };
+}
+
+TEST(ClusterPartSkipTest, SelectCullPlanesNeverRejectsFewerSamplesThanTheCameraPlanes)
+{
+    std::mt19937 rng(77);
+    const auto uniform = [&rng](float lo, float hi) { return std::uniform_real_distribution<float>(lo, hi)(rng); };
+    const Planes camera = PerspectivePlanes(Vec3(0, 0, 0), Vec3(0, 0, 1));
+    ASSERT_TRUE(camera.has_value());
+
+    for (int trial = 0; trial < 200; ++trial) {
+        std::vector<Plane> pool(camera->begin(), camera->end());
+        const int extra = static_cast<int>(uniform(0.0f, 9.99f));
+        for (int i = 0; i < extra; ++i) {
+            Vec3 normal(uniform(-1, 1), uniform(-1, 1), uniform(-1, 1));
+            normal = LengthSquared(normal) > 1e-4f ? Normalize(normal) : Vec3(1, 0, 0);
+            pool.push_back(Plane{ normal, uniform(-30.0f, 30.0f) });
+        }
+        std::vector<AABB> samples;
+        for (int i = 0; i < 40; ++i) {
+            const Vec3 centre(uniform(-40, 40), uniform(-40, 40), uniform(-10, 60));
+            samples.push_back(Box(centre.x, centre.y, centre.z, centre.x + 1, centre.y + 1, centre.z + 1));
+        }
+        const std::array<Plane, 6> chosen = SelectCullPlanes(pool, samples);
+        EXPECT_GE(RejectedBy(chosen, samples), RejectedBy(*camera, samples)) << "trial " << trial;
+    }
+}
+
+TEST(ClusterPartSkipTest, SelectCullPlanesFallsBackToTheCameraPlanesWithoutSamples)
+{
+    const Planes camera = OrthoPlanes();
+    ASSERT_TRUE(camera.has_value());
+    std::vector<Plane> pool(camera->begin(), camera->end());
+    pool.push_back(KeepBelowX(0.2f));
+
+    const std::array<Plane, 6> noSamples = SelectCullPlanes(pool, {});
+    const std::array<Plane, 6> unusable = SelectCullPlanes(pool, std::vector<AABB>{ Box(1, 1, 1, 0, 0, 0) });
+    for (std::size_t i = 0; i < 6; ++i) {
+        EXPECT_EQ(noSamples[i].distance, (*camera)[i].distance);
+        EXPECT_EQ(unusable[i].distance, (*camera)[i].distance);
+    }
+
+    // A pool without extra planes is the camera frustum.
+    const std::array<Plane, 6> same = SelectCullPlanes(std::span<const Plane>(pool.data(), 6), std::vector<AABB>{ Box(5, 0, 1, 6, 1, 2) });
+    EXPECT_EQ(same[3].distance, (*camera)[3].distance);
+}
+
+TEST(ClusterPartSkipTest, SelectedPlanesSkipAPartThatTheCameraBoxWouldKeep)
+{
+    const Planes camera = OrthoPlanes();
+    ASSERT_TRUE(camera.has_value());
+    ExtraCullPlanes extra;
+    extra.planes[0] = KeepBelowX(0.2f);
+    extra.count = 1;
+
+    // Every box lies inside the camera frustum (x in [-1, 1]) but right of the extra plane.
+    const std::vector<AABB> boxes{ Box(0.5f, -0.5f, 1, 0.6f, 0.5f, 2), Box(0.7f, -0.5f, 1, 0.8f, 0.5f, 2) };
+    const std::vector<ClusterMeshGroup> groups{ { MeshToken{ 1, 1 }, {}, ClusterMaterialKind::None, { 0, 1 } } };
+    EXPECT_EQ(PlanClusterPartSkips(camera, kFrustumOnly, boxes, Union(boxes), groups), (std::vector<std::uint8_t>{ 0 }));
+
+    const Planes chosen = ChooseCullPlanes(*camera, extra, boxes);
+    EXPECT_EQ(PlanClusterPartSkips(chosen, kFrustumOnly, boxes, Union(boxes), groups), (std::vector<std::uint8_t>{ 1 }));
+
+    // A box left of the extra plane is kept by the chosen planes.
+    const std::vector<AABB> keptBoxes{ Box(-0.5f, -0.5f, 1, 0.0f, 0.5f, 2) };
+    const std::vector<ClusterMeshGroup> keptGroups{ { MeshToken{ 1, 1 }, {}, ClusterMaterialKind::None, { 0 } } };
+    const Planes chosenKept = ChooseCullPlanes(*camera, extra, keptBoxes);
+    EXPECT_EQ(PlanClusterPartSkips(chosenKept, kFrustumOnly, keptBoxes, Union(keptBoxes), keptGroups),
+        (std::vector<std::uint8_t>{ 0 }));
+}
+
 } // namespace
 } // namespace gte::fx

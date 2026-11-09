@@ -140,6 +140,8 @@ private:
 
     // The list keeps its content between frames; `m_sharedListRegistry` is set only while a frame may read it.
     std::vector<DrawCommand> m_sharedList;
+    // m_sharedList[i].entity, dense, so the claimed-entity skip of Draw() reads 8 bytes per command.
+    std::vector<Entity> m_sharedEntities;
     const Registry* m_sharedListRegistry = nullptr;
     std::uint64_t m_sharedListEpoch = 0;
     std::vector<RenderListEntry> m_listSnapshot;

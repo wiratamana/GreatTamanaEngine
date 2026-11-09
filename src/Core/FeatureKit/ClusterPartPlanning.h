@@ -78,6 +78,18 @@ std::vector<std::uint8_t> PlanClusterPartSkips(const std::optional<std::array<Pl
     ClusterCullFlags flags, std::span<const AABB> instanceBoxes, const ClusterPartBox& allBoxes,
     std::span<const ClusterMeshGroup> groups);
 
+// Most instance boxes SelectCullPlanes looks at.
+inline constexpr std::size_t kCullPlaneSampleCount = 128;
+
+// Six planes for the cull from `pool`, whose first six entries are the camera frustum. Greedy: each pick rejects the
+// most sample boxes the earlier picks kept. Rejects at least as many samples as the camera planes, else returns them.
+// Every pool plane must bound what the draw can change; then any choice stays conservative.
+std::array<Plane, 6> SelectCullPlanes(std::span<const Plane> pool, std::span<const AABB> sampleBoxes);
+
+// SelectCullPlanes over the camera planes followed by `extra`, judged on a strided sample of the candidate boxes.
+std::array<Plane, 6> ChooseCullPlanes(
+    const std::array<Plane, 6>& camera, const ExtraCullPlanes& extra, std::span<const AABB> candidateBounds);
+
 // Hi-Z reason a chain reports. A chain that wanted occlusion reads NothingInView when every part was skipped,
 // else its planned reason. Other chains read None.
 constexpr HizReason ClusterHizReasonOf(HizReason planned, bool wantsTwoPhase, bool depthOnly, bool nothingInView) noexcept

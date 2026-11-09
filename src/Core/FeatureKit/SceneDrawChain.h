@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ClusterDrawTypes.h"
 #include "Frame.h"
 #include "Texture.h"
 #include "../../Math/Mat4.h"
@@ -35,6 +36,9 @@ public:
     // Skips entities whose world bounds, grown by `paddingFraction` of their largest extent, miss the camera frustum.
     // Meshes without bounds are always drawn.
     SceneDrawChain& CullToFrustum(float paddingFraction = 0.0f);
+
+    // With CullToFrustum(): also skips entities whose padded bounds lie outside any of these planes.
+    SceneDrawChain& CullPlanes(const ExtraCullPlanes& planes);
 
     // Skips the entities of `exclusion` (read when the pass executes). An empty handle changes nothing.
     // The pass is declared even when every entity is skipped, so a depth clear still happens.

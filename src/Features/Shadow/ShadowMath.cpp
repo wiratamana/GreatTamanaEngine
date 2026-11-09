@@ -230,6 +230,8 @@ ShadowCascadeSet BuildShadowCascades(const ShadowViewFrustum& frustum, const Vec
         cascade.radius = radius;
         cascade.texelWorldSize = static_cast<float>(texel);
         cascade.depthRange = static_cast<float>(zMax - zMin);
+        cascade.lightForward = Vec3(lightRotation(2, 0), lightRotation(2, 1), lightRotation(2, 2));
+        cascade.lightNearZ = zMin;
     }
 
     set.valid = true;
@@ -240,6 +242,227 @@ ShadowCascadeSet BuildShadowCascades(const ShadowViewFrustum& frustum, const Vec
     set.shadowDistance = shadowFar;
     set.fadeStart = shadowFar * (1.0f - safe.distanceFadeFraction);
     return set;
+}
+
+namespace {
+
+// Double vector: the swept hull of the camera slice needs more headroom than the float cascade math has.
+struct Vec3d {
+    double x = 0.0;
+    double y = 0.0;
+    double z = 0.0;
+};
+
+Vec3d operator+(const Vec3d& a, const Vec3d& b) noexcept { return { a.x + b.x, a.y + b.y, a.z + b.z }; }
+Vec3d operator-(const Vec3d& a, const Vec3d& b) noexcept { return { a.x - b.x, a.y - b.y, a.z - b.z }; }
+Vec3d operator*(const Vec3d& a, double s) noexcept { return { a.x * s, a.y * s, a.z * s }; }
+double Dot(const Vec3d& a, const Vec3d& b) noexcept { return a.x * b.x + a.y * b.y + a.z * b.z; }
+double Length(const Vec3d& a) noexcept { return std::sqrt(Dot(a, a)); }
+
+Vec3d Cross(const Vec3d& a, const Vec3d& b) noexcept
+{
+    return { a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x };
+}
+
+Vec3d ToDouble(const Vec3& v) noexcept { return { v.x, v.y, v.z }; }
+
+bool IsFinite(const Vec3d& v) noexcept { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
+
+// Texels a lookup can land away from the receiver's own texel, besides the normal offset and the filter radius.
+constexpr double kNearestTexelReach = 1.0; // The nearest-texel read lands up to one texel away.
+constexpr double kRasterSlackTexels = 1.0; // Sub-texel rasterization slack.
+constexpr double kJitterPixels = 2.0;      // The view is unjittered; the image is drawn jittered.
+
+// Float rounding of the frustum extraction (see FrustumNoise) is padded by this factor; a view whose noise reaches the
+// refusal limit gets no planes.
+constexpr double kFloatRoundoff = 1.2e-7;
+constexpr double kNoisePadFactor = 24.0;
+constexpr double kNoiseRefusal = 0.01;
+
+// Safety margin for evaluating a plane in float: relative to the plane offset and the largest coordinate.
+constexpr double kPlaneFloatMargin = 4.0e-7;
+
+constexpr std::size_t kHullPointCount = 16;
+constexpr std::size_t kHullFaceCapacity = 64;
+
+// Relative error of a near-plane corner ray: the extraction runs in float on eye-sized numbers,
+// the near rectangle is small.
+double FrustumNoise(const ShadowViewFrustum& frustum) noexcept
+{
+    const double tanX = 0.5 * Length(ToDouble(frustum.rays[1]) - ToDouble(frustum.rays[0]));
+    const double tanY = 0.5 * Length(ToDouble(frustum.rays[3]) - ToDouble(frustum.rays[0]));
+    const double nearRect = 2.0 * std::min(tanX, tanY) * frustum.viewNear;
+    const double maxEye = std::max({ std::abs(static_cast<double>(frustum.eye.x)),
+        std::abs(static_cast<double>(frustum.eye.y)), std::abs(static_cast<double>(frustum.eye.z)), 1.0 });
+    return nearRect > 0.0 ? kFloatRoundoff * maxEye / nearRect : 1e30;
+}
+
+struct DepthSlab {
+    double lo = 0.0;
+    double hi = 0.0;
+};
+
+// View-depth range whose lookups can read the map of cascade `c`. The first cascade also serves depth below its slice,
+// the last one up to the fade end, and a lookup outside map c - 1 falls back to map c.
+DepthSlab ReceiverSlab(const ShadowViewFrustum& frustum, const ShadowCascadeSet& set, std::uint32_t c,
+    double lookupReach) noexcept
+{
+    const std::uint32_t last = set.count - 1;
+    const auto startOf = [&](std::uint32_t k) {
+        return k == 0 ? static_cast<double>(frustum.viewNear) : static_cast<double>(set.cascades[k].sliceStart);
+    };
+    const auto endOf = [&](std::uint32_t k) {
+        return k == last ? static_cast<double>(set.shadowDistance) : static_cast<double>(set.cascades[k].sliceEnd);
+    };
+    DepthSlab slab{ c > 0 ? startOf(c - 1) : startOf(c), endOf(c) };
+
+    // A lookup moved toward the sun by up to `lookupReach` picks its cascade by the moved depth.
+    const double sunAlongForward = Dot(ToDouble(set.directionTowardSun), ToDouble(frustum.forward));
+    slab.lo -= std::max(0.0, lookupReach * sunAlongForward);
+    slab.hi += std::max(0.0, -lookupReach * sunAlongForward);
+    slab.lo = std::max(slab.lo, static_cast<double>(frustum.viewNear));
+    slab.hi = std::min(slab.hi, static_cast<double>(frustum.viewFar));
+    return slab;
+}
+
+// World padding around every receiver point of cascade `c`: bias, filter, camera jitter and frustum float noise.
+double CasterPad(const ShadowViewFrustum& frustum, const ShadowCascade& cascade, const ShadowSettings& safe,
+    double hiDepth, double viewWidth, double viewHeight) noexcept
+{
+    const double texel = cascade.texelWorldSize;
+    double pad = (safe.normalOffsetTexels + safe.filterRadiusTexels + kNearestTexelReach + kRasterSlackTexels) * texel;
+    const double tanX = 0.5 * Length(ToDouble(frustum.rays[1]) - ToDouble(frustum.rays[0]));
+    const double tanY = 0.5 * Length(ToDouble(frustum.rays[3]) - ToDouble(frustum.rays[0]));
+    pad += kJitterPixels * hiDepth * std::max(2.0 * tanX / viewWidth, 2.0 * tanY / viewHeight);
+    pad += kNoisePadFactor * FrustumNoise(frustum) * hiDepth;
+    return pad;
+}
+
+// Outer half-space of a convex hull: every hull point satisfies dot(n, p) <= d.
+struct HullFace {
+    Vec3d n;
+    double d = 0.0;
+};
+
+// Faces of the convex hull of the points, by brute force over all point triples. Degenerate triples and duplicate faces
+// are dropped; faces past the capacity are dropped too (a missing face only loosens the bound).
+std::size_t HullFacesOf(const std::array<Vec3d, kHullPointCount>& pts, std::array<HullFace, kHullFaceCapacity>& faces) noexcept
+{
+    double scale = 0.0;
+    for (const Vec3d& p : pts) {
+        scale = std::max({ scale, std::abs(p.x), std::abs(p.y), std::abs(p.z) });
+    }
+    const double tolerance = 1e-9 * (1.0 + scale);
+    std::size_t count = 0;
+    for (std::size_t a = 0; a < pts.size(); ++a) {
+        for (std::size_t b = a + 1; b < pts.size(); ++b) {
+            for (std::size_t c = b + 1; c < pts.size(); ++c) {
+                const Vec3d e1 = pts[b] - pts[a];
+                const Vec3d e2 = pts[c] - pts[a];
+                Vec3d n = Cross(e1, e2);
+                const double length = Length(n);
+                if (length < 1e-4 * Length(e1) * Length(e2) || length < 1e-12) {
+                    continue;
+                }
+                n = n * (1.0 / length);
+                const double offset = Dot(n, pts[a]);
+                bool above = false;
+                bool below = false;
+                for (const Vec3d& p : pts) {
+                    const double v = Dot(n, p) - offset;
+                    above = above || v > tolerance;
+                    below = below || v < -tolerance;
+                }
+                if (above && below) {
+                    continue; // The triple does not span a face.
+                }
+                if (above) {
+                    n = n * -1.0;
+                }
+                // The support value of all points is exact even when the normal is noisy.
+                double support = -1e300;
+                for (const Vec3d& p : pts) {
+                    support = std::max(support, Dot(n, p));
+                }
+                bool duplicate = false;
+                for (std::size_t i = 0; i < count && !duplicate; ++i) {
+                    duplicate = Dot(faces[i].n, n) > 0.99999 && std::abs(faces[i].d - support) < 1e-4 * (1.0 + std::abs(support));
+                }
+                if (!duplicate && count < faces.size()) {
+                    faces[count++] = HullFace{ n, support };
+                }
+            }
+        }
+    }
+    return count;
+}
+
+} // namespace
+
+bool IsPerspectiveViewProjection(const Mat4& viewProjection) noexcept
+{
+    const float w = std::abs(viewProjection(3, 0)) + std::abs(viewProjection(3, 1)) + std::abs(viewProjection(3, 2));
+    return w > 1e-6f;
+}
+
+ShadowCasterPlanes BuildShadowCasterPlanes(const ShadowViewFrustum& frustum, const ShadowCascadeSet& set,
+    std::uint32_t cascade, const ShadowSettings& safe, float viewWidthPixels, float viewHeightPixels,
+    float lookupReachWorld) noexcept
+{
+    ShadowCasterPlanes result;
+    if (!frustum.valid || !set.valid || cascade >= set.count || !(viewWidthPixels > 0.0f) || !(viewHeightPixels > 0.0f)) {
+        return result;
+    }
+    if (!(FrustumNoise(frustum) < kNoiseRefusal)) {
+        return result; // The extracted rays are too noisy to bound anything.
+    }
+    const ShadowCascade& cascadeData = set.cascades[cascade];
+    const Vec3d lightForward = ToDouble(cascadeData.lightForward);
+    if (!(std::abs(Length(lightForward) - 1.0) < 1e-3)) {
+        return result;
+    }
+    const Vec3d towardSun = lightForward * -1.0;
+    const DepthSlab slab = ReceiverSlab(frustum, set, cascade, std::max(0.0f, lookupReachWorld));
+    if (!(slab.hi > slab.lo)) {
+        return result;
+    }
+    const double pad = CasterPad(frustum, cascadeData, safe, slab.hi, viewWidthPixels, viewHeightPixels);
+
+    // The slab corners, and the same corners swept toward the sun up to the map's near plane.
+    const Vec3d eye = ToDouble(frustum.eye);
+    std::array<Vec3d, kHullPointCount> points;
+    for (std::size_t i = 0; i < 4; ++i) {
+        points[i] = eye + ToDouble(frustum.rays[i]) * slab.lo;
+        points[i + 4] = eye + ToDouble(frustum.rays[i]) * slab.hi;
+    }
+    double maxCoordinate = 0.0;
+    for (std::size_t i = 0; i < 8; ++i) {
+        const double sweep = std::max(0.0, Dot(points[i], lightForward) - cascadeData.lightNearZ + pad);
+        points[i + 8] = points[i] + towardSun * sweep;
+    }
+    for (const Vec3d& p : points) {
+        if (!IsFinite(p) || !std::isfinite(pad)) {
+            return result;
+        }
+        maxCoordinate = std::max({ maxCoordinate, std::abs(p.x), std::abs(p.y), std::abs(p.z) });
+    }
+
+    std::array<HullFace, kHullFaceCapacity> faces;
+    const std::size_t faceCount = HullFacesOf(points, faces);
+    for (std::size_t i = 0; i < faceCount && result.planes.count < fx::kMaxExtraCullPlanes; ++i) {
+        const double offset = faces[i].d + pad;
+        Plane plane;
+        plane.normal = Vec3(static_cast<float>(-faces[i].n.x), static_cast<float>(-faces[i].n.y),
+            static_cast<float>(-faces[i].n.z));
+        plane.distance = static_cast<float>(offset + kPlaneFloatMargin * (std::abs(offset) + maxCoordinate));
+        if (!std::isfinite(plane.normal.x) || !std::isfinite(plane.normal.y) || !std::isfinite(plane.normal.z)
+            || !std::isfinite(plane.distance)) {
+            return ShadowCasterPlanes{};
+        }
+        result.planes.planes[result.planes.count++] = plane;
+    }
+    result.valid = result.planes.count > 0;
+    return result;
 }
 
 ShadowMaskParamsGpu MakeShadowMaskParams(

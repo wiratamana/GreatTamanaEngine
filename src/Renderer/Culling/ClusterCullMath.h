@@ -144,6 +144,9 @@ ClusterCullParams MakeClusterCullParams(const Mat4& cullViewProjection, const Ve
 // Sets the instance box: the union of the mesh's cluster boxes. Without it the instance-level test is off.
 void SetClusterCullInstanceBox(ClusterCullParams& params, const AABB& box) noexcept;
 
+// Replaces the six frustum planes (the occlusion matrix is untouched). Each plane must bound what the draw can change.
+void SetClusterCullPlanes(ClusterCullParams& params, const std::array<Plane, 6>& planes) noexcept;
+
 // False when any plane or the eye holds a non-finite value.
 bool ClusterCullParamsAreFinite(const ClusterCullParams& params) noexcept;
 

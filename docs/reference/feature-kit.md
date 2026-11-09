@@ -78,13 +78,14 @@ Every chain ends with a terminal call. A refused call makes the terminal declare
 |---|---|---|
 | `ComputeChain` | `Bind(name, tex)`, `Bind(name, fx::Depth(tex))`, `BindBuffer(name, buf)`, `Push(T)`, `Params(gpuParams, T)`, `Params(binding, gpuParams, T)`, `BindOutput(name, readback)` | `Dispatch(extent[, depth])` |
 | `FullscreenChain` | `Bind`, `Push`, `Acknowledge(depth)`, `Target(tex[, clear])`, `DepthTest(tex, compare, write)` | `Draw()` |
-| `SceneDrawChain` | `Shaders(set)`, `Camera(vp)`, `ClearDepthTarget(tex, v)`, `ColorTarget(tex)`, `Target(tex)`, `SceneServices()`, `CullToFrustum(padding)`, `Exclude(set)`, `Only(selection)`, `Claim()` | `Record()` |
-| `ClusterDrawChain` | `Instances`, `Camera`, `CullCamera`, `Culling`, `TwoPhase(hiz, depth)`, `ReuseSurvivors()`, `Target` or `DepthOnlyTarget`, `IdTint`, `Stats` | `Plan()` (optional), `Record()` |
+| `SceneDrawChain` | `Shaders(set)`, `Camera(vp)`, `ClearDepthTarget(tex, v)`, `ColorTarget(tex)`, `Target(tex)`, `SceneServices()`, `CullToFrustum(padding)`, `CullPlanes(planes)`, `Exclude(set)`, `Only(selection)`, `Claim()` | `Record()` |
+| `ClusterDrawChain` | `Instances`, `Camera`, `CullCamera`, `CullPlanes(planes)`, `Culling`, `TwoPhase(hiz, depth)`, `ReuseSurvivors()`, `Target` or `DepthOnlyTarget`, `IdTint`, `Stats` | `Plan()` (optional), `Record()` |
 
 - Variables are bound by name. Names must be literals. Access (read or write) comes from the shader.
 - `Fullscreen` acknowledges scene depth by default. `DepthCompare` is `Less`, `LessEqual`, `Equal` or `Always`.
 - `FullscreenShader{base, blend}` takes `Opaque`, `AlphaBlend` or `Additive`.
 - `CullToFrustum` skips draws whose bounds miss the camera. Meshes without bounds are never skipped.
+- `CullPlanes(planes)` adds up to 16 half-spaces. Each plane alone must bound what the draw can change: a draw wholly outside one plane is skipped. A cluster chain uses the 6 planes (camera or extra) that reject most of its candidates.
 - `Target(tex)` draws into one texture as color and depth and loads both. Use `OpaqueFrame::SceneTarget()`.
 - `SceneServices()` binds the sun, ambient and shadow set of this view and declares reads of the published scene slots. A `Shaded` set refuses to record without it. Refused in a Shared frame.
 - `Only(selection)` draws just those entities. An invalid selection draws nothing. Get one with `f.SelectEntities(span)`. One selection can feed several chains of the frame. At most 32 sets exist per frame (cluster draws, shadow cascades and selections share them).

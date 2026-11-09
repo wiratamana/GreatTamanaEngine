@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [Shadow caster sweep, slot fix](#shadow-caster-sweep-slot-fix-branch-featuretoon-shading-impl-2026-11-09) | `feature/toon-shading-impl` | 2026-11-09 |
 | [Shadow lanes share buffers, write-after-read edges](#shadow-lanes-share-buffers-write-after-read-edges-branch-featuretoon-shading-impl-2026-11-09) | `feature/toon-shading-impl` | 2026-11-09 |
 | [GPU culling: cheaper CPU floor, instance-level cull, ledger fix](#gpu-culling-cheaper-cpu-floor-instance-level-cull-ledger-fix-branch-featuretoon-shading-impl-2026-11-05) | `feature/toon-shading-impl` | 2026-11-05 |
 | [Toon light follows the world light](#toon-light-follows-the-world-light-branch-featuretoon-shading-impl-2026-11-04) | `feature/toon-shading-impl` | 2026-11-04 |
@@ -42,6 +43,16 @@
 | [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+
+## Shadow caster sweep, slot fix (branch `feature/toon-shading-impl`, 2026-11-09)
+
+- **Caster sweep.** Each Shadow cascade lane culls casters against its camera view slice swept toward the sun, not only the camera frustum. The 6 best planes are chosen in `PlanChain`. The cull shader and the 256-byte `ClusterCullParams` layout do not change.
+- **Skipped lanes.** A lane with no caster in range gets no pass. An AWAY camera no longer draws any cascade lane.
+- **Slot bug fixed.** A scene with 2 or more cluster parts could give a lane the wrong instance records, and nothing reported it. Parts now keep the same slot in every lane.
+- **CPU cost.** The entity list of a whole-candidate part is shared, and a single-group candidate list is remembered by epoch.
+- **Measured.** About -51.6 percent Shadow GPU time in the FAR_WALLOFF pose (390 ms to 189 ms), with the sun behind the camera and a flat field. Other poses stay within about 1 ms. Shadow depth maps are no longer bit-identical to the old build, as expected.
+- **No separate switch.** `cullCasters=false` turns off all caster culling, the sweep too.
+- **Not verified.** The skipped headless-Vulkan GPU parity tests, discrete GPUs, scenes with 3 or more cluster parts and counts above 100000.
 
 ## Shadow lanes share buffers, write-after-read edges (branch `feature/toon-shading-impl`, 2026-11-09)
 

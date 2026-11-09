@@ -11,6 +11,7 @@
 #include "../../Game/SceneDrawPass.h"
 #include "../../Renderer/SceneServicesDescriptorSet.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -21,6 +22,8 @@
 #include <vector>
 
 namespace gte::fx {
+
+static_assert(kMaxExtraCullPlanes == kSceneCullExtraPlanes, "the pass keeps every extra plane of the chain");
 
 // `active` is false for an inert chain: pass toggled off, or the frame has no engine context.
 struct SceneDrawChain::Impl {
@@ -42,6 +45,7 @@ struct SceneDrawChain::Impl {
     std::optional<float> depthClear;
     Texture color;
     std::optional<float> cullPadding;
+    ExtraCullPlanes extraPlanes;
     const EntityMarkSet* excluded = nullptr;
     EntitySelection only;
     bool sceneServices = false;
@@ -163,6 +167,15 @@ SceneDrawChain& SceneDrawChain::CullToFrustum(float paddingFraction)
     return *this;
 }
 
+SceneDrawChain& SceneDrawChain::CullPlanes(const ExtraCullPlanes& planes)
+{
+    if (m_impl) {
+        m_impl->extraPlanes = planes;
+        m_impl->extraPlanes.count = std::min(planes.count, kMaxExtraCullPlanes);
+    }
+    return *this;
+}
+
 SceneDrawChain& SceneDrawChain::Exclude(const EntityExclusion& exclusion)
 {
     if (m_impl && exclusion.handle != nullptr) {
@@ -268,6 +281,7 @@ bool SceneDrawChain::Record()
     }
     if (impl.cullPadding.has_value()) {
         pass.CullToFrustum(*impl.cullPadding);
+        pass.CullPlanes(std::span<const Plane>(impl.extraPlanes.planes.data(), impl.extraPlanes.count));
     }
     if (impl.excluded != nullptr) {
         pass.ExcludeEntities(impl.excluded, core.ExclusionEpoch());

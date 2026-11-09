@@ -38,9 +38,10 @@
 | SDSM smoothing | Range is padded, grows at once, shrinks over `sdsmShrinkSeconds`, snaps to a log grid |
 | SDSM fallback | `useSdsm` off, a pass of the group off, shader missing, or no sample for 120 frames: fixed splits over `[near, maxDistance]` |
 | Caster culling | `CullToFrustum(casterCullPaddingFraction)`. Meshes without bounds are never culled. Skinned meshes use rest-pose bounds |
+| Caster bound | Per cascade, the hull planes of the camera slice swept toward the sun (`BuildShadowCasterPlanes`). A caster outside one plane cannot shadow what the cascade map is read at. Orthographic views and a noisy float frustum keep the cascade box |
 | Depth pipelines | One depth-only pipeline per vertex layout. A layout with no depth-only shader casts no shadow |
 | Cluster lanes | One lane per cascade, 4 part slots. Order: `Plan()`, CPU draw with `Exclude`, then `Record()` |
-| Lane culling | Frustum only. Never the back-face cone. No padding. `cullCasters` off = no cluster culled |
+| Lane culling | Frustum only. Never the back-face cone. No padding. `cullCasters` off = no cluster culled. The lane takes the 6 planes (cascade box or caster bound) that reject most of 128 sampled instance boxes; a lane whose whole part is outside them draws nothing |
 | Capture | A frame with the Frame Debugger capture armed uses the CPU draw only |
 | Alpha-tested casters | Stay on the CPU depth draw, drawn opaque |
 

@@ -142,6 +142,35 @@ TEST(ClusterCullMath, ParamsCarryPlanesCountsAndOrthographicBit)
     EXPECT_FALSE(ClusterCullParamsAreFinite(broken));
 }
 
+TEST(ClusterCullMath, SetClusterCullPlanesWritesOnlyThePlanes)
+{
+    const Mat4 vp = PerspectiveFrom(Vec3(0.0f, 0.0f, -5.0f));
+    ClusterCullParams params = MakeClusterCullParams(vp, Vec3(0.0f, 0.0f, -5.0f), false, 7, 9, ClusterCullFlags::Frustum);
+    const ClusterCullParams before = params;
+
+    const std::array<Plane, 6> camera = ExtractFrustumPlanes(vp);
+    std::array<Plane, 6> planes = camera;
+    planes[1] = Plane{ Vec3(-1.0f, 0.0f, 0.0f), 0.5f }; // Replaces the right plane: keeps x <= 0.5.
+    SetClusterCullPlanes(params, planes);
+
+    for (std::size_t i = 0; i < 6; ++i) {
+        EXPECT_EQ(params.planes[i][0], planes[i].normal.x);
+        EXPECT_EQ(params.planes[i][1], planes[i].normal.y);
+        EXPECT_EQ(params.planes[i][2], planes[i].normal.z);
+        EXPECT_EQ(params.planes[i][3], planes[i].distance);
+    }
+    EXPECT_EQ(std::memcmp(params.viewProjection, before.viewProjection, sizeof(params.viewProjection)), 0);
+    EXPECT_EQ(std::memcmp(params.counts, before.counts, sizeof(params.counts)), 0);
+    EXPECT_EQ(std::memcmp(params.eyeOrDirection, before.eyeOrDirection, sizeof(params.eyeOrDirection)), 0);
+
+    // The CPU oracle takes the same planes: a cluster the camera frustum keeps is culled by the replaced plane.
+    const MeshCluster cluster = MakeCluster(Vec3(0.0f, 0.0f, 0.0f), 1.0f, Vec3(0.0f, 0.0f, 1.0f), 1.0f);
+    const Mat4 right = Mat4::Translation(Vec3(2.0f, 0.0f, 0.0f));
+    EXPECT_FALSE(ClusterFrustumCulled(cluster, right, camera));
+    EXPECT_TRUE(ClusterFrustumCulled(cluster, right, planes));
+    EXPECT_FALSE(ClusterFrustumCulled(cluster, Mat4::Identity(), planes));
+}
+
 // ---- frustum and cone oracle ----
 
 TEST(ClusterCullMath, FrustumAcceptsVisibleAndRejectsOutsideAndBehind)

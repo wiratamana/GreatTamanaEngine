@@ -6,6 +6,7 @@
 #include "../../Math/Vec3.h"
 #include "../../Renderer/Culling/ClusterCullMath.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -93,6 +94,16 @@ struct ClusterRejectCounts {
 struct ClusterPartBox {
     AABB box;
     bool bounded = false;
+};
+
+// Most extra cull planes a draw can take.
+inline constexpr std::uint32_t kMaxExtraCullPlanes = 16;
+
+// Extra half-spaces a draw is culled against, besides its camera frustum. Each plane alone must be a valid
+// outer bound of what the draw can change (inside when dot(normal, p) + distance >= 0).
+struct ExtraCullPlanes {
+    std::array<Plane, kMaxExtraCullPlanes> planes{};
+    std::uint32_t count = 0;
 };
 
 // Camera of one chain. `eyeOrDirection` is the eye point, or the view direction when `orthographic`.

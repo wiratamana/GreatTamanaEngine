@@ -232,6 +232,30 @@ TEST(CullingTypes, IsBoundsOutsideFrustumPaddingKeepsANearMissingBox)
     EXPECT_FALSE(IsBoundsOutsideFrustum(planes, box, world, 0.5f));
 }
 
+// --- IsAABBOutsideAnyPlane() -----------------------------------------------------
+
+TEST(CullingTypes, ExtraPlanesRejectWhatTheCameraPlanesKeep)
+{
+    const std::array<Plane, 6> camera =
+        ExtractFrustumPlanes(Mat4::OrthographicLH_ZO(-1.0f, 1.0f, -2.0f, 2.0f, 0.5f, 10.0f));
+    const AABB inside{ Vec3(0.5f, -0.5f, 4.0f), Vec3(0.9f, 0.5f, 5.0f) };
+    ASSERT_FALSE(IsAABBOutsideFrustum(camera, inside));
+
+    // Extra planes: keep x <= 0.2 and keep z <= 8.
+    const std::array<Plane, 2> extra{ Plane{ Vec3(-1.0f, 0.0f, 0.0f), 0.2f }, Plane{ Vec3(0.0f, 0.0f, -1.0f), 8.0f } };
+    EXPECT_TRUE(IsAABBOutsideAnyPlane(extra, inside));
+
+    const AABB kept{ Vec3(-0.5f, -0.5f, 4.0f), Vec3(0.1f, 0.5f, 5.0f) };
+    EXPECT_FALSE(IsAABBOutsideAnyPlane(extra, kept));
+
+    // A touching box is kept, no planes keep everything, a bad box is never rejected.
+    EXPECT_FALSE(IsAABBOutsideAnyPlane(extra, AABB{ Vec3(0.2f, 0.0f, 4.0f), Vec3(0.3f, 0.5f, 5.0f) }));
+    EXPECT_FALSE(IsAABBOutsideAnyPlane(std::span<const Plane>{}, inside));
+    EXPECT_FALSE(IsAABBOutsideAnyPlane(extra, AABB{ Vec3(1.0f, 0.0f, 0.0f), Vec3(0.0f, 1.0f, 1.0f) }));
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    EXPECT_FALSE(IsAABBOutsideAnyPlane(extra, AABB{ Vec3(nan, 0.0f, 0.0f), Vec3(1.0f, 1.0f, 1.0f) }));
+}
+
 // --- PartLocalBounds() ---------------------------------------------------------
 
 TEST(CullingTypes, PartLocalBoundsIsEmptyForSkinnedPartsAndTightForStaticParts)
