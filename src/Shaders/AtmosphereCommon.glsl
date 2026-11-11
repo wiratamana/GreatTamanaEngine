@@ -104,6 +104,13 @@ float RayIntersectsSphereNearest(vec3 originKm, vec3 direction, float radiusKm)
     return max(min(t0, t1), 0.0);
 }
 
+// True when a ray from `originKm` reaches the planet. A ray that starts on the surface and points up never does,
+// whatever the rounding of the sphere test says.
+bool RayHitsPlanet(vec3 originKm, vec3 direction, float radiusKm)
+{
+    return dot(originKm, direction) < 0.0 && RayIntersectsSphereNearest(originKm, direction, radiusKm) >= 0.0;
+}
+
 // Optical depth to the top of the atmosphere in `sampleCount` fixed steps. Does not test for ground hits.
 vec3 ComputeOpticalDepthToTopOfAtmosphere(AtmosphereParametersGpu params, vec3 positionKm, vec3 direction, int sampleCount)
 {

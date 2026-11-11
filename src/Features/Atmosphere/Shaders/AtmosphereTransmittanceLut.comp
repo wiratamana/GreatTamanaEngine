@@ -41,9 +41,7 @@ void main()
     vec3 positionKm = vec3(0.0, heightKm + planetRadiusKm, 0.0);
 
     // A ray that hits the planet before leaving the atmosphere has zero transmittance.
-    float groundHitDistance = RayIntersectsSphereNearest(positionKm, viewDirection, planetRadiusKm);
-
-    vec3 transmittance = (groundHitDistance >= 0.0)
+    vec3 transmittance = RayHitsPlanet(positionKm, viewDirection, planetRadiusKm)
         ? vec3(0.0)
         : ComputeTransmittanceToTopOfAtmosphere(atmosphereParameters, positionKm, viewDirection, kTransmittanceLutSampleCount);
 

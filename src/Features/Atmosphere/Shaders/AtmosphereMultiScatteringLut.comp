@@ -58,7 +58,7 @@ void main()
 
             // March to the ground hit, or to the atmosphere exit if the ray misses the planet.
             float groundHitDistanceKm = RayIntersectsSphereNearest(positionKm, sampleDirection, planetRadiusKm);
-            bool hitsGround = groundHitDistanceKm >= 0.0;
+            bool hitsGround = RayHitsPlanet(positionKm, sampleDirection, planetRadiusKm);
             float atmosphereExitDistanceKm =
                 DistanceToAtmosphereOuterBoundary(positionKm, sampleDirection, atmosphereRadiusKm);
             float rayDistanceKm = hitsGround ? groundHitDistanceKm : max(atmosphereExitDistanceKm, 0.0);
