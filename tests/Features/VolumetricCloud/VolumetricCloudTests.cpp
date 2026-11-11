@@ -681,9 +681,9 @@ TEST(VolumetricCloudParamsTest, TheAtmosphereIsAskedForByDefaultAndTheSettingsSt
     const VolumetricCloudSettings defaults;
     EXPECT_FLOAT_EQ(defaults.atmosphereMode, 1.0f);
     EXPECT_FLOAT_EQ(defaults.airScale, 1.0f);
-    EXPECT_FLOAT_EQ(defaults.skyAmbient, 3.0f);
-    EXPECT_FLOAT_EQ(defaults.msAttenuation, 0.35f);
-    EXPECT_FLOAT_EQ(defaults.msContribution, 0.85f);
+    EXPECT_FLOAT_EQ(defaults.skyAmbient, 3.5f);
+    EXPECT_FLOAT_EQ(defaults.msAttenuation, 0.55f);
+    EXPECT_FLOAT_EQ(defaults.msContribution, 0.65f);
     // Without the tables the facts keep the standalone look: the sun goes in tinted and the flag stays off.
     VolumetricCloudFrameFacts facts;
     facts.sunTint = Vec3(0.5f, 0.5f, 0.5f);
