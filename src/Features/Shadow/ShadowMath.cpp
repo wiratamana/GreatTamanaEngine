@@ -133,6 +133,13 @@ ShadowViewFrustum ExtractViewFrustum(const Vec3& eye, const Mat4& invViewProject
     return frustum;
 }
 
+ShadowViewFrustum ExtractViewFrustumRelative(const Vec3& eye, const Mat4& relativeInverse) noexcept
+{
+    ShadowViewFrustum frustum = ExtractViewFrustum(Vec3::Zero(), relativeInverse);
+    frustum.eye = eye;
+    return frustum;
+}
+
 ShadowCascadeSet BuildShadowCascades(const ShadowViewFrustum& frustum, const Vec3& directionTowardSun,
     const ShadowSettings& safe, std::uint32_t resolution, std::optional<ShadowDepthRange> sdsmRange) noexcept
 {

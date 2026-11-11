@@ -3,7 +3,7 @@ layout(local_size_x = 16, local_size_y = 16) in;
 
 // Member names and order match ShadowMaskParamsGpu.
 layout(std430, binding = 0) readonly buffer ShadowMaskParams {
-    mat4 invViewProjection;
+    mat4 invViewProjection;               // Clip space to world position minus eye.
     mat4 cascadeViewProjection[4];
     float cascadeSplitFar[4];             // View depth where cascade i ends.
     float cascadeBlendWidth[4];           // Blend band width at the end of cascade i.
@@ -36,6 +36,7 @@ float FetchDepth(ivec2 p)
     return texelFetch(sceneDepth, clamp(p, ivec2(0), gDepthSize - ivec2(1)), 0).r;
 }
 
+// World position minus the eye.
 vec3 WorldAt(ivec2 p, float depth)
 {
     ivec2 q = clamp(p, ivec2(0), gDepthSize - ivec2(1));
@@ -129,15 +130,16 @@ void main()
     vec3 eye = params.cameraPositionAndFadeStart.xyz;
     float fadeStart = params.cameraPositionAndFadeStart.w;
     float fadeEnd = params.cameraForwardAndFadeEnd.w;
-    vec3 position = WorldAt(depthTexel, depth);
-    float viewDepth = dot(position - eye, params.cameraForwardAndFadeEnd.xyz);
+    vec3 relativePosition = WorldAt(depthTexel, depth);
+    float viewDepth = dot(relativePosition, params.cameraForwardAndFadeEnd.xyz);
     if (viewDepth >= fadeEnd) {
         imageStore(maskOutput, texel, vec4(0.0));
         imageStore(cascadeOutput, texel, vec4(0.0));
         return;
     }
 
-    vec3 normal = NormalFromDepth(depthTexel, depth, position, eye);
+    vec3 normal = NormalFromDepth(depthTexel, depth, relativePosition, vec3(0.0));
+    vec3 position = relativePosition + eye; // Absolute, for the shadow maps.
     float nDotL = dot(normal, params.sunDirection.xyz);
 
     int count = int(params.cascadeCount);

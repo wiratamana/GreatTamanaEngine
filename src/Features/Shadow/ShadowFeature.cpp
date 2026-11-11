@@ -142,12 +142,12 @@ void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
         view.snapshot = snap;
     };
 
-    if (!f.View().invViewProjectionValid) {
+    if (!f.View().relative.valid) {
         finish(ShadowFrameStatus::NoValidCamera);
         return;
     }
     const ResolvedDirectionalLight sun = ResolveActiveDirectionalLight(f.Scene());
-    const ShadowViewFrustum frustum = ExtractViewFrustum(f.View().eye, f.View().invViewProjection);
+    const ShadowViewFrustum frustum = ExtractViewFrustumRelative(f.View().eye, f.View().relative.inverse);
     snap.sunElevationDegrees = SunElevationDegrees(sun.directionTowardSun);
     if (frustum.valid) {
         snap.effectiveMaxDistance = std::min(frustum.viewFar, cfg.maxDistance);
@@ -306,21 +306,22 @@ void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
 void ShadowFeature::DepthRangePass(fx::PostOpaqueFrame& f)
 {
     const ShadowSettings& cfg = m_settings;
-    if (HasNoPixels(f.View()) || !f.View().invViewProjectionValid || !cfg.useSdsm || !SdsmGroupEnabled(f)
+    if (HasNoPixels(f.View()) || !f.View().relative.valid || !cfg.useSdsm || !SdsmGroupEnabled(f)
         || !f.ShaderReady(m_depthReduceShader)) {
         return;
     }
-    const ShadowViewFrustum frustum = ExtractViewFrustum(f.View().eye, f.View().invViewProjection);
+    const ShadowViewFrustum frustum = ExtractViewFrustumRelative(f.View().eye, f.View().relative.inverse);
     if (!frustum.valid) {
         return;
     }
     ShadowViewState& view = m_views.For(f.Scope());
 
     DepthReducePush push;
-    push.invViewProjection = f.View().invViewProjection;
-    push.eyeAndPad[0] = frustum.eye.x;
-    push.eyeAndPad[1] = frustum.eye.y;
-    push.eyeAndPad[2] = frustum.eye.z;
+    // The matrix is eye-relative, so the shader measures depth from the origin.
+    push.invViewProjection = f.View().relative.inverse;
+    push.eyeAndPad[0] = 0.0f;
+    push.eyeAndPad[1] = 0.0f;
+    push.eyeAndPad[2] = 0.0f;
     push.forwardAndPad[0] = frustum.forward.x;
     push.forwardAndPad[1] = frustum.forward.y;
     push.forwardAndPad[2] = frustum.forward.z;
@@ -347,7 +348,7 @@ void ShadowFeature::MaskPass(fx::PostOpaqueFrame& f)
     const auto finish = [&](ShadowFrameStatus status) { view.snapshot.maskStatus = status; };
 
     const std::optional<ShadowMapData> map = m_mapData.Fetch(f);
-    if (!ShadowDebugViewNeeded(m_settings) || !map || HasNoPixels(f.View()) || !f.View().invViewProjectionValid) {
+    if (!ShadowDebugViewNeeded(m_settings) || !map || HasNoPixels(f.View()) || !f.View().relative.valid) {
         finish(ShadowFrameStatus::NotRendered);
         return;
     }
@@ -358,7 +359,7 @@ void ShadowFeature::MaskPass(fx::PostOpaqueFrame& f)
         return;
     }
 
-    const ShadowMaskParamsGpu params = MakeShadowMaskParams(*map, m_settings, f.View().invViewProjection);
+    const ShadowMaskParamsGpu params = MakeShadowMaskParams(*map, m_settings, f.View().relative.inverse);
 
     // Cascades past the active count read the first map; the shader never selects them.
     const auto& maps = map->maps;

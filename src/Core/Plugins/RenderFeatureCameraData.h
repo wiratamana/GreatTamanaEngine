@@ -17,8 +17,6 @@ struct RenderPassViewData;
 
 struct RenderFeatureCameraData {
     Vec3 eyeWorldPosition;
-    Mat4 invViewProjection = Mat4::Identity();
-    bool invViewProjectionValid = false;
     // Double-precision camera with the eye at the origin; exact far from the world origin.
     EyeRelativeCamera relative;
 };
@@ -36,8 +34,8 @@ private:
     std::vector<rg::RenderViewId> m_warnedViews;
 };
 
-// Resolves `view`'s eye position and a checked inverse view-projection. Returns an invalid result when
-// `viewData` is null; a singular matrix falls back to identity and warns once per view.
+// Resolves `view`'s eye position and its eye-relative camera. Returns an invalid camera when `viewData` is null;
+// a singular matrix gives an invalid camera and warns once per view.
 RenderFeatureCameraData ResolveRenderFeatureCameraData(rg::RenderViewId view, const RenderPassViewData* viewData);
 
 } // namespace gte

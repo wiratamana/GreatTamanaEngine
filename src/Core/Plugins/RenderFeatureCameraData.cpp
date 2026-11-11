@@ -46,18 +46,9 @@ RenderFeatureCameraData ResolveRenderFeatureCameraData(rg::RenderViewId view, co
         ? MakeEyeRelativeCameraFromMatrix(*viewData->eyeRelativeViewProjection)
         : MakeEyeRelativeCamera(viewData->viewProjection, viewData->eyeWorldPosition);
 
-    Mat4 outInverse;
-    if (viewData->viewProjection.TryInverse(outInverse)) {
-        result.invViewProjection = outInverse;
-        result.invViewProjectionValid = true;
-        return result;
-    }
-
-    result.invViewProjection = Mat4::Identity();
-    result.invViewProjectionValid = false;
-    if (WarningTrackerInstance().ShouldWarnOnce(view)) {
+    if (!result.relative.valid && WarningTrackerInstance().ShouldWarnOnce(view)) {
         GTE_LOG_ERROR("RenderFeatureCameraData",
-            "ResolveRenderFeatureCameraData() - view-projection matrix is singular; falling back to identity.");
+            "ResolveRenderFeatureCameraData() - view-projection matrix is singular; the view has no camera.");
     }
     return result;
 }

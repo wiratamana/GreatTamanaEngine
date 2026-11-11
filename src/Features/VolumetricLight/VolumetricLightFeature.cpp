@@ -172,7 +172,7 @@ void VolumetricLightFeature::VolumePass(fx::PostOpaqueFrame& f)
         bail(VolumetricLightFrameStatus::Disabled);
         return;
     }
-    if (v.extent.width == 0 || v.extent.height == 0 || !v.invViewProjectionValid) {
+    if (v.extent.width == 0 || v.extent.height == 0 || !v.relative.valid) {
         bail(VolumetricLightFrameStatus::NoValidCamera);
         return;
     }
@@ -199,9 +199,10 @@ void VolumetricLightFeature::VolumePass(fx::PostOpaqueFrame& f)
 
     VolumetricLightFrameFacts facts;
     facts.viewProjection = v.viewProjection;
-    facts.invViewProjection = v.invViewProjection;
+    // Rays only need directions, so the eye-relative inverse (double) replaces the absolute one.
+    facts.invViewProjection = v.relative.inverse;
     facts.eye = v.eye;
-    facts.forward = hasReceiver ? receiver->cameraForward : DeriveVolumetricLightForward(v.invViewProjection);
+    facts.forward = hasReceiver ? receiver->cameraForward : DeriveVolumetricLightForward(v.relative.inverse);
     facts.sunDirection = sun.directionTowardSun;
     facts.sunIlluminance = sun.sunIlluminance;
     const std::optional<SunLightModulation> sunLight = m_sunLight.Fetch(f);
@@ -265,7 +266,7 @@ void VolumetricLightFeature::CompositePass(fx::CompositeFrame& f)
 {
     // Every return below declares nothing, so the compositor skips this entry.
     const VolumetricLightSettings& cfg = m_settings;
-    if (!f.View().invViewProjectionValid || !(cfg.strength > 0.0f) || !f.PassEnabled("VolumetricLight.Composite.Dispatch")
+    if (!f.View().relative.valid || !(cfg.strength > 0.0f) || !f.PassEnabled("VolumetricLight.Composite.Dispatch")
         || !f.PassEnabled("VolumetricLight.Composite.CopyToPrivateTarget") || !f.ShaderReady(m_compositeShader)) {
         return;
     }
@@ -279,7 +280,7 @@ void VolumetricLightFeature::CompositePass(fx::CompositeFrame& f)
     }
 
     const VolumetricLightCompositePush push =
-        MakeVolumetricLightCompositePush(cfg, f.View().invViewProjection, f.View().eye, *result, f.FrameIndex());
+        MakeVolumetricLightCompositePush(cfg, f.View().relative.inverse, Vec3::Zero(), *result, f.FrameIndex());
     const bool dispatched = f.Compute(m_compositeShader, "VolumetricLight.Composite.Dispatch")
                                 .Push(push)
                                 .Bind("sourceColor", f.SceneColor())

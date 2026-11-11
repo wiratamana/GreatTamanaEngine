@@ -539,8 +539,6 @@ std::optional<fx::View> Core::PrimaryCameraView(float fallbackAspect)
         }
         view.eye = camera.eyeWorldPosition;
         view.viewProjection = data->viewProjection;
-        view.invViewProjection = camera.invViewProjection;
-        view.invViewProjectionValid = camera.invViewProjectionValid;
         view.relative = camera.relative;
         view.jitterNdc = m_viewJitterThisFrame[rg::ViewScopeIndex(rg::ViewScope::Primary)];
     } else {

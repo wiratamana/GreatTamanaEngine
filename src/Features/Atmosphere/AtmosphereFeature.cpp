@@ -32,7 +32,7 @@ constexpr Extent2D kAerialDispatchSize{ kAerialVolumeSize.width, kAerialVolumeSi
 // Push constants of AtmosphereAerialPerspectiveComposite.comp.
 struct CompositePush {
     Mat4 invViewProjection;
-    Vec4 cameraWorldPositionAndScale; // xyz = camera world position, w = world units per km.
+    Vec4 cameraWorldPositionAndScale; // xyz = camera position the matrix is relative to (the origin), w = world units per km.
     Vec4 strengthMaxDistanceExponent; // x = strength, y = max distance (km), z = depth exponent, w = unused.
     Vec4 skyIntensityAndPad;          // x = sky intensity.
 };
@@ -81,7 +81,7 @@ AtmosphereParametersGpu MakeParameters(const AtmosphereSettings& settings)
     return params;
 }
 
-// The view's inverse view-projection must be valid (checked by the caller).
+// The view's eye-relative camera must be valid (checked by the caller).
 AtmosphereFrameUniforms MakeFrameUniforms(Registry& scene, const fx::View& view, const AtmosphereSettings& settings)
 {
     AtmosphereFrameUniforms uniforms;
@@ -95,7 +95,7 @@ AtmosphereFrameUniforms MakeFrameUniforms(Registry& scene, const fx::View& view,
     uniforms.sunDirection = sun.directionTowardSun;
     uniforms.sunIlluminance = sun.sunIlluminance;
 
-    uniforms.invViewProjection = view.invViewProjection;
+    uniforms.invViewProjection = MakeAtmosphereRayCamera(view.relative).invViewProjection;
     uniforms.aerialPerspectiveMaxDistanceKm = settings.aerialPerspectiveMaxDistanceKm;
     uniforms.aerialPerspectiveDepthExponent = settings.aerialPerspectiveDepthExponent;
     uniforms.aerialPerspectiveSamplesPerSliceAsFloat = static_cast<float>(settings.aerialPerspectiveSamplesPerSlice);
@@ -174,7 +174,7 @@ void AtmosphereFeature::SharedLuts(fx::SharedFrame& f)
 
 void AtmosphereFeature::ViewLuts(fx::PreOpaqueFrame& f)
 {
-    if (!f.View().invViewProjectionValid) {
+    if (!f.View().relative.valid) {
         return;
     }
     const std::optional<AtmosphereSharedLuts> shared = m_sharedLuts.Fetch(f);
@@ -212,7 +212,7 @@ void AtmosphereFeature::AerialVolume(fx::PostOpaqueFrame& f)
     view.aerialSnapshot = AtmosphereAerialSnapshot{};
     view.aerialSnapshot.frameIndex = f.FrameIndex();
 
-    if (v.extent.width == 0 || v.extent.height == 0 || !v.invViewProjectionValid
+    if (v.extent.width == 0 || v.extent.height == 0 || !v.relative.valid
         || !f.PassEnabled("AtmosphereAerialPerspectiveVolumePass")) {
         return;
     }
@@ -312,7 +312,7 @@ void AtmosphereFeature::PublishSunLight(fx::PreOpaqueFrame& f)
 
 void AtmosphereFeature::SkyBackground(fx::PostOpaqueFrame& f)
 {
-    if (!f.View().invViewProjectionValid) {
+    if (!f.View().relative.valid) {
         return;
     }
     const std::optional<AtmosphereViewLuts> luts = m_viewLuts.Fetch(f);
@@ -322,7 +322,7 @@ void AtmosphereFeature::SkyBackground(fx::PostOpaqueFrame& f)
     }
 
     SkyBackgroundPush push{};
-    push.invViewProjection = f.View().invViewProjection;
+    push.invViewProjection = MakeAtmosphereRayCamera(f.View().relative).invViewProjection;
     push.eyeHeightKm = luts->frameUniforms.cameraPositionAtmosphere.y;
     push.planetRadiusKm = shared->parameters.planetRadiusKm;
     push.skyIntensity = m_settings.skyIntensity;
@@ -336,7 +336,7 @@ void AtmosphereFeature::SkyBackground(fx::PostOpaqueFrame& f)
 
 void AtmosphereFeature::Composite(fx::CompositeFrame& f)
 {
-    if (!f.View().invViewProjectionValid || !f.PassEnabled("AtmosphereAerialPerspectiveCompositePass")) {
+    if (!f.View().relative.valid || !f.PassEnabled("AtmosphereAerialPerspectiveCompositePass")) {
         return;
     }
     const std::optional<AtmosphereAerialResult> aerial = m_aerial.Fetch(f);
@@ -350,8 +350,9 @@ void AtmosphereFeature::Composite(fx::CompositeFrame& f)
 
     const fx::View& view = f.View();
     CompositePush push{};
-    push.invViewProjection = view.invViewProjection;
-    push.cameraWorldPositionAndScale = Vec4(view.eye, kWorldUnitsPerKilometer);
+    const AtmosphereRayCamera rayCamera = MakeAtmosphereRayCamera(view.relative);
+    push.invViewProjection = rayCamera.invViewProjection;
+    push.cameraWorldPositionAndScale = Vec4(rayCamera.eye, kWorldUnitsPerKilometer);
     push.strengthMaxDistanceExponent =
         Vec4(m_settings.aerialPerspectiveStrength, aerial->maxDistanceKm, aerial->depthExponent, 0.0f);
     push.skyIntensityAndPad = Vec4(m_settings.skyIntensity, 0.0f, 0.0f, 0.0f);

@@ -145,13 +145,13 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
         CloudWindPeriodM(m_settings));
     VolumetricCloudFrameFacts facts;
     // Rays and reprojection are formed relative to the eye, in double precision.
-    const CloudRelativeCamera camera = MakeCloudRelativeCamera(f.View().viewProjection, f.View().eye);
-    if (!camera.valid) {
+    const fx::View& cameraView = f.View();
+    if (!cameraView.relative.valid) {
         snapshot.status = VolumetricCloudFrameStatus::NoValidCamera;
         return false;
     }
-    facts.invViewProjection = camera.inverse;
-    facts.eye = f.View().eye;
+    facts.invViewProjection = cameraView.relative.inverse;
+    facts.eye = cameraView.eye;
     facts.sunDirection = sun.directionTowardSun;
     facts.sunIlluminance = sun.sunIlluminance;
     facts.sunTint = light.sunTint;
@@ -210,12 +210,11 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
     }
 
     // The history reprojects through the previous unjittered view-projection, which this feature keeps itself.
-    // The basis comes from the eye-relative inverse: the engine's own is too coarse far from the origin.
-    fx::CameraBasis basis = fx::DeriveCameraBasis(Vec3::Zero(), camera.inverse, full);
-    basis.eye = f.View().eye;
+    // The basis comes from the eye-relative camera: an absolute float matrix is too coarse far from the origin.
+    const fx::CameraBasis basis = fx::DeriveViewCameraBasis(cameraView);
     const bool accumulate = m_settings.temporal >= 0.5f;
     VolumetricCloudResolveFacts resolveFacts;
-    resolveFacts.prevViewProjection = MakeCloudRelativeCamera(view.previous.viewProjection, f.View().eye).projection;
+    resolveFacts.prevViewProjection = fx::PreviousViewProjectionForShader(basis, view.previous);
     resolveFacts.windDelta[0] = static_cast<float>(view.windStep[0]);
     resolveFacts.windDelta[1] = static_cast<float>(view.windStep[1]);
     resolveFacts.historyValid = accumulate && basis.valid && fx::HistoryUsable(view.previous, basis, f.FrameIndex(), full, divisor);
@@ -264,7 +263,7 @@ void VolumetricCloudFeature::CompositePass(fx::CompositeFrame& f)
         bail(VolumetricCloudFrameStatus::Disabled);
         return;
     }
-    if (!f.View().invViewProjectionValid) {
+    if (!f.View().relative.valid) {
         bail(VolumetricCloudFrameStatus::NoValidCamera);
         return;
     }

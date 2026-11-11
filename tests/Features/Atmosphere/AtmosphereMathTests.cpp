@@ -6,9 +6,11 @@
 
 #include "Features/Atmosphere/AtmosphereMath.h"
 #include "Features/Atmosphere/AtmosphereParameters.h"
+#include "Math/EyeRelativeCamera.h"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 
 namespace gte {
@@ -369,6 +371,43 @@ TEST(AtmosphereParametersTest, WorldPositionToAtmosphereSpaceKmUsesTheDocumented
     const Vec3 worldPosition(1000.0f, 0.0f, 0.0f);
     const Vec3 km = WorldPositionToAtmosphereSpaceKm(worldPosition);
     EXPECT_FLOAT_EQ(km.x, 1.0f);
+}
+
+// View rays of the sky come from unprojecting two NDC depths. Far from the origin the absolute float inverse turns them
+// by up to tens of pixels (the positive control); the ray camera is exact and puts the eye at the origin.
+TEST(AtmosphereRayCameraTest, RaysStayExactFarFromTheOrigin)
+{
+    const Vec3 eye(21600.0f, 40.0f, -49491.0f);
+    const Mat4 projection = Mat4::PerspectiveFovLH_ZO(1.0472f, 16.0f / 9.0f, 0.1f, 1000.0f, /*flipY=*/true);
+    double worstRay = 0.0;
+    double worstAbsolute = 0.0;
+    int rejectedAbsolute = 0;
+    for (int i = 0; i < 40; ++i) {
+        const float yaw = 0.157f * static_cast<float>(i);
+        const Vec3 forward = Normalize(Vec3(std::sin(yaw), 0.2f, std::cos(yaw)));
+        const Mat4 view = Mat4::LookToLH(eye, forward, Vec3::Up());
+        const Mat4 viewProjection = projection * view;
+        const EyeRelativeCamera camera = MakeEyeRelativeCameraFromMatrix(MakeEyeRelativeViewProjection(viewProjection, projection));
+        ASSERT_TRUE(camera.valid);
+        const AtmosphereRayCamera ray = MakeAtmosphereRayCamera(camera);
+        EXPECT_EQ(ray.eye, Vec3::Zero());
+
+        const auto direction = [](const Mat4& inverse) {
+            const Vec4 nearPoint = inverse * Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+            const Vec4 farPoint = inverse * Vec4(0.0f, 0.0f, 1.0f, 1.0f);
+            return Normalize(Vec3(farPoint.x, farPoint.y, farPoint.z) / farPoint.w
+                - Vec3(nearPoint.x, nearPoint.y, nearPoint.z) / nearPoint.w);
+        };
+        worstRay = std::max(worstRay, static_cast<double>(Length(direction(ray.invViewProjection) - forward)));
+        Mat4 absoluteInverse;
+        if (viewProjection.TryInverse(absoluteInverse)) {
+            worstAbsolute = std::max(worstAbsolute, static_cast<double>(Length(direction(absoluteInverse) - forward)));
+        } else {
+            ++rejectedAbsolute;
+        }
+    }
+    EXPECT_LT(worstRay, 2.0e-6);
+    EXPECT_GT(worstAbsolute + 1.0e-3 * rejectedAbsolute, 1.0e-4);
 }
 
 TEST(AtmosphereParametersTest, WorldPositionToAtmosphereSpaceKmDegradesToZeroForNonPositiveScale)

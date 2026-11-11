@@ -3,9 +3,11 @@
 // involved - every function under test is pure.
 
 #include "Features/Shadow/ShadowMath.h"
+#include "Math/EyeRelativeCamera.h"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -307,6 +309,50 @@ TEST(ShadowMathTest, ExtractViewFrustumRaysReachDepthOneAlongTheForwardAxis)
     for (const Vec3& ray : frustum.rays) {
         EXPECT_NEAR(Dot(ray, frustum.forward), 1.0f, 1e-3f);
     }
+}
+
+// The corner rays of the frustum 30 km from the origin: the eye-relative inverse gives them to a few millimetres at
+// 100 m depth; the absolute float inverse is off by metres (the positive control).
+TEST(ShadowMathTest, RelativeFrustumKeepsItsCornerRaysFarFromTheOrigin)
+{
+    const Vec3 eye(12000.0f, 40.0f, -27500.0f);
+    const Mat4 projection = Mat4::PerspectiveFovLH_ZO(1.0472f, 16.0f / 9.0f, kCameraNear, kCameraFar, /*flipY=*/true);
+    double worstRelative = 0.0;
+    double worstAbsolute = 0.0;
+    for (int i = 0; i < 24; ++i) {
+        const float yaw = 0.26f * static_cast<float>(i);
+        const Vec3 forward = Normalize(Vec3(std::sin(yaw), -0.1f, std::cos(yaw)));
+        const Mat4 view = Mat4::LookToLH(eye, forward, Vec3::Up());
+        const Mat4 viewProjection = projection * view;
+        const EyeRelativeCamera camera = MakeEyeRelativeCameraFromMatrix(MakeEyeRelativeViewProjection(viewProjection, projection));
+        ASSERT_TRUE(camera.valid);
+        const ShadowViewFrustum relative = ExtractViewFrustumRelative(eye, camera.inverse);
+        ASSERT_TRUE(relative.valid);
+        EXPECT_EQ(relative.eye.x, eye.x);
+        EXPECT_EQ(relative.eye.z, eye.z);
+
+        // Reference corner rays from the view axes: right, up and forward of the view matrix rows.
+        const Vec3 right(view.columns[0].x, view.columns[1].x, view.columns[2].x);
+        const Vec3 up(view.columns[0].y, view.columns[1].y, view.columns[2].y);
+        const Vec3 axis(view.columns[0].z, view.columns[1].z, view.columns[2].z);
+        const float tanY = std::tan(1.0472f * 0.5f);
+        const float tanX = tanY * 16.0f / 9.0f;
+        const float sx[4] = { -1.0f, 1.0f, 1.0f, -1.0f };
+        const float sy[4] = { -1.0f, -1.0f, 1.0f, 1.0f };
+        Mat4 absoluteInverse;
+        const bool absoluteOk = viewProjection.TryInverse(absoluteInverse);
+        const ShadowViewFrustum absolute = absoluteOk ? ExtractViewFrustum(eye, absoluteInverse) : ShadowViewFrustum{};
+        for (int k = 0; k < 4; ++k) {
+            const Vec3 expected = axis + right * (sx[k] * tanX) + up * (-sy[k] * tanY);
+            const Vec3 relativeRay = relative.rays[static_cast<std::size_t>(k)];
+            worstRelative = std::max(worstRelative, static_cast<double>(Length(relativeRay - expected)) * 100.0);
+            if (absolute.valid) {
+                worstAbsolute = std::max(worstAbsolute, static_cast<double>(Length(absolute.rays[static_cast<std::size_t>(k)] - expected)) * 100.0);
+            }
+        }
+    }
+    EXPECT_LT(worstRelative, 0.01);
+    EXPECT_GT(worstAbsolute, 0.2);
 }
 
 TEST(ShadowMathTest, ExtractViewFrustumRejectsADegenerateMatrix)

@@ -63,8 +63,8 @@ struct AtmosphereFrameUniforms {
     Vec3 sunIlluminance = Vec3::One();
     float _pad2 = 0.0f;
 
-    // 64 bytes: the view's inverse view-projection, inverted on the CPU. Shaders unproject two NDC points with it
-    // to get a world-space view ray. Defaults to identity so an unset value stays invertible.
+    // 64 bytes: clip space to (world - eye), inverted in double on the CPU. Shaders unproject two NDC points with it
+    // to get a view ray. Defaults to identity so an unset value stays invertible.
     Mat4 invViewProjection = Mat4::Identity();
 
     // 16 bytes: aerial perspective ray-march tunables of this frame. These defaults are the unexaggerated

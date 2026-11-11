@@ -11,14 +11,12 @@
 namespace gte::fx {
 
 // What a feature callback knows about the view it runs for. Plain data, no GPU types.
-// viewProjection and invViewProjection are never jittered.
+// viewProjection and the matrices of `relative` are never jittered.
 struct View {
     rg::ViewScope scope = rg::ViewScope::Shared;
     Extent2D extent{};
     Vec3 eye;
     Mat4 viewProjection = Mat4::Identity();
-    Mat4 invViewProjection = Mat4::Identity();
-    bool invViewProjectionValid = false;
     // Same camera with the eye at the origin, built in double. Use it for depth reconstruction far from the origin.
     EyeRelativeCamera relative;
     // Jitter of this view's main scene draw this frame, in NDC. (0, 0) when none.

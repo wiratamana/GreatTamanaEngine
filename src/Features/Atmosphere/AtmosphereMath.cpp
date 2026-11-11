@@ -235,4 +235,11 @@ float ReciprocalScaleHeightFromKm(float scaleHeightKm) noexcept
     return 1.0f / std::max(scaleHeightKm, kMinScaleHeightKm);
 }
 
+AtmosphereRayCamera MakeAtmosphereRayCamera(const EyeRelativeCamera& relative) noexcept
+{
+    AtmosphereRayCamera camera;
+    camera.invViewProjection = relative.inverse;
+    return camera;
+}
+
 } // namespace gte

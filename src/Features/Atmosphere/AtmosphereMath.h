@@ -2,6 +2,8 @@
 
 #include "AtmosphereTypes.h"
 #include "../../Game/Lighting/SunLightModulation.h"
+#include "../../Math/EyeRelativeCamera.h"
+#include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
 
 namespace gte {
@@ -63,6 +65,14 @@ float CornetteShanksMiePhaseFunction(float g, float cosTheta) noexcept;
 // heightKm = mix(0, thickness, clamp(u, 0, 1)), upDot = max(v * 2 - 1, -0.999). Mirrors AtmosphereCommon.glsl.
 void TransmittanceLutUvToHeightZenith(
     const AtmosphereParametersGpu& params, float lutGridU, float lutGridV, float& outHeightKm, float& outUpDot) noexcept;
+
+// Ray camera of the sky, aerial perspective and composite shaders. They only need view directions and the distance
+// to a surface, so the matrix maps clip space to (world - eye) and the eye they see is the origin. Built in double.
+struct AtmosphereRayCamera {
+    Mat4 invViewProjection = Mat4::Identity();
+    Vec3 eye = Vec3::Zero();
+};
+AtmosphereRayCamera MakeAtmosphereRayCamera(const EyeRelativeCamera& relative) noexcept;
 
 inline constexpr float kMinScaleHeightKm = 0.01f;
 

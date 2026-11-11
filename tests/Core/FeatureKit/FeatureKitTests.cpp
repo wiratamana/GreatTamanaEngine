@@ -36,7 +36,6 @@ TEST(FxViewTest, DefaultsAreASharedViewWithNoCamera)
     EXPECT_EQ(view.scope, rg::ViewScope::Shared);
     EXPECT_EQ(view.extent.width, 0u);
     EXPECT_EQ(view.extent.height, 0u);
-    EXPECT_FALSE(view.invViewProjectionValid);
     EXPECT_FALSE(view.relative.valid);
 }
 

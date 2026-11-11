@@ -79,6 +79,10 @@ constexpr void RefuseShadowResolution(ShadowResolutionState& state, std::uint32_
 // Derives eye, forward, near/far view depth and the 4 corner rays from the camera's inverse view-projection.
 ShadowViewFrustum ExtractViewFrustum(const Vec3& eye, const Mat4& invViewProjection) noexcept;
 
+// Same frustum from an inverse that maps clip space to (world - eye), built in double. The rays are the same as for an
+// absolute inverse, without its rounding far from the origin; `eye` stays the real world position.
+ShadowViewFrustum ExtractViewFrustumRelative(const Vec3& eye, const Mat4& relativeInverse) noexcept;
+
 // Fits up to 4 stable cascades to the camera. `safe` must be sanitized.
 // With a depth range the splits cover that range, otherwise [view near, shadow distance].
 ShadowCascadeSet BuildShadowCascades(const ShadowViewFrustum& frustum, const Vec3& directionTowardSun,
