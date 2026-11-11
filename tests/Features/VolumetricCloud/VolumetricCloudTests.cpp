@@ -546,10 +546,13 @@ TEST(VolumetricCloudParamsTest, TheStructureSettingsReachTheBlockWithTheShippedD
     EXPECT_FLOAT_EQ(defaults.shapeWorley, 0.5f);
     EXPECT_FLOAT_EQ(defaults.windShearM, 800.0f);
     EXPECT_FLOAT_EQ(defaults.bodyErosion, 0.35f);
-    EXPECT_FLOAT_EQ(defaults.verticalStretch, 1.3f);
+    EXPECT_FLOAT_EQ(defaults.verticalStretch, 0.8f);
     EXPECT_FLOAT_EQ(defaults.baseVariation, 0.5f);
     EXPECT_FLOAT_EQ(defaults.baseRoundness, 0.15f);
     EXPECT_FLOAT_EQ(defaults.farSoftening, 0.7f);
+    EXPECT_FLOAT_EQ(defaults.bodyThresholdMin, 0.0f);
+    EXPECT_FLOAT_EQ(defaults.baseRagged, 0.0f);
+    EXPECT_FLOAT_EQ(defaults.bodyWidth, 0.25f);
     VolumetricCloudSettings s = defaults;
     s.largeShapeMix = 0.2f;
     s.sizeVariation = 0.9f;
@@ -560,6 +563,9 @@ TEST(VolumetricCloudParamsTest, TheStructureSettingsReachTheBlockWithTheShippedD
     s.verticalStretch = 2.0f;
     s.baseVariation = 0.25f;
     s.farSoftening = 0.4f;
+    s.bodyThresholdMin = 0.45f;
+    s.baseRagged = 0.35f;
+    s.bodyWidth = 0.3f;
     VolumetricCloudFrameFacts facts;
     const VolumetricCloudParamsGpu p = MakeVolumetricCloudParams(SanitizeVolumetricCloudSettings(s), facts);
     EXPECT_FLOAT_EQ(p.structure[0], 0.2f);
@@ -572,6 +578,9 @@ TEST(VolumetricCloudParamsTest, TheStructureSettingsReachTheBlockWithTheShippedD
     EXPECT_FLOAT_EQ(p.structure2[2], 0.25f);
     EXPECT_FLOAT_EQ(p.structure2[3], 0.4f);
     EXPECT_FLOAT_EQ(p.structure3[0], 0.8f);
+    EXPECT_FLOAT_EQ(p.structure3[1], 0.45f);
+    EXPECT_FLOAT_EQ(p.structure3[2], 0.35f);
+    EXPECT_FLOAT_EQ(p.structure3[3], 0.3f);
     // Out of range values are clamped.
     s.verticalStretch = 0.0f;
     s.windShearM = -5.0f;

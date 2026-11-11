@@ -92,6 +92,9 @@ bool BuildVolumetricCloudPanel(
     changed |= ImGui::SliderFloat("Vertical stretch", &edit.verticalStretch, 0.25f, 6.0f);
     changed |= ImGui::SliderFloat("Base variation", &edit.baseVariation, 0.0f, 1.0f);
     changed |= ImGui::SliderFloat("Base roundness", &edit.baseRoundness, 0.01f, 0.5f);
+    changed |= ImGui::SliderFloat("Body threshold floor", &edit.bodyThresholdMin, 0.0f, 0.9f);
+    changed |= ImGui::SliderFloat("Body ramp width", &edit.bodyWidth, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Ragged base", &edit.baseRagged, 0.0f, 1.0f);
     changed |= ImGui::SliderFloat("Far softening", &edit.farSoftening, 0.0f, 1.0f);
     changed |= ImGui::SliderFloat("Erosion kept in body", &edit.bodyErosion, 0.0f, 1.0f);
     changed |= ImGui::DragFloat("Wind shear (m)", &edit.windShearM, 10.0f, 0.0f, 10000.0f);

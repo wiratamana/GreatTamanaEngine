@@ -37,7 +37,7 @@ layout(std430, binding = 0) readonly buffer VolumetricCloudParams {
     vec4 detailShape;               // x curl amount (m), y curl tile (m), z wispiness, w fine detail weight.
     vec4 structure;                 // x large lobe mix, y size variation, zw wind shear vector at the layer top (m).
     vec4 structure2;                // x erosion kept in the body, y vertical stretch of the noise, z base variation, w far softening.
-    vec4 structure3;                // x weight of the Worley cells in the shape (popcorn), yzw reserved.
+    vec4 structure3;                // x weight of the Worley cells in the shape (popcorn), y body threshold floor, z ragged base, w body ramp width.
     vec4 lightTune;                 // x sky light saturation, y diffusion gain, z inner glow gain, w reserved.
     vec4 lightTune2;                // x sun warmth, yzw reserved.
 } params;
@@ -202,6 +202,7 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float altitude = params.layer.x + heightFraction * (params.layer.y - params.layer.x);
     vec3 shapeUv = vec3(position.x + wind.x + shear.x, altitude / params.structure2.y, position.z + wind.y + shear.y) / params.noise.x;
     float shape = ShapeValue(textureLod(shapeVolume, shapeUv, 0.0));
+    float shapeMid = shape;
     float shapeLarge = shape;
     if (params.structure.x > 0.0 || params.structure2.w > 0.0) {
         // Two scales of the same volume: a big lobe octave carries the body and the mid octave adds the lobes on it.
@@ -215,7 +216,7 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float peak = mix(params.density.z, 1.0, wm.b);
     float stop = Saturate(peak + params.heightShape.y);
     // Hanging bases: where the big octave is high the cloud base is lower, so the underside is bumpy and not one plane.
-    float baseShift = params.structure2.z * (0.5 - shapeLarge) * 0.4;
+    float baseShift = params.structure2.z * (0.5 - shapeLarge) * 0.4 + params.structure3.z * (0.5 - shapeMid) * 0.3;
     float roundBottom = Saturate(Remap(heightFraction, baseShift, baseShift + params.heightShape.x, 0.0, 1.0));
     float roundTop = Saturate(Remap(heightFraction, stop * params.skip.y, stop, 1.0, 0.0));
     float shapeGradient = roundBottom * roundTop;
@@ -226,7 +227,10 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
 
     // Linear body; CloudDetail erodes it and applies the density curve afterwards, so the fine noise cuts into the
     // soft part of the cloud and not into a body already raised to a power.
-    return Saturate(Remap(shape * shapeGradient, 1.0 - coverage * weatherCoverage, 1.0, 0.0, 1.0));
+    // The cut level never falls below the floor: a big mass keeps its lobes and holes instead of filling solid.
+    float threshold = max(1.0 - coverage * weatherCoverage, params.structure3.y);
+    float rampEnd = params.structure3.w > 0.0 ? min(threshold + params.structure3.w, 1.0) : 1.0;
+    return Saturate(Remap(shape * shapeGradient, threshold, rampEnd, 0.0, 1.0));
 }
 
 float CloudCurve(float body)

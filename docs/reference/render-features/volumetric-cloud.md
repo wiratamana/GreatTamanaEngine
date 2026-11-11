@@ -90,14 +90,17 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `density` | 1.5 | 0..4 | Density factor after shaping |
 | `extinction` | 0.05 | 0.0005..0.5 | Extinction per metre at density 1 |
 | `weatherScaleM` | 25000 | 1000..500000 | World size of one weather map tile (m) |
-| `shapeScaleM` | 4000 | 100..100000 | World size of one shape noise tile (m) |
+| `shapeScaleM` | 5000 | 100..100000 | World size of one shape noise tile (m) |
 | `shapeWorley` | 0.5 | 0..1.5 | Weight of the Worley cells (G, B, A of the shape volume) in the shape. The cells are what makes equal-sized popcorn balls; below 1 the soft Perlin body leads. 1 = the old look |
 | `largeShapeMix` | 0.4 | 0..1 | Share of the big lobe octave: the same shape volume read at 1.75 x the tile (7 km), so every cloud has big soft lobes and the mid lobes ride on them. 0 = one scale |
 | `sizeVariation` | 0.5 | 0..1 | How much the weather map's cloud type (B) moves that share: big tall clouds get more big lobes, small low clouds keep the mid lobes |
 | `windShearM` | 800 | 0..10000 | The noise and weather lookups are shifted along the wind direction by this many metres at the layer top (0 at the base): clouds lean downwind. Static, so the reprojection is not affected |
 | `bodyErosion` | 0.35 | 0..1 | Share of the fine erosion kept in the core of a cloud; the rim always gets all of it. Low = smooth soft body with detail only on the rim |
-| `verticalStretch` | 1.3 | 0.25..6 | Noise lobes are this many times taller than wide. Above about 2 vertical curtains show |
+| `verticalStretch` | 0.8 | 0.25..6 | Noise lobes are this many times taller than wide. Above about 2 vertical curtains show |
 | `baseVariation` | 0.5 | 0..1 | How much the big octave lowers or lifts the cloud base, so the underside is bumpy and not one plane. 0 = flat base |
+| `bodyThresholdMin` | 0 | 0..0.9 | Lowest cut level of the body. A big mass with a high coverage would fill solid and look like a smooth slab; the floor keeps its lobes and holes. 0 = off |
+| `bodyWidth` | 0.25 | 0..1 | Width of the body ramp in shape units above the cut level. Small values make crisp lobe surfaces with full density behind them, large values a soft fog. 0 = the whole range up to 1 |
+| `baseRagged` | 0 | 0..1 | How much the mid lobes lift or lower the cloud base, so the underside shows billows and not one smooth ceiling. 0 = off |
 | `farSoftening` | 0.7 | 0..1 | Extra share of the big octave at the far field start and beyond: distant clouds lose the thin stacked sheets that look like horizontal stripes at the horizon |
 | `detailScaleM` | 350 | 10..20000 | World size of one detail noise tile (m) |
 | `detailStrength` | 1.0 | 0..2 | Erosion by the detail noise. The erosion is cut into the linear cloud body; the density curve is applied after it |
@@ -110,7 +113,7 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `windDirection` | 45 | -360..360 | Wind direction (degrees) |
 | `peakMin` | 0.6 | 0.05..1 | Cloud type: top height of the lowest type (weather map B = 0) as a fraction of the layer thickness; B = 1 reaches the full top. The tops in between follow the map, so a sky holds flat low clouds and tall towers. 1 = no cloud types (every cloud as tall as the layer). Below about 0.4 flat terrace-like tops show |
 | `baseRoundness` | 0.15 | 0.01..0.5 | Rounding of the height gradient at the base: how softly the underside fades in (share of the layer thickness) |
-| `topRoundness` | 0.5 | 0..0.5 | Rounding of the height gradient at the top |
+| `topRoundness` | 0.2 | 0..0.5 | Rounding of the height gradient at the top |
 | `densityRamp` | 0.2 | 0.01..0.5 | Density ramp above the base (fraction of the thickness) |
 | `densityTopFade` | 0.9 | 0.5..0.99 | Fraction of the thickness where density starts to fade at the top |
 | `topFalloffStart` | 0.5 | 0..0.95 | Where the top rounding of a cloud starts to fall, as a fraction of its peak height. Low values give flat pancakes, high values towering tops |

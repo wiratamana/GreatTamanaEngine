@@ -55,15 +55,18 @@ struct VolumetricCloudSettings {
     float density = 1.5f;
     float extinction = 0.05f; // Per metre at density 1.
     float weatherScaleM = 25000.0f;
-    float shapeScaleM = 4000.0f;
+    float shapeScaleM = 5000.0f;
     // Structure: how big and how leaning the clouds are.
     float shapeWorley = 0.5f;     // Weight of the Worley cells in the shape; below 1 the equal-sized popcorn balls fade and the soft Perlin body leads.
     float largeShapeMix = 0.4f;   // Share of the big lobe octave (3 x the shape tile) in the shape; 0 = only the mid lobes.
     float sizeVariation = 0.5f;   // How much the weather map's cloud type shifts that share: big tall clouds get big lobes, small ones keep mid lobes.
     float windShearM = 800.0f;    // How far the top of the layer is shifted downwind relative to its base; clouds lean.
     float bodyErosion = 0.35f;    // Share of the fine erosion kept in the core of a cloud; the rim always gets all of it.
-    float verticalStretch = 1.3f; // Noise lobes are this many times taller than wide; above 1 the cloud layers stop looking like stacked sheets.
+    float verticalStretch = 0.8f; // Noise lobes are this many times taller than wide; above 1 the cloud layers stop looking like stacked sheets.
     float baseVariation = 0.5f;  // How much the big octave lowers or lifts the cloud base; 0 = one flat base.
+    float bodyThresholdMin = 0.0f; // Lowest cut level of the body: raises the threshold in big masses so a high coverage does not fill them solid; 0 = off.
+    float bodyWidth = 0.25f;       // Width of the body ramp in shape units: small = crisp lobe surfaces, large = soft fog; 0 = the full range above the cut level.
+    float baseRagged = 0.0f;       // How much the mid lobes lift or lower the cloud base; the underside gets billows instead of one smooth ceiling.
     float farSoftening = 0.7f;    // Extra share of the big octave at the far field start and beyond; far clouds lose their stacked fine sheets.
     float detailScaleM = 350.0f;
     float detailStrength = 1.0f;
@@ -82,7 +85,7 @@ struct VolumetricCloudSettings {
     float windDirection = 45.0f;
     float peakMin = 0.6f; // Top height of the lowest cloud type (weather map B = 0: flat, low top) as a share of the layer; B = 1 reaches the full top. 1 = no cloud types.
     float baseRoundness = 0.15f;
-    float topRoundness = 0.5f;
+    float topRoundness = 0.2f;
     float densityRamp = 0.2f;
     float densityTopFade = 0.9f;
     float topFalloffStart = 0.5f; // Where the top roundness starts to fall, as a fraction of the cloud's peak height.
@@ -179,6 +182,9 @@ inline constexpr std::array kVolumetricCloudFloatSettings{
     VolumetricCloudFloatSetting{ "bodyErosion", &VolumetricCloudSettings::bodyErosion, 0.0f, 1.0f },
     VolumetricCloudFloatSetting{ "verticalStretch", &VolumetricCloudSettings::verticalStretch, 0.25f, 6.0f },
     VolumetricCloudFloatSetting{ "baseVariation", &VolumetricCloudSettings::baseVariation, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "bodyThresholdMin", &VolumetricCloudSettings::bodyThresholdMin, 0.0f, 0.9f },
+    VolumetricCloudFloatSetting{ "bodyWidth", &VolumetricCloudSettings::bodyWidth, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "baseRagged", &VolumetricCloudSettings::baseRagged, 0.0f, 1.0f },
     VolumetricCloudFloatSetting{ "farSoftening", &VolumetricCloudSettings::farSoftening, 0.0f, 1.0f },
     VolumetricCloudFloatSetting{ "detailScaleM", &VolumetricCloudSettings::detailScaleM, 10.0f, 20000.0f },
     VolumetricCloudFloatSetting{ "detailStrength", &VolumetricCloudSettings::detailStrength, 0.0f, 2.0f },
@@ -310,7 +316,7 @@ struct VolumetricCloudParamsGpu {
     float detailShape[4] = {};          // x curl amount (m), y curl tile (m), z wispiness, w fine detail weight.
     float structure[4] = {};            // x large lobe mix, y size variation, zw wind shear vector at the layer top (m).
     float structure2[4] = {};           // x erosion kept in the body, y vertical stretch, z base variation, w far softening.
-    float structure3[4] = {};           // x weight of the Worley cells in the shape, yzw reserved.
+    float structure3[4] = {};           // x weight of the Worley cells in the shape, y body threshold floor, z ragged base, w body ramp width.
     float lightTune[4] = {};            // x sky light saturation, y diffusion gain, z inner glow gain, w reserved.
     float lightTune2[4] = {};           // x sun warmth, yzw reserved.
 };
