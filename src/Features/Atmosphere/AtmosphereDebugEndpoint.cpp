@@ -33,6 +33,13 @@ constexpr std::array kSettingKeys{
     SettingKey{ "aerialPerspectiveDepthExponent", &AtmosphereSettings::aerialPerspectiveDepthExponent },
     SettingKey{ "aerialPerspectiveSamplesPerSlice", &AtmosphereSettings::aerialPerspectiveSamplesPerSlice },
     SettingKey{ "aerialPerspectiveScatteringExaggeration", &AtmosphereSettings::aerialPerspectiveScatteringExaggeration },
+    SettingKey{ "skyIntensity", &AtmosphereSettings::skyIntensity },
+    SettingKey{ "sunDiskIntensity", &AtmosphereSettings::sunDiskIntensity },
+    SettingKey{ "sunDiskRadiusDeg", &AtmosphereSettings::sunDiskRadiusDeg },
+    SettingKey{ "multiScatteringStrength", &AtmosphereSettings::multiScatteringStrength },
+    SettingKey{ "miePhaseG", &AtmosphereSettings::miePhaseG },
+    SettingKey{ "rayleighScaleHeightKm", &AtmosphereSettings::rayleighScaleHeightKm },
+    SettingKey{ "mieScaleHeightKm", &AtmosphereSettings::mieScaleHeightKm },
 };
 
 struct ScopeName {

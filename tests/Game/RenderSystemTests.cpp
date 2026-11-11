@@ -188,6 +188,36 @@ TEST(RenderSystemTest, ResolveActiveCameraViewProjectionUsesIdentityTransformWhe
     EXPECT_TRUE(ApproximatelyEqual(viewProjection, expected));
 }
 
+TEST(RenderSystemTest, EyeRelativeViewProjectionWithNoCameraIsEmpty)
+{
+    Registry registry;
+    EXPECT_FALSE(RenderSystem::ResolveActiveCameraEyeRelativeViewProjection(registry, 16.0f / 9.0f).has_value());
+}
+
+// A camera far from the origin: the relative matrix sends a point ahead of the eye to the same clip position as the
+// absolute matrix does for the same point in world space.
+TEST(RenderSystemTest, EyeRelativeViewProjectionAgreesWithTheAbsoluteOneForAFarCamera)
+{
+    Registry registry;
+    const Entity entity = registry.CreateEntity();
+    Transform& transform = registry.AddComponent<Transform>(entity);
+    transform.position = Vec3{ 2000.0f, 2.0f, -5000.0f };
+    transform.rotation = Quat::FromEulerDegrees(-8.0f, 37.0f, 0.0f);
+    registry.AddComponent<Camera>(entity);
+
+    const float aspect = 16.0f / 9.0f;
+    const std::optional<Mat4> relative = RenderSystem::ResolveActiveCameraEyeRelativeViewProjection(registry, aspect);
+    ASSERT_TRUE(relative.has_value());
+    const Mat4 absolute = RenderSystem::ResolveActiveCameraViewProjection(registry, aspect);
+
+    const Vec3 ahead = transform.rotation.RotateVector(Vec3::Forward()) * 12.0f + Vec3{ 1.0f, 0.5f, 0.0f };
+    const Vec4 viaRelative = *relative * Vec4(ahead.x, ahead.y, ahead.z, 1.0f);
+    const Vec4 viaAbsolute = absolute * Vec4(transform.position.x + ahead.x, transform.position.y + ahead.y,
+                                            transform.position.z + ahead.z, 1.0f);
+    EXPECT_NEAR(viaRelative.x / viaRelative.w, viaAbsolute.x / viaAbsolute.w, 1e-3f);
+    EXPECT_NEAR(viaRelative.y / viaRelative.w, viaAbsolute.y / viaAbsolute.w, 1e-3f);
+}
+
 TEST(RenderSystemTest, ResolveActiveCameraViewProjectionFollowsParentTransform)
 {
     Registry registry;

@@ -54,6 +54,7 @@ public:
     fx::VolumeSize DetailSize() const noexcept { return m_detail.Size(); }
     Extent2D WeatherSize() const noexcept { return m_weather.Size(); }
     Extent2D BlueNoiseSize() const noexcept { return m_blueNoise.Size(); }
+    Extent2D CurlSize() const noexcept { return m_curl.Size(); }
 
     fx::IFeatureDebugEndpoint* DebugEndpoint() noexcept override { return &m_debugEndpoint; }
 
@@ -77,6 +78,7 @@ private:
     fx::StaticVolume m_detail{ kCloudDetailAsset };
     fx::StaticTexture m_weather{ kCloudWeatherAsset };
     fx::StaticTexture m_blueNoise{ kCloudBlueNoiseAsset };
+    fx::StaticTexture m_curl{ kCloudCurlAsset };
     fx::ComputeShader m_marchShader{ "VolumetricCloud" };
     fx::ComputeShader m_resolveShader{ "VolumetricCloudResolve" };
     fx::ComputeShader m_slice3dShader{ "VolumetricCloudSlice3D" };

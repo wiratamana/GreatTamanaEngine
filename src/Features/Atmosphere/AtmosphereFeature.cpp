@@ -5,6 +5,7 @@
 #include "../../Game/Lighting/DirectionalLightResolver.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <string_view>
@@ -44,8 +45,22 @@ struct SkyBackgroundPush {
     float planetRadiusKm;
     float skyIntensity;
     float pad;
+    Vec4 sunDirectionAndCosRadius; // xyz toward the sun, w cosine of the disk radius.
+    Vec4 sunDiskRadiance;          // rgb radiance of the disk.
 };
-static_assert(sizeof(SkyBackgroundPush) == 80, "layout differs from AtmosphereSkyBackground.frag");
+static_assert(sizeof(SkyBackgroundPush) == 112, "layout differs from AtmosphereSkyBackground.frag");
+
+// Radiance of the sun disk: the sun's illuminance spread over the disk's solid angle, tinted by the air.
+Vec4 MakeSunDiskRadiance(const AtmosphereSettings& settings, const ResolvedDirectionalLight& sun, const SunLightModulation& light,
+    float cosRadius)
+{
+    if (!light.active || settings.sunDiskIntensity <= 0.0f) {
+        return Vec4(0.0f, 0.0f, 0.0f, 0.0f);
+    }
+    const float solidAngle = 2.0f * 3.14159265f * std::max(1.0f - cosRadius, 1e-7f);
+    const Vec3 radiance = sun.sunIlluminance * light.sunTint * (settings.sunDiskIntensity / solidAngle);
+    return Vec4(radiance.x, radiance.y, radiance.z, 0.0f);
+}
 
 AtmosphereParametersGpu MakeParameters(const AtmosphereSettings& settings)
 {
@@ -311,6 +326,11 @@ void AtmosphereFeature::SkyBackground(fx::PostOpaqueFrame& f)
     push.eyeHeightKm = luts->frameUniforms.cameraPositionAtmosphere.y;
     push.planetRadiusKm = shared->parameters.planetRadiusKm;
     push.skyIntensity = m_settings.skyIntensity;
+    const float radiusRad = m_settings.sunDiskRadiusDeg * (3.14159265f / 180.0f);
+    const float cosRadius = std::cos(radiusRad);
+    const ResolvedDirectionalLight sun = ResolveActiveDirectionalLight(f.Scene());
+    push.sunDirectionAndCosRadius = Vec4(sun.directionTowardSun, cosRadius);
+    push.sunDiskRadiance = MakeSunDiskRadiance(m_settings, sun, m_views.For(f.Scope()).sunLight.light, cosRadius);
     f.ViewBackground(m_skyBackgroundShader, "DrawSkyBackground").Bind("skyViewLut", luts->skyView).Push(push).Draw();
 }
 

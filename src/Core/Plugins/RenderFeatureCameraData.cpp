@@ -42,6 +42,9 @@ RenderFeatureCameraData ResolveRenderFeatureCameraData(rg::RenderViewId view, co
 
     RenderFeatureCameraData result;
     result.eyeWorldPosition = viewData->eyeWorldPosition;
+    result.relative = viewData->eyeRelativeViewProjection.has_value()
+        ? MakeEyeRelativeCameraFromMatrix(*viewData->eyeRelativeViewProjection)
+        : MakeEyeRelativeCamera(viewData->viewProjection, viewData->eyeWorldPosition);
 
     Mat4 outInverse;
     if (viewData->viewProjection.TryInverse(outInverse)) {

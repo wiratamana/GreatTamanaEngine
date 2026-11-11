@@ -91,6 +91,43 @@ TEST(RenderFeatureCameraDataTest, NullViewDataProducesAQuietInvalidDefaultResult
     EXPECT_FALSE(result.invViewProjectionValid);
 }
 
+TEST(RenderFeatureCameraDataTest, EyeRelativeCameraIsBuiltFromTheMatrixWhenViewDataHasNoParts)
+{
+    const Vec3 eye(2000.0f, 2.0f, -5000.0f);
+    const Mat4 viewProjection = Mat4::PerspectiveFovLH_ZO(1.0f, 16.0f / 9.0f, 0.1f, 1000.0f)
+        * Mat4::LookAtLH(eye, eye + Vec3(0.0f, 0.0f, 1.0f), Vec3(0.0f, 1.0f, 0.0f));
+    RenderPassViewData viewData = MakeViewData(viewProjection, eye);
+
+    const RenderFeatureCameraData result = ResolveRenderFeatureCameraData(rg::RenderViewId::Named("Primary"), &viewData);
+
+    EXPECT_TRUE(result.relative.valid);
+    // A point on the optical axis, 10 m ahead, sits at the clip centre in the eye-relative camera.
+    const Vec4 clip = result.relative.viewProjection * Vec4(0.0f, 0.0f, 10.0f, 1.0f);
+    EXPECT_NEAR(clip.x / clip.w, 0.0f, 1e-3f);
+    EXPECT_NEAR(clip.y / clip.w, 0.0f, 1e-3f);
+}
+
+TEST(RenderFeatureCameraDataTest, EyeRelativeCameraPrefersTheMatrixWithoutTheEyeRounding)
+{
+    const Vec3 eye(54000.0f, 40.0f, -120000.0f);
+    const Mat4 projection = Mat4::PerspectiveFovLH_ZO(1.0f, 16.0f / 9.0f, 0.1f, 1000.0f);
+    const Mat4 viewProjection = projection * Mat4::LookAtLH(eye, eye + Vec3(0.0f, 0.0f, 1.0f), Vec3(0.0f, 1.0f, 0.0f));
+    RenderPassViewData viewData = MakeViewData(viewProjection, eye);
+    viewData.eyeRelativeViewProjection = MakeEyeRelativeViewProjection(viewProjection, projection);
+
+    const RenderFeatureCameraData result = ResolveRenderFeatureCameraData(rg::RenderViewId::Named("Primary"), &viewData);
+
+    ASSERT_TRUE(result.relative.valid);
+    EXPECT_TRUE(ApproximatelyEqual(result.relative.viewProjection, *viewData.eyeRelativeViewProjection));
+}
+
+TEST(RenderFeatureCameraDataTest, SingularViewProjectionHasNoEyeRelativeCamera)
+{
+    RenderPassViewData viewData = MakeViewData(Mat4{}, Vec3(0.0f, 0.0f, 0.0f));
+    const RenderFeatureCameraData result = ResolveRenderFeatureCameraData(rg::RenderViewId::Named("Primary"), &viewData);
+    EXPECT_FALSE(result.relative.valid);
+}
+
 // RenderFeatureCameraDataWarningTracker is the pure, Reset()-able "already
 // warned" bookkeeping ResolveRenderFeatureCameraData()'s own log-once-per-view
 // behavior is built on (mirrors ImGuiIdConflictTracker.h's precedent - see

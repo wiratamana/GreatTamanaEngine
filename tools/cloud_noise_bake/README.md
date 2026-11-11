@@ -37,7 +37,8 @@ Bake time: about 3.5 s total on 8 threads (shape 1.7 s, weather 0.9 s, detail 14
 | file | size | R | G | B | A |
 |---|---|---|---|---|---|
 | cloud_shape_128.gtvol | 128^3 RGBA8 (8 MiB) | Perlin-Worley | Worley 8 cells | Worley 16 cells | Worley 32 cells |
-| cloud_detail_32.gtvol | 32^3 RGBA8 (128 KiB) | Worley 4 cells | Worley 8 cells | Worley 16 cells | 0.625 R + 0.25 G + 0.125 B (precomputed FBM) |
+| cloud_detail_64.gtvol | 64^3 RGBA8 (1 MiB) | billowy low: inverted Worley 4/8/16 cells (0.55/0.30/0.15) | billowy high: inverted Worley 16/24 cells (0.7/0.3) | wispy low: ridged Perlin (1-abs(2p-1))^2, 4 cells, 3 octaves, domain warp 0.06 | wispy high: the same, 12 cells, 2 octaves |
+| cloud_curl_128.gtvol | 128^2 RGBA8 (64 KiB) | curl x of a periodic Perlin potential (3 cells, 3 octaves), 0.5 = 0 | curl y | second potential (height shift) | 255 |
 | cloud_weather_512.gtvol / .png | 512^2 RGBA8 | low-altitude coverage | high-altitude coverage | cloud type / peak height | density multiplier 0.45..1 |
 | blue_noise_128.gtvol / .png | 128^2 R8 | blue noise | | | |
 
@@ -52,6 +53,8 @@ Every channel is min/max stretched to the full 0..255 range after generation.
 The generator is periodic by construction: lattice cell indices are wrapped modulo the cell count before hashing, and every FBM octave uses an integer cell count (base * 2^n), so every octave has period exactly 1 tile. Voxel x is sampled at `x / N`, so voxel N == voxel 0. FastNoiseLite cannot tile at all. FastNoise2 v1.1.1 only has `GenTileable2D` (4D torus trick) and nothing for 3D; see work\notes\P1a_noise_bake.md.
 
 The weather map is a z = 0.37 slice of the periodic 3D noise, which is periodic in x and y.
+
+Weather v2 (cumulus masses): R = three scales of domain-warped, blurred Worley cells (4 / 9 / 20 per tile) with different caps (0.58 / 0.80 / 0.88: a huge mass at full coverage turns into a smooth sheet), lumpy modulation and a regional busy/quiet field; G = broad high-coverage regions; B = cloud type (regional field + core of the big cells; 0 flat low top, 1 tall); A = density. Dev shortcut: `cloud_noise_bake weather --out DIR` bakes only the weather map (+ png) in a second.
 
 ## Blue noise
 

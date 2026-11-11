@@ -114,7 +114,8 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
     const fx::Texture detail = m_detail.Acquire(f);
     const fx::Texture weather = m_weather.Acquire(f);
     const fx::Texture blueNoise = m_blueNoise.Acquire(f);
-    if (!shape.IsValid() || !detail.IsValid() || !weather.IsValid() || !blueNoise.IsValid()) {
+    const fx::Texture curl = m_curl.Acquire(f);
+    if (!shape.IsValid() || !detail.IsValid() || !weather.IsValid() || !blueNoise.IsValid() || !curl.IsValid()) {
         snapshot.status = VolumetricCloudFrameStatus::AssetMissing;
         return false;
     }
@@ -198,6 +199,7 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
                              .Bind("detailVolume", detail)
                              .Bind("weatherMap", weather)
                              .Bind("blueNoise", blueNoise)
+                             .Bind("curlMap", curl)
                              .Bind("lowColorOut", lowColor)
                              .Bind("lowAuxOut", lowAux)
                              .Dispatch(low);

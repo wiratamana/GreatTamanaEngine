@@ -4,10 +4,15 @@
 const int kAirSamples = 8;
 const float kAmbientZenithWeight = 0.4;
 const float kAmbientRingWeight = 0.15;
+const float kReferenceSkyIntensity = 6.0; // The atmosphere's default sky intensity.
+const float kGroundAlbedo = 0.3;
+const vec3 kGroundWarmTint = vec3(1.0, 0.72, 0.5);
 const float kAmbientRingElevation = 0.6109; // 35 degrees.
 
 // Sky light that reaches the cloud, once per marched pixel. Set by main() before the march.
 vec3 gSkyAmbient = vec3(0.0);
+// Ground light for the clouds, once per marched pixel. Set by main() before the march.
+vec3 gGroundRadiance = vec3(0.0);
 
 bool AtmosphereOn()
 {
@@ -47,7 +52,22 @@ vec3 SkyAmbientRadiance()
         sum += kAmbientRingWeight
             * textureLod(skyViewLut, ViewDirectionToSkyViewLutUv(direction, size, viewHeightKm, planetRadiusKm), 0.0).rgb;
     }
-    return sum * params.atmosphereMode.y * params.atmosphereMode.w;
+    // The sky intensity setting dims the sky picture only; the light the clouds receive stays at the reference level.
+    return sum * kReferenceSkyIntensity * params.atmosphereMode.w;
+}
+
+// Sunlight the ground sends back up, in the units of the sky light: the sun at the ground (air and planet
+// shadow included) spread over a diffuse ground. `warmth` tints it from grey to a sunlit brown.
+vec3 GroundBounceRadiance(vec3 sunIlluminance, vec3 sunDirection)
+{
+    float up = max(sunDirection.y, 0.0);
+    if (params.skyShade.w <= 0.0 || up <= 0.0) {
+        return vec3(0.0);
+    }
+    vec3 groundKm = vec3(0.0, atmosphere.values.planetRadiusKm, 0.0);
+    vec3 sun = sunIlluminance * SunTransmittanceAt(groundKm, sunDirection);
+    vec3 tint = mix(vec3(1.0), kGroundWarmTint, params.skyShade2.x);
+    return sun * tint * (up * params.skyShade.w * kGroundAlbedo / kPi);
 }
 
 // Light the air scatters toward the eye along the first `distanceKm` of a ray, in the units of the sky LUT

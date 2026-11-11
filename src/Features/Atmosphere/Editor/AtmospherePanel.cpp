@@ -58,6 +58,8 @@ bool BuildAtmospherePanel(AtmosphereSettings& edit, const AtmosphereAerialSnapsh
     changed |= ImGui::DragFloat("Aerial Depth Exponent", &edit.aerialPerspectiveDepthExponent, 0.05f, 1.0f, 4.0f);
     changed |= ImGui::SliderInt("Aerial Samples Per Slice", &edit.aerialPerspectiveSamplesPerSlice, 1, 16);
     changed |= ImGui::DragFloat("Sky Intensity", &edit.skyIntensity, 0.1f, 0.0f, 50.0f);
+    changed |= ImGui::DragFloat("Sun Disk Intensity", &edit.sunDiskIntensity, 0.05f, 0.0f, 100.0f);
+    changed |= ImGui::DragFloat("Sun Disk Radius (deg)", &edit.sunDiskRadiusDeg, 0.01f, 0.05f, 10.0f);
     changed |= ImGui::Checkbox("Scene Light Follows Atmosphere", &edit.sceneLightFollowsAtmosphere);
     ImGui::TextDisabled("Sun and sky light of surfaces and light shafts fade and redden with the sun height.");
 

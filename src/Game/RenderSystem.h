@@ -101,6 +101,10 @@ public:
     // View-projection of the first active Camera, or identity when there is none.
     static Mat4 ResolveActiveCameraViewProjection(Registry& registry, float aspectWidthOverHeight);
 
+    // Same camera with the eye at the origin: ResolveActiveCameraViewProjection() * Translation(eye) without the
+    // rounding of a large eye position. Nothing when there is no active Camera.
+    static std::optional<Mat4> ResolveActiveCameraEyeRelativeViewProjection(Registry& registry, float aspectWidthOverHeight);
+
     // Eye position of the first active Camera, or zero when there is none.
     static Vec3 ResolveActiveCameraWorldPosition(Registry& registry) noexcept;
 

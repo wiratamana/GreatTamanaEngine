@@ -541,6 +541,7 @@ std::optional<fx::View> Core::PrimaryCameraView(float fallbackAspect)
         view.viewProjection = data->viewProjection;
         view.invViewProjection = camera.invViewProjection;
         view.invViewProjectionValid = camera.invViewProjectionValid;
+        view.relative = camera.relative;
         view.jitterNdc = m_viewJitterThisFrame[rg::ViewScopeIndex(rg::ViewScope::Primary)];
     } else {
         view.eye = RenderSystem::ResolveActiveCameraWorldPosition(registry);
@@ -1502,6 +1503,8 @@ void Core::BuildFrame()
                         primaryViewData.aspectWidthOverHeight = aspect;
                         primaryViewData.viewProjection = primaryViewProjection;
                         primaryViewData.eyeWorldPosition = primaryEyeWorldPosition;
+                        primaryViewData.eyeRelativeViewProjection =
+                            RenderSystem::ResolveActiveCameraEyeRelativeViewProjection(m_game.GetRegistry(), aspect);
                         m_currentViewDataThisFrame.push_back(primaryViewData);
 
                         frame.activeViews.push_back(rg::RenderViewId::Named(kPrimaryViewName));
@@ -1529,6 +1532,7 @@ void Core::BuildFrame()
                         secondaryViewData.aspectWidthOverHeight = aspect;
                         secondaryViewData.viewProjection = secondaryViewProjection;
                         secondaryViewData.eyeWorldPosition = secondaryEyeWorldPosition;
+                        secondaryViewData.eyeRelativeViewProjection = m_editorLayer->SecondaryViewProjectionEyeRelative(aspect);
                         secondaryViewData.recordSceneOverlay = [this](const rg::RecordingContext& cmd, const Mat4& viewProj) {
                             if (m_editorLayer != nullptr) {
                                 m_editorLayer->RenderSceneGrid(cmd, viewProj);

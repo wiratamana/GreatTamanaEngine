@@ -20,8 +20,22 @@ float CloudAltitudeM(float horizontalSquared, float y, float radiusM) noexcept;
 // Position inside the layer: 0 at the base, 1 at the top.
 float CloudHeightFraction(float altitudeM, float baseM, float topM) noexcept;
 
-// Rounds the bottom and the top of a cloud whose peak sits at `peak` (0..1 of the layer).
-float CloudShapeGradient(float heightFraction, float peak, float baseRoundness, float topRoundness) noexcept;
+// Rounds the bottom and the top of a cloud whose peak sits at `peak` (0..1 of the layer). The top falls from
+// `topFalloffStart` * stop to the stop height.
+float CloudShapeGradient(float heightFraction, float peak, float baseRoundness, float topRoundness,
+    float topFalloffStart = 0.2f) noexcept;
+
+// Stretches the shape noise value so [low, high] maps to [0, 1] (clamped).
+float CloudStretchShape(float shape, float low, float high) noexcept;
+
+// Share of the sky light that reaches a sample with `upwardOpticalDepth` of cloud above it (SkyVisibility()).
+float CloudSkyVisibility(float upwardOpticalDepth, float strength, float floor) noexcept;
+
+// Share of the bounced ground light that reaches a sample at `heightFraction` of the layer.
+float CloudGroundShare(float heightFraction) noexcept;
+
+// Per octave tint of the multiple scattering: white at 0 and `fullShiftTint` at 1 (SunScatter()).
+Vec3 CloudOctaveTint(float blueShift, const Vec3& fullShiftTint) noexcept;
 
 // Density ramp over the layer: thin at the base, thin again under the top.
 float CloudDensityGradient(float heightFraction, float ramp, float topFade) noexcept;
@@ -43,8 +57,15 @@ CloudShellSegment ComputeCloudShellSegment(
 void AdvanceCloudWind(double (&offset)[2], double (&step)[2], float speed, float directionDegrees, float dt,
     double periodM) noexcept;
 
-// Length after which the weather, shape and detail lookups all repeat: the least common multiple of the tile
-// sizes in whole metres, or 0 when they have none that stays small.
+// The far weather map is the weather map at this multiple of its tile size (VolumetricCloud.comp kFarWeatherTileScale).
+inline constexpr float kCloudFarWeatherTileScale = 2.8f;
+
+// Distance (m) the resolve pass assumes for a pixel that has no fresh cloud distance. Fixed: it is not tied to the
+// march range, which reaches the horizon (250 km and more).
+inline constexpr float kCloudHistoryFallbackDistanceM = 15000.0f;
+
+// Length after which the weather, far weather, shape and detail lookups all repeat: the least common multiple of the
+// tile sizes in whole metres, or 0 when they have none that stays small.
 double CloudWindPeriodM(const VolumetricCloudSettings& safe) noexcept;
 
 // Phase functions, normalised so they integrate to 1 over the sphere. `cosTheta` is the cosine between the
@@ -122,6 +143,13 @@ struct CloudSampleOffset {
     std::uint32_t y = 0;
 };
 CloudSampleOffset CloudBayerOffset(std::uint64_t frameIndex, std::uint32_t divisor) noexcept;
+
+// How often the pixel marched on `frameIndex` was marched before. A pixel is marched once per divisor * divisor
+// frames, so its own samples are numbered by this index, wrapped at 256.
+std::uint32_t CloudOwnSampleIndex(std::uint64_t frameIndex, std::uint32_t divisor) noexcept;
+
+// Start jitter in [0, 1) of a marched pixel: the blue noise value moved by the golden ratio per own sample.
+float CloudMarchJitter(float blueNoise, std::uint64_t frameIndex, std::uint32_t divisor) noexcept;
 
 // Previous-frame data of the resolve pass.
 struct VolumetricCloudResolveFacts {

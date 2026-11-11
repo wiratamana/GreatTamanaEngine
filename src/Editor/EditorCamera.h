@@ -2,6 +2,7 @@
 
 #include "../ECS/Components/Camera.h"
 #include "../ECS/Components/Transform.h"
+#include "../Math/EyeRelativeCamera.h"
 #include "../Math/Mat4.h"
 #include "../Math/Vec2.h"
 #include "SceneViewAxes.h"
@@ -65,6 +66,13 @@ public:
     Mat4 GizmoProjection(float aspectWidthOverHeight) const noexcept { return ProjectionFor(aspectWidthOverHeight, false); }
 
     Mat4 ViewProjection(float aspectWidthOverHeight) const noexcept { return Projection(aspectWidthOverHeight) * View(); }
+
+    // ViewProjection() * Translation(eye) without the rounding of a large eye position.
+    Mat4 ViewProjectionEyeRelative(float aspectWidthOverHeight) const noexcept
+    {
+        const Mat4 projection = Projection(aspectWidthOverHeight);
+        return MakeEyeRelativeViewProjection(projection * View(), projection);
+    }
 
     const Transform& GetTransform() const noexcept { return m_transform; }
     float YawDegrees() const noexcept { return m_yawDegrees; }

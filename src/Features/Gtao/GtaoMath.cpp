@@ -78,7 +78,7 @@ GtaoMainParamsGpu MakeGtaoMainParams(const fx::CameraBasis& basis, const GtaoSet
     p.invViewProjection = invViewProjection;
     const GtaoFalloff falloff = MakeGtaoFalloff(safe.radius, safe.falloffFraction);
 
-    fx::PackVec3(p.eyeAndPixelScale, basis.eye, basis.pixelScale);
+    fx::PackVec3(p.eyeAndPixelScale, basis.ShaderEye(), basis.pixelScale);
     fx::PackVec3(p.rightAndRadius, basis.right, safe.radius);
     fx::PackVec3(p.downAndFalloffMul, basis.down, falloff.mul);
     fx::PackVec3(p.forwardAndFalloffAdd, basis.forward, falloff.add);
@@ -106,7 +106,7 @@ GtaoCompositePush MakeGtaoCompositePush(const fx::CameraBasis& basis, const Gtao
 {
     GtaoCompositePush p;
     p.invViewProjection = invViewProjection;
-    fx::PackVec3(p.eye, basis.eye);
+    fx::PackVec3(p.eye, basis.ShaderEye());
     fx::PackVec3(p.forward, basis.forward);
     p.strengthReservedSigma[0] = safe.strength;
     p.strengthReservedSigma[1] = 0.0f;

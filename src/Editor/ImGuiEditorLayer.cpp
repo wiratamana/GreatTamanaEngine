@@ -326,6 +326,11 @@ public:
         return m_sceneCamera.ViewProjection(aspectWidthOverHeight);
     }
 
+    std::optional<Mat4> SecondaryViewProjectionEyeRelative(float aspectWidthOverHeight) const override
+    {
+        return m_sceneCamera.ViewProjectionEyeRelative(aspectWidthOverHeight);
+    }
+
     Vec3 SecondaryViewCameraWorldPosition() const override { return m_sceneCamera.GetTransform().position; }
 
     // Remembers the pointer; BuildUI() creates the ImGui descriptor from it lazily.

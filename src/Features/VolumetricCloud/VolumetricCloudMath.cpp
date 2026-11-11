@@ -184,16 +184,16 @@ VolumetricCloudSettings ApplyVolumetricCloudPreset(
     switch (preset) {
     case VolumetricCloudPreset::Clear:
         out.coverage = 0.2f;
-        out.density = 0.9f;
+        out.density = 1.3f;
         break;
     case VolumetricCloudPreset::Scattered:
         break;
     case VolumetricCloudPreset::Broken:
-        out.coverage = 0.8f;
+        out.coverage = 0.7f;
         break;
     case VolumetricCloudPreset::Overcast:
-        out.coverage = 1.0f;
-        out.density = 1.4f;
+        out.coverage = 0.9f;
+        out.density = 1.5f;
         break;
     }
     return SanitizeVolumetricCloudSettings(out);
@@ -224,12 +224,34 @@ float CloudHeightFraction(float altitudeM, float baseM, float topM) noexcept
     return Saturate((altitudeM - baseM) / std::max(topM - baseM, kMinStepM));
 }
 
-float CloudShapeGradient(float heightFraction, float peak, float baseRoundness, float topRoundness) noexcept
+float CloudShapeGradient(float heightFraction, float peak, float baseRoundness, float topRoundness,
+    float topFalloffStart) noexcept
 {
     const float stop = Saturate(peak + topRoundness);
     const float bottom = Saturate(CloudRemap(heightFraction, 0.0f, baseRoundness, 0.0f, 1.0f));
-    const float top = Saturate(CloudRemap(heightFraction, stop * 0.2f, stop, 1.0f, 0.0f));
+    const float top = Saturate(CloudRemap(heightFraction, stop * topFalloffStart, stop, 1.0f, 0.0f));
     return bottom * top;
+}
+
+float CloudStretchShape(float shape, float low, float high) noexcept
+{
+    return Saturate((shape - low) / std::max(high - low, kMinStepM));
+}
+
+float CloudSkyVisibility(float upwardOpticalDepth, float strength, float floor) noexcept
+{
+    return floor + (1.0f - floor) * std::exp(-std::max(upwardOpticalDepth, 0.0f) * strength);
+}
+
+float CloudGroundShare(float heightFraction) noexcept
+{
+    const float low = 1.0f - Saturate(heightFraction);
+    return low * low;
+}
+
+Vec3 CloudOctaveTint(float blueShift, const Vec3& fullShiftTint) noexcept
+{
+    return Vec3(1.0f, 1.0f, 1.0f) + (fullShiftTint - Vec3(1.0f, 1.0f, 1.0f)) * Saturate(blueShift);
 }
 
 float CloudDensityGradient(float heightFraction, float ramp, float topFade) noexcept
@@ -299,7 +321,7 @@ double CloudWindPeriodM(const VolumetricCloudSettings& safe) noexcept
 {
     constexpr std::uint64_t kMaxPeriodM = 100000000ull;
     std::uint64_t period = 1;
-    for (const float tile : { safe.weatherScaleM, safe.shapeScaleM, safe.detailScaleM }) {
+    for (const float tile : { safe.weatherScaleM, safe.weatherScaleM * kCloudFarWeatherTileScale, safe.shapeScaleM, safe.detailScaleM }) {
         const std::uint64_t metres = static_cast<std::uint64_t>(std::max(std::llround(tile), 1ll));
         period = period / std::gcd(period, metres) * metres;
         if (period > kMaxPeriodM) {
@@ -423,6 +445,10 @@ VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     p.counts[2] = static_cast<std::uint32_t>(std::lround(safe.emptyToCoarse));
     p.counts[3] = static_cast<std::uint32_t>(std::lround(safe.lightStride));
     p.skip[0] = safe.clearSkip;
+    p.skip[1] = safe.topFalloffStart;
+    p.skip[2] = safe.shapeLow;
+    p.skip[3] = std::max(safe.shapeHigh, safe.shapeLow + 0.05f);
+    p.ambientColor[3] = safe.densityCurve;
     p.lightMarch[0] = std::round(safe.sunSteps);
     p.lightMarch[1] = safe.lightReach;
     p.lightMarch[2] = std::round(safe.msOctaves);
@@ -448,6 +474,7 @@ VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     p.lowRes[0] = divisor;
     p.lowRes[1] = offset.x;
     p.lowRes[2] = offset.y;
+    p.lowRes[3] = static_cast<std::uint32_t>(std::lround(safe.subpixelJitter * 100.0f));
     p.fullSize[0] = facts.viewWidth;
     p.fullSize[1] = facts.viewHeight;
     p.atmosphereMode[0] = facts.atmosphereLit ? 1.0f : 0.0f;
@@ -455,6 +482,22 @@ VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     p.atmosphereMode[2] = safe.airScale;
     p.atmosphereMode[3] = safe.skyAmbient;
     fx::PackVec3(p.atmosphereCamera, facts.atmosphereCameraKm);
+    p.skyShade[0] = safe.skyOcclusion;
+    p.skyShade[1] = safe.skyOcclusionReachM;
+    p.skyShade[2] = safe.skyFloor;
+    p.skyShade[3] = safe.groundBounce;
+    p.skyShade2[0] = safe.groundWarmth;
+    p.skyShade2[1] = safe.msBlueShift;
+    p.skyShade2[2] = safe.farWeatherStartM;
+    p.skyShade2[3] = safe.farWeatherMix;
+    p.farField[0] = safe.farCoverageLift;
+    p.farField[1] = safe.farAirScale;
+    p.farField[2] = safe.maxStepDepth;
+    p.farField[3] = safe.inScatter;
+    p.detailShape[0] = safe.curlAmountM;
+    p.detailShape[1] = safe.curlScaleM;
+    p.detailShape[2] = safe.wispiness;
+    p.detailShape[3] = safe.fineDetail;
     return p;
 }
 
@@ -463,26 +506,44 @@ std::uint32_t CloudResolutionDivisor(const VolumetricCloudSettings& safe) noexce
     if (safe.resolutionDivisor < 1.5f) {
         return 1;
     }
-    return safe.resolutionDivisor < 3.0f ? 2 : 4;
+    if (safe.resolutionDivisor < 2.5f) {
+        return 2;
+    }
+    return safe.resolutionDivisor < 3.5f ? 3 : 4;
 }
 
 CloudSampleOffset CloudBayerOffset(std::uint64_t frameIndex, std::uint32_t divisor) noexcept
 {
     // Rank of each cell of the Bayer matrix; the cell holding rank k is visited on frame k.
     constexpr std::uint32_t kBayer2[4] = { 0, 2, 3, 1 };
+    // Divisor 3: a 3 x 3 order that keeps consecutive frames apart (no two consecutive ranks are neighbours).
+    constexpr std::uint32_t kBayer3[9] = { 0, 7, 3, 6, 4, 1, 2, 8, 5 };
     constexpr std::uint32_t kBayer4[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
-    if (divisor != 2 && divisor != 4) {
+    if (divisor < 2 || divisor > 4) {
         return CloudSampleOffset{};
     }
     const std::uint32_t cells = divisor * divisor;
     const std::uint32_t rank = static_cast<std::uint32_t>(frameIndex % cells);
-    const std::uint32_t* matrix = divisor == 2 ? kBayer2 : kBayer4;
+    const std::uint32_t* matrix = divisor == 2 ? kBayer2 : (divisor == 3 ? kBayer3 : kBayer4);
     for (std::uint32_t i = 0; i < cells; ++i) {
         if (matrix[i] == rank) {
             return CloudSampleOffset{ i % divisor, i / divisor };
         }
     }
     return CloudSampleOffset{};
+}
+
+std::uint32_t CloudOwnSampleIndex(std::uint64_t frameIndex, std::uint32_t divisor) noexcept
+{
+    const std::uint64_t cycle = (divisor >= 1 && divisor <= 4) ? std::uint64_t{ divisor } * divisor : 1u;
+    return static_cast<std::uint32_t>((frameIndex / cycle) & 255u);
+}
+
+float CloudMarchJitter(float blueNoise, std::uint64_t frameIndex, std::uint32_t divisor) noexcept
+{
+    constexpr double kGoldenRatio = 0.61803398875;
+    const double value = static_cast<double>(blueNoise) + kGoldenRatio * CloudOwnSampleIndex(frameIndex, divisor);
+    return static_cast<float>(value - std::floor(value));
 }
 
 VolumetricCloudResolveParamsGpu MakeVolumetricCloudResolveParams(const VolumetricCloudSettings& safe,
@@ -498,8 +559,10 @@ VolumetricCloudResolveParamsGpu MakeVolumetricCloudResolveParams(const Volumetri
     p.blend[0] = accumulate ? safe.historyBlend : 1.0f;
     p.blend[1] = accumulate ? safe.freshBlend : 1.0f;
     p.blend[2] = safe.clampExpand;
-    p.blend[3] = safe.maxDistanceM * 0.25f;
+    p.blend[3] = kCloudHistoryFallbackDistanceM;
     p.motion[0] = accumulate ? safe.motionBlend : 1.0f;
+    p.motion[1] = accumulate ? safe.historySharp : 0.0f;
+    p.motion[2] = accumulate && safe.adaptiveBlend >= 0.5f ? 1.0f : 0.0f;
     const std::uint32_t divisor = CloudResolutionDivisor(safe);
     const CloudSampleOffset offset = CloudBayerOffset(facts.frameIndex, divisor);
     p.counts[0] = divisor;

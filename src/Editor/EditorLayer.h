@@ -202,6 +202,9 @@ public:
     // Projection * view the secondary view renders with. Perspective or orthographic; Identity for NullEditorLayer.
     virtual Mat4 SecondaryViewProjection(float aspectWidthOverHeight) const = 0;
 
+    // Same matrix with the eye at the origin, free of the rounding of a large eye position. Nothing when unknown.
+    virtual std::optional<Mat4> SecondaryViewProjectionEyeRelative(float /*aspectWidthOverHeight*/) const { return std::nullopt; }
+
     // World position of the secondary view's camera. Only a position: it is not a true eye in orthographic mode.
     virtual Vec3 SecondaryViewCameraWorldPosition() const = 0;
 

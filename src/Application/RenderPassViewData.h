@@ -8,6 +8,7 @@
 #include "../Renderer/RenderGraph/RenderPipeline.h"
 
 #include <functional>
+#include <optional>
 
 namespace gte {
 
@@ -22,6 +23,8 @@ struct RenderPassViewData {
     float aspectWidthOverHeight = 1.0f;
     Mat4 viewProjection;
     Vec3 eyeWorldPosition;
+    // viewProjection * Translation(eye) with the rounding residue of a large eye position removed.
+    std::optional<Mat4> eyeRelativeViewProjection;
 
     // Secondary view only: draws the ground-grid overlay.
     std::function<void(const rg::RecordingContext&, const Mat4&)> recordSceneOverlay;

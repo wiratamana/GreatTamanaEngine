@@ -5,6 +5,7 @@
 #include "Instantiation/MaterialLifetimeRules.h"
 #include "Renderer/Culling/CullingTypes.h"
 #include "Profiling/ScopeTimer.h"
+#include "Math/EyeRelativeCamera.h"
 #include "Renderer/Renderer.h"
 #include "Renderer/RenderGraph/BoundedOnceSet.h"
 #include "Renderer/RenderGraph/CommandBuffer.h"
@@ -191,6 +192,28 @@ Mat4 RenderSystem::ResolveActiveCameraViewProjection(Registry& registry, float a
 
     // No active camera: identity leaves vertices in clip space, as authored.
     return Mat4::Identity();
+}
+
+std::optional<Mat4> RenderSystem::ResolveActiveCameraEyeRelativeViewProjection(
+    Registry& registry, float aspectWidthOverHeight)
+{
+    ComponentStorage<Camera>& cameras = registry.Storage<Camera>();
+    for (std::size_t i = 0; i < cameras.Size(); ++i) {
+        const Camera& camera = cameras.ComponentAt(i);
+        if (!camera.active) {
+            continue;
+        }
+
+        const Entity entity = cameras.EntityAt(i);
+        Transform transform;
+        if (registry.TryGetComponent<Transform>(entity) != nullptr) {
+            transform = ComputeWorldTransform(registry, entity);
+        }
+
+        const Mat4 projection = camera.ProjectionMatrix(aspectWidthOverHeight);
+        return MakeEyeRelativeViewProjection(projection * Camera::ViewMatrix(transform), projection);
+    }
+    return std::nullopt;
 }
 
 Vec3 RenderSystem::ResolveActiveCameraWorldPosition(Registry& registry) noexcept

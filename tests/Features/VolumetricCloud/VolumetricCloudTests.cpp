@@ -1,6 +1,7 @@
 // Tier-1 tests for the VolumetricCloud settings, the layer math and the shader names.
 
 #include "Core/FeatureKit/ScreenSpaceView.h"
+#include "Features/Atmosphere/AtmosphereTypes.h"
 #include "Features/VolumetricCloud/VolumetricCloudMath.h"
 #include "Features/VolumetricCloud/VolumetricCloudTypes.h"
 #include "Renderer/Vulkan/ShaderReflection.h"
@@ -86,7 +87,7 @@ TEST(VolumetricCloudMathTest, PushCarriesTheSettings)
 
 TEST(VolumetricCloudMathTest, AssetNamesLiveUnderTheCloudsFolder)
 {
-    for (const char* asset : { kCloudShapeAsset, kCloudDetailAsset, kCloudWeatherAsset, kCloudBlueNoiseAsset }) {
+    for (const char* asset : { kCloudShapeAsset, kCloudDetailAsset, kCloudCurlAsset, kCloudWeatherAsset, kCloudBlueNoiseAsset }) {
         EXPECT_EQ(std::string(asset).rfind("clouds/", 0), 0u) << asset;
     }
 }
@@ -154,6 +155,110 @@ TEST(VolumetricCloudLayerTest, GradientsRoundTheBaseAndTheTop)
     EXPECT_FLOAT_EQ(CloudDensityGradient(0.0f, 0.2f, 0.9f), 0.0f);
     EXPECT_FLOAT_EQ(CloudDensityGradient(0.5f, 0.2f, 0.9f), 0.5f);
     EXPECT_FLOAT_EQ(CloudDensityGradient(1.0f, 0.2f, 0.9f), 0.0f);
+}
+
+TEST(VolumetricCloudLayerTest, TopFalloffStartMovesTheRoundingUp)
+{
+    // Stop height 1.0: the old start (0.2) is already halfway down at 0.6, the new start (0.5) is still full.
+    EXPECT_NEAR(CloudShapeGradient(0.6f, 1.0f, 0.07f, 0.0f, 0.2f), 0.5f, 1e-5f);
+    EXPECT_NEAR(CloudShapeGradient(0.6f, 1.0f, 0.07f, 0.0f, 0.5f), 0.8f, 1e-5f);
+    EXPECT_FLOAT_EQ(CloudShapeGradient(1.0f, 1.0f, 0.07f, 0.0f, 0.5f), 0.0f);
+}
+
+TEST(VolumetricCloudLayerTest, ShapeStretchMapsTheRangeToUnitAndClamps)
+{
+    EXPECT_FLOAT_EQ(CloudStretchShape(0.5f, 0.0f, 1.0f), 0.5f);
+    EXPECT_FLOAT_EQ(CloudStretchShape(0.3f, 0.4f, 0.8f), 0.0f);
+    EXPECT_FLOAT_EQ(CloudStretchShape(0.9f, 0.4f, 0.8f), 1.0f);
+    EXPECT_NEAR(CloudStretchShape(0.6f, 0.4f, 0.8f), 0.5f, 1e-6f);
+}
+
+TEST(VolumetricCloudParamsTest, ShapeAndCurveSettingsReachTheSpareBlockSlots)
+{
+    VolumetricCloudSettings s = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    s.topFalloffStart = 0.6f;
+    s.shapeLow = 0.4f;
+    s.shapeHigh = 0.8f;
+    s.densityCurve = 0.5f;
+    const VolumetricCloudParamsGpu p = MakeVolumetricCloudParams(SanitizeVolumetricCloudSettings(s), VolumetricCloudFrameFacts{});
+    EXPECT_FLOAT_EQ(p.skip[1], 0.6f);
+    EXPECT_FLOAT_EQ(p.skip[2], 0.4f);
+    EXPECT_FLOAT_EQ(p.skip[3], 0.8f);
+    EXPECT_FLOAT_EQ(p.ambientColor[3], 0.5f);
+    // A high end at or below the low end is lifted so the stretch never divides by zero.
+    s.shapeLow = 0.9f;
+    s.shapeHigh = 0.1f;
+    const VolumetricCloudParamsGpu q = MakeVolumetricCloudParams(SanitizeVolumetricCloudSettings(s), VolumetricCloudFrameFacts{});
+    EXPECT_GT(q.skip[3], q.skip[2]);
+}
+
+TEST(VolumetricCloudLightTest, SkyVisibilityRunsFromOpenSkyToTheFloor)
+{
+    EXPECT_FLOAT_EQ(CloudSkyVisibility(0.0f, 1.0f, 0.3f), 1.0f);
+    EXPECT_NEAR(CloudSkyVisibility(100.0f, 1.0f, 0.3f), 0.3f, 1e-6f);
+    EXPECT_FLOAT_EQ(CloudSkyVisibility(5.0f, 0.0f, 0.3f), 1.0f);
+    float last = 2.0f;
+    for (float tau = 0.0f; tau < 4.0f; tau += 0.25f) {
+        const float v = CloudSkyVisibility(tau, 0.8f, 0.45f);
+        EXPECT_LT(v, last);
+        EXPECT_GE(v, 0.45f);
+        last = v;
+    }
+    // A negative optical depth never brightens a sample past the open sky.
+    EXPECT_FLOAT_EQ(CloudSkyVisibility(-3.0f, 1.0f, 0.2f), 1.0f);
+}
+
+TEST(VolumetricCloudLightTest, GroundLightReachesOnlyTheLowCloud)
+{
+    EXPECT_FLOAT_EQ(CloudGroundShare(0.0f), 1.0f);
+    EXPECT_FLOAT_EQ(CloudGroundShare(0.5f), 0.25f);
+    EXPECT_FLOAT_EQ(CloudGroundShare(1.0f), 0.0f);
+    EXPECT_FLOAT_EQ(CloudGroundShare(3.0f), 0.0f);
+}
+
+TEST(VolumetricCloudLightTest, OctaveTintIsWhiteWithoutBlueShift)
+{
+    const Vec3 tint(0.9f, 0.97f, 1.1f);
+    const Vec3 none = CloudOctaveTint(0.0f, tint);
+    EXPECT_FLOAT_EQ(none.x, 1.0f);
+    EXPECT_FLOAT_EQ(none.y, 1.0f);
+    EXPECT_FLOAT_EQ(none.z, 1.0f);
+    const Vec3 full = CloudOctaveTint(1.0f, tint);
+    EXPECT_FLOAT_EQ(full.x, 0.9f);
+    EXPECT_FLOAT_EQ(full.z, 1.1f);
+    EXPECT_NEAR(CloudOctaveTint(0.5f, tint).z, 1.05f, 1e-6f);
+}
+
+TEST(VolumetricCloudParamsTest, SkyShadeSettingsReachTheBlockAndStayInRange)
+{
+    VolumetricCloudSettings s = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    EXPECT_FLOAT_EQ(s.skyOcclusion, 0.8f);
+    EXPECT_FLOAT_EQ(s.skyFloor, 0.32f);
+    s.skyOcclusion = 1.5f;
+    s.skyOcclusionReachM = 800.0f;
+    s.skyFloor = 0.2f;
+    s.groundBounce = 3.0f;
+    s.groundWarmth = 0.4f;
+    s.msBlueShift = 0.9f;
+    const VolumetricCloudParamsGpu p = MakeVolumetricCloudParams(SanitizeVolumetricCloudSettings(s), VolumetricCloudFrameFacts{});
+    EXPECT_FLOAT_EQ(p.skyShade[0], 1.5f);
+    EXPECT_FLOAT_EQ(p.skyShade[1], 800.0f);
+    EXPECT_FLOAT_EQ(p.skyShade[2], 0.2f);
+    EXPECT_FLOAT_EQ(p.skyShade[3], 3.0f);
+    EXPECT_FLOAT_EQ(p.skyShade2[0], 0.4f);
+    EXPECT_FLOAT_EQ(p.skyShade2[1], 0.9f);
+
+    s.skyOcclusion = 99.0f;
+    s.skyOcclusionReachM = -5.0f;
+    s.skyFloor = std::numeric_limits<float>::quiet_NaN();
+    s.groundBounce = 1000.0f;
+    s.msBlueShift = 7.0f;
+    const VolumetricCloudSettings clean = SanitizeVolumetricCloudSettings(s);
+    EXPECT_FLOAT_EQ(clean.skyOcclusion, 4.0f);
+    EXPECT_FLOAT_EQ(clean.skyOcclusionReachM, 10.0f);
+    EXPECT_FLOAT_EQ(clean.skyFloor, VolumetricCloudSettings{}.skyFloor);
+    EXPECT_FLOAT_EQ(clean.groundBounce, 20.0f);
+    EXPECT_FLOAT_EQ(clean.msBlueShift, 1.0f);
 }
 
 // Double-precision twin of the shell intersection: the first and last parameter of the ray inside the shell.
@@ -265,6 +370,117 @@ TEST(VolumetricCloudLayerTest, MaxDistanceCutsTheSegment)
     EXPECT_FALSE(ComputeCloudShellSegment(2.0f, 0.02f, r, 1500.0f, 4000.0f, 1000.0f).hit);
 }
 
+TEST(VolumetricCloudLayerTest, TheRangeReachesTheHorizonOfAGroundCamera)
+{
+    // The default range must hold the whole layer seen along the horizon: the shell exit is 252 km away at a 5000 m top (the range ends it at 250 km).
+    const VolumetricCloudSettings safe = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    EXPECT_GE(safe.maxDistanceM, 250000.0f);
+    const float r = safe.planetRadiusKm * 1000.0f;
+    const CloudShellSegment horizon = ComputeCloudShellSegment(2.0f, 0.0f, r, safe.layerBaseM, safe.layerTopM, safe.maxDistanceM);
+    ASSERT_TRUE(horizon.hit);
+    EXPECT_NEAR(horizon.tStart, 138200.0f, 500.0f);
+    EXPECT_NEAR(horizon.tEnd, 250000.0f, 500.0f);
+    // One degree up the whole segment is inside the range too (the old 60 km range cut it away).
+    const CloudShellSegment oneDegree = ComputeCloudShellSegment(2.0f, 0.017452f, r, safe.layerBaseM, safe.layerTopM, safe.maxDistanceM);
+    ASSERT_TRUE(oneDegree.hit);
+    EXPECT_NEAR(oneDegree.tStart, 66200.0f, 500.0f);
+    EXPECT_NEAR(oneDegree.tEnd, 164600.0f, 500.0f);
+    // The fade only starts near the end of the range.
+    EXPECT_GE(safe.fadeStart, 0.9f);
+}
+
+TEST(VolumetricCloudLayerTest, TheFarWeatherTileKeepsTheWindPeriodAWholeNumberOfTiles)
+{
+    const VolumetricCloudSettings defaults = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    const double period = CloudWindPeriodM(defaults);
+    ASSERT_GT(period, 0.0);
+    const double farTile = static_cast<double>(std::llround(defaults.weatherScaleM * kCloudFarWeatherTileScale));
+    EXPECT_DOUBLE_EQ(farTile, 70000.0);
+    EXPECT_DOUBLE_EQ(std::fmod(period, farTile), 0.0);
+    // A weather tile whose far tile does not divide the old period lengthens the period.
+    VolumetricCloudSettings other = defaults;
+    other.weatherScaleM = 20000.0f;
+    other.shapeScaleM = 4000.0f;
+    other.detailScaleM = 500.0f;
+    const double otherFar = static_cast<double>(std::llround(other.weatherScaleM * kCloudFarWeatherTileScale));
+    EXPECT_DOUBLE_EQ(std::fmod(CloudWindPeriodM(other), otherFar), 0.0);
+}
+
+TEST(VolumetricCloudParamsTest, TheFarFieldSettingsReachTheBlockAndTheHistoryFallbackIsFixed)
+{
+    VolumetricCloudSettings s = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    EXPECT_FLOAT_EQ(s.farWeatherStartM, 30000.0f);
+    EXPECT_FLOAT_EQ(s.farWeatherMix, 0.5f);
+    s.farWeatherStartM = 45000.0f;
+    s.farWeatherMix = 0.25f;
+    s.farCoverageLift = 0.2f;
+    s.farAirScale = 0.4f;
+    s.maxDistanceM = 400000.0f;
+    VolumetricCloudFrameFacts facts;
+    const VolumetricCloudParamsGpu p = MakeVolumetricCloudParams(SanitizeVolumetricCloudSettings(s), facts);
+    EXPECT_FLOAT_EQ(p.skyShade2[2], 45000.0f);
+    EXPECT_FLOAT_EQ(p.skyShade2[3], 0.25f);
+    EXPECT_FLOAT_EQ(p.farField[0], 0.2f);
+    EXPECT_FLOAT_EQ(p.farField[1], 0.4f);
+    // The resolve pass keeps a fixed fallback distance, whatever the march range is.
+    VolumetricCloudResolveFacts resolve;
+    const VolumetricCloudResolveParamsGpu q = MakeVolumetricCloudResolveParams(SanitizeVolumetricCloudSettings(s), facts, resolve);
+    EXPECT_FLOAT_EQ(q.blend[3], kCloudHistoryFallbackDistanceM);
+    s.maxDistanceM = 100000.0f;
+    EXPECT_FLOAT_EQ(MakeVolumetricCloudResolveParams(SanitizeVolumetricCloudSettings(s), facts, resolve).blend[3],
+        kCloudHistoryFallbackDistanceM);
+    // Out of range values are clamped.
+    s.farAirScale = 5.0f;
+    s.farCoverageLift = -1.0f;
+    const VolumetricCloudSettings clamped = SanitizeVolumetricCloudSettings(s);
+    EXPECT_FLOAT_EQ(clamped.farAirScale, 1.0f);
+    EXPECT_FLOAT_EQ(clamped.farCoverageLift, 0.0f);
+}
+
+TEST(VolumetricCloudParamsTest, TheDetailAndStepSettingsReachTheBlockWithTheShippedDefaults)
+{
+    const VolumetricCloudSettings defaults = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    EXPECT_FLOAT_EQ(defaults.detailScaleM, 350.0f);
+    EXPECT_FLOAT_EQ(defaults.detailStrength, 1.5f);
+    EXPECT_FLOAT_EQ(defaults.detailFadeDistM, 25000.0f);
+    EXPECT_FLOAT_EQ(defaults.curlAmountM, 300.0f);
+    EXPECT_FLOAT_EQ(defaults.curlScaleM, 3000.0f);
+    EXPECT_FLOAT_EQ(defaults.wispiness, 0.8f);
+    EXPECT_FLOAT_EQ(defaults.fineDetail, 0.6f);
+    EXPECT_FLOAT_EQ(defaults.maxStepDepth, 0.4f);
+    EXPECT_FLOAT_EQ(defaults.lightDetail, 1.0f);
+    EXPECT_FLOAT_EQ(defaults.inScatter, 0.8f);
+    EXPECT_FLOAT_EQ(defaults.sunIntensity, 14.0f);
+    EXPECT_FLOAT_EQ(defaults.ambientBottom, 0.42f);
+    EXPECT_FLOAT_EQ(defaults.coverage, 0.55f);
+    EXPECT_FLOAT_EQ(defaults.peakMin, 0.6f);
+    VolumetricCloudSettings s = defaults;
+    s.curlAmountM = 120.0f;
+    s.curlScaleM = 4500.0f;
+    s.wispiness = 0.25f;
+    s.fineDetail = 0.75f;
+    s.maxStepDepth = 1.5f;
+    s.inScatter = 0.3f;
+    VolumetricCloudFrameFacts facts;
+    const VolumetricCloudParamsGpu p = MakeVolumetricCloudParams(SanitizeVolumetricCloudSettings(s), facts);
+    EXPECT_FLOAT_EQ(p.detailShape[0], 120.0f);
+    EXPECT_FLOAT_EQ(p.detailShape[1], 4500.0f);
+    EXPECT_FLOAT_EQ(p.detailShape[2], 0.25f);
+    EXPECT_FLOAT_EQ(p.detailShape[3], 0.75f);
+    EXPECT_FLOAT_EQ(p.farField[2], 1.5f);
+    EXPECT_FLOAT_EQ(p.farField[3], 0.3f);
+    // Out of range values are clamped.
+    s.detailStrength = 9.0f;
+    s.maxStepDepth = 0.0f;
+    s.curlScaleM = 1.0f;
+    s.inScatter = 7.0f;
+    const VolumetricCloudSettings clamped = SanitizeVolumetricCloudSettings(s);
+    EXPECT_FLOAT_EQ(clamped.detailStrength, 2.0f);
+    EXPECT_FLOAT_EQ(clamped.maxStepDepth, 0.1f);
+    EXPECT_FLOAT_EQ(clamped.curlScaleM, 200.0f);
+    EXPECT_FLOAT_EQ(clamped.inScatter, 1.0f);
+}
+
 TEST(VolumetricCloudLayerTest, WindMovesAlongTheDirection)
 {
     double offset[2] = {};
@@ -280,7 +496,7 @@ TEST(VolumetricCloudLayerTest, WindMovesAlongTheDirection)
 TEST(VolumetricCloudLayerTest, WindPeriodIsTheCommonRepeatOfTheNoiseTiles)
 {
     const VolumetricCloudSettings defaults = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
-    EXPECT_DOUBLE_EQ(CloudWindPeriodM(defaults), 420000.0);
+    EXPECT_DOUBLE_EQ(CloudWindPeriodM(defaults), 700000.0);
     VolumetricCloudSettings odd = defaults;
     odd.weatherScaleM = 12347.0f;
     odd.shapeScaleM = 5003.0f;
@@ -343,7 +559,11 @@ TEST(VolumetricCloudParamsTest, BlockLayoutMatchesTheShader)
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, drainePhase), 320u);
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, atmosphereMode), 368u);
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, atmosphereCamera), 384u);
-    EXPECT_EQ(sizeof(VolumetricCloudParamsGpu), 400u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, skyShade), 400u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, skyShade2), 416u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, farField), 432u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, detailShape), 448u);
+    EXPECT_EQ(sizeof(VolumetricCloudParamsGpu), 464u);
 }
 
 TEST(VolumetricCloudParamsTest, TheAtmosphereModePassesTheSunUntouchedAndTheCamera)
@@ -378,7 +598,7 @@ TEST(VolumetricCloudParamsTest, TheAtmosphereIsAskedForByDefaultAndTheSettingsSt
     const VolumetricCloudSettings defaults;
     EXPECT_FLOAT_EQ(defaults.atmosphereMode, 1.0f);
     EXPECT_FLOAT_EQ(defaults.airScale, 1.0f);
-    EXPECT_FLOAT_EQ(defaults.skyAmbient, 1.0f);
+    EXPECT_FLOAT_EQ(defaults.skyAmbient, 4.5f);
     // Without the tables the facts keep the standalone look: the sun goes in tinted and the flag stays off.
     VolumetricCloudFrameFacts facts;
     facts.sunTint = Vec3(0.5f, 0.5f, 0.5f);
@@ -602,7 +822,7 @@ TEST(VolumetricCloudShaderNamesTest, MarchExposesBoundNames)
     ASSERT_NE(params, nullptr);
     EXPECT_EQ(params->type, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     EXPECT_EQ(params->access, ReflectedAccess::ReadOnly);
-    for (const char* sampler : { "sourceDepth", "shapeVolume", "detailVolume", "weatherMap", "blueNoise",
+    for (const char* sampler : { "sourceDepth", "shapeVolume", "detailVolume", "weatherMap", "blueNoise", "curlMap",
              "transmittanceLut", "multiScatteringLut", "skyViewLut" }) {
         const ReflectedDescriptorBinding* binding = Find(result, sampler);
         ASSERT_NE(binding, nullptr) << sampler;
@@ -618,7 +838,7 @@ TEST(VolumetricCloudShaderNamesTest, MarchExposesBoundNames)
         EXPECT_EQ(binding->type, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) << output;
         EXPECT_EQ(binding->access, ReflectedAccess::WriteOnly) << output;
     }
-    EXPECT_EQ(result.descriptorBindings.size(), 12u);
+    EXPECT_EQ(result.descriptorBindings.size(), 13u);
     EXPECT_FALSE(result.hasPushConstantRange);
 }
 
@@ -688,7 +908,7 @@ TEST(VolumetricCloudTemporalTest, RelativeCameraRoundTripsRaysFarFromTheOrigin)
     EXPECT_LT(worst, 0.02);
 }
 
-TEST(VolumetricCloudTemporalTest, DivisorRoundsToOneTwoOrFour)
+TEST(VolumetricCloudTemporalTest, DivisorRoundsToOneTwoThreeOrFour)
 {
     VolumetricCloudSettings s;
     const auto divisorOf = [&](float value) {
@@ -698,15 +918,18 @@ TEST(VolumetricCloudTemporalTest, DivisorRoundsToOneTwoOrFour)
     EXPECT_EQ(divisorOf(1.0f), 1u);
     EXPECT_EQ(divisorOf(1.4f), 1u);
     EXPECT_EQ(divisorOf(2.0f), 2u);
-    EXPECT_EQ(divisorOf(2.9f), 2u);
-    EXPECT_EQ(divisorOf(3.0f), 4u);
+    EXPECT_EQ(divisorOf(2.4f), 2u);
+    EXPECT_EQ(divisorOf(2.6f), 3u);
+    EXPECT_EQ(divisorOf(3.0f), 3u);
+    EXPECT_EQ(divisorOf(3.4f), 3u);
+    EXPECT_EQ(divisorOf(3.6f), 4u);
     EXPECT_EQ(divisorOf(4.0f), 4u);
     EXPECT_EQ(divisorOf(99.0f), 4u);
 }
 
 TEST(VolumetricCloudTemporalTest, BayerOffsetsVisitEveryCellOncePerCycle)
 {
-    for (const std::uint32_t divisor : { 2u, 4u }) {
+    for (const std::uint32_t divisor : { 2u, 3u, 4u }) {
         const std::uint32_t cells = divisor * divisor;
         std::set<std::pair<std::uint32_t, std::uint32_t>> seen;
         for (std::uint32_t i = 0; i < cells; ++i) {
@@ -784,6 +1007,10 @@ TEST(VolumetricCloudTemporalTest, ResolveParamsCarryTheTemporalSettings)
     EXPECT_FLOAT_EQ(p.windDelta[0], 2.0f);
     EXPECT_FLOAT_EQ(p.windDelta[2], 3.0f);
     EXPECT_FLOAT_EQ(p.blend[0], s.historyBlend);
+    EXPECT_FLOAT_EQ(p.blend[1], s.freshBlend);
+    EXPECT_FLOAT_EQ(p.motion[0], s.motionBlend);
+    EXPECT_FLOAT_EQ(p.motion[1], s.historySharp);
+    EXPECT_FLOAT_EQ(p.motion[2], 1.0f);
 
     // Without accumulation the new samples replace the picture and no history is read.
     s.temporal = 0.0f;
@@ -791,6 +1018,8 @@ TEST(VolumetricCloudTemporalTest, ResolveParamsCarryTheTemporalSettings)
     EXPECT_EQ(off.counts[3], 0u);
     EXPECT_FLOAT_EQ(off.blend[0], 1.0f);
     EXPECT_FLOAT_EQ(off.blend[1], 1.0f);
+    EXPECT_FLOAT_EQ(off.motion[1], 0.0f);
+    EXPECT_FLOAT_EQ(off.motion[2], 0.0f);
 
     // The march block carries the same offset as the resolve block.
     const VolumetricCloudParamsGpu march = MakeVolumetricCloudParams(s, facts);
@@ -798,6 +1027,27 @@ TEST(VolumetricCloudTemporalTest, ResolveParamsCarryTheTemporalSettings)
     EXPECT_EQ(march.lowRes[1], o.x);
     EXPECT_EQ(march.lowRes[2], o.y);
     EXPECT_EQ(march.fullSize[0], 884u);
+    // The sub-pixel jitter travels in percent of a pixel.
+    EXPECT_EQ(march.lowRes[3], 100u);
+    s.subpixelJitter = 0.5f;
+    EXPECT_EQ(MakeVolumetricCloudParams(s, facts).lowRes[3], 50u);
+    s.subpixelJitter = 0.0f;
+    EXPECT_EQ(MakeVolumetricCloudParams(s, facts).lowRes[3], 0u);
+}
+
+TEST(VolumetricCloudTemporalTest, TheTemporalDefaultsAreTheSampleAveragingOnes)
+{
+    const VolumetricCloudSettings d = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    EXPECT_FLOAT_EQ(d.freshBlend, 0.1f);
+    EXPECT_FLOAT_EQ(d.motionBlend, 0.25f);
+    EXPECT_FLOAT_EQ(d.historyBlend, 0.0f);
+    EXPECT_FLOAT_EQ(d.historySharp, 1.0f);
+    EXPECT_FLOAT_EQ(d.adaptiveBlend, 1.0f);
+    EXPECT_FLOAT_EQ(d.subpixelJitter, 1.0f);
+    EXPECT_FLOAT_EQ(d.resolutionDivisor, 4.0f);
+    // Divisor 3 walks a 9 frame cycle: the own-sample index advances every 9 frames.
+    EXPECT_EQ(CloudOwnSampleIndex(9 * 5, 3), 5u);
+    EXPECT_EQ(CloudOwnSampleIndex(9 * 5 + 8, 3), 5u);
 }
 
 TEST(VolumetricCloudShaderNamesTest, Slice3dExposesBoundNamesAndPushBlock)
@@ -933,7 +1183,9 @@ TEST(VolumetricCloudParamsTest, GlslBlocksHaveTheCppMembersAtTheCppOffsets)
             GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, lightMisc), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, drainePhase),
             GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, lowRes), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, fullSize),
             GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, atmosphereMode),
-            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, atmosphereCamera) });
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, atmosphereCamera),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, skyShade), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, skyShade2),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, farField), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, detailShape) });
     ExpectBlock(ParseBlock(ReadShaderText("VolumetricCloudResolve.comp"), "VolumetricCloudResolveParams"),
         { GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, invViewProjection),
             GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, prevViewProjection),
@@ -946,12 +1198,117 @@ TEST(VolumetricCloudParamsTest, GlslBlocksHaveTheCppMembersAtTheCppOffsets)
 #undef GTE_CLOUD_MEMBER
 }
 
+TEST(VolumetricCloudLightTest, ShaderConstantsMatchTheCpuTwinsAndTheAtmosphereDefault)
+{
+    const std::string lighting = ReadShaderText("VolumetricCloudLighting.glsl");
+    EXPECT_NE(lighting.find("const vec3 kOctaveTint = vec3(0.9, 0.97, 1.1);"), std::string::npos);
+    const std::string atmosphere = ReadShaderText("VolumetricCloudAtmosphere.glsl");
+    EXPECT_NE(atmosphere.find("const float kReferenceSkyIntensity = 6.0;"), std::string::npos);
+    // The clouds' sky light is tied to the atmosphere's default sky intensity, not to the live setting.
+    EXPECT_FLOAT_EQ(AtmosphereSettings{}.skyIntensity, 6.0f);
+}
+
 TEST(VolumetricCloudTemporalTest, ResolveShaderTapRuleUsesTheSameToleranceAsTheReference)
 {
     const std::string source = ReadShaderText("VolumetricCloudResolve.comp");
     EXPECT_NE(source.find("const float kRelative = 0.03;"), std::string::npos);
     EXPECT_NE(source.find("const float kSlackKm = 0.02;"), std::string::npos);
     EXPECT_NE(source.find("const float kClearTransmittance = 0.999;"), std::string::npos);
+}
+
+TEST(VolumetricCloudTemporalTest, EachPixelsOwnSamplesStepByTheGoldenRatio)
+{
+    for (const std::uint32_t divisor : { 1u, 2u, 3u, 4u }) {
+        const std::uint64_t cycle = std::uint64_t{ divisor } * divisor;
+        for (const float blue : { 0.0f, 0.3f, 0.77f }) {
+            // One pixel is marched on frames f, f + cycle, f + 2 * cycle, ...
+            std::vector<float> jitters;
+            for (std::uint64_t k = 0; k < 16; ++k) {
+                jitters.push_back(CloudMarchJitter(blue, 7 + k * cycle, divisor));
+                EXPECT_GE(jitters.back(), 0.0f);
+                EXPECT_LT(jitters.back(), 1.0f);
+            }
+            for (std::size_t k = 1; k < jitters.size(); ++k) {
+                double step = static_cast<double>(jitters[k]) - jitters[k - 1];
+                step -= std::floor(step);
+                EXPECT_NEAR(step, 0.618034, 2e-4) << divisor << " " << k;
+            }
+            // Sixteen samples of one pixel cover [0, 1) evenly: no two are closer than 0.015.
+            std::sort(jitters.begin(), jitters.end());
+            for (std::size_t k = 1; k < jitters.size(); ++k) {
+                EXPECT_GT(jitters[k] - jitters[k - 1], 0.015f) << divisor;
+            }
+        }
+    }
+    // Frames inside one cycle march other pixels: the jitter of this pixel does not move.
+    EXPECT_FLOAT_EQ(CloudMarchJitter(0.4f, 3, 4), CloudMarchJitter(0.4f, 15, 4));
+    EXPECT_EQ(CloudOwnSampleIndex(16 * 300, 4), 300u & 255u);
+}
+
+TEST(VolumetricCloudShaderTest, MarchShaderUsesTheOwnSampleJitterAndBlendsTheLight)
+{
+    const std::string march = gte::ReadShaderText("VolumetricCloud.comp");
+    EXPECT_NE(march.find("params.counts.y / cycleLength"), std::string::npos);
+    EXPECT_NE(march.find("kGoldenRatio * float(ownSample)"), std::string::npos);
+    EXPECT_NE(march.find("mix(sunDepthA, sunDepthB, blend)"), std::string::npos);
+    EXPECT_NE(march.find("mix(skyVisibilityA, skyVisibilityB, blend)"), std::string::npos);
+}
+
+TEST(VolumetricCloudShaderTest, DetailIsCurlWarpedBillowAndWispErosionAndTheCurveComesAfterTheErosion)
+{
+    const std::string march = gte::ReadShaderText("VolumetricCloud.comp");
+    EXPECT_NE(march.find("layout(binding = 12) uniform sampler2D curlMap;"), std::string::npos);
+    EXPECT_NE(march.find("vec4 detailShape;"), std::string::npos);
+    EXPECT_NE(march.find("textureLod(curlMap,"), std::string::npos);
+    EXPECT_NE(march.find("float billowErosion"), std::string::npos);
+    EXPECT_NE(march.find("float wispErosion"), std::string::npos);
+    // The density curve is applied to the eroded body, not to the body before the erosion.
+    EXPECT_NE(march.find("return CloudCurve(Saturate(Remap(shape, erosion, 1.0, 0.0, 1.0))) * densityFactor;"), std::string::npos);
+    // The exponent lives in one place, CloudCurve(); CloudShape() returns the linear body.
+    EXPECT_NE(march.find("float CloudCurve(float body)"), std::string::npos);
+    EXPECT_NE(march.find("return Saturate(Remap(shape * shapeGradient, 1.0 - coverage * weatherCoverage, 1.0, 0.0, 1.0));"), std::string::npos);
+    const std::string lighting = gte::ReadShaderText("VolumetricCloudLighting.glsl");
+    EXPECT_NE(lighting.find("return CloudCurve(shape) * factor;"), std::string::npos);
+    // A dense sample is shortened so that one step holds at most maxStepDepth optical depths.
+    EXPECT_NE(march.find("extinction * stepLength > params.farField.z"), std::string::npos);
+    EXPECT_NE(march.find("t += marchStep;"), std::string::npos);
+}
+
+TEST(VolumetricCloudShaderTest, EveryRayGrowsItsStepsToFitTheStepBudget)
+{
+    const std::string march = gte::ReadShaderText("VolumetricCloud.comp");
+    // The per-ray growth: step = stepBaseM + growth * t, with growth raised until the segment fits 85 percent of maxSteps.
+    EXPECT_NE(march.find("const float kStepBudgetShare = 0.85;"), std::string::npos);
+    EXPECT_NE(march.find("pow((tEnd + stepOffset) / (tStart + stepOffset), 1.0 / stepBudget) - 1.0"), std::string::npos);
+    EXPECT_NE(march.find("float stepOffset = params.march.x / rayGrowth;"), std::string::npos);
+    EXPECT_NE(march.find("stepLength = (t + stepOffset) * rayGrowth;"), std::string::npos);
+    // The old fixed-growth step must be gone.
+    EXPECT_EQ(march.find("baseStep + t * growth"), std::string::npos);
+    // The flat density fade is the only fade left and the far field has its own uniforms.
+    EXPECT_NE(march.find("params.farField.x * farRamp"), std::string::npos);
+    EXPECT_NE(march.find("kFarWeatherTileScale"), std::string::npos);
+}
+
+TEST(VolumetricCloudShaderTest, TheResolveAveragesSamplesAndTheMarchJittersInsideThePixel)
+{
+    const std::string resolve = gte::ReadShaderText("VolumetricCloudResolve.comp");
+    // The sample count lives in the history aux z; a marched pixel blends 1 / (count + 1) down to the freshBlend floor.
+    EXPECT_NE(resolve.find("alpha = max(alpha, 1.0 / (effectiveCount + 1.0));"), std::string::npos);
+    EXPECT_NE(resolve.find("imageStore(historyAuxOut, pixel, vec4(cloudDistanceKm, pixelEndKm, newCount, 0.0));"), std::string::npos);
+    EXPECT_NE(resolve.find("vec4 CatmullRomWeights(float f)"), std::string::npos);
+    EXPECT_NE(resolve.find("cubic = clamp(cubic, innerMin, innerMax);"), std::string::npos);
+    const std::string march = gte::ReadShaderText("VolumetricCloud.comp");
+    EXPECT_NE(march.find("vec2 rayNdc = ndc + pixelShift * 2.0 / vec2(fullSize);"), std::string::npos);
+    EXPECT_NE(march.find("float(params.lowRes.w) * 0.01"), std::string::npos);
+}
+
+TEST(VolumetricCloudShaderTest, TheSunLightIsScaledByTheInScatterChance)
+{
+    const std::string march = gte::ReadShaderText("VolumetricCloud.comp");
+    const std::string lighting = gte::ReadShaderText("VolumetricCloudLighting.glsl");
+    EXPECT_NE(lighting.find("float InScatterProbability(float lodDensity, float h, float cosTheta)"), std::string::npos);
+    EXPECT_NE(lighting.find("scatter *= mix(1.0, InScatterProbability(s.lodDensity, s.heightFraction, cosTheta), params.farField.w);"), std::string::npos);
+    EXPECT_NE(march.find("li.lodDensity = Saturate(CloudCurve(shape) * factor);"), std::string::npos);
 }
 
 } // namespace
@@ -965,6 +1322,14 @@ TEST(VolumetricCloudShaderTest, ImageAccessIsBoundedByTheBoundImages)
     EXPECT_NE(resolve.find("imageSize(destinationImage)"), std::string::npos);
     EXPECT_NE(resolve.find("textureSize(historyColor, 0)"), std::string::npos);
     EXPECT_NE(resolve.find("textureSize(lowColor, 0)"), std::string::npos);
+}
+
+TEST(VolumetricCloudShaderTest, AStillPixelReadsItsHistoryExactly)
+{
+    // A history fraction of 1e-4 texel made the rgba16f store round a still pixel down one half-float step per frame.
+    const std::string resolve = gte::ReadShaderText("VolumetricCloudResolve.comp");
+    EXPECT_NE(resolve.find("const float kSnapTexels = 0.004;"), std::string::npos);
+    EXPECT_NE(resolve.find("previousTexel = mix(previousTexel, snapped, lessThan(abs(previousTexel - snapped), vec2(kSnapTexels)));"), std::string::npos);
 }
 
 TEST(VolumetricCloudShaderTest, NoImplicitLodInTheComputeShaders)

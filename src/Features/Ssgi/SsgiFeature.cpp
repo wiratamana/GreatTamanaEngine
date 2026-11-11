@@ -70,12 +70,12 @@ void SsgiFeature::TracePass(fx::PostOpaqueFrame& f)
         return;
     }
     // No active camera leaves the view-projection as identity; that is "no camera yet", not a bad camera.
-    if (v.extent.width == 0 || v.extent.height == 0 || !v.invViewProjectionValid
+    if (v.extent.width == 0 || v.extent.height == 0 || !v.relative.valid
         || ApproximatelyEqual(v.viewProjection, Mat4::Identity())) {
         bail(SsgiFrameStatus::NoValidCamera);
         return;
     }
-    const fx::CameraBasis basis = fx::DeriveCameraBasis(v.eye, v.invViewProjection, v.extent);
+    const fx::CameraBasis basis = fx::DeriveViewCameraBasis(v);
     if (!basis.valid) {
         f.ReportOnce("Ssgi: camera is not a square-pixel perspective camera, GI is off");
         bail(SsgiFrameStatus::NoValidCamera);
@@ -105,7 +105,7 @@ void SsgiFeature::TracePass(fx::PostOpaqueFrame& f)
 
     // A refused dispatch publishes nothing, so the composite declares nothing.
     const bool prepared = f.Compute(m_prepareShader, "Ssgi.Prepare.Dispatch")
-                              .Params(view.prepareParams, MakeSsgiPrepareParams(basis, cfg, v.invViewProjection))
+                              .Params(view.prepareParams, MakeSsgiPrepareParams(basis, cfg, basis.shaderInverse))
                               .Bind("sceneDepth", fx::Depth(f.SceneDepth()))
                               .Bind("sceneColor", f.SceneColor())
                               .Bind("ssgiColorOut", color)
@@ -145,7 +145,7 @@ void SsgiFeature::TracePass(fx::PostOpaqueFrame& f)
                 cfg.depthSigma, cfg.historyWeight, cfg.spatialDenoise, cfg.resolutionDivisor };
             resolved = f.Compute(m_resolveShader, "Ssgi.Resolve.Dispatch")
                            .Params(view.resolveParams, fx::MakeTemporalResolveParams(basis, view.previous, filter,
-                                                           v.extent, v.invViewProjection, useHistory))
+                                                           v.extent, basis.shaderInverse, useHistory))
                            .Bind("ssgiRaw", raw)
                            .Bind("ssgiHistory", previous)
                            .Bind("ssgiOutput", current)
@@ -176,11 +176,11 @@ void SsgiFeature::TracePass(fx::PostOpaqueFrame& f)
 void SsgiFeature::CompositePass(fx::CompositeFrame& f)
 {
     const std::optional<SsgiResult> result = m_result.Fetch(f);
-    if (!result || !result->basis.valid || !f.View().invViewProjectionValid) {
+    if (!result || !result->basis.valid) {
         return;
     }
     const SsgiCompositePush push =
-        MakeSsgiCompositePush(result->basis, m_settings, f.View().invViewProjection, result->divisor);
+        MakeSsgiCompositePush(result->basis, m_settings, result->basis.shaderInverse, result->divisor);
     const bool drawn = f.Fullscreen(m_compositeShader, "Ssgi.Composite.Draw")
                            .Bind("sceneColor", f.SceneColor())
                            .Bind("sceneDepth", fx::Depth(f.SceneDepth()))

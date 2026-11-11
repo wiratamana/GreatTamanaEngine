@@ -16,8 +16,10 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -224,21 +226,86 @@ Volume BakeShape(int n) {
     return Pack(n, n, n, {&r, &g, &b, &a});
 }
 
-// Detail 32^3: R/G/B inverted Worley at 4/8/16 cells, A = their 0.625/0.25/0.125 mix.
+// Detail 64^3, four channels, all periodic (the shader reads them with one trilinear fetch):
+//   R billowy low   : inverted Worley, 4/8/16 cells mixed 0.55/0.30/0.15 (16/8/4 texels per cell).
+//   G billowy high  : inverted Worley, 16/24 cells mixed 0.7/0.3 (4 and 2.7 texels per cell; no octave below 2.5 texels).
+//   B wispy low     : ridged Perlin (1 - |2p - 1|)^2, 4 cells, 3 octaves, domain warped by a Perlin vector field.
+//   A wispy high    : the same at 12 cells, 2 octaves.
+// A billow is bright at the cell centres (erode the borders to get cauliflower lobes); a wisp is bright on thin
+// sheets and strands (erode everything else to get ragged fibres).
 Volume BakeDetail(int n) {
-    auto single = [&](int cells, std::uint32_t seed) {
-        FVol v = Fill(n, n, n, [=](float x, float y, float z) { return WorleyInv(x, y, z, cells, seed); });
+    auto worleyMix = [&](std::initializer_list<std::pair<int, float>> octaves, std::uint32_t seed) {
+        FVol v = Fill(n, n, n, [&](float x, float y, float z) {
+            float sum = 0, norm = 0;
+            std::uint32_t s = seed;
+            for (const auto& [cells, weight] : octaves) {
+                sum += weight * WorleyInv(x, y, z, cells, s);
+                norm += weight;
+                s += 1000u;
+            }
+            return sum / norm;
+        });
         Stretch(v);
         return v;
     };
-    FVol r = single(4, 61u), g = single(8, 71u), b = single(16, 81u);
-    FVol a(r.size());
-    for (std::size_t i = 0; i < a.size(); ++i) a[i] = r[i] * 0.625f + g[i] * 0.25f + b[i] * 0.125f;
-    Stretch(a);
+    auto ridged = [&](int base, int octaves, std::uint32_t seed) {
+        // Warp: three independent periodic Perlin fields move the lookup position by up to 0.06 of the tile.
+        FVol raw = Fill(n, n, n, [=](float x, float y, float z) {
+            const float wx = 0.06f * PerlinPeriodic(x, y, z, 3, seed + 7001u);
+            const float wy = 0.06f * PerlinPeriodic(x, y, z, 3, seed + 7002u);
+            const float wz = 0.06f * PerlinPeriodic(x, y, z, 3, seed + 7003u);
+            return PerlinFbm(x + wx, y + wy, z + wz, base, octaves, seed);
+        });
+        Stretch(raw);
+        for (float& f : raw) {
+            const float r = 1.0f - std::fabs(2.0f * f - 1.0f);
+            f = r * r;
+        }
+        Stretch(raw);
+        return raw;
+    };
+    FVol r = worleyMix({{4, 0.55f}, {8, 0.30f}, {16, 0.15f}}, 61u);
+    FVol g = worleyMix({{16, 0.7f}, {24, 0.3f}}, 71u);
+    FVol b = ridged(4, 3, 81u);
+    FVol a = ridged(12, 2, 91u);
     return Pack(n, n, n, {&r, &g, &b, &a});
 }
 
-// Weather 512^2: slices of the periodic 3D noise at a fixed z are periodic in x and y.
+// Curl 128^2: the curl of a periodic Perlin potential, a divergence free 2D field used to push the detail lookup
+// around. R and G are the two curl components (0.5 = zero), B is a second independent field for the height shift.
+Volume BakeCurl(int n) {
+    auto potential = [&](std::uint32_t seed) {
+        FVol v = Fill(n, n, 1, [=](float x, float y, float) { return PerlinFbm(x, y, 0.37f, 3, 3, seed); });
+        Stretch(v);
+        return v;
+    };
+    const FVol p1 = potential(201u), p2 = potential(211u);
+    FVol r(static_cast<std::size_t>(n) * n), g(r.size()), b(r.size()), a(r.size(), 1.0f);
+    auto at = [&](const FVol& v, int x, int y) { return v[static_cast<std::size_t>(Wrap(y, n)) * n + Wrap(x, n)]; };
+    float maxMag = 1e-9f;
+    for (int y = 0; y < n; ++y)
+        for (int x = 0; x < n; ++x) {
+            const std::size_t i = static_cast<std::size_t>(y) * n + x;
+            r[i] = (at(p1, x, y + 1) - at(p1, x, y - 1)) * 0.5f;
+            g[i] = -(at(p1, x + 1, y) - at(p1, x - 1, y)) * 0.5f;
+            b[i] = at(p2, x, y) - 0.5f;
+            maxMag = std::max({maxMag, std::fabs(r[i]), std::fabs(g[i])});
+        }
+    for (std::size_t i = 0; i < r.size(); ++i) {
+        r[i] = 0.5f + 0.5f * r[i] / maxMag;
+        g[i] = 0.5f + 0.5f * g[i] / maxMag;
+        b[i] = 0.5f + b[i];
+    }
+    return Pack(n, n, 1, {&r, &g, &b, &a});
+}
+
+// Weather 512^2 (v2): slices of the periodic 3D noise at a fixed z are periodic in x and y.
+//   R coverage : big cumulus masses (Worley cells, domain-warped) + medium + small cells, scaled by a regional field,
+//                so one sky holds large and small clouds and clear gaps. Capped below 1 so no region becomes a solid sheet.
+//   G high cov.: broad overcast-ish region field (only used when the coverage setting is above 0.5).
+//   B cloud type / peak: 0 = flat stratus-like (low top), 1 = tall cumulus. Regional type field plus the cell core, so a
+//                cumulus mass is tallest in the middle and lower at its shoulders.
+//   A density  : 0.45..1 modulation.
 Volume BakeWeather(int n) {
     const float zf = 0.37f;
     auto pf = [&](int base, int oct, std::uint32_t seed) {
@@ -246,17 +313,62 @@ Volume BakeWeather(int n) {
         Stretch(v);
         return v;
     };
-    auto wf = [&](int base, std::uint32_t seed) {
-        FVol v = Fill(n, n, 1, [=](float x, float y, float) { return WorleyFbm3(x, y, zf, base, seed); });
-        Stretch(v);
+    // Domain warp: periodic displacement keeps the tile period.
+    FVol warpX = pf(3, 3, 201u), warpY = pf(3, 3, 211u);
+    auto cells = [&](int count, std::uint32_t seed, float warp) {
+        FVol v(static_cast<std::size_t>(n) * n);
+        ParallelFor(n, [&](int y) {
+            for (int x = 0; x < n; ++x) {
+                const std::size_t i = static_cast<std::size_t>(y) * n + x;
+                const float fx = static_cast<float>(x) / n + warp * (warpX[i] - 0.5f);
+                const float fy = static_cast<float>(y) / n + warp * (warpY[i] - 0.5f);
+                v[i] = WorleyInv(fx, fy, zf, count, seed);
+            }
+        });
         return v;
     };
-    FVol pc = pf(4, 5, 101u), wc = wf(3, 111u), pg = pf(3, 4, 121u), pt = pf(2, 3, 131u), pd = pf(6, 4, 141u);
-    FVol r(pc.size()), g(pc.size()), b(pc.size()), a(pc.size());
+    FVol regional = pf(2, 3, 101u), mid = pf(10, 4, 111u), pg = pf(3, 4, 121u), pt = pf(3, 3, 131u), pd = pf(6, 4, 141u), pf2 = pf(24, 3, 151u);
+    FVol big = cells(4, 301u, 0.06f), med = cells(9, 311u, 0.05f), small = cells(20, 321u, 0.04f);
+    // Periodic box blur (3 passes ~ Gaussian). The Worley field has a crease (a V) at every cell border; thresholding a crease
+    // gives straight cliff-like cloud walls, so the fields are smoothed first.
+    auto blur = [&](FVol& v, int radius) {
+        FVol tmp(v.size());
+        for (int pass = 0; pass < 3; ++pass) {
+            ParallelFor(n, [&](int y) {
+                for (int x = 0; x < n; ++x) {
+                    float sum = 0;
+                    for (int d = -radius; d <= radius; ++d) sum += v[static_cast<std::size_t>(y) * n + Wrap(x + d, n)];
+                    tmp[static_cast<std::size_t>(y) * n + x] = sum / (2 * radius + 1);
+                }
+            });
+            ParallelFor(n, [&](int y) {
+                for (int x = 0; x < n; ++x) {
+                    float sum = 0;
+                    for (int d = -radius; d <= radius; ++d) sum += tmp[static_cast<std::size_t>(Wrap(y + d, n)) * n + x];
+                    v[static_cast<std::size_t>(y) * n + x] = sum / (2 * radius + 1);
+                }
+            });
+        }
+    };
+    blur(big, 9);
+    blur(med, 4);
+    blur(small, 1);
+    FVol r(regional.size()), g(r.size()), b(r.size()), a(r.size());
     for (std::size_t i = 0; i < r.size(); ++i) {
-        r[i] = Smoothstep(0.42f, 0.74f, 0.65f * pc[i] + 0.35f * wc[i]);
-        g[i] = Smoothstep(0.55f, 0.82f, pg[i]);
-        b[i] = Smoothstep(0.15f, 0.85f, pt[i]);
+        const float reg = Smoothstep(0.20f, 0.80f, regional[i]);          // where the sky is busy
+        const float massBig = Smoothstep(0.12f, 0.85f, big[i]);           // large cumulus masses, soft shoulders
+        const float massMed = Smoothstep(0.22f, 0.90f, med[i]);           // medium clouds
+        const float massSmall = Smoothstep(0.40f, 0.90f, 0.6f * small[i] + 0.4f * pf2[i]); // small puffs
+        // Huge masses get a lower coverage cap than small clouds: a high coverage makes the body solid and the fine
+        // erosion cannot carve it, so a big mass at full coverage turns into a smooth sheet.
+        const float lump = 0.45f + 0.95f * mid[i];  // lumpy coverage inside a cloud: the thresholds vary, the outline gets ragged
+        const float rBig = 0.58f * Smoothstep(0.10f, 0.60f, massBig * (0.35f + 0.65f * reg) * lump);
+        const float rMed = 0.80f * Smoothstep(0.10f, 0.62f, massMed * (0.30f + 0.50f * (1.0f - 0.5f * reg)) * lump);
+        const float rSmall = 0.88f * Smoothstep(0.10f, 0.62f, 0.55f * massSmall * (1.15f - reg) * lump);
+        r[i] = std::max({rBig, rMed, rSmall});
+        g[i] = Smoothstep(0.58f, 0.85f, pg[i]);
+        const float core = Smoothstep(0.15f, 0.95f, big[i]);
+        b[i] = Smoothstep(0.10f, 0.90f, 0.40f * Smoothstep(0.25f, 0.75f, pt[i]) + 0.45f * core + 0.25f * mid[i]);
         a[i] = 0.45f + 0.55f * pd[i];
     }
     return Pack(n, n, 1, {&r, &g, &b, &a});
@@ -481,6 +593,15 @@ int main(int argc, char** argv) {
     if (out.empty()) { std::printf("missing --out/--dir\n"); return 2; }
     const fs::path dir(out);
 
+    if (mode == "weather") {  // dev shortcut: only the weather map (+ preview png) into --out
+        fs::create_directories(dir);
+        Volume weather = BakeWeather(512);
+        if (!WriteGtvol(dir / "cloud_weather_512.gtvol", weather)) { std::printf("write failed\n"); return 1; }
+        WritePng(dir / "cloud_weather_512.png", 512, 512, 4, weather.data);
+        std::printf("weather written to %s\n", dir.string().c_str());
+        return 0;
+    }
+
     if (mode == "bake") {
         using Clock = std::chrono::steady_clock;
         auto ms = [](Clock::time_point a) { return std::chrono::duration<double, std::milli>(Clock::now() - a).count(); };
@@ -489,8 +610,11 @@ int main(int argc, char** argv) {
         Volume shape = BakeShape(128);
         std::printf("shape 128^3 baked in %.0f ms\n", ms(t0));
         t0 = Clock::now();
-        Volume detail = BakeDetail(32);
-        std::printf("detail 32^3 baked in %.0f ms\n", ms(t0));
+        Volume detail = BakeDetail(64);
+        std::printf("detail 64^3 baked in %.0f ms\n", ms(t0));
+        t0 = Clock::now();
+        Volume curl = BakeCurl(128);
+        std::printf("curl 128^2 baked in %.0f ms\n", ms(t0));
         t0 = Clock::now();
         Volume weather = BakeWeather(512);
         std::printf("weather 512^2 baked in %.0f ms\n", ms(t0));
@@ -517,7 +641,7 @@ int main(int argc, char** argv) {
         }
 
         struct Item { const char* name; const Volume* v; };
-        const Item items[] = {{"cloud_shape_128", &shape}, {"cloud_detail_32", &detail}, {"cloud_weather_512", &weather}, {"blue_noise_128", &blue}};
+        const Item items[] = {{"cloud_shape_128", &shape}, {"cloud_detail_64", &detail}, {"cloud_curl_128", &curl}, {"cloud_weather_512", &weather}, {"blue_noise_128", &blue}};
         for (const Item& it : items) {
             if (!WriteGtvol(dir / (std::string(it.name) + ".gtvol"), *it.v)) { std::printf("write failed %s\n", it.name); return 1; }
         }
@@ -529,7 +653,7 @@ int main(int argc, char** argv) {
 
     if (mode == "verify") {
         bool ok = true;
-        for (const char* name : {"cloud_shape_128", "cloud_detail_32", "cloud_weather_512", "blue_noise_128"}) {
+        for (const char* name : {"cloud_shape_128", "cloud_detail_64", "cloud_curl_128", "cloud_weather_512", "blue_noise_128"}) {
             ok = VerifyVolume(dir / (std::string(name) + ".gtvol"), dir / "preview") && ok;
         }
         Volume blue;

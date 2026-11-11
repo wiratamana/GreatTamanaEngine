@@ -32,7 +32,9 @@
 | Key | Default | Range | Meaning |
 |---|---|---|---|
 | `aerialPerspectiveStrength` | 1 | 0..1e30 | 1 = physical. 0 = scene color unchanged |
-| `skyIntensity` | 6 | 0..50 | Linear multiplier of the sky. Not an HTTP key |
+| `skyIntensity` | 6 | 0..50 | Linear multiplier of the sky picture. The deep blue sky look uses 3 (see volumetric-cloud.md) |
+| `sunDiskIntensity` | 8 | 0..100 | Sun disk drawn into the sky background, times the physical disk radiance. 0 = no disk. The bloom makes it glow |
+| `sunDiskRadiusDeg` | 0.5 | 0.05..10 | Angular radius of the sun disk (degrees) |
 | `autoScale` | true | bool | Picks haze range from the visible depth range |
 | `aerialPerspectiveMaxDistanceKm` | 0.5 | 0.01..50 | Haze range. Fallback when `autoScale` is on |
 | `aerialPerspectiveDepthExponent` | 2 | 1..4 | Slice distribution along depth |
@@ -61,7 +63,7 @@
 
 ## Debug keys
 
-Writable (`/feature_debug/set`): `sceneLightFollowsAtmosphere`, `autoScale`, `aerialPerspectiveStrength`, `aerialPerspectiveMaxDistanceKm`, `aerialPerspectiveDepthExponent`, `aerialPerspectiveSamplesPerSlice`, `aerialPerspectiveScatteringExaggeration`.
+Writable (`/feature_debug/set`): `sceneLightFollowsAtmosphere`, `autoScale`, `aerialPerspectiveStrength`, `aerialPerspectiveMaxDistanceKm`, `aerialPerspectiveDepthExponent`, `aerialPerspectiveSamplesPerSlice`, `aerialPerspectiveScatteringExaggeration`, `skyIntensity`, `sunDiskIntensity`, `sunDiskRadiusDeg`, `multiScatteringStrength`, `miePhaseG`, `rayleighScaleHeightKm`, `mieScaleHeightKm`.
 
 Read-only, per view with prefix `game.` or `scene.`:
 

@@ -116,10 +116,12 @@ fx::FeatureDebugResult VolumetricCloudDebugEndpoint::GetState() const
     const fx::VolumeSize detail = m_feature.DetailSize();
     const Extent2D weather = m_feature.WeatherSize();
     const Extent2D blue = m_feature.BlueNoiseSize();
+    const Extent2D curl = m_feature.CurlSize();
     Add(out, "game.assets.shape", SizeText(shape.width, shape.height, shape.depth));
     Add(out, "game.assets.detail", SizeText(detail.width, detail.height, detail.depth));
     Add(out, "game.assets.weather", SizeText(weather.width, weather.height, 0));
     Add(out, "game.assets.blueNoise", SizeText(blue.width, blue.height, 0));
+    Add(out, "game.assets.curl", SizeText(curl.width, curl.height, 0));
     Add(out, "game.status", std::string(StatusName(m_feature.Snapshot(rg::ViewScope::Primary).status)));
     Add(out, "game.historyUsed", m_feature.Snapshot(rg::ViewScope::Primary).historyUsed);
     Add(out, "game.divisor", static_cast<std::int64_t>(m_feature.Snapshot(rg::ViewScope::Primary).divisor));

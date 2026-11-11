@@ -115,7 +115,30 @@ CameraBasis DeriveCameraBasis(const Vec3& eye, const Mat4& invViewProjection, Ex
     basis.down = down;
     basis.forward = forward;
     basis.pixelScale = tanH / static_cast<float>(extent.width);
+    basis.shaderInverse = invViewProjection;
     return basis;
+}
+
+CameraBasis DeriveCameraBasisRelative(const Vec3& eye, const EyeRelativeCamera& camera, Extent2D extent) noexcept
+{
+    if (!camera.valid || !IsFinite(eye)) {
+        return CameraBasis{};
+    }
+    // With the eye at the origin the checks run on small numbers, so a far camera keeps its digits.
+    CameraBasis basis = DeriveCameraBasis(Vec3::Zero(), camera.inverse, extent);
+    if (!basis.valid) {
+        return basis;
+    }
+    basis.eye = eye;
+    basis.eyeRelative = true;
+    basis.shaderInverse = camera.inverse;
+    basis.shaderViewProjection = camera.viewProjection;
+    return basis;
+}
+
+CameraBasis DeriveViewCameraBasis(const View& view) noexcept
+{
+    return DeriveCameraBasisRelative(view.eye, view.relative, view.extent);
 }
 
 bool HistoryUsable(const TemporalHistory& previous, const CameraBasis& basis, std::uint64_t frame, Extent2D extent,
@@ -145,7 +168,28 @@ TemporalHistory MakeHistory(const CameraBasis& basis, const Mat4& viewProjection
     h.viewProjection = viewProjection;
     h.eye = basis.eye;
     h.forward = basis.forward;
+    h.relativeValid = basis.eyeRelative;
+    h.viewProjectionRelative = basis.shaderViewProjection;
     return h;
+}
+
+Mat4 PreviousViewProjectionForShader(const CameraBasis& basis, const TemporalHistory& previous) noexcept
+{
+    if (!basis.eyeRelative) {
+        return previous.viewProjection;
+    }
+    return previous.relativeValid ? ShiftRelativeViewProjection(previous.viewProjectionRelative, previous.eye, basis.eye)
+                                  : MakePreviousViewProjectionRelative(previous.viewProjection, basis.eye);
+}
+
+Vec3 PreviousEyeForShader(const CameraBasis& basis, const TemporalHistory& previous) noexcept
+{
+    if (!basis.eyeRelative) {
+        return previous.eye;
+    }
+    return Vec3(static_cast<float>(static_cast<double>(previous.eye.x) - static_cast<double>(basis.eye.x)),
+        static_cast<float>(static_cast<double>(previous.eye.y) - static_cast<double>(basis.eye.y)),
+        static_cast<float>(static_cast<double>(previous.eye.z) - static_cast<double>(basis.eye.z)));
 }
 
 TemporalResolveParamsGpu MakeTemporalResolveParams(const CameraBasis& basis, const TemporalHistory& previous,
@@ -154,10 +198,10 @@ TemporalResolveParamsGpu MakeTemporalResolveParams(const CameraBasis& basis, con
 {
     TemporalResolveParamsGpu p;
     p.invViewProjection = invViewProjection;
-    p.prevViewProjection = previous.viewProjection;
-    PackVec3(p.eye, basis.eye);
+    p.prevViewProjection = PreviousViewProjectionForShader(basis, previous);
+    PackVec3(p.eye, basis.ShaderEye());
     PackVec3(p.forward, basis.forward);
-    PackVec3(p.prevEye, previous.eye);
+    PackVec3(p.prevEye, PreviousEyeForShader(basis, previous));
     PackVec3(p.prevForward, previous.forward);
 
     // The history depth tolerance reuses the bilateral sigma; the filters then reject the same depth gaps.

@@ -35,6 +35,11 @@ struct AtmosphereSettings {
     // Linear multiplier on the sky background radiance.
     float skyIntensity = 6.0f;
 
+    // Sun disk drawn into the sky background: a multiplier on the physical disk radiance (0 = no disk) and its
+    // angular radius in degrees. The bloom turns the bright disk into a glow, so the defaults are above physical.
+    float sunDiskIntensity = 8.0f;
+    float sunDiskRadiusDeg = 0.5f;
+
     // Aerial perspective ray-march tunables. With autoScale on, the max distance and the exaggeration are derived
     // from the visible depth range each frame and these two values apply only as fallbacks.
     float aerialPerspectiveMaxDistanceKm = 0.5f;

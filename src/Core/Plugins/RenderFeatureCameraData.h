@@ -3,6 +3,7 @@
 // Per-view camera data for a PostComposite/PreUI render-feature callback: what a depth-based or
 // camera-aware effect needs beyond ScenePassReadHandles' color/depth read handles.
 
+#include "../../Math/EyeRelativeCamera.h"
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
 #include "../../Renderer/RenderGraph/RenderGraphHandles.h"
@@ -18,6 +19,8 @@ struct RenderFeatureCameraData {
     Vec3 eyeWorldPosition;
     Mat4 invViewProjection = Mat4::Identity();
     bool invViewProjectionValid = false;
+    // Double-precision camera with the eye at the origin; exact far from the world origin.
+    EyeRelativeCamera relative;
 };
 
 // Log-once-per-view bookkeeping for singular matrices; a resettable class so tests start clean.

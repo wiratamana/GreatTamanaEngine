@@ -67,11 +67,11 @@ void GtaoFeature::OcclusionPass(fx::PostOpaqueFrame& f)
         view.snapshot = snap;
     };
 
-    if (v.extent.width == 0 || v.extent.height == 0 || !v.invViewProjectionValid) {
+    if (v.extent.width == 0 || v.extent.height == 0 || !v.relative.valid) {
         bail(GtaoFrameStatus::NoValidCamera);
         return;
     }
-    const fx::CameraBasis basis = fx::DeriveCameraBasis(v.eye, v.invViewProjection, v.extent);
+    const fx::CameraBasis basis = fx::DeriveViewCameraBasis(v);
     if (!basis.valid) {
         f.ReportOnce("Gtao: camera is not a square-pixel perspective camera, AO is off");
         bail(GtaoFrameStatus::NoValidCamera);
@@ -95,7 +95,7 @@ void GtaoFeature::OcclusionPass(fx::PostOpaqueFrame& f)
 
     const std::uint32_t noiseFrame = cfg.temporal ? static_cast<std::uint32_t>(f.FrameIndex() & 63u) : 0u;
     const bool sampled = f.Compute(m_mainShader, "Gtao.Main.Dispatch")
-                             .Params(view.mainParams, MakeGtaoMainParams(basis, cfg, v.invViewProjection, noiseFrame))
+                             .Params(view.mainParams, MakeGtaoMainParams(basis, cfg, basis.shaderInverse, noiseFrame))
                              .Bind("sceneDepth", fx::Depth(f.SceneDepth()))
                              .Bind("aoOutput", raw)
                              .Dispatch(aoExtent);
@@ -120,7 +120,7 @@ void GtaoFeature::OcclusionPass(fx::PostOpaqueFrame& f)
             const fx::TemporalResolveSettings filter{
                 cfg.depthSigma, cfg.historyWeight, cfg.spatialDenoise, cfg.resolutionDivisor };
             const fx::TemporalResolveParamsGpu params =
-                fx::MakeTemporalResolveParams(basis, view.previous, filter, v.extent, v.invViewProjection, useHistory);
+                fx::MakeTemporalResolveParams(basis, view.previous, filter, v.extent, basis.shaderInverse, useHistory);
             resolved = f.Compute(m_resolveShader, "Gtao.Resolve.Dispatch")
                            .Params(view.resolveParams, params)
                            .Bind("aoRaw", raw)
@@ -154,11 +154,11 @@ void GtaoFeature::OcclusionPass(fx::PostOpaqueFrame& f)
 void GtaoFeature::CompositePass(fx::CompositeFrame& f)
 {
     const std::optional<GtaoResult> result = m_result.Fetch(f);
-    if (!result || !result->basis.valid || !f.View().invViewProjectionValid) {
+    if (!result || !result->basis.valid) {
         return;
     }
     const GtaoCompositePush push =
-        MakeGtaoCompositePush(result->basis, m_settings, f.View().invViewProjection, result->divisor);
+        MakeGtaoCompositePush(result->basis, m_settings, result->basis.shaderInverse, result->divisor);
     const bool drawn = f.Fullscreen(m_compositeShader, "Gtao.Composite.Draw")
                            .Bind("sceneColor", f.SceneColor())
                            .Bind("sceneDepth", fx::Depth(f.SceneDepth()))

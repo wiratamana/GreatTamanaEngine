@@ -103,10 +103,10 @@ TemporalAaParamsGpu MakeTemporalAaParams(const fx::CameraBasis& basis, const fx:
 {
     TemporalAaParamsGpu p;
     p.invViewProjection = invViewProjection;
-    p.prevViewProjection = previous.viewProjection;
-    fx::PackVec3(p.eye, basis.eye);
+    p.prevViewProjection = fx::PreviousViewProjectionForShader(basis, previous);
+    fx::PackVec3(p.eye, basis.ShaderEye());
     fx::PackVec3(p.forward, basis.forward);
-    fx::PackVec3(p.prevEye, previous.eye);
+    fx::PackVec3(p.prevEye, fx::PreviousEyeForShader(basis, previous));
     fx::PackVec3(p.prevForward, previous.forward);
 
     p.blend[0] = safe.feedbackMin;

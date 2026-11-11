@@ -6,7 +6,7 @@
 # missing or the tool changed, so a no-op build stays fast. The bake needs no network: the blue
 # noise source is vendored in tools/cloud_noise_bake/data. The engine loads <exe dir>/assets/clouds.
 
-set(GTE_CLOUD_NOISE_NAMES cloud_shape_128 cloud_detail_32 cloud_weather_512 blue_noise_128)
+set(GTE_CLOUD_NOISE_NAMES cloud_shape_128 cloud_detail_64 cloud_curl_128 cloud_weather_512 blue_noise_128)
 
 function(gte_add_cloud_noise_assets exe_target)
     set(_tool_dir "${CMAKE_SOURCE_DIR}/tools/cloud_noise_bake")

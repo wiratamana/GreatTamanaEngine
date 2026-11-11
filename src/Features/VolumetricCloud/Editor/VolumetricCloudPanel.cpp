@@ -15,8 +15,8 @@ namespace gte {
 namespace {
 
 constexpr std::array<const char*, 5> kDebugViews{ "Off (the clouds)", "Shape slice", "Detail slice", "Weather map", "Blue noise" };
-constexpr std::array<const char*, 3> kDivisorLabels{ "1 (full)", "2 (1/4 of the pixels)", "4 (1/16 of the pixels)" };
-constexpr std::array<float, 3> kDivisorValues{ 1.0f, 2.0f, 4.0f };
+constexpr std::array<const char*, 4> kDivisorLabels{ "1 (full)", "2 (1/4 of the pixels)", "3 (1/9 of the pixels)", "4 (1/16 of the pixels)" };
+constexpr std::array<float, 4> kDivisorValues{ 1.0f, 2.0f, 3.0f, 4.0f };
 
 const char* StatusText(VolumetricCloudFrameStatus status) noexcept
 {
@@ -80,12 +80,25 @@ bool BuildVolumetricCloudPanel(
     changed |= ImGui::DragFloat("Base altitude (m)", &edit.layerBaseM, 10.0f, 0.0f, 20000.0f);
     changed |= ImGui::DragFloat("Top altitude (m)", &edit.layerTopM, 10.0f, 10.0f, 30000.0f);
     changed |= ImGui::DragFloat("Max distance (m)", &edit.maxDistanceM, 100.0f, 1000.0f, 500000.0f);
+    changed |= ImGui::SliderFloat("Fade start (of max distance)", &edit.fadeStart, 0.0f, 0.99f);
 
     ImGui::SeparatorText("Shape");
     changed |= ImGui::SliderFloat("Coverage", &edit.coverage, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Cloud type (lowest peak)", &edit.peakMin, 0.05f, 1.0f);
     changed |= ImGui::SliderFloat("Density", &edit.density, 0.0f, 4.0f);
     changed |= ImGui::SliderFloat("Extinction (1/m)", &edit.extinction, 0.0005f, 0.5f, "%.4f", ImGuiSliderFlags_Logarithmic);
-    changed |= ImGui::SliderFloat("Detail strength", &edit.detailStrength, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Detail strength", &edit.detailStrength, 0.0f, 2.0f);
+    changed |= ImGui::SliderFloat("Wispiness", &edit.wispiness, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Fine detail", &edit.fineDetail, 0.0f, 1.0f);
+    changed |= ImGui::DragFloat("Curl amount (m)", &edit.curlAmountM, 5.0f, 0.0f, 2000.0f);
+    changed |= ImGui::DragFloat("Curl tile (m)", &edit.curlScaleM, 50.0f, 200.0f, 100000.0f);
+    changed |= ImGui::DragFloat("Far field start (m)", &edit.farWeatherStartM, 100.0f, 1000.0f, 500000.0f);
+    changed |= ImGui::SliderFloat("Far weather mix", &edit.farWeatherMix, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Far coverage lift", &edit.farCoverageLift, 0.0f, 0.5f);
+    changed |= ImGui::SliderFloat("Far air scale", &edit.farAirScale, 0.05f, 1.0f);
+    changed |= ImGui::SliderFloat("Density curve", &edit.densityCurve, 0.2f, 2.0f);
+    changed |= ImGui::SliderFloat("Max step depth", &edit.maxStepDepth, 0.1f, 20.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+    changed |= ImGui::SliderFloat("Top falloff start", &edit.topFalloffStart, 0.0f, 0.95f);
     changed |= ImGui::SliderFloat("Wind speed (m/s)", &edit.windSpeed, 0.0f, 100.0f);
     changed |= ImGui::SliderFloat("Wind direction", &edit.windDirection, -360.0f, 360.0f);
 
@@ -94,6 +107,7 @@ bool BuildVolumetricCloudPanel(
     changed |= ImGui::SliderFloat("Ambient intensity", &edit.ambientIntensity, 0.0f, 4.0f);
     changed |= ImGui::SliderFloat("Silver lining", &edit.silverIntensity, 0.0f, 2.0f);
     changed |= ImGui::SliderFloat("Powder", &edit.powder, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("In-scatter chance", &edit.inScatter, 0.0f, 1.0f);
     changed |= ImGui::DragFloat("Haze distance (m, standalone)", &edit.hazeDistanceM, 500.0f, 1000.0f, 1000000.0f);
 
     ImGui::SeparatorText("Atmosphere");
@@ -102,8 +116,13 @@ bool BuildVolumetricCloudPanel(
         edit.atmosphereMode = fromAtmosphere ? 1.0f : 0.0f;
         changed = true;
     }
-    changed |= ImGui::SliderFloat("Sky ambient", &edit.skyAmbient, 0.0f, 4.0f);
+    changed |= ImGui::SliderFloat("Sky ambient", &edit.skyAmbient, 0.0f, 10.0f);
     changed |= ImGui::SliderFloat("Air scale", &edit.airScale, 0.0f, 8.0f);
+    changed |= ImGui::SliderFloat("Sky occlusion", &edit.skyOcclusion, 0.0f, 4.0f);
+    changed |= ImGui::SliderFloat("Sky floor", &edit.skyFloor, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Ground bounce", &edit.groundBounce, 0.0f, 8.0f);
+    changed |= ImGui::SliderFloat("Ground warmth", &edit.groundWarmth, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Scatter blue shift", &edit.msBlueShift, 0.0f, 1.0f);
 
     ImGui::SeparatorText("Quality");
     int divisorIndex = 0;
@@ -113,7 +132,7 @@ bool BuildVolumetricCloudPanel(
         }
     }
     if (ImGui::Combo("March resolution", &divisorIndex, kDivisorLabels.data(), static_cast<int>(kDivisorLabels.size()))) {
-        edit.resolutionDivisor = kDivisorValues[static_cast<std::size_t>(std::clamp(divisorIndex, 0, 2))];
+        edit.resolutionDivisor = kDivisorValues[static_cast<std::size_t>(std::clamp(divisorIndex, 0, 3))];
         changed = true;
     }
     bool temporal = edit.temporal >= 0.5f;
@@ -123,7 +142,11 @@ bool BuildVolumetricCloudPanel(
     }
     changed |= ImGui::SliderFloat("Max steps", &edit.maxSteps, 8.0f, 256.0f, "%.0f");
     changed |= ImGui::SliderFloat("Sun steps", &edit.sunSteps, 1.0f, 8.0f, "%.0f");
-    changed |= ImGui::SliderFloat("Fresh blend", &edit.freshBlend, 0.01f, 1.0f);
+    changed |= ImGui::SliderFloat("Fresh blend (floor)", &edit.freshBlend, 0.01f, 1.0f);
+    changed |= ImGui::SliderFloat("Motion blend", &edit.motionBlend, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Sub-pixel jitter (px)", &edit.subpixelJitter, 0.0f, 2.0f);
+    changed |= ImGui::SliderFloat("Sharp history", &edit.historySharp, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Adaptive blend", &edit.adaptiveBlend, 0.0f, 1.0f);
 
     ImGui::SeparatorText("Debug");
     int view = static_cast<int>(edit.debugView);

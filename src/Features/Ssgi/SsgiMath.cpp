@@ -192,7 +192,7 @@ SsgiPrepareParamsGpu MakeSsgiPrepareParams(
 {
     SsgiPrepareParamsGpu p;
     p.invViewProjection = invViewProjection;
-    fx::PackVec3(p.eye, basis.eye);
+    fx::PackVec3(p.eye, basis.ShaderEye());
     fx::PackVec3(p.forward, basis.forward);
     p.tuning[0] = safe.maxRadiance;
     p.counts[0] = safe.resolutionDivisor;
@@ -229,7 +229,7 @@ SsgiCompositePush MakeSsgiCompositePush(const fx::CameraBasis& basis, const Ssgi
 {
     SsgiCompositePush p;
     p.invViewProjection = invViewProjection;
-    fx::PackVec3(p.eye, basis.eye);
+    fx::PackVec3(p.eye, basis.ShaderEye());
     fx::PackVec3(p.forward, basis.forward);
     p.intensityAlbedo[0] = safe.intensity;
     p.intensityAlbedo[1] = safe.albedoLuma;

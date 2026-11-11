@@ -110,6 +110,29 @@ TEST(AtmosphereSettingsTest, OutOfRangeValuesClampToTheirRanges)
     EXPECT_FLOAT_EQ(b.aerialPerspectiveScatteringExaggeration, 50.0f);
 }
 
+TEST(AtmosphereSettingsTest, SunDiskSettingsStayInRangeAndNonFiniteFallsBack)
+{
+    const AtmosphereSettings d;
+    EXPECT_GT(d.sunDiskIntensity, 0.0f);
+    EXPECT_GT(d.sunDiskRadiusDeg, 0.0f);
+    AtmosphereSettings s;
+    s.sunDiskIntensity = -2.0f;
+    s.sunDiskRadiusDeg = 0.0f;
+    AtmosphereSettings low = SanitizeAtmosphereSettings(s);
+    EXPECT_FLOAT_EQ(low.sunDiskIntensity, 0.0f);
+    EXPECT_FLOAT_EQ(low.sunDiskRadiusDeg, 0.05f);
+    s.sunDiskIntensity = 1e9f;
+    s.sunDiskRadiusDeg = 90.0f;
+    AtmosphereSettings high = SanitizeAtmosphereSettings(s);
+    EXPECT_FLOAT_EQ(high.sunDiskIntensity, 100.0f);
+    EXPECT_FLOAT_EQ(high.sunDiskRadiusDeg, 10.0f);
+    s.sunDiskIntensity = kNaN;
+    s.sunDiskRadiusDeg = kInf;
+    AtmosphereSettings bad = SanitizeAtmosphereSettings(s);
+    EXPECT_FLOAT_EQ(bad.sunDiskIntensity, d.sunDiskIntensity);
+    EXPECT_FLOAT_EQ(bad.sunDiskRadiusDeg, d.sunDiskRadiusDeg);
+}
+
 TEST(AtmosphereSettingsTest, LargeStrengthIsKept)
 {
     const AtmosphereSettings d;

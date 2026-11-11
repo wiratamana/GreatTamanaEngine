@@ -13,7 +13,7 @@ layout(std430, binding = 0) readonly buffer VolumetricCloudResolveParams {
     vec4 eye;           // xyz eye.
     vec4 windDelta;     // xz shift to last frame's cloud position.
     vec4 blend;         // x history blend, y fresh blend, z clamp expand, w fallback cloud distance (m).
-    vec4 motion;        // x extra blend at one pixel of motion.
+    vec4 motion;        // x extra blend at one pixel of motion, y sharp (Catmull-Rom) history 0..1, z adaptive sample count 0/1.
     uvec4 counts;       // x divisor, yz sample offset, w history valid.
     uvec4 sizes;        // xy view size, zw march target size.
 } params;
@@ -33,6 +33,7 @@ const float kMaxOutputLuminance = 65504.0;
 const float kRelative = 0.03;
 const float kSlackKm = 0.02;
 const float kClearTransmittance = 0.999;
+const float kSnapTexels = 0.004;
 
 // Keep identical to CloudTapUsable() in VolumetricCloudMath.cpp.
 bool TapUsable(vec4 color, vec4 aux, float pixelEndKm)
@@ -45,7 +46,18 @@ bool TapUsable(vec4 color, vec4 aux, float pixelEndKm)
 
 // Bilinear fetch of the history around `texelPosition` (texel centres at integers), using only texels that
 // saw this pixel's surface. Returns false when none did.
-bool FetchHistory(vec2 texelPosition, float pixelEndKm, out vec4 color, out float distanceKm)
+// Catmull-Rom weights of the four texels around a fractional position.
+vec4 CatmullRomWeights(float f)
+{
+    float f2 = f * f;
+    float f3 = f2 * f;
+    return vec4(-0.5 * f3 + f2 - 0.5 * f, 1.5 * f3 - 2.5 * f2 + 1.0, -1.5 * f3 + 2.0 * f2 + 0.5 * f, 0.5 * f3 - 0.5 * f2);
+}
+
+// With params.motion.y > 0 the bilinear result is replaced by a Catmull-Rom fetch (clamped to the range of the
+// four inner texels) when all four inner texels are usable: bilinear resampling blurs the history a little more
+// on every frame of motion. `count` is the number of samples the history pixel has accumulated.
+bool FetchHistory(vec2 texelPosition, float pixelEndKm, out vec4 color, out float distanceKm, out float count)
 {
     ivec2 size = min(textureSize(historyColor, 0), textureSize(historyAux, 0));
     ivec2 base = ivec2(floor(texelPosition));
@@ -54,6 +66,9 @@ bool FetchHistory(vec2 texelPosition, float pixelEndKm, out vec4 color, out floa
     float distanceSum = 0.0;
     float distanceWeight = 0.0;
     float weightSum = 0.0;
+    float countSum = 0.0;
+    vec4 innerMin = vec4(1e30);
+    vec4 innerMax = vec4(-1e30);
     for (int k = 0; k < 4; ++k) {
         ivec2 c = base + ivec2(k & 1, k >> 1);
         if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, size))) {
@@ -68,6 +83,9 @@ bool FetchHistory(vec2 texelPosition, float pixelEndKm, out vec4 color, out floa
         if (!TapUsable(hc, ha, pixelEndKm)) {
             continue;
         }
+        innerMin = min(innerMin, hc);
+        innerMax = max(innerMax, hc);
+        countSum += ha.z * w;
         colorSum += hc * w;
         weightSum += w;
         float cloudWeight = w * (1.0 - hc.a);
@@ -76,10 +94,25 @@ bool FetchHistory(vec2 texelPosition, float pixelEndKm, out vec4 color, out floa
     }
     color = vec4(0.0, 0.0, 0.0, 1.0);
     distanceKm = 0.0;
+    count = 0.0;
     if (weightSum < 1e-3) {
         return false;
     }
     color = colorSum / weightSum;
+    count = countSum / weightSum;
+    if (params.motion.y > 0.0 && weightSum > 0.999) {
+        vec4 wx = CatmullRomWeights(f.x);
+        vec4 wy = CatmullRomWeights(f.y);
+        vec4 cubic = vec4(0.0);
+        for (int j = 0; j < 4; ++j) {
+            for (int i = 0; i < 4; ++i) {
+                ivec2 c = clamp(base + ivec2(i - 1, j - 1), ivec2(0), size - 1);
+                cubic += texelFetch(historyColor, c, 0) * (wx[i] * wy[j]);
+            }
+        }
+        cubic = clamp(cubic, innerMin, innerMax);
+        color = mix(color, cubic, params.motion.y);
+    }
     distanceKm = distanceWeight > 0.0 ? distanceSum / distanceWeight : 0.0;
     return true;
 }
@@ -157,6 +190,7 @@ void main()
     // History: reproject through the cloud, which is far, never through the scene surface.
     vec4 history = vec4(0.0, 0.0, 0.0, 1.0);
     float historyDistanceKm = 0.0;
+    float historyCount = 0.0;
     bool hasHistory = false;
     vec2 reprojectionShift = vec2(0.0); // Motion of this pixel since last frame, in pixels.
     if (params.counts.w != 0u) {
@@ -169,13 +203,27 @@ void main()
         if (clip.w > 0.0) {
             vec2 previousUv = clip.xy / clip.w * 0.5 + 0.5;
             vec2 previousTexel = previousUv * vec2(fullSize) - 0.5;
+            // A still pixel must read its history texel EXACTLY: a fraction of 1e-4 texel (matrix rounding) makes the
+            // resample differ from the stored value by a few 1e-6 and the rgba16f store then rounds it DOWN a half-float
+            // step (about 5e-4 relative) on every one of the frames in which this pixel is not marched, a steady drain
+            // that darkened the converged picture (more at larger divisors). Snap near-integer positions.
+            vec2 snapped = floor(previousTexel + 0.5);
+            previousTexel = mix(previousTexel, snapped, lessThan(abs(previousTexel - snapped), vec2(kSnapTexels)));
             reprojectionShift = previousTexel - vec2(pixel);
-            hasHistory = FetchHistory(previousTexel, pixelEndKm, history, historyDistanceKm);
+            hasHistory = FetchHistory(previousTexel, pixelEndKm, history, historyDistanceKm, historyCount);
         }
     }
 
     vec4 cloud;
     float cloudDistanceKm;
+    // Samples this pixel has accumulated (history aux z). Every sample of an own march adds 1 until the
+    // freshBlend floor (1 / (count + 1)) is reached; motion pulls the count back to 1 so a moving picture
+    // keeps the fast blend it had before.
+    float shiftLength = clamp(length(reprojectionShift), 0.0, 1.0);
+    bool adaptive = params.motion.z > 0.5;
+    float maxCount = max(1.0 / max(params.blend.y, 0.01) - 1.0, 0.0);
+    float effectiveCount = adaptive ? min(historyCount, mix(maxCount, 1.0, shiftLength)) : 0.0;
+    float newCount = 0.0;
     if (hasHistory && hasFresh) {
         // A positive clamp pulls the history into the box of the fresh samples so a changed cloud leaves
         // no trail; the march noise is as large as the signal at cloud edges, so zero turns it off.
@@ -184,17 +232,26 @@ void main()
             vec4 extent = (boxMax - boxMin) * params.blend.z + 1e-3;
             kept = clamp(history, boxMin - extent, boxMax + extent);
         }
-        float alpha = maxTapWeight > 0.999 ? params.blend.y : params.blend.x;
+        bool marched = maxTapWeight > 0.999;
+        float alpha = marched ? params.blend.y : params.blend.x;
+        if (marched && adaptive) {
+            alpha = max(alpha, 1.0 / (effectiveCount + 1.0));
+            newCount = min(effectiveCount + 1.0, maxCount);
+        } else {
+            newCount = effectiveCount;
+        }
         // Where the picture moves the history is blurred and stale, so the new samples count for more.
-        alpha = max(alpha, params.motion.x * clamp(length(reprojectionShift), 0.0, 1.0));
+        alpha = max(alpha, params.motion.x * shiftLength);
         cloud = mix(kept, fresh, alpha);
         cloudDistanceKm = freshDistanceWeight > 0.0 ? mix(historyDistanceKm, freshDistanceKm, alpha) : historyDistanceKm;
     } else if (hasFresh) {
         cloud = fresh;
         cloudDistanceKm = freshDistanceKm;
+        newCount = (maxTapWeight > 0.999 && adaptive) ? 1.0 : 0.0;
     } else if (hasHistory) {
         cloud = history;
         cloudDistanceKm = historyDistanceKm;
+        newCount = effectiveCount;
     } else {
         cloud = vec4(0.0, 0.0, 0.0, 1.0);
         cloudDistanceKm = 0.0;
@@ -202,7 +259,7 @@ void main()
     cloud = vec4(max(cloud.rgb, vec3(0.0)), clamp(cloud.a, 0.0, 1.0));
 
     imageStore(historyColorOut, pixel, cloud);
-    imageStore(historyAuxOut, pixel, vec4(cloudDistanceKm, pixelEndKm, 0.0, 0.0));
+    imageStore(historyAuxOut, pixel, vec4(cloudDistanceKm, pixelEndKm, newCount, 0.0));
 
     vec3 color = scene * cloud.a + cloud.rgb;
     if (any(isnan(color)) || any(isinf(color))) {

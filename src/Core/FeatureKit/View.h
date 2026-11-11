@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ViewJitter.h"
+#include "../../Math/EyeRelativeCamera.h"
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec2.h"
 #include "../../Math/Vec3.h"
@@ -18,6 +19,8 @@ struct View {
     Mat4 viewProjection = Mat4::Identity();
     Mat4 invViewProjection = Mat4::Identity();
     bool invViewProjectionValid = false;
+    // Same camera with the eye at the origin, built in double. Use it for depth reconstruction far from the origin.
+    EyeRelativeCamera relative;
     // Jitter of this view's main scene draw this frame, in NDC. (0, 0) when none.
     Vec2 jitterNdc;
 

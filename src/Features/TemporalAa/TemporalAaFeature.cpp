@@ -17,10 +17,10 @@ constexpr std::uint64_t kTexelBytes = 8 + 8 + 4 + 4;
 // Camera of `v`; invalid when it has no usable matrix.
 fx::CameraBasis UsableBasis(const fx::View& v) noexcept
 {
-    if (!v.invViewProjectionValid || ApproximatelyEqual(v.viewProjection, Mat4::Identity())) {
+    if (ApproximatelyEqual(v.viewProjection, Mat4::Identity())) {
         return fx::CameraBasis{};
     }
-    return fx::DeriveCameraBasis(v.eye, v.invViewProjection, v.extent);
+    return fx::DeriveViewCameraBasis(v);
 }
 
 bool ResolvePassesEnabled(const fx::Frame& f)
@@ -183,7 +183,7 @@ void TemporalAaFeature::ResolvePass(fx::CompositeFrame& f)
 
     const bool useHistory = fx::HistoryUsable(view.previous, basis, f.FrameIndex(), extent, 1u);
     const TemporalAaParamsGpu params =
-        MakeTemporalAaParams(basis, view.previous, useHistory, cfg, v.invViewProjection, extent);
+        MakeTemporalAaParams(basis, view.previous, useHistory, cfg, basis.shaderInverse, extent);
     const bool dispatched = f.Compute(m_resolveShader, "TemporalAa.Resolve.Dispatch")
                                 .Params(view.params, params)
                                 .Bind("sceneColor", f.SceneColor())
