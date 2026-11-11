@@ -10,6 +10,9 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cmath>
+
 namespace gte {
 namespace {
 
@@ -61,6 +64,25 @@ TEST(CameraTest, ViewMatrixRotatesForwardAndUpByTransformRotation)
     const Mat4 expected = Mat4::LookAtLH(Vec3::Zero(), Vec3::Right(), Vec3::Up());
 
     EXPECT_TRUE(ApproximatelyEqual(actual, expected));
+}
+
+// The view axis must be the rotated forward even for an eye 54 km from the origin (eye + forward would round it).
+TEST(CameraTest, ViewMatrixKeepsTheForwardDirectionFarFromTheOrigin)
+{
+    Transform transform;
+    transform.position = Vec3{ 21600.0f, 40.0f, -49491.0f };
+    transform.rotation = Quat::FromAxisAngle(Vec3::Up(), 0.7f);
+
+    const Mat4 view = Camera::ViewMatrix(transform);
+    const Vec3 forward = transform.rotation.RotateVector(Vec3::Forward());
+    const double zx = view.columns[0].z;
+    const double zy = view.columns[1].z;
+    const double zz = view.columns[2].z;
+    const double dot = zx * forward.x + zy * forward.y + zz * forward.z;
+    const double cx = zy * forward.z - zz * forward.y;
+    const double cy = zz * forward.x - zx * forward.z;
+    const double cz = zx * forward.y - zy * forward.x;
+    EXPECT_LT(std::atan2(std::sqrt(cx * cx + cy * cy + cz * cz), dot), 2.0e-6);
 }
 
 TEST(CameraTest, DefaultsAreActiveWithSensibleFieldOfViewAndClipPlanes)

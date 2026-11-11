@@ -52,19 +52,19 @@ struct Camera {
     }
 
     // View matrix from a Transform's world position/rotation, via
-    // Mat4::LookAtLH(): looks down the transform's rotated
+    // Mat4::LookToLH(): looks down the transform's rotated
     // Vec3::Forward(), with the transform's rotated Vec3::Up() as the up
     // vector - i.e. this camera's Transform is treated exactly like any
     // other entity's (TRS-composable, editable in the Inspector), not a
     // bespoke "eye/target/up" triple. Scale is deliberately ignored (a
-    // camera's Transform.scale should always stay Vec3::One(); LookAtLH
+    // camera's Transform.scale should always stay Vec3::One(); LookToLH
     // only ever needs position/rotation, unlike Mat4::TRS()).
     static Mat4 ViewMatrix(const Transform& transform) noexcept
     {
         const Vec3 eye = transform.position;
         const Vec3 forward = transform.rotation.RotateVector(Vec3::Forward());
         const Vec3 up = transform.rotation.RotateVector(Vec3::Up());
-        return Mat4::LookAtLH(eye, eye + forward, up);
+        return Mat4::LookToLH(eye, forward, up);
     }
 };
 

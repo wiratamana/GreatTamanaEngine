@@ -111,7 +111,12 @@ Mat4 Mat4::TRS(const Vec3& position, const Quat& rotation, const Vec3& scale) no
 
 Mat4 Mat4::LookAtLH(const Vec3& eye, const Vec3& target, const Vec3& up) noexcept
 {
-    Vec3 zaxis = Normalize(target - eye);      // forward
+    return LookToLH(eye, target - eye, up);
+}
+
+Mat4 Mat4::LookToLH(const Vec3& eye, const Vec3& forward, const Vec3& up) noexcept
+{
+    Vec3 zaxis = Normalize(forward);           // forward
     Vec3 xaxis = Normalize(Cross(up, zaxis));  // right
     Vec3 yaxis = Cross(zaxis, xaxis);          // up (already unit-length: zaxis/xaxis are orthonormal)
 

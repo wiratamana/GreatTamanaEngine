@@ -67,6 +67,10 @@ struct alignas(16) Mat4 {
     // Z-forward world convention) - NOT OpenGL's -Z-forward view space.
     static Mat4 LookAtLH(const Vec3& eye, const Vec3& target, const Vec3& up) noexcept;
 
+    // Same view matrix from a look DIRECTION. Far from the origin `eye + forward` rounds the direction to the float grid
+    // of the eye, so cameras built from a rotation use this one.
+    static Mat4 LookToLH(const Vec3& eye, const Vec3& forward, const Vec3& up) noexcept;
+
     // LEFT-HANDED, ZERO-TO-ONE depth range perspective projection - matches
     // Vulkan's expected clip-space depth range ([0,1], not OpenGL's
     // [-1,1]). `flipY`, when true, negates the Y scale term to also correct

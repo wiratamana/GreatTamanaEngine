@@ -9,6 +9,9 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cmath>
+
 namespace gte {
 namespace {
 
@@ -129,6 +132,47 @@ TEST(Mat4Tests, LookAtLH_AtOriginLookingForwardIsIdentity)
 {
     Mat4 view = Mat4::LookAtLH(Vec3::Zero(), Vec3::Forward(), Vec3::Up());
     EXPECT_TRUE(ApproximatelyEqual(view, Mat4::Identity()));
+}
+
+TEST(Mat4Tests, LookToLH_MatchesLookAtLHNearTheOrigin)
+{
+    const Vec3 eye(3.0f, 4.0f, -5.0f);
+    const Vec3 forward = Normalize(Vec3(0.3f, -0.1f, 1.0f));
+    EXPECT_TRUE(ApproximatelyEqual(Mat4::LookToLH(eye, forward, Vec3::Up()), Mat4::LookAtLH(eye, eye + forward, Vec3::Up())));
+}
+
+// Far from the origin eye + forward lands on the float grid of the eye (about 4 mm at 54 km), so LookAtLH(eye, eye +
+// forward) turns the view axis by up to 2 mrad. LookToLH keeps the direction. The LookAtLH half is the positive control.
+TEST(Mat4Tests, LookToLH_KeepsTheLookDirectionFarFromTheOrigin)
+{
+    const Vec3 eye(21600.0f, 40.0f, -49491.0f);
+    double worstTo = 0.0;
+    double worstAt = 0.0;
+    for (int i = 0; i < 200; ++i) {
+        const float yaw = 0.031f * static_cast<float>(i);
+        const float pitch = 0.45f * std::sin(0.7f * static_cast<float>(i));
+        const Vec3 forward = Normalize(Vec3(std::cos(pitch) * std::sin(yaw), std::sin(pitch), std::cos(pitch) * std::cos(yaw)));
+        const Mat4 to = Mat4::LookToLH(eye, forward, Vec3::Up());
+        const Mat4 at = Mat4::LookAtLH(eye, eye + forward, Vec3::Up());
+        // atan2 of cross and dot in double: acos would turn float rounding of 1e-7 into 4e-4 rad.
+        const auto angleTo = [&](const Mat4& view) {
+            const double zx = view.columns[0].z;
+            const double zy = view.columns[1].z;
+            const double zz = view.columns[2].z;
+            const double fx = forward.x;
+            const double fy = forward.y;
+            const double fz = forward.z;
+            const double dot = zx * fx + zy * fy + zz * fz;
+            const double cx = zy * fz - zz * fy;
+            const double cy = zz * fx - zx * fz;
+            const double cz = zx * fy - zy * fx;
+            return std::atan2(std::sqrt(cx * cx + cy * cy + cz * cz), dot);
+        };
+        worstTo = std::max(worstTo, angleTo(to));
+        worstAt = std::max(worstAt, angleTo(at));
+    }
+    EXPECT_LT(worstTo, 2.0e-6);
+    EXPECT_GT(worstAt, 2.0e-4);
 }
 
 TEST(Mat4Tests, LookAtLH_TranslatesEyeIntoOrigin)
