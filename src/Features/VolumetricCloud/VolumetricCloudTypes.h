@@ -102,7 +102,7 @@ struct VolumetricCloudSettings {
     float jitter = 1.0f;
 
     // Lighting. Intensities scale the sun and sky radiance the engine hands over.
-    float sunIntensity = 14.0f;
+    float sunIntensity = 10.0f;
     float ambientIntensity = 0.28f;
     float sunSteps = 4.0f;          // Samples of the march toward the sun.
     float lightReach = 0.7f;        // Length of that march, as a fraction of the layer thickness.
@@ -125,9 +125,13 @@ struct VolumetricCloudSettings {
     float skyOcclusion = 0.8f;      // How strongly cloud above a sample blocks the sky light; 0 = height ramp only.
     float skyOcclusionReachM = 600.0f; // Height above a sample that the occlusion looks at.
     float skyFloor = 0.32f;         // Share of the sky light that always reaches a sample.
-    float groundBounce = 2.0f;      // Strength of the sunlight bounced up from the ground; 0 = none (mode 1).
+    float groundBounce = 3.0f;      // Strength of the sunlight bounced up from the ground; 0 = none (mode 1).
     float groundWarmth = 0.7f;      // 0 grey ground light, 1 warm sunlit-ground light.
     float msBlueShift = 0.7f;       // Tints the deeper scattering octaves toward blue.
+    float ambientSaturation = 1.0f; // Colour of the sky light that reaches the cloud: 1 as the sky, 0 grey.
+    float msDiffuse = 0.5f;         // Weight of the diffusion term of the multiple scattering: thick cores and undersides keep some light.
+    float msGlow = 1.5f;            // Weight of the inner glow of thick cloud that is seen toward the sun.
+    float sunWarmth = 0.25f;        // Tints the sun light on the cloud toward warm; 0 = the colour the atmosphere gives it.
 
     // Resolution and temporal accumulation.
     float resolutionDivisor = 4.0f; // March at 1/n of the view size per axis; 1, 2, 3 or 4.
@@ -233,6 +237,10 @@ inline constexpr std::array kVolumetricCloudFloatSettings{
     VolumetricCloudFloatSetting{ "groundBounce", &VolumetricCloudSettings::groundBounce, 0.0f, 20.0f },
     VolumetricCloudFloatSetting{ "groundWarmth", &VolumetricCloudSettings::groundWarmth, 0.0f, 1.0f },
     VolumetricCloudFloatSetting{ "msBlueShift", &VolumetricCloudSettings::msBlueShift, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "ambientSaturation", &VolumetricCloudSettings::ambientSaturation, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "msDiffuse", &VolumetricCloudSettings::msDiffuse, 0.0f, 8.0f },
+    VolumetricCloudFloatSetting{ "msGlow", &VolumetricCloudSettings::msGlow, 0.0f, 8.0f },
+    VolumetricCloudFloatSetting{ "sunWarmth", &VolumetricCloudSettings::sunWarmth, 0.0f, 1.0f },
     VolumetricCloudFloatSetting{ "resolutionDivisor", &VolumetricCloudSettings::resolutionDivisor, 1.0f, 4.0f },
     VolumetricCloudFloatSetting{ "temporal", &VolumetricCloudSettings::temporal, 0.0f, 1.0f },
     VolumetricCloudFloatSetting{ "historyBlend", &VolumetricCloudSettings::historyBlend, 0.0f, 1.0f },
@@ -303,8 +311,10 @@ struct VolumetricCloudParamsGpu {
     float structure[4] = {};            // x large lobe mix, y size variation, zw wind shear vector at the layer top (m).
     float structure2[4] = {};           // x erosion kept in the body, y vertical stretch, z base variation, w far softening.
     float structure3[4] = {};           // x weight of the Worley cells in the shape, yzw reserved.
+    float lightTune[4] = {};            // x sky light saturation, y diffusion gain, z inner glow gain, w reserved.
+    float lightTune2[4] = {};           // x sun warmth, yzw reserved.
 };
-static_assert(sizeof(VolumetricCloudParamsGpu) == 64 + 28 * 16);
+static_assert(sizeof(VolumetricCloudParamsGpu) == 64 + 30 * 16);
 static_assert(std::is_trivially_copyable_v<VolumetricCloudParamsGpu>);
 
 // std430 block of VolumetricCloudResolve.comp; member order matches the shader.

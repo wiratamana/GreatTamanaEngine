@@ -53,7 +53,9 @@ vec3 SkyAmbientRadiance()
             * textureLod(skyViewLut, ViewDirectionToSkyViewLutUv(direction, size, viewHeightKm, planetRadiusKm), 0.0).rgb;
     }
     // The sky intensity setting dims the sky picture only; the light the clouds receive stays at the reference level.
-    return sum * kReferenceSkyIntensity * params.atmosphereMode.w;
+    vec3 sky = sum * kReferenceSkyIntensity * params.atmosphereMode.w;
+    float skyLuma = dot(sky, vec3(0.2126, 0.7152, 0.0722));
+    return mix(vec3(skyLuma), sky, params.lightTune.x);
 }
 
 // Sunlight the ground sends back up, in the units of the sky light: the sun at the ground (air and planet

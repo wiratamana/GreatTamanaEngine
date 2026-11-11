@@ -450,7 +450,7 @@ TEST(VolumetricCloudParamsTest, TheDetailAndStepSettingsReachTheBlockWithTheShip
     EXPECT_FLOAT_EQ(defaults.maxStepDepth, 0.4f);
     EXPECT_FLOAT_EQ(defaults.lightDetail, 1.0f);
     EXPECT_FLOAT_EQ(defaults.inScatter, 0.8f);
-    EXPECT_FLOAT_EQ(defaults.sunIntensity, 14.0f);
+    EXPECT_FLOAT_EQ(defaults.sunIntensity, 10.0f);
     EXPECT_FLOAT_EQ(defaults.ambientBottom, 0.42f);
     EXPECT_FLOAT_EQ(defaults.coverage, 0.7f);
     EXPECT_FLOAT_EQ(defaults.peakMin, 0.6f);
@@ -580,6 +580,33 @@ TEST(VolumetricCloudParamsTest, TheStructureSettingsReachTheBlockWithTheShippedD
     EXPECT_FLOAT_EQ(clamped.windShearM, 0.0f);
 }
 
+TEST(VolumetricCloudParamsTest, TheLightTuningSettingsReachTheBlockWithTheShippedDefaults)
+{
+    const VolumetricCloudSettings defaults = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    EXPECT_FLOAT_EQ(defaults.ambientSaturation, 1.0f);
+    EXPECT_FLOAT_EQ(defaults.msDiffuse, 0.5f);
+    EXPECT_FLOAT_EQ(defaults.msGlow, 1.5f);
+    EXPECT_FLOAT_EQ(defaults.sunWarmth, 0.25f);
+    EXPECT_FLOAT_EQ(defaults.groundBounce, 3.0f);
+    VolumetricCloudSettings s = defaults;
+    s.ambientSaturation = 0.4f;
+    s.msDiffuse = 2.0f;
+    s.msGlow = 3.0f;
+    s.sunWarmth = 0.9f;
+    VolumetricCloudFrameFacts facts;
+    const VolumetricCloudParamsGpu p = MakeVolumetricCloudParams(SanitizeVolumetricCloudSettings(s), facts);
+    EXPECT_FLOAT_EQ(p.lightTune[0], 0.4f);
+    EXPECT_FLOAT_EQ(p.lightTune[1], 2.0f);
+    EXPECT_FLOAT_EQ(p.lightTune[2], 3.0f);
+    EXPECT_FLOAT_EQ(p.lightTune2[0], 0.9f);
+    // Out of range values are clamped.
+    s.ambientSaturation = 5.0f;
+    s.msDiffuse = -1.0f;
+    const VolumetricCloudSettings clamped = SanitizeVolumetricCloudSettings(s);
+    EXPECT_FLOAT_EQ(clamped.ambientSaturation, 1.0f);
+    EXPECT_FLOAT_EQ(clamped.msDiffuse, 0.0f);
+}
+
 TEST(VolumetricCloudParamsTest, TheWindPeriodHoldsAWholeNumberOfBigLobeTiles)
 {
     const VolumetricCloudSettings defaults = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
@@ -617,7 +644,9 @@ TEST(VolumetricCloudParamsTest, BlockLayoutMatchesTheShader)
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, structure), 464u);
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, structure2), 480u);
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, structure3), 496u);
-    EXPECT_EQ(sizeof(VolumetricCloudParamsGpu), 512u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, lightTune), 512u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, lightTune2), 528u);
+    EXPECT_EQ(sizeof(VolumetricCloudParamsGpu), 544u);
 }
 
 TEST(VolumetricCloudParamsTest, TheAtmosphereModePassesTheSunUntouchedAndTheCamera)
@@ -1243,7 +1272,8 @@ TEST(VolumetricCloudParamsTest, GlslBlocksHaveTheCppMembersAtTheCppOffsets)
             GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, skyShade), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, skyShade2),
             GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, farField), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, detailShape),
             GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, structure), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, structure2),
-            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, structure3) });
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, structure3), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, lightTune),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, lightTune2) });
     ExpectBlock(ParseBlock(ReadShaderText("VolumetricCloudResolve.comp"), "VolumetricCloudResolveParams"),
         { GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, invViewProjection),
             GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, prevViewProjection),

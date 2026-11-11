@@ -38,6 +38,8 @@ layout(std430, binding = 0) readonly buffer VolumetricCloudParams {
     vec4 structure;                 // x large lobe mix, y size variation, zw wind shear vector at the layer top (m).
     vec4 structure2;                // x erosion kept in the body, y vertical stretch of the noise, z base variation, w far softening.
     vec4 structure3;                // x weight of the Worley cells in the shape (popcorn), yzw reserved.
+    vec4 lightTune;                 // x sky light saturation, y diffusion gain, z inner glow gain, w reserved.
+    vec4 lightTune2;                // x sun warmth, yzw reserved.
 } params;
 
 layout(binding = 1) uniform sampler2D sourceDepth;

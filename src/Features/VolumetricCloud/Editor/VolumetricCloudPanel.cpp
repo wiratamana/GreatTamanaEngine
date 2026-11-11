@@ -132,6 +132,10 @@ bool BuildVolumetricCloudPanel(
     changed |= ImGui::SliderFloat("Ground bounce", &edit.groundBounce, 0.0f, 8.0f);
     changed |= ImGui::SliderFloat("Ground warmth", &edit.groundWarmth, 0.0f, 1.0f);
     changed |= ImGui::SliderFloat("Scatter blue shift", &edit.msBlueShift, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Sky light saturation", &edit.ambientSaturation, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Scatter diffusion", &edit.msDiffuse, 0.0f, 4.0f);
+    changed |= ImGui::SliderFloat("Inner glow", &edit.msGlow, 0.0f, 4.0f);
+    changed |= ImGui::SliderFloat("Sun warmth", &edit.sunWarmth, 0.0f, 1.0f);
 
     ImGui::SeparatorText("Quality");
     int divisorIndex = 0;

@@ -5,6 +5,9 @@ const float kPi = 3.14159265359;
 const float kMinPhaseDenominator = 1e-4;
 // Per octave colour of the multiple scattering at full blue shift; red and green fall, blue rises.
 const vec3 kOctaveTint = vec3(0.9, 0.97, 1.1);
+// Sun light at full warmth: the blue falls first, like light that crossed more air.
+const vec3 kSunWarmTint = vec3(1.0, 0.88, 0.7);
+const float kGlowEccentricity = 0.3;
 
 struct CloudLightInput {
     vec3 position;          // World position of the sample, metres.
@@ -141,7 +144,13 @@ vec3 CloudSourceRadiance(CloudLightInput s)
         scatter *= mix(1.0, powder, params.lightMarch.w * awayFromSun);
         // The in-scatter chance darkens edges and cavities; the strength knob is farField.w, 0 = off.
         scatter *= mix(1.0, InScatterProbability(s.lodDensity, s.heightFraction, cosTheta), params.farField.w);
-        sun = s.sunRadiance * scatter;
+        // The diffusion term is the light that bounced around inside the cloud: it decays slowly with optical depth.
+        float tau = s.sunOpticalDepth;
+        vec3 diffuse = vec3(params.lightTune.y * (tau / (tau + 2.0)) / (1.0 + 0.15 * tau) / (4.0 * kPi));
+        // Inner glow: looking toward the sun, the deep light of a thick cloud shines through its lobes.
+        float glowDecay = mix(0.25, mix(0.25, 0.05, s.lodDensity), Saturate(cosTheta / 0.9));
+        vec3 glow = vec3(params.lightTune.z * s.lodDensity * exp(-tau * glowDecay) * HenyeyGreenstein(cosTheta, kGlowEccentricity));
+        sun = s.sunRadiance * mix(vec3(1.0), kSunWarmTint, params.lightTune2.x) * (scatter + diffuse + glow);
     }
     float skyShare = mix(params.lightMisc.y, 1.0, pow(s.heightFraction, 0.7)) * s.skyVisibility;
     // Light bounced up from the ground reaches the low part of the cloud.

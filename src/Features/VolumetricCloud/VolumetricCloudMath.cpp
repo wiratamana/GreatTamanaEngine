@@ -510,6 +510,10 @@ VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     p.structure2[2] = safe.baseVariation;
     p.structure2[3] = safe.farSoftening;
     p.structure3[0] = safe.shapeWorley;
+    p.lightTune[0] = safe.ambientSaturation;
+    p.lightTune[1] = safe.msDiffuse;
+    p.lightTune[2] = safe.msGlow;
+    p.lightTune2[0] = safe.sunWarmth;
     return p;
 }
 

@@ -126,7 +126,7 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `clearSkip` | 1 | 1..32 | Stride multiplier over empty weather. Above 1 can miss small clouds |
 | `minTransmittance` | 0.1 | 0..0.5 | Ray stops below this transmittance |
 | `jitter` | 1 | 0..1 | Blue noise start jitter, 0..1 of a step |
-| `sunIntensity` | 14 | 0..100 | Sun radiance factor on top of the engine sun |
+| `sunIntensity` | 10 | 0..100 | Sun radiance factor on top of the engine sun |
 | `ambientIntensity` | 0.28 | 0..100 | Sky light factor |
 | `sunSteps` | 4 | 1..12 | Samples of the march toward the sun |
 | `lightReach` | 0.7 | 0.05..2 | Length of that march as a fraction of the thickness |
@@ -149,9 +149,13 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `skyOcclusion` | 0.8 | 0..4 | How strongly cloud above a sample blocks the sky light (2 density samples straight up). 0 = height ramp only |
 | `skyOcclusionReachM` | 600 | 10..5000 | Height above a sample that the occlusion looks at (m) |
 | `skyFloor` | 0.32 | 0..1 | Share of the sky light that always reaches a sample |
-| `groundBounce` | 2 | 0..20 | Sunlight bounced up from the ground onto the low part of the cloud (mode 1). 0 = none |
+| `groundBounce` | 3 | 0..20 | Sunlight bounced up from the ground onto the low part of the cloud (mode 1). 0 = none |
 | `groundWarmth` | 0.7 | 0..1 | 0 grey ground light, 1 warm sunlit-ground light |
 | `msBlueShift` | 0.7 | 0..1 | Tints the deeper multiple scattering octaves toward blue |
+| `ambientSaturation` | 1 | 0..1 | Colour of the sky light on the cloud (mode 1): 1 keeps the sky colour, 0 makes it grey |
+| `msDiffuse` | 0.5 | 0..8 | Weight of the diffusion term `tau/(tau+2)/(1+0.15 tau)/(4 pi)` of the multiple scattering: thick cores and undersides keep light where the octave sum has died out |
+| `msGlow` | 1.5 | 0..8 | Weight of the inner glow of thick cloud seen toward the sun (Nubis^3 multiple-scatter volume) |
+| `sunWarmth` | 0.25 | 0..1 | Tints the sun light on the cloud toward warm |
 | `resolutionDivisor` | 4 | 1..4 | March at 1/n of the view size per axis. 1, 2, 3 or 4 (others round). Divisor 3 walks a 9 frame cycle and costs about 1.3x of divisor 4 at 720p |
 | `temporal` | 1 | 0..1 | 1 accumulates over frames, 0 shows the current march only |
 | `historyBlend` | 0 | 0..1 | Weight of new samples in a pixel that was not marched this frame. 0 holds the history, which keeps the picture sharp; any value above 0 blurs a still picture because the new samples come from the low-res taps |
