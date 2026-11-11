@@ -94,7 +94,7 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `shapeWorley` | 0.5 | 0..1.5 | Weight of the Worley cells (G, B, A of the shape volume) in the shape. The cells are what makes equal-sized popcorn balls; below 1 the soft Perlin body leads. 1 = the old look |
 | `largeShapeMix` | 0.4 | 0..1 | Share of the big lobe octave: the same shape volume read at 1.75 x the tile (7 km), so every cloud has big soft lobes and the mid lobes ride on them. 0 = one scale |
 | `sizeVariation` | 0.5 | 0..1 | How much the weather map's cloud type (B) moves that share: big tall clouds get more big lobes, small low clouds keep the mid lobes |
-| `windShearM` | 800 | 0..10000 | The noise and weather lookups are shifted along the wind direction by this many metres at the layer top (0 at the base): clouds lean downwind. Static, so the reprojection is not affected |
+| `windShearM` | 800 | 0..10000 | The noise and weather lookups are shifted by this many metres at the layer top (0 at the base): the tops lean downwind. Static, so the reprojection is not affected |
 | `bodyErosion` | 0.35 | 0..1 | Share of the fine erosion kept in the core of a cloud; the rim always gets all of it. Low = smooth soft body with detail only on the rim |
 | `verticalStretch` | 0.8 | 0.25..6 | Noise lobes are this many times taller than wide. Above about 2 vertical curtains show |
 | `baseVariation` | 0.5 | 0..1 | How much the big octave lowers or lifts the cloud base, so the underside is bumpy and not one plane. 0 = flat base |
@@ -110,7 +110,7 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `wispiness` | 0.8 | 0..1 | Share of the wispy (fibre) detail channels in thin parts of a cloud and at its top. 0 = only billows |
 | `fineDetail` | 0.15 | 0..1 | Weight of a second fetch of the detail noise at 3.1 x the frequency (small lobes). 0 = off, saves one fetch per sample |
 | `windSpeed` | 4 | 0..500 | Wind speed (m/s) |
-| `windDirection` | 45 | -360..360 | Wind direction (degrees) |
+| `windDirection` | 45 | -360..360 | Direction the clouds move toward, in degrees on the ground plane: 0 = +x, 90 = +z |
 | `peakMin` | 0.6 | 0.05..1 | Cloud type: top height of the lowest type (weather map B = 0) as a fraction of the layer thickness; B = 1 reaches the full top. The tops in between follow the map, so a sky holds flat low clouds and tall towers. 1 = no cloud types (every cloud as tall as the layer). Below about 0.4 flat terrace-like tops show |
 | `baseRoundness` | 0.15 | 0.01..0.5 | Rounding of the height gradient at the base: how softly the underside fades in (share of the layer thickness) |
 | `topRoundness` | 0.2 | 0..0.5 | Rounding of the height gradient at the top |
@@ -248,7 +248,7 @@ Memory per view: 4 full-size RGBA16F history targets (about 12 MB at 884x432), s
 - A noise file is loaded once per process. A file larger than the device's 2D or 3D image limit is refused with one log line.
 - Transparent objects and particles are not in the scene depth, and the cloud pass runs after the transparent stage. Where a transparent object is seen in front of the sky, cloud in that pixel is added on top of it: the object looks dimmed by the cloud, as if it were behind it. Opaque objects are never affected. Workaround: keep the clouds off the view that shows such objects close to the camera, or lower `coverage`. The proper fix is to run the cloud pass before the transparent stage, or to give it a depth input that includes the transparent objects.
 - A march that stops at `maxSteps` before the end of its segment still reports that it looked all the way. This can only drop far cloud, never add cloud in front of a surface. It is left as is on purpose: reporting the short reach makes the resolve pass reject the pixel's own march and punches holes in the far clouds.
-- The wind offset is kept in double precision per view and wraps at the common repeat length of the three noise tiles (420000 m with the default scales), so long sessions keep sub-metre precision. When the tile sizes have no small common length the offset does not wrap.
+- The wind offset is kept in double precision per view and wraps at the common repeat length of the three noise tiles (350000 m with the default scales), so long sessions keep sub-metre precision. When the tile sizes have no small common length the offset does not wrap.
 
 ## Related
 - [Render features](README.md) · [Atmosphere](atmosphere.md) · [Temporal anti-aliasing](temporal-aa.md) · [Volumetric light](volumetric-light.md)

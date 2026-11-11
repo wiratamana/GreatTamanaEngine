@@ -212,8 +212,9 @@ void AdvanceCloudWind(double (&offset)[2], double (&step)[2], float speed, float
 {
     const double radians = static_cast<double>(directionDegrees) * kPi / 180.0;
     const double distance = static_cast<double>(speed) * static_cast<double>(dt);
-    step[0] = std::cos(radians) * distance;
-    step[1] = std::sin(radians) * distance;
+    // The lookups read the noise at position + offset, so the pattern moves along the direction when the offset moves against it.
+    step[0] = -std::cos(radians) * distance;
+    step[1] = -std::sin(radians) * distance;
     for (int axis = 0; axis < 2; ++axis) {
         offset[axis] += step[axis];
         if (periodM > 0.0) {
@@ -405,12 +406,12 @@ VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     p.detailShape[1] = safe.curlScaleM;
     p.detailShape[2] = safe.wispiness;
     p.detailShape[3] = safe.fineDetail;
-    // The shear points the way the wind offset grows, like the wind itself.
+    // The tops lean downwind: the noise is read at a place shifted against the wind direction.
     const double windRadians = static_cast<double>(safe.windDirection) * kPi / 180.0;
     p.structure[0] = safe.largeShapeMix;
     p.structure[1] = safe.sizeVariation;
-    p.structure[2] = static_cast<float>(std::cos(windRadians) * static_cast<double>(safe.windShearM));
-    p.structure[3] = static_cast<float>(std::sin(windRadians) * static_cast<double>(safe.windShearM));
+    p.structure[2] = static_cast<float>(-std::cos(windRadians) * static_cast<double>(safe.windShearM));
+    p.structure[3] = static_cast<float>(-std::sin(windRadians) * static_cast<double>(safe.windShearM));
     p.structure2[0] = safe.bodyErosion;
     p.structure2[1] = safe.verticalStretch;
     p.structure2[2] = safe.baseVariation;

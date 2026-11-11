@@ -483,16 +483,17 @@ TEST(VolumetricCloudParamsTest, TheDetailAndStepSettingsReachTheBlockWithTheShip
     EXPECT_FLOAT_EQ(clamped.inScatter, 1.0f);
 }
 
-TEST(VolumetricCloudLayerTest, WindMovesAlongTheDirection)
+TEST(VolumetricCloudLayerTest, TheCloudsMoveAlongTheWindDirection)
 {
+    // The lookups read the noise at position + offset: the offset moves against the wind, so the pattern moves along it.
     double offset[2] = {};
     double step[2] = {};
     AdvanceCloudWind(offset, step, 10.0f, 0.0f, 2.0f, 0.0);
-    EXPECT_NEAR(offset[0], 20.0, 1e-4);
+    EXPECT_NEAR(offset[0], -20.0, 1e-4);
     EXPECT_NEAR(offset[1], 0.0, 1e-4);
-    EXPECT_NEAR(step[0], 20.0, 1e-4);
+    EXPECT_NEAR(step[0], -20.0, 1e-4);
     AdvanceCloudWind(offset, step, 10.0f, 90.0f, 1.0f, 0.0);
-    EXPECT_NEAR(offset[1], 10.0, 1e-4);
+    EXPECT_NEAR(offset[1], -10.0, 1e-4);
 }
 
 TEST(VolumetricCloudLayerTest, WindPeriodIsTheCommonRepeatOfTheNoiseTiles)
@@ -534,7 +535,9 @@ TEST(VolumetricCloudLayerTest, WindKeepsSubMetreResolutionAfterTenHours)
     }
     EXPECT_GE(offset[0], 0.0);
     EXPECT_LT(offset[0], period);
-    EXPECT_NEAR(offset[0], std::fmod(unwrappedX, period), 1e-3);
+    double expectedX = std::fmod(unwrappedX, period);
+    expectedX += expectedX < 0.0 ? period : 0.0;
+    EXPECT_NEAR(offset[0], expectedX, 1e-3);
     // One float step at the largest offset is far below a metre.
     const float value = static_cast<float>(period);
     EXPECT_LT(std::nextafter(value, 2.0f * value) - value, 0.1f);
@@ -572,9 +575,9 @@ TEST(VolumetricCloudParamsTest, TheStructureSettingsReachTheBlockWithTheShippedD
     const VolumetricCloudParamsGpu p = MakeVolumetricCloudParams(SanitizeVolumetricCloudSettings(s), facts);
     EXPECT_FLOAT_EQ(p.structure[0], 0.2f);
     EXPECT_FLOAT_EQ(p.structure[1], 0.9f);
-    // The shear vector follows the wind direction: 90 degrees points along +z (the second component).
+    // The noise is read against the wind direction: 90 degrees leans the tops along +z, so the lookup shift is -z.
     EXPECT_NEAR(p.structure[2], 0.0f, 1e-3f);
-    EXPECT_NEAR(p.structure[3], 1000.0f, 1e-3f);
+    EXPECT_NEAR(p.structure[3], -1000.0f, 1e-3f);
     EXPECT_FLOAT_EQ(p.structure2[0], 0.6f);
     EXPECT_FLOAT_EQ(p.structure2[1], 2.0f);
     EXPECT_FLOAT_EQ(p.structure2[2], 0.25f);
