@@ -1,12 +1,12 @@
 # VolumetricCloud (ray-marched cloud layer)
 > One sky cloud layer between two spheres, ray marched at low resolution and accumulated over frames. For anyone tuning or debugging clouds.
-> Verified against code: 2026-11-10
+> Verified against code: 2026-11-11
 
 ## TL;DR
 - One cloud layer (default 1500..5000 m above Y = 0) on a 6371 km planet, composited over the scene.
 - Needs the baked noise in `assets/clouds/` next to the exe. The build makes it. Without it the effect draws nothing.
 - **Off by default.** One call turns it on with the tuned look: `/feature_debug/set?name=VolumetricCloud&enabled=true`.
-- Marches at 1/4 per axis (1/16 of the pixels) and accumulates over frames. About 2 to 2.6 ms at 884x432 on an Intel Iris Xe.
+- Marches a grid about 320 texels wide (`resolutionDivisor` 0 = automatic: 1/4 per axis at 1280 wide, 1/6 at 1920 wide) and accumulates over frames. The cloud passes take about 10 to 16 ms at 1280x720 and 14 to 19 ms at 1920x1080 on an Intel Iris Xe (see Performance).
 - Scene depth limits every ray, so clouds never draw over a mountain or an object in front of them.
 - Off in the Scene view by default. On in the Game view once enabled.
 - Sun colour, sky light and distance haze come from the Atmosphere look-up tables (`atmosphereMode` 1, the default). Without them the clouds fall back to a standalone look.
@@ -48,7 +48,7 @@ Units are the sky's: atmosphere space is km from the planet centre, the camera a
 ## How it works
 1. **March** (compute, 1/`resolutionDivisor` of the view). Each low-res texel marches one real pixel of its block. The pixel walks a Bayer order, so 16 frames cover the full grid at divisor 4. A ray starts on the layer shell, jittered by blue noise (the jitter of a pixel moves by the golden ratio each time that pixel is marched, so a still picture converges fast), takes long steps over empty air, steps back on the first hit and then takes short steps with the detail noise and a sun march (Beer-Lambert optical depth, dual lobe Henyey-Greenstein, silver lining, 3 multiple scattering octaves, powder, sky ambient). It stores light, transmittance, the mean cloud distance and how far the ray looked.
 2. **Resolve** (compute, full size). Reprojects the history of the last frame through the cloud distance (never the scene depth), blends it with the new samples and composites over the scene. A sample or a history texel is only used if it saw at least as far as the pixel's own surface and its cloud is not behind that surface. This keeps the silhouette of a mountain clean.
-3. **History** is two full-size RGBA16F targets (colour + distance) in ping-pong. It is dropped on a camera cut, a resize, a disabled frame, a debug view or any early exit.
+3. **History** is two pairs of full-size RGBA16F targets (colour; distance, end distance and the per-pixel sample count), used in ping-pong. It is dropped on a camera cut, a resize, a disabled frame, a debug view or any early exit.
 
 **Horizon and far field.** The march range is `maxDistanceM` (250 km) and every ray grows its step length to reach the end of its segment within `maxSteps`. Beyond `farWeatherStartM` the weather map is mixed with a second sample at another scale, the coverage is lifted a little and the air in front of the cloud counts less (`farAirScale`), so the layer continues to the horizon as a flattening deck that fades into the haze instead of ending in an empty band. The resolve pass keeps its own fixed fallback distance (15 km, `kCloudHistoryFallbackDistanceM`) and does not follow `maxDistanceM`.
 
@@ -194,8 +194,14 @@ The sky background belongs to the Atmosphere and the exposure to ToneMapping. Th
 ```
 The sun disk is on by default (`sunDiskIntensity` 8, `sunDiskRadiusDeg` 0.5 on the Atmosphere); the Bloom feature turns it into a glow. Set `sunDiskIntensity=0` for no disk.
 
+### Bloom halo
+Sunlit cloud is far brighter than white, so the default Bloom (`threshold` 1) spreads a pale glow onto the sky around every small bright cloud: they look like cut-outs with a halo. For a cloud scene use `/feature_debug/set?name=Bloom&threshold=2`: the halo goes, the cloud shading and the glow around the sun stay. A value of 4 removes the halo and most of the sun glow. Bloom also hides some grain: with Bloom off the grain metric rises from 0.66 to 1.03.
+
+### Tone mapping and sunsets
+ToneMapping with `saturation` 1.3 and the `Aces` mode clips red and green together on a low sun and turns the clouds neon yellow. The engine default 1.1 gives natural gold; `mode=PbrNeutral` gives a pink-orange sunset.
+
 ### Presets
-Presets (action, no arguments, keep everything else and keep `enabled`): `preset_clear` (coverage 0.35, density 1.3), `preset_scattered` (the defaults), `preset_broken` (coverage 0.85), `preset_overcast` (coverage 0.95, density 1.5). The panel has one button per preset.
+Presets (action, no arguments, keep everything else and keep `enabled`): `preset_clear` (coverage 0.4, density 1.3), `preset_scattered` (the defaults), `preset_broken` (coverage 0.9), `preset_overcast` (coverage 0.97, density 1.5). The panel has one button per preset.
 
 ## Debug keys
 Name for `/feature_debug`: `VolumetricCloud`. Actions: `reset_defaults`, `preset_clear`, `preset_scattered`, `preset_broken`, `preset_overcast`. Every setting above is writable. Read-only keys:
@@ -223,21 +229,26 @@ Status `Ok` and `game.historyUsed=true` mean the temporal path runs. Add a `Dire
 ## Performance
 Measured on an Intel Iris Xe iGPU (shared memory, power limited), clouds on minus clouds off, `gpu_span`, medians of 3 interleaved rounds. Noise between runs is +-10..25 percent. A discrete GPU was not tested.
 
-| Resolution | Divisor 4 (default) | Divisor 2 | Divisor 1 (full, no history) |
-|---|---|---|---|
-| 884x432, horizon view | +2.56 ms | +3.62 ms | +9.59 ms |
-| 884x432, looking up | +1.98 ms | +4.02 ms | +11.58 ms |
-| 1284x722 | +4.3 ms | +7.7..8.3 ms | not measured |
+Cloud passes = March + Resolve + Copy rows of the GPU profiler, defaults, medians of 3 interleaved rounds in one session (scene S2 = camera 2 m up, looking 8 degrees up; S8 = a big cloud mass overhead; S10 = low sun in front):
 
-The resolve pass is bandwidth bound (0.6 ms at 884x432, 1.7 ms at 720p). The march pass is latency bound. The 2 ms target was not met at 884x432. Cheaper presets that cut steps reach 0.9..1.5 ms but change the cloud shapes.
-With the current defaults (finer steps, taller clouds, sky occlusion, 4 sun steps) the cloud passes sum to about 5..7 ms at 1280x720 and divisor 4 (March 3..4.5, Resolve 1.8..2, copy 0.4). The sky occlusion and the 4th sun step add about 0.4..0.6 ms; the rest is the denser march.
+| Resolution | Divisor | S2 | S8 | S10 |
+|---|---|---|---|---|
+| 1280x720 | 4 (automatic) | 10.5 ms | 15.6 ms | 14.2 ms |
+| 1280x720 | 3 | 15.9 ms | 23.1 ms | 22.0 ms |
+| 1280x720 | 2 | 26.4 ms | 40.7 ms | 37.2 ms |
+| 1920x1080 | 6 (automatic) | 13.7..14.1 ms | 18.9..19.2 ms | not measured |
+| 1920x1080 | 4 | 22.6 ms | 32.0 ms | 28.7 ms |
+| 1920x1080 | 3 | 32.6 ms | 47.5 ms | 42.0 ms |
+
+At 1920x1080 the resolve pass costs 4.6 ms and the copy 0.9 ms; the rest is the march. A whole editor frame (S2, 1280x720) is 15.7 ms without clouds and 28.1 ms with; at 1920x1080 it is 29.6 ms and 45.3 ms. The editor scene without clouds already costs that much (volumetric light, temporal anti-aliasing, aerial perspective). The resolve pass is bandwidth bound. The march pass is latency bound.
+Cheap levers at 1920x1080 and divisor 4 (S2 / S8): `maxSteps` 64 saves 3.6 / 5.3 ms, 48 saves 5.9 / 7.9 ms (but the far horizon gets thinner); `lightDetail` 0, `fineDetail` 0, `sunSteps` 3, `lightStride` 4 and `msOctaves` 3 save 0..2 ms each, inside the noise of the GPU clock.
 Memory per view: 4 full-size RGBA16F history targets (about 12 MB at 884x432), small march targets, and about 9.6 MB of noise shared by all views.
 
 ## Limits
 - No cloud shadows on the ground and no cloud shadow on other clouds from outside the layer.
 - The noise has no mips. Detail fades out with distance instead.
-- Divisor 2 (crisper edges) costs about 23-26 ms on the Iris Xe at 720p with the shipped detail settings; the default stays at 4.
-- Divisor 4 is a little softer than divisor 2 (mean error against a full-res reference 0.8 against 0.5 out of 255 on a still camera). A newly exposed screen edge and the first frames after a resize or a camera cut show the raw 4x4 pattern for up to about 16 frames.
+- Divisor 2 (crisper edges) costs 26..41 ms on the Iris Xe at 720p; the automatic divisor keeps the march grid at about 320 texels wide instead.
+- A coarser divisor is a little softer (mean error against a full-res reference 0.8 at divisor 4 against 0.5 at divisor 2, out of 255, still camera). A still picture at divisor 6 converges to nearly the same picture as divisor 4 but needs 36 frames per sample of a pixel (about 10 samples = 12 s at 30 fps). Moving clouds are soft: wind of 40 m/s keeps 86 percent of the still sharpness, 200 m/s about 75 percent. A newly exposed screen edge and the first frames after a resize or a camera cut show the raw block pattern for up to n*n frames.
 - TemporalAa (-150) sees the clouds as normal pixels. Its jitter is not fed into the march pattern. TemporalAa, Gtao and Ssgi use the same eye-relative camera, so they stay on far from the origin.
 - Mode 1 reads the sky of the camera's height only: one sky-view lookup set for the whole picture and the camera's position for the air. Clouds that are far away and high see the same sky light as the ones overhead.
 - Clouds do not shadow the ground, the aerial perspective shafts or the sun glow of the sky. They only dim what is behind them. A sun glow behind a cloud is dimmed by the cloud transmittance, like any other pixel.
