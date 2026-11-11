@@ -107,8 +107,8 @@ struct VolumetricCloudSettings {
     float sunSteps = 4.0f;          // Samples of the march toward the sun.
     float lightReach = 0.7f;        // Length of that march, as a fraction of the layer thickness.
     float msOctaves = 4.0f;         // Multiple scattering octaves.
-    float msAttenuation = 0.6f;     // Per octave factor on the optical depth.
-    float msContribution = 0.6f;    // Per octave factor on the light.
+    float msAttenuation = 0.35f;    // Per octave factor on the optical depth.
+    float msContribution = 0.85f;   // Per octave factor on the light.
     float msEccentricity = 0.5f;    // Per octave factor on the phase eccentricity.
     float phaseModel = 0.0f;        // 0 dual lobe Henyey-Greenstein, 1 Henyey-Greenstein plus Draine.
     float forwardG = 0.8f;
@@ -144,7 +144,7 @@ struct VolumetricCloudSettings {
     // look (0) while the atmosphere publishes none.
     float atmosphereMode = 1.0f;
     float airScale = 1.0f;          // Factor on the air's scattering between the eye and a cloud (mode 1).
-    float skyAmbient = 4.5f;        // Factor on the sky light that reaches the clouds (mode 1).
+    float skyAmbient = 3.0f;        // Factor on the sky light that reaches the clouds (mode 1).
 };
 
 // One tunable float: its endpoint key, field and range.

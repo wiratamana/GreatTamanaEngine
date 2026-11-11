@@ -131,8 +131,8 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `sunSteps` | 4 | 1..12 | Samples of the march toward the sun |
 | `lightReach` | 0.7 | 0.05..2 | Length of that march as a fraction of the thickness |
 | `msOctaves` | 4 | 1..6 | Multiple scattering octaves |
-| `msAttenuation` | 0.6 | 0.05..1 | Per octave factor on the optical depth |
-| `msContribution` | 0.6 | 0..1 | Per octave factor on the light |
+| `msAttenuation` | 0.35 | 0.05..1 | Per octave factor on the optical depth |
+| `msContribution` | 0.85 | 0..1 | Per octave factor on the light |
 | `msEccentricity` | 0.5 | 0..1 | Per octave factor on the phase eccentricity |
 | `phaseModel` | 0 | 0..1 | 0 dual lobe Henyey-Greenstein, 1 Henyey-Greenstein plus Draine |
 | `forwardG` | 0.8 | 0..0.99 | Forward lobe eccentricity |
@@ -163,7 +163,7 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `subpixelJitter` | 1 | 0..2 | Size in pixels of the sub-pixel shift of each march ray (R2 sequence, blue-noise shifted per pixel). The temporal average then covers the pixel area, so the edges are antialiased. 0 = ray through the pixel centre |
 | `atmosphereMode` | 1 | 0..1 | 1 lights the clouds from the Atmosphere tables (falls back to 0 when none are published), 0 is the standalone look |
 | `airScale` | 1 | 0..50 | Mode 1: factor on the air's scattering and extinction between the eye and a cloud |
-| `skyAmbient` | 4.5 | 0..10 | Mode 1: factor on the sky light that reaches the clouds (at the reference sky intensity 6, whatever `skyIntensity` the Atmosphere shows) |
+| `skyAmbient` | 3 | 0..10 | Mode 1: factor on the sky light that reaches the clouds (at the reference sky intensity 6, whatever `skyIntensity` the Atmosphere shows) |
 
 Resolve detail: a pixel that is not marched this frame reads its history texel exactly (positions within 0.004 texel of a texel centre are snapped). Without the snap the 1e-4 texel matrix noise made the rgba16f store round the history down one half-float step on every unmarched frame, which darkened the converged picture the more the lower `freshBlend` was.
 
