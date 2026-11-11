@@ -183,16 +183,16 @@ VolumetricCloudSettings ApplyVolumetricCloudPreset(
     out.density = defaults.density;
     switch (preset) {
     case VolumetricCloudPreset::Clear:
-        out.coverage = 0.2f;
+        out.coverage = 0.35f;
         out.density = 1.3f;
         break;
     case VolumetricCloudPreset::Scattered:
         break;
     case VolumetricCloudPreset::Broken:
-        out.coverage = 0.7f;
+        out.coverage = 0.85f;
         break;
     case VolumetricCloudPreset::Overcast:
-        out.coverage = 0.9f;
+        out.coverage = 0.95f;
         out.density = 1.5f;
         break;
     }
@@ -321,7 +321,8 @@ double CloudWindPeriodM(const VolumetricCloudSettings& safe) noexcept
 {
     constexpr std::uint64_t kMaxPeriodM = 100000000ull;
     std::uint64_t period = 1;
-    for (const float tile : { safe.weatherScaleM, safe.weatherScaleM * kCloudFarWeatherTileScale, safe.shapeScaleM, safe.detailScaleM }) {
+    for (const float tile : { safe.weatherScaleM, safe.weatherScaleM * kCloudFarWeatherTileScale, safe.shapeScaleM,
+             safe.shapeScaleM * kCloudLargeShapeScale, safe.detailScaleM }) {
         const std::uint64_t metres = static_cast<std::uint64_t>(std::max(std::llround(tile), 1ll));
         period = period / std::gcd(period, metres) * metres;
         if (period > kMaxPeriodM) {
@@ -498,6 +499,17 @@ VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     p.detailShape[1] = safe.curlScaleM;
     p.detailShape[2] = safe.wispiness;
     p.detailShape[3] = safe.fineDetail;
+    // The shear points the way the wind offset grows, like the wind itself.
+    const double windRadians = static_cast<double>(safe.windDirection) * kPi / 180.0;
+    p.structure[0] = safe.largeShapeMix;
+    p.structure[1] = safe.sizeVariation;
+    p.structure[2] = static_cast<float>(std::cos(windRadians) * static_cast<double>(safe.windShearM));
+    p.structure[3] = static_cast<float>(std::sin(windRadians) * static_cast<double>(safe.windShearM));
+    p.structure2[0] = safe.bodyErosion;
+    p.structure2[1] = safe.verticalStretch;
+    p.structure2[2] = safe.baseVariation;
+    p.structure2[3] = safe.farSoftening;
+    p.structure3[0] = safe.shapeWorley;
     return p;
 }
 

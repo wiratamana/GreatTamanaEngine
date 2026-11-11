@@ -62,7 +62,7 @@ Baked once by `tools/cloud_noise_bake` (the build runs it, see [Building](../../
 | `cloud_shape_128.gtvol` | 128^3 RGBA8 | R Perlin-Worley, G/B/A Worley at 8/16/32 cells |
 | `cloud_detail_64.gtvol` | 64^3 RGBA8 | R billowy low (inverted Worley, 4/8/16 cells), G billowy high (16/24 cells), B wispy low (ridged Perlin, 4 cells, 3 octaves, domain warped), A wispy high (12 cells, 2 octaves) |
 | `cloud_curl_128.gtvol` | 128^2 RGBA8 | R/G curl of a periodic Perlin potential (0.5 = zero), B a second independent field (height shift) |
-| `cloud_weather_512.gtvol` | 512^2 RGBA8 | R coverage: big cumulus masses (4 Worley cells per tile, domain warped, capped at 0.58 so they keep structure), medium clouds (9 cells, cap 0.8) and small puffs (20 cells, cap 0.88), scaled by a regional busy/quiet field; G high coverage (broad overcast-like regions, only used when `coverage` is above 0.5); B cloud type / peak: 0 flat low top, 1 tall cumulus (regional type field plus the core of each big cell, so a mass is tallest in the middle); A density 0.45..1 |
+| `cloud_weather_512.gtvol` | 512^2 RGBA8 | R coverage (v3): one smooth multi-scale field (Perlin fbm at 3 / 8 / 20 cells per tile, domain warped, plus a regional busy/quiet field), so the sky holds huge masses, medium clouds and small puffs of every size joined by soft gradients; its local cap varies smoothly between 0.40 and 0.68 (no flat plateaus), and a few sparse small puffs (cap 0.55) sit in the gaps. v2 used cut-off Worley cells: flat discs of nearly one size whose straight edges showed as boxes; G high coverage (broad overcast-like regions, only used when `coverage` is above 0.5); B cloud type / peak: 0 flat low top, 1 tall cumulus (regional type field plus the big-mass field, multiplied by a ramp of R so weak thin coverage gets a low top: a cloud is about as tall as it is wide); A density 0.45..1 |
 | `blue_noise_128.gtvol` | 128^2 R8 | Blue noise for the ray start jitter |
 
 All tile on every axis and sample with REPEAT. A file is read once; restart the editor after a re-bake. A missing file logs one error and the status reads `AssetMissing`.
@@ -86,22 +86,30 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `farWeatherMix` | 0.5 | 0..1 | Far field: share of a second weather map sample (the same file at 2.8 x the tile, shifted) mixed in. Breaks the 25 km repeat of the weather and evens out the big blobs. 0 = off |
 | `farCoverageLift` | 0.1 | 0..0.5 | Far field: added to `coverage`. Makes the far cloud a closed deck instead of crumbs |
 | `farAirScale` | 0.6 | 0.05..1 | Far field, mode 1: share of the distance beyond `farWeatherStartM` that the air in front of a cloud counts. 1 is the physical value; below 1 the horizon deck stays visible instead of dissolving into the haze colour |
-| `coverage` | 0.55 | 0..1 | Sky share under cloud. 0.2 few puffs, 0.55 scattered, 0.7 broken, 0.9 overcast |
+| `coverage` | 0.7 | 0..1 | Sky share under cloud. 0.35 few cumulus, 0.7 scattered, 0.85 broken, 0.95 overcast (the weather map of v3 holds less cloud per coverage value than v2) |
 | `density` | 1.5 | 0..4 | Density factor after shaping |
 | `extinction` | 0.05 | 0.0005..0.5 | Extinction per metre at density 1 |
 | `weatherScaleM` | 25000 | 1000..500000 | World size of one weather map tile (m) |
 | `shapeScaleM` | 4000 | 100..100000 | World size of one shape noise tile (m) |
+| `shapeWorley` | 0.5 | 0..1.5 | Weight of the Worley cells (G, B, A of the shape volume) in the shape. The cells are what makes equal-sized popcorn balls; below 1 the soft Perlin body leads. 1 = the old look |
+| `largeShapeMix` | 0.4 | 0..1 | Share of the big lobe octave: the same shape volume read at 1.75 x the tile (7 km), so every cloud has big soft lobes and the mid lobes ride on them. 0 = one scale |
+| `sizeVariation` | 0.5 | 0..1 | How much the weather map's cloud type (B) moves that share: big tall clouds get more big lobes, small low clouds keep the mid lobes |
+| `windShearM` | 800 | 0..10000 | The noise and weather lookups are shifted along the wind direction by this many metres at the layer top (0 at the base): clouds lean downwind. Static, so the reprojection is not affected |
+| `bodyErosion` | 0.35 | 0..1 | Share of the fine erosion kept in the core of a cloud; the rim always gets all of it. Low = smooth soft body with detail only on the rim |
+| `verticalStretch` | 1.3 | 0.25..6 | Noise lobes are this many times taller than wide. Above about 2 vertical curtains show |
+| `baseVariation` | 0.5 | 0..1 | How much the big octave lowers or lifts the cloud base, so the underside is bumpy and not one plane. 0 = flat base |
+| `farSoftening` | 0.7 | 0..1 | Extra share of the big octave at the far field start and beyond: distant clouds lose the thin stacked sheets that look like horizontal stripes at the horizon |
 | `detailScaleM` | 350 | 10..20000 | World size of one detail noise tile (m) |
-| `detailStrength` | 1.5 | 0..2 | Erosion by the detail noise. The erosion is cut into the linear cloud body; the density curve is applied after it |
+| `detailStrength` | 1.0 | 0..2 | Erosion by the detail noise. The erosion is cut into the linear cloud body; the density curve is applied after it |
 | `detailFadeDistM` | 25000 | 100..500000 | Detail fades out by this distance (the noise has no mips) |
-| `curlAmountM` | 300 | 0..2000 | How far (m) the curl noise moves the detail lookup. Gives swirled lobes and ragged edges; half as much at the top. 0 = off |
+| `curlAmountM` | 150 | 0..2000 | How far (m) the curl noise moves the detail lookup. Gives swirled lobes and ragged edges; half as much at the top. 0 = off |
 | `curlScaleM` | 3000 | 200..100000 | World size of one tile of the curl noise (m) |
 | `wispiness` | 0.8 | 0..1 | Share of the wispy (fibre) detail channels in thin parts of a cloud and at its top. 0 = only billows |
-| `fineDetail` | 0.6 | 0..1 | Weight of a second fetch of the detail noise at 3.1 x the frequency (small lobes). 0 = off, saves one fetch per sample |
+| `fineDetail` | 0.15 | 0..1 | Weight of a second fetch of the detail noise at 3.1 x the frequency (small lobes). 0 = off, saves one fetch per sample |
 | `windSpeed` | 4 | 0..500 | Wind speed (m/s) |
 | `windDirection` | 45 | -360..360 | Wind direction (degrees) |
 | `peakMin` | 0.6 | 0.05..1 | Cloud type: top height of the lowest type (weather map B = 0) as a fraction of the layer thickness; B = 1 reaches the full top. The tops in between follow the map, so a sky holds flat low clouds and tall towers. 1 = no cloud types (every cloud as tall as the layer). Below about 0.4 flat terrace-like tops show |
-| `baseRoundness` | 0.07 | 0.01..0.5 | Rounding of the height gradient at the base |
+| `baseRoundness` | 0.15 | 0.01..0.5 | Rounding of the height gradient at the base: how softly the underside fades in (share of the layer thickness) |
 | `topRoundness` | 0.5 | 0..0.5 | Rounding of the height gradient at the top |
 | `densityRamp` | 0.2 | 0.01..0.5 | Density ramp above the base (fraction of the thickness) |
 | `densityTopFade` | 0.9 | 0.5..0.99 | Fraction of the thickness where density starts to fade at the top |
@@ -162,7 +170,7 @@ Resolve detail: a pixel that is not marched this frame reads its history texel e
 ## Cloud coverage knobs
 | Want | Set |
 |---|---|
-| Fewer or more clouds | `coverage` (0.2 sparse, 0.55 default, 0.9 overcast), `peakMin` (cloud type mix: 0.6 default, 1 = all clouds tall) |
+| Fewer or more clouds | `coverage` (0.35 sparse, 0.7 default, 0.95 overcast), `peakMin` (cloud type mix: 0.6 default, 1 = all clouds tall) |
 | Thicker, darker clouds | `density`, `extinction` |
 | Bigger cloud fields or smaller | `weatherScaleM` |
 | Puffier or smoother edges | `detailStrength`, `detailScaleM` |
@@ -180,7 +188,7 @@ The sky background belongs to the Atmosphere and the exposure to ToneMapping. Th
 The sun disk is on by default (`sunDiskIntensity` 8, `sunDiskRadiusDeg` 0.5 on the Atmosphere); the Bloom feature turns it into a glow. Set `sunDiskIntensity=0` for no disk.
 
 ### Presets
-Presets (action, no arguments, keep everything else and keep `enabled`): `preset_clear` (coverage 0.2, density 1.3), `preset_scattered` (the defaults), `preset_broken` (coverage 0.7), `preset_overcast` (coverage 0.9, density 1.5). The panel has one button per preset.
+Presets (action, no arguments, keep everything else and keep `enabled`): `preset_clear` (coverage 0.35, density 1.3), `preset_scattered` (the defaults), `preset_broken` (coverage 0.85), `preset_overcast` (coverage 0.95, density 1.5). The panel has one button per preset.
 
 ## Debug keys
 Name for `/feature_debug`: `VolumetricCloud`. Actions: `reset_defaults`, `preset_clear`, `preset_scattered`, `preset_broken`, `preset_overcast`. Every setting above is writable. Read-only keys:

@@ -51,18 +51,27 @@ struct VolumetricCloudSettings {
     float fadeStart = 0.9f;         // Fraction of the max distance where the clouds start to thin out (the air hazes them before).
 
     // Density model.
-    float coverage = 0.55f; // Sky share under cloud: 0.2 a few puffs, 0.65 scattered, 1 overcast.
+    float coverage = 0.7f; // Sky share under cloud: 0.2 a few puffs, 0.65 scattered, 1 overcast.
     float density = 1.5f;
     float extinction = 0.05f; // Per metre at density 1.
     float weatherScaleM = 25000.0f;
     float shapeScaleM = 4000.0f;
+    // Structure: how big and how leaning the clouds are.
+    float shapeWorley = 0.5f;     // Weight of the Worley cells in the shape; below 1 the equal-sized popcorn balls fade and the soft Perlin body leads.
+    float largeShapeMix = 0.4f;   // Share of the big lobe octave (3 x the shape tile) in the shape; 0 = only the mid lobes.
+    float sizeVariation = 0.5f;   // How much the weather map's cloud type shifts that share: big tall clouds get big lobes, small ones keep mid lobes.
+    float windShearM = 800.0f;    // How far the top of the layer is shifted downwind relative to its base; clouds lean.
+    float bodyErosion = 0.35f;    // Share of the fine erosion kept in the core of a cloud; the rim always gets all of it.
+    float verticalStretch = 1.3f; // Noise lobes are this many times taller than wide; above 1 the cloud layers stop looking like stacked sheets.
+    float baseVariation = 0.5f;  // How much the big octave lowers or lifts the cloud base; 0 = one flat base.
+    float farSoftening = 0.7f;    // Extra share of the big octave at the far field start and beyond; far clouds lose their stacked fine sheets.
     float detailScaleM = 350.0f;
-    float detailStrength = 1.5f;
+    float detailStrength = 1.0f;
     // Detail noise: billowy (rounded lobes) and wispy (fibres) channels, pushed around by a curl noise.
-    float curlAmountM = 300.0f; // How far the curl noise moves the detail lookup, metres.
+    float curlAmountM = 150.0f; // How far the curl noise moves the detail lookup, metres.
     float curlScaleM = 3000.0f; // World size of one tile of the curl noise.
     float wispiness = 0.8f;     // Share of the wispy (fibre) detail in thin parts and at the top; 0 = only billows.
-    float fineDetail = 0.6f;    // Weight of a second, finer fetch of the detail noise; 0 = off.
+    float fineDetail = 0.15f;    // Weight of a second, finer fetch of the detail noise; 0 = off.
     float detailFadeDistM = 25000.0f;
     // Far field. Starts at farWeatherStartM and is full at twice that distance.
     float farWeatherStartM = 30000.0f; // Distance where the far field starts: second weather map, coverage lift, air shortening.
@@ -72,7 +81,7 @@ struct VolumetricCloudSettings {
     float windSpeed = 4.0f;
     float windDirection = 45.0f;
     float peakMin = 0.6f; // Top height of the lowest cloud type (weather map B = 0: flat, low top) as a share of the layer; B = 1 reaches the full top. 1 = no cloud types.
-    float baseRoundness = 0.07f;
+    float baseRoundness = 0.15f;
     float topRoundness = 0.5f;
     float densityRamp = 0.2f;
     float densityTopFade = 0.9f;
@@ -159,6 +168,14 @@ inline constexpr std::array kVolumetricCloudFloatSettings{
     VolumetricCloudFloatSetting{ "extinction", &VolumetricCloudSettings::extinction, 0.0005f, 0.5f },
     VolumetricCloudFloatSetting{ "weatherScaleM", &VolumetricCloudSettings::weatherScaleM, 1000.0f, 500000.0f },
     VolumetricCloudFloatSetting{ "shapeScaleM", &VolumetricCloudSettings::shapeScaleM, 100.0f, 100000.0f },
+    VolumetricCloudFloatSetting{ "shapeWorley", &VolumetricCloudSettings::shapeWorley, 0.0f, 1.5f },
+    VolumetricCloudFloatSetting{ "largeShapeMix", &VolumetricCloudSettings::largeShapeMix, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "sizeVariation", &VolumetricCloudSettings::sizeVariation, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "windShearM", &VolumetricCloudSettings::windShearM, 0.0f, 10000.0f },
+    VolumetricCloudFloatSetting{ "bodyErosion", &VolumetricCloudSettings::bodyErosion, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "verticalStretch", &VolumetricCloudSettings::verticalStretch, 0.25f, 6.0f },
+    VolumetricCloudFloatSetting{ "baseVariation", &VolumetricCloudSettings::baseVariation, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "farSoftening", &VolumetricCloudSettings::farSoftening, 0.0f, 1.0f },
     VolumetricCloudFloatSetting{ "detailScaleM", &VolumetricCloudSettings::detailScaleM, 10.0f, 20000.0f },
     VolumetricCloudFloatSetting{ "detailStrength", &VolumetricCloudSettings::detailStrength, 0.0f, 2.0f },
     VolumetricCloudFloatSetting{ "curlAmountM", &VolumetricCloudSettings::curlAmountM, 0.0f, 2000.0f },
@@ -283,8 +300,11 @@ struct VolumetricCloudParamsGpu {
     float skyShade2[4] = {};            // x ground bounce warmth, y blue shift of the scattering octaves, z far field start (m), w far weather mix.
     float farField[4] = {};             // x far coverage lift, y far air distance scale, z max step optical depth, w in-scatter strength.
     float detailShape[4] = {};          // x curl amount (m), y curl tile (m), z wispiness, w fine detail weight.
+    float structure[4] = {};            // x large lobe mix, y size variation, zw wind shear vector at the layer top (m).
+    float structure2[4] = {};           // x erosion kept in the body, y vertical stretch, z base variation, w far softening.
+    float structure3[4] = {};           // x weight of the Worley cells in the shape, yzw reserved.
 };
-static_assert(sizeof(VolumetricCloudParamsGpu) == 64 + 25 * 16);
+static_assert(sizeof(VolumetricCloudParamsGpu) == 64 + 28 * 16);
 static_assert(std::is_trivially_copyable_v<VolumetricCloudParamsGpu>);
 
 // std430 block of VolumetricCloudResolve.comp; member order matches the shader.

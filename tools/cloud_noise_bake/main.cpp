@@ -299,11 +299,13 @@ Volume BakeCurl(int n) {
     return Pack(n, n, 1, {&r, &g, &b, &a});
 }
 
-// Weather 512^2 (v2): slices of the periodic 3D noise at a fixed z are periodic in x and y.
-//   R coverage : big cumulus masses (Worley cells, domain-warped) + medium + small cells, scaled by a regional field,
-//                so one sky holds large and small clouds and clear gaps. Capped below 1 so no region becomes a solid sheet.
+// Weather 512^2 (v3): slices of the periodic 3D noise at a fixed z are periodic in x and y.
+//   R coverage : a smooth multi-scale field (Perlin fbm at 3 / 8 / 20 cells, domain warped), so the sky holds huge masses,
+//                medium clouds and small puffs of every size in between, joined by gentle gradients. v2 used cut-off Worley
+//                cells: the result was flat-topped discs of nearly one size ("popcorn") whose straight edges showed as boxes.
+//                The local cap varies smoothly (no plateaus) and stays below 1 so no region becomes a solid sheet.
 //   G high cov.: broad overcast-ish region field (only used when the coverage setting is above 0.5).
-//   B cloud type / peak: 0 = flat stratus-like (low top), 1 = tall cumulus. Regional type field plus the cell core, so a
+//   B cloud type / peak: 0 = flat stratus-like (low top), 1 = tall cumulus. Regional type field plus the big-mass field, so a
 //                cumulus mass is tallest in the middle and lower at its shoulders.
 //   A density  : 0.45..1 modulation.
 Volume BakeWeather(int n) {
@@ -315,60 +317,35 @@ Volume BakeWeather(int n) {
     };
     // Domain warp: periodic displacement keeps the tile period.
     FVol warpX = pf(3, 3, 201u), warpY = pf(3, 3, 211u);
-    auto cells = [&](int count, std::uint32_t seed, float warp) {
+    auto warped = [&](int base, int oct, std::uint32_t seed, float warp) {
         FVol v(static_cast<std::size_t>(n) * n);
         ParallelFor(n, [&](int y) {
             for (int x = 0; x < n; ++x) {
                 const std::size_t i = static_cast<std::size_t>(y) * n + x;
                 const float fx = static_cast<float>(x) / n + warp * (warpX[i] - 0.5f);
                 const float fy = static_cast<float>(y) / n + warp * (warpY[i] - 0.5f);
-                v[i] = WorleyInv(fx, fy, zf, count, seed);
+                v[i] = PerlinFbm(fx, fy, zf, base, oct, seed);
             }
         });
+        Stretch(v);
         return v;
     };
-    FVol regional = pf(2, 3, 101u), mid = pf(10, 4, 111u), pg = pf(3, 4, 121u), pt = pf(3, 3, 131u), pd = pf(6, 4, 141u), pf2 = pf(24, 3, 151u);
-    FVol big = cells(4, 301u, 0.06f), med = cells(9, 311u, 0.05f), small = cells(20, 321u, 0.04f);
-    // Periodic box blur (3 passes ~ Gaussian). The Worley field has a crease (a V) at every cell border; thresholding a crease
-    // gives straight cliff-like cloud walls, so the fields are smoothed first.
-    auto blur = [&](FVol& v, int radius) {
-        FVol tmp(v.size());
-        for (int pass = 0; pass < 3; ++pass) {
-            ParallelFor(n, [&](int y) {
-                for (int x = 0; x < n; ++x) {
-                    float sum = 0;
-                    for (int d = -radius; d <= radius; ++d) sum += v[static_cast<std::size_t>(y) * n + Wrap(x + d, n)];
-                    tmp[static_cast<std::size_t>(y) * n + x] = sum / (2 * radius + 1);
-                }
-            });
-            ParallelFor(n, [&](int y) {
-                for (int x = 0; x < n; ++x) {
-                    float sum = 0;
-                    for (int d = -radius; d <= radius; ++d) sum += tmp[static_cast<std::size_t>(Wrap(y + d, n)) * n + x];
-                    v[static_cast<std::size_t>(y) * n + x] = sum / (2 * radius + 1);
-                }
-            });
-        }
-    };
-    blur(big, 9);
-    blur(med, 4);
-    blur(small, 1);
+    FVol regional = pf(2, 3, 101u), cap = pf(5, 3, 111u), pg = pf(3, 4, 121u), pt = pf(3, 3, 131u), pd = pf(6, 4, 141u);
+    FVol bigF = warped(3, 3, 401u, 0.16f), midF = warped(8, 3, 411u, 0.10f), smallF = warped(20, 3, 421u, 0.06f);
     FVol r(regional.size()), g(r.size()), b(r.size()), a(r.size());
     for (std::size_t i = 0; i < r.size(); ++i) {
-        const float reg = Smoothstep(0.20f, 0.80f, regional[i]);          // where the sky is busy
-        const float massBig = Smoothstep(0.12f, 0.85f, big[i]);           // large cumulus masses, soft shoulders
-        const float massMed = Smoothstep(0.22f, 0.90f, med[i]);           // medium clouds
-        const float massSmall = Smoothstep(0.40f, 0.90f, 0.6f * small[i] + 0.4f * pf2[i]); // small puffs
-        // Huge masses get a lower coverage cap than small clouds: a high coverage makes the body solid and the fine
-        // erosion cannot carve it, so a big mass at full coverage turns into a smooth sheet.
-        const float lump = 0.45f + 0.95f * mid[i];  // lumpy coverage inside a cloud: the thresholds vary, the outline gets ragged
-        const float rBig = 0.58f * Smoothstep(0.10f, 0.60f, massBig * (0.35f + 0.65f * reg) * lump);
-        const float rMed = 0.80f * Smoothstep(0.10f, 0.62f, massMed * (0.30f + 0.50f * (1.0f - 0.5f * reg)) * lump);
-        const float rSmall = 0.88f * Smoothstep(0.10f, 0.62f, 0.55f * massSmall * (1.15f - reg) * lump);
-        r[i] = std::max({rBig, rMed, rSmall});
+        const float reg = Smoothstep(0.25f, 0.75f, regional[i]);                  // where the sky is busy
+        // One continuous field: huge lobes carry the shape, medium and small lobes ride on them.
+        const float field = 0.56f * bigF[i] + 0.29f * midF[i] + 0.15f * smallF[i] + 0.28f * (reg - 0.5f);
+        const float localCap = 0.40f + 0.28f * cap[i];                            // varies smoothly: no flat plateaus
+        const float body = Smoothstep(0.40f, 0.74f, field);
+        // Sparse small cumulus in the gaps: only the peaks of the small field, weak where the sky is busy.
+        const float puffs = Smoothstep(0.62f, 0.84f, 0.65f * smallF[i] + 0.35f * midF[i]) * 0.55f * (1.15f - reg);
+        r[i] = std::max(body * localCap, puffs);
         g[i] = Smoothstep(0.58f, 0.85f, pg[i]);
-        const float core = Smoothstep(0.15f, 0.95f, big[i]);
-        b[i] = Smoothstep(0.10f, 0.90f, 0.40f * Smoothstep(0.25f, 0.75f, pt[i]) + 0.45f * core + 0.25f * mid[i]);
+        // A cloud is about as tall as it is wide: thin, weak coverage (small puffs, shoulders of a mass) gets a low top.
+        const float typeBase = Smoothstep(0.10f, 0.90f, 0.40f * Smoothstep(0.25f, 0.75f, pt[i]) + 0.45f * Smoothstep(0.35f, 0.80f, bigF[i]) + 0.25f * midF[i]);
+        b[i] = typeBase * Smoothstep(0.05f, 0.60f, r[i]);
         a[i] = 0.45f + 0.55f * pd[i];
     }
     return Pack(n, n, 1, {&r, &g, &b, &a});

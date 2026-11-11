@@ -60,6 +60,9 @@ void AdvanceCloudWind(double (&offset)[2], double (&step)[2], float speed, float
 // The far weather map is the weather map at this multiple of its tile size (VolumetricCloud.comp kFarWeatherTileScale).
 inline constexpr float kCloudFarWeatherTileScale = 2.8f;
 
+// The big lobe octave reads the shape volume at this multiple of the shape tile (VolumetricCloud.comp kLargeShapeScale).
+inline constexpr float kCloudLargeShapeScale = 1.75f;
+
 // Distance (m) the resolve pass assumes for a pixel that has no fresh cloud distance. Fixed: it is not tied to the
 // march range, which reaches the horizon (250 km and more).
 inline constexpr float kCloudHistoryFallbackDistanceM = 15000.0f;

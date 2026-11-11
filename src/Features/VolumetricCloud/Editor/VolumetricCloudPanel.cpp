@@ -86,6 +86,15 @@ bool BuildVolumetricCloudPanel(
     changed |= ImGui::SliderFloat("Coverage", &edit.coverage, 0.0f, 1.0f);
     changed |= ImGui::SliderFloat("Cloud type (lowest peak)", &edit.peakMin, 0.05f, 1.0f);
     changed |= ImGui::SliderFloat("Density", &edit.density, 0.0f, 4.0f);
+    changed |= ImGui::SliderFloat("Big lobes (mix)", &edit.largeShapeMix, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Size variation", &edit.sizeVariation, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Worley cells (popcorn)", &edit.shapeWorley, 0.0f, 1.5f);
+    changed |= ImGui::SliderFloat("Vertical stretch", &edit.verticalStretch, 0.25f, 6.0f);
+    changed |= ImGui::SliderFloat("Base variation", &edit.baseVariation, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Base roundness", &edit.baseRoundness, 0.01f, 0.5f);
+    changed |= ImGui::SliderFloat("Far softening", &edit.farSoftening, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Erosion kept in body", &edit.bodyErosion, 0.0f, 1.0f);
+    changed |= ImGui::DragFloat("Wind shear (m)", &edit.windShearM, 10.0f, 0.0f, 10000.0f);
     changed |= ImGui::SliderFloat("Extinction (1/m)", &edit.extinction, 0.0005f, 0.5f, "%.4f", ImGuiSliderFlags_Logarithmic);
     changed |= ImGui::SliderFloat("Detail strength", &edit.detailStrength, 0.0f, 2.0f);
     changed |= ImGui::SliderFloat("Wispiness", &edit.wispiness, 0.0f, 1.0f);

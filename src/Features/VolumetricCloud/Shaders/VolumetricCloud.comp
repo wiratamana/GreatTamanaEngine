@@ -35,6 +35,9 @@ layout(std430, binding = 0) readonly buffer VolumetricCloudParams {
     vec4 skyShade2;                 // x ground bounce warmth, y blue shift of the scattering octaves, z far field start (m), w far weather mix.
     vec4 farField;                  // x far coverage lift, y far air distance scale, z max step optical depth, w in-scatter strength.
     vec4 detailShape;               // x curl amount (m), y curl tile (m), z wispiness, w fine detail weight.
+    vec4 structure;                 // x large lobe mix, y size variation, zw wind shear vector at the layer top (m).
+    vec4 structure2;                // x erosion kept in the body, y vertical stretch of the noise, z base variation, w far softening.
+    vec4 structure3;                // x weight of the Worley cells in the shape (popcorn), yzw reserved.
 } params;
 
 layout(binding = 1) uniform sampler2D sourceDepth;
@@ -68,6 +71,10 @@ const float kFarWeatherTileScale = 2.8;
 const vec2 kFarWeatherOffset = vec2(0.37, 0.61);
 // The second, finer fetch of the detail noise reads it at this multiple of the detail frequency.
 const float kFineDetailScale = 3.1;
+const float kShapeWorleyMean = 0.5;
+// The large lobe octave reads the shape volume at this multiple of the shape tile, shifted so it is not a copy of the mid octave.
+const float kLargeShapeScale = 1.75;
+const vec3 kLargeShapeOffset = vec3(0.17, 0.31, 0.43);
 const float kStepBudgetShare = 0.85;
 const float kMinStepShare = 0.2;
 const float kMinStepGrowth = 1e-4;
@@ -155,18 +162,31 @@ bool LayerSegment(float cameraY, float dirY, out float tStart, out float tEnd)
 // Set by CloudShape(): the weather map holds no cloud at the last sampled position.
 bool gWeatherClear = false;
 
+// The shape value of one volume fetch: Perlin-Worley body against the Worley fbm, stretched to 0..1.
+float ShapeValue(vec4 sn)
+{
+    float fbm = sn.g * 0.625 + sn.b * 0.25 + sn.a * 0.125;
+    // The Worley cells are what makes equal-sized popcorn balls; their weight scales them toward their mean.
+    fbm = kShapeWorleyMean + (fbm - kShapeWorleyMean) * params.structure3.x;
+    float shape = Remap(sn.r, fbm - 1.0, 1.0, 0.0, 1.0);
+    return Saturate(Remap(shape, params.skip.z, params.skip.w, 0.0, 1.0));
+}
+
 float CloudShape(vec3 position, float heightFraction, out float densityFactor)
 {
     vec2 wind = params.weather.yz;
+    // Wind shear: the noise is read at a place that moves with the height, so the top of a cloud leans downwind.
+    vec2 shear = params.structure.zw * heightFraction;
     vec2 fromEye = position.xz - params.eyeAndPlanetRadius.xz;
     float farRamp = smoothstep(params.skyShade2.z, 2.0 * params.skyShade2.z, length(fromEye));
     float coverage = min(params.weather.w + params.farField.x * farRamp, 1.0);
-    vec4 wm = textureLod(weatherMap, (position.xz + wind) / params.weather.x, 0.0);
+    vec2 weatherPosition = position.xz + wind + 0.5 * params.structure.zw;
+    vec4 wm = textureLod(weatherMap, weatherPosition / params.weather.x, 0.0);
     // Far away the weather repeats every tile and shows the same big blobs. Blend in a second sample of the map at
     // another scale: the pattern no longer repeats and the far field gets more even, smaller clouds.
     float farBlend = params.skyShade2.w * farRamp;
     if (farBlend > 0.0) {
-        vec2 farUv = (position.xz + wind) / (params.weather.x * kFarWeatherTileScale) + kFarWeatherOffset;
+        vec2 farUv = weatherPosition / (params.weather.x * kFarWeatherTileScale) + kFarWeatherOffset;
         wm = mix(wm, textureLod(weatherMap, farUv, 0.0), farBlend);
     }
     float weatherCoverage = max(wm.r, Saturate(coverage - 0.5) * wm.g * 1.1);  // the high-coverage fill tops out at 0.55: no solid sheet
@@ -177,9 +197,24 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
         return 0.0;
     }
 
+    float altitude = params.layer.x + heightFraction * (params.layer.y - params.layer.x);
+    vec3 shapeUv = vec3(position.x + wind.x + shear.x, altitude / params.structure2.y, position.z + wind.y + shear.y) / params.noise.x;
+    float shape = ShapeValue(textureLod(shapeVolume, shapeUv, 0.0));
+    float shapeLarge = shape;
+    if (params.structure.x > 0.0 || params.structure2.w > 0.0) {
+        // Two scales of the same volume: a big lobe octave carries the body and the mid octave adds the lobes on it.
+        // Where the weather map says a cloud is big and tall (B high) the big octave dominates, small low clouds keep
+        // the mid lobes; far away the big octave takes over so a distant deck does not turn into thin stacked sheets.
+        shapeLarge = ShapeValue(textureLod(shapeVolume, shapeUv / kLargeShapeScale + kLargeShapeOffset, 0.0));
+        float largeShare = Saturate(params.structure.x + params.structure.y * (wm.b - 0.5) * 2.0 + params.structure2.w * farRamp);
+        shape = mix(shape, shapeLarge, largeShare);
+    }
+
     float peak = mix(params.density.z, 1.0, wm.b);
     float stop = Saturate(peak + params.heightShape.y);
-    float roundBottom = Saturate(Remap(heightFraction, 0.0, params.heightShape.x, 0.0, 1.0));
+    // Hanging bases: where the big octave is high the cloud base is lower, so the underside is bumpy and not one plane.
+    float baseShift = params.structure2.z * (0.5 - shapeLarge) * 0.4;
+    float roundBottom = Saturate(Remap(heightFraction, baseShift, baseShift + params.heightShape.x, 0.0, 1.0));
     float roundTop = Saturate(Remap(heightFraction, stop * params.skip.y, stop, 1.0, 0.0));
     float shapeGradient = roundBottom * roundTop;
 
@@ -187,12 +222,6 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float rampTop = Saturate(Remap(heightFraction, params.heightShape.w, 1.0, 1.0, 0.0));
     densityFactor = params.density.x * rampBottom * rampTop * wm.a * 2.0;
 
-    float altitude = params.layer.x + heightFraction * (params.layer.y - params.layer.x);
-    vec3 shapeUv = vec3(position.x + wind.x, altitude, position.z + wind.y) / params.noise.x;
-    vec4 sn = textureLod(shapeVolume, shapeUv, 0.0);
-    float fbm = sn.g * 0.625 + sn.b * 0.25 + sn.a * 0.125;
-    float shape = Remap(sn.r, fbm - 1.0, 1.0, 0.0, 1.0);
-    shape = Saturate(Remap(shape, params.skip.z, params.skip.w, 0.0, 1.0));
     // Linear body; CloudDetail erodes it and applies the density curve afterwards, so the fine noise cuts into the
     // soft part of the cloud and not into a body already raised to a power.
     return Saturate(Remap(shape * shapeGradient, 1.0 - coverage * weatherCoverage, 1.0, 0.0, 1.0));
@@ -209,7 +238,8 @@ float CloudDetail(vec3 position, float heightFraction, float shape, float densit
 {
     vec2 wind = params.weather.yz;
     float altitude = params.layer.x + heightFraction * (params.layer.y - params.layer.x);
-    vec3 world = vec3(position.x + wind.x, altitude, position.z + wind.y);
+    vec2 shear = params.structure.zw * heightFraction;
+    vec3 world = vec3(position.x + wind.x + shear.x, altitude / params.structure2.y, position.z + wind.y + shear.y);
     // Curl noise pushes the lookup around: the lobes get swirled and the edges ragged. Less at the top.
     vec3 curl = textureLod(curlMap, world.xz / params.detailShape.y, 0.0).rgb * 2.0 - 1.0;
     world += vec3(curl.x, curl.z * 0.5, curl.y) * (params.detailShape.x * (1.0 - 0.5 * heightFraction));
@@ -225,7 +255,8 @@ float CloudDetail(vec3 position, float heightFraction, float shape, float densit
         vec4 fn = textureLod(detailVolume, world * kFineDetailScale / params.noise.y + 0.31, 0.0);
         erosion = mix(erosion, 1.0 - (fn.g * 0.5 + fn.a * 0.5), params.detailShape.w * 0.5);
     }
-    erosion *= params.noise.z * detailAmount * exp(-params.weather.w * 0.75);
+    // The fine erosion cuts the rim of a cloud; the core keeps only a share of it, so the body stays smooth.
+    erosion *= params.noise.z * detailAmount * exp(-params.weather.w * 0.75) * mix(params.structure2.x, 1.0, 1.0 - shape);
     return CloudCurve(Saturate(Remap(shape, erosion, 1.0, 0.0, 1.0))) * densityFactor;
 }
 

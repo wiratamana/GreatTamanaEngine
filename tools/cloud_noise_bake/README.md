@@ -54,7 +54,7 @@ The generator is periodic by construction: lattice cell indices are wrapped modu
 
 The weather map is a z = 0.37 slice of the periodic 3D noise, which is periodic in x and y.
 
-Weather v2 (cumulus masses): R = three scales of domain-warped, blurred Worley cells (4 / 9 / 20 per tile) with different caps (0.58 / 0.80 / 0.88: a huge mass at full coverage turns into a smooth sheet), lumpy modulation and a regional busy/quiet field; G = broad high-coverage regions; B = cloud type (regional field + core of the big cells; 0 flat low top, 1 tall); A = density. Dev shortcut: `cloud_noise_bake weather --out DIR` bakes only the weather map (+ png) in a second.
+Weather v3 (soft multi-scale masses): R = one smooth field, Perlin fbm at 3 / 8 / 20 cells per tile (domain warped) plus a regional busy/quiet field, thresholded and capped by a smoothly varying local cap (0.40..0.68, no plateaus) with a few sparse small puffs (cap 0.55); v2's Worley cells made flat discs of one size and boxy edges; G = broad high-coverage regions; B = cloud type (regional field + the big-mass field, scaled by a ramp of R so thin weak coverage gets a low top; 0 flat low top, 1 tall); A = density. Dev shortcut: `cloud_noise_bake weather --out DIR` bakes only the weather map (+ png) in a second.
 
 ## Blue noise
 

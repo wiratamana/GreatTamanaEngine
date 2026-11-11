@@ -441,18 +441,18 @@ TEST(VolumetricCloudParamsTest, TheDetailAndStepSettingsReachTheBlockWithTheShip
 {
     const VolumetricCloudSettings defaults = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
     EXPECT_FLOAT_EQ(defaults.detailScaleM, 350.0f);
-    EXPECT_FLOAT_EQ(defaults.detailStrength, 1.5f);
+    EXPECT_FLOAT_EQ(defaults.detailStrength, 1.0f);
     EXPECT_FLOAT_EQ(defaults.detailFadeDistM, 25000.0f);
-    EXPECT_FLOAT_EQ(defaults.curlAmountM, 300.0f);
+    EXPECT_FLOAT_EQ(defaults.curlAmountM, 150.0f);
     EXPECT_FLOAT_EQ(defaults.curlScaleM, 3000.0f);
     EXPECT_FLOAT_EQ(defaults.wispiness, 0.8f);
-    EXPECT_FLOAT_EQ(defaults.fineDetail, 0.6f);
+    EXPECT_FLOAT_EQ(defaults.fineDetail, 0.15f);
     EXPECT_FLOAT_EQ(defaults.maxStepDepth, 0.4f);
     EXPECT_FLOAT_EQ(defaults.lightDetail, 1.0f);
     EXPECT_FLOAT_EQ(defaults.inScatter, 0.8f);
     EXPECT_FLOAT_EQ(defaults.sunIntensity, 14.0f);
     EXPECT_FLOAT_EQ(defaults.ambientBottom, 0.42f);
-    EXPECT_FLOAT_EQ(defaults.coverage, 0.55f);
+    EXPECT_FLOAT_EQ(defaults.coverage, 0.7f);
     EXPECT_FLOAT_EQ(defaults.peakMin, 0.6f);
     VolumetricCloudSettings s = defaults;
     s.curlAmountM = 120.0f;
@@ -538,6 +538,57 @@ TEST(VolumetricCloudLayerTest, WindKeepsSubMetreResolutionAfterTenHours)
     EXPECT_LT(std::nextafter(value, 2.0f * value) - value, 0.1f);
 }
 
+TEST(VolumetricCloudParamsTest, TheStructureSettingsReachTheBlockWithTheShippedDefaults)
+{
+    const VolumetricCloudSettings defaults = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    EXPECT_FLOAT_EQ(defaults.largeShapeMix, 0.4f);
+    EXPECT_FLOAT_EQ(defaults.sizeVariation, 0.5f);
+    EXPECT_FLOAT_EQ(defaults.shapeWorley, 0.5f);
+    EXPECT_FLOAT_EQ(defaults.windShearM, 800.0f);
+    EXPECT_FLOAT_EQ(defaults.bodyErosion, 0.35f);
+    EXPECT_FLOAT_EQ(defaults.verticalStretch, 1.3f);
+    EXPECT_FLOAT_EQ(defaults.baseVariation, 0.5f);
+    EXPECT_FLOAT_EQ(defaults.baseRoundness, 0.15f);
+    EXPECT_FLOAT_EQ(defaults.farSoftening, 0.7f);
+    VolumetricCloudSettings s = defaults;
+    s.largeShapeMix = 0.2f;
+    s.sizeVariation = 0.9f;
+    s.shapeWorley = 0.8f;
+    s.windShearM = 1000.0f;
+    s.windDirection = 90.0f;
+    s.bodyErosion = 0.6f;
+    s.verticalStretch = 2.0f;
+    s.baseVariation = 0.25f;
+    s.farSoftening = 0.4f;
+    VolumetricCloudFrameFacts facts;
+    const VolumetricCloudParamsGpu p = MakeVolumetricCloudParams(SanitizeVolumetricCloudSettings(s), facts);
+    EXPECT_FLOAT_EQ(p.structure[0], 0.2f);
+    EXPECT_FLOAT_EQ(p.structure[1], 0.9f);
+    // The shear vector follows the wind direction: 90 degrees points along +z (the second component).
+    EXPECT_NEAR(p.structure[2], 0.0f, 1e-3f);
+    EXPECT_NEAR(p.structure[3], 1000.0f, 1e-3f);
+    EXPECT_FLOAT_EQ(p.structure2[0], 0.6f);
+    EXPECT_FLOAT_EQ(p.structure2[1], 2.0f);
+    EXPECT_FLOAT_EQ(p.structure2[2], 0.25f);
+    EXPECT_FLOAT_EQ(p.structure2[3], 0.4f);
+    EXPECT_FLOAT_EQ(p.structure3[0], 0.8f);
+    // Out of range values are clamped.
+    s.verticalStretch = 0.0f;
+    s.windShearM = -5.0f;
+    const VolumetricCloudSettings clamped = SanitizeVolumetricCloudSettings(s);
+    EXPECT_FLOAT_EQ(clamped.verticalStretch, 0.25f);
+    EXPECT_FLOAT_EQ(clamped.windShearM, 0.0f);
+}
+
+TEST(VolumetricCloudParamsTest, TheWindPeriodHoldsAWholeNumberOfBigLobeTiles)
+{
+    const VolumetricCloudSettings defaults = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    const double period = CloudWindPeriodM(defaults);
+    ASSERT_GT(period, 0.0);
+    const double bigTile = static_cast<double>(std::llround(defaults.shapeScaleM * kCloudLargeShapeScale));
+    EXPECT_NEAR(std::fmod(period, bigTile), 0.0, 1e-6);
+}
+
 TEST(VolumetricCloudParamsTest, BlockLayoutMatchesTheShader)
 {
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, eyeAndPlanetRadius), 64u);
@@ -563,7 +614,10 @@ TEST(VolumetricCloudParamsTest, BlockLayoutMatchesTheShader)
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, skyShade2), 416u);
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, farField), 432u);
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, detailShape), 448u);
-    EXPECT_EQ(sizeof(VolumetricCloudParamsGpu), 464u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, structure), 464u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, structure2), 480u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, structure3), 496u);
+    EXPECT_EQ(sizeof(VolumetricCloudParamsGpu), 512u);
 }
 
 TEST(VolumetricCloudParamsTest, TheAtmosphereModePassesTheSunUntouchedAndTheCamera)
@@ -1185,7 +1239,9 @@ TEST(VolumetricCloudParamsTest, GlslBlocksHaveTheCppMembersAtTheCppOffsets)
             GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, atmosphereMode),
             GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, atmosphereCamera),
             GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, skyShade), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, skyShade2),
-            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, farField), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, detailShape) });
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, farField), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, detailShape),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, structure), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, structure2),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, structure3) });
     ExpectBlock(ParseBlock(ReadShaderText("VolumetricCloudResolve.comp"), "VolumetricCloudResolveParams"),
         { GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, invViewProjection),
             GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, prevViewProjection),
@@ -1272,6 +1328,23 @@ TEST(VolumetricCloudShaderTest, DetailIsCurlWarpedBillowAndWispErosionAndTheCurv
     // A dense sample is shortened so that one step holds at most maxStepDepth optical depths.
     EXPECT_NE(march.find("extinction * stepLength > params.farField.z"), std::string::npos);
     EXPECT_NE(march.find("t += marchStep;"), std::string::npos);
+}
+
+TEST(VolumetricCloudShaderTest, TheShapeHasTwoScalesWindShearAndSoftBases)
+{
+    const std::string march = gte::ReadShaderText("VolumetricCloud.comp");
+    // The big lobe octave: same volume at 1.75 x the tile (the CPU twin is kCloudLargeShapeScale).
+    EXPECT_NE(march.find("const float kLargeShapeScale = 1.75;"), std::string::npos);
+    EXPECT_FLOAT_EQ(kCloudLargeShapeScale, 1.75f);
+    EXPECT_NE(march.find("shapeUv / kLargeShapeScale + kLargeShapeOffset"), std::string::npos);
+    EXPECT_NE(march.find("float ShapeValue(vec4 sn)"), std::string::npos);
+    // Wind shear: the noise and weather lookups move with the height fraction.
+    EXPECT_NE(march.find("vec2 shear = params.structure.zw * heightFraction;"), std::string::npos);
+    EXPECT_NE(march.find("params.structure.zw"), std::string::npos);
+    // Hanging bases and the erosion kept in the core.
+    EXPECT_NE(march.find("float baseShift = params.structure2.z * (0.5 - shapeLarge) * 0.4;"), std::string::npos);
+    EXPECT_NE(march.find("mix(params.structure2.x, 1.0, 1.0 - shape)"), std::string::npos);
+    EXPECT_NE(march.find("params.structure3.x"), std::string::npos);
 }
 
 TEST(VolumetricCloudShaderTest, EveryRayGrowsItsStepsToFitTheStepBudget)
