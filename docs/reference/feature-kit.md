@@ -35,8 +35,9 @@ Blend (`fx::Blend`): `Replace` writes over the view (ToneMapping, last). `AlphaO
 | `CompositeFrame` | `PostComposite`, `PreUI` | `PrivateTarget()`, `Extent()`, plus `PostOpaqueFrame` members |
 | `SharedFrame` | `PreOpaqueShared` | none. `View()` is empty and `Scope()` is `Shared` |
 
-`fx::View` (`f.View()`) holds `scope`, `extent`, `eye`, `viewProjection`, `invViewProjection`, `invViewProjectionValid`, `jitterNdc`.
-- `viewProjection` and `invViewProjection` are never jittered. Camera math and history use them.
+`fx::View` (`f.View()`) holds `scope`, `extent`, `eye`, `viewProjection`, `relative`, `jitterNdc`.
+- `viewProjection` and the matrices of `relative` are never jittered. Camera math and history use them.
+- `relative` is the same camera with the eye at the origin, built in double on the CPU: `relative.inverse` maps clip space to (world - eye), `relative.valid` is false when the matrix cannot be inverted. Use it for every ray or depth reconstruction. An absolute float inverse is up to 18 px off at 54 km from the origin.
 - `jitterNdc` is the clip-space shift of this view's main scene draw this frame. `(0, 0)` when none.
 - `DrawViewProjection()` is the matrix the view's scene color and depth were drawn with. It equals `viewProjection` when there is no jitter.
 - Anything that draws into the view's scene color or depth must use `DrawViewProjection()`, not `viewProjection`.

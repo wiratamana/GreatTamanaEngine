@@ -28,7 +28,7 @@ The CPU reference is `GtaoMath.cpp`. The shaders mirror it.
 | Feature off for one view | No pass in that view. Status `NotRendered`. |
 
 ## How it works
-1. Each pixel is unprojected with `invViewProjection`. `fx::DeriveCameraBasis` gets the camera axes and pixel scale.
+1. Each pixel is unprojected with the eye-relative inverse (`View::relative.inverse`). `fx::DeriveViewCameraBasis` gets the camera axes and pixel scale.
 2. AO texel `i` reads depth pixel `i * divisor`. Divisor 2 gives half-size textures (rounded up).
 3. `sliceCount` slices, `stepCount` steps per side. The sample radius in pixels follows view depth. Cap: 192 px.
 4. Resolve: bilateral filter, then temporal blend with the previous frame.

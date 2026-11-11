@@ -52,7 +52,7 @@ Units are the sky's: atmosphere space is km from the planet centre, the camera a
 
 **Horizon and far field.** The march range is `maxDistanceM` (250 km) and every ray grows its step length to reach the end of its segment within `maxSteps`. Beyond `farWeatherStartM` the weather map is mixed with a second sample at another scale, the coverage is lifted a little and the air in front of the cloud counts less (`farAirScale`), so the layer continues to the horizon as a flattening deck that fades into the haze instead of ending in an empty band. The resolve pass keeps its own fixed fallback distance (15 km, `kCloudHistoryFallbackDistanceM`) and does not follow `maxDistanceM`.
 
-Rays and reprojection are built eye-relative in double precision. The engine inverse view-projection is too coarse far from the origin (about 0.4 px at 5 km).
+Rays and reprojection use `fx::View::relative`: the camera with the eye at the origin, built in double precision. An absolute float inverse is too coarse far from the origin (about 2 px at 5 km, 18 px at 54 km).
 
 ## Noise assets
 Baked once by `tools/cloud_noise_bake` (the build runs it, see [Building](../../../BUILDING.md)). Format `GTV1`, read by `fx::StaticVolume` / `fx::StaticTexture` from `<working directory>/assets/clouds/`.
@@ -238,12 +238,12 @@ Memory per view: 4 full-size RGBA16F history targets (about 12 MB at 884x432), s
 - The noise has no mips. Detail fades out with distance instead.
 - Divisor 2 (crisper edges) costs about 23-26 ms on the Iris Xe at 720p with the shipped detail settings; the default stays at 4.
 - Divisor 4 is a little softer than divisor 2 (mean error against a full-res reference 0.8 against 0.5 out of 255 on a still camera). A newly exposed screen edge and the first frames after a resize or a camera cut show the raw 4x4 pattern for up to about 16 frames.
-- TemporalAa (-150) sees the clouds as normal pixels. Its jitter is not fed into the march pattern. TemporalAa, Gtao and Ssgi reported `NoValidCamera` with the camera 5 km from the origin in a test (their camera basis check uses the coarse engine matrix). The clouds do not depend on that check.
+- TemporalAa (-150) sees the clouds as normal pixels. Its jitter is not fed into the march pattern. TemporalAa, Gtao and Ssgi use the same eye-relative camera, so they stay on far from the origin.
 - Mode 1 reads the sky of the camera's height only: one sky-view lookup set for the whole picture and the camera's position for the air. Clouds that are far away and high see the same sky light as the ones overhead.
 - Clouds do not shadow the ground, the aerial perspective shafts or the sun glow of the sky. They only dim what is behind them. A sun glow behind a cloud is dimmed by the cloud transmittance, like any other pixel.
 - Mode 1 follows the planet's shadow: at a sun angle just below the horizon only the high far clouds stay lit and the rest go dark, as the sky does. Mode 0 keeps lighting them with a fixed twilight tint.
 - The layer is a sphere shell around a planet centred below the camera. Horizontal camera position does not bend it.
-- Perspective cameras only. A view with no valid `invViewProjection` gives `NoValidCamera`.
+- Perspective cameras only. A view with no valid eye-relative camera (`View::relative`) gives `NoValidCamera`.
 - The Game camera far plane is 1000 m. The scene depth limit works inside that range; beyond it the sky shows through.
 - A noise file is loaded once per process. A file larger than the device's 2D or 3D image limit is refused with one log line.
 - Transparent objects and particles are not in the scene depth, and the cloud pass runs after the transparent stage. Where a transparent object is seen in front of the sky, cloud in that pixel is added on top of it: the object looks dimmed by the cloud, as if it were behind it. Opaque objects are never affected. Workaround: keep the clouds off the view that shows such objects close to the camera, or lower `coverage`. The proper fix is to run the cloud pass before the transparent stage, or to give it a depth input that includes the transparent objects.

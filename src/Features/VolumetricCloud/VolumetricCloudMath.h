@@ -97,21 +97,9 @@ float CloudStepOpacity(float extinction, float stepLength) noexcept;
 // Adds one step to a front-to-back accumulation. `source` is the radiance per unit of absorbed light.
 void CloudAccumulateStep(float& light, float& transmittance, float source, float opacity) noexcept;
 
-// View-projection matrices that work in coordinates relative to the eye. The engine's own inverse is
-// computed in single precision with the camera thousands of metres from the origin, which leaves rays
-// about half a pixel off; here the product and the inverse are formed in double precision.
-struct CloudRelativeCamera {
-    bool valid = false;
-    Mat4 inverse = Mat4::Identity();    // Clip space to world position minus eye.
-    Mat4 projection = Mat4::Identity(); // World position minus eye to clip space.
-};
-
-// `viewProjection` maps world positions to clip space; `eye` is the origin of the relative frame.
-CloudRelativeCamera MakeCloudRelativeCamera(const Mat4& viewProjection, const Vec3& eye) noexcept;
-
 // What the per-frame parameter block needs besides the settings.
 struct VolumetricCloudFrameFacts {
-    Mat4 invViewProjection = Mat4::Identity(); // Eye-relative, from MakeCloudRelativeCamera().
+    Mat4 invViewProjection = Mat4::Identity(); // Eye-relative: fx::View::relative.inverse.
     Vec3 eye;
     Vec3 sunDirection = Vec3::Up();
     Vec3 sunIlluminance = Vec3::One();

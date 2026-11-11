@@ -981,7 +981,7 @@ TEST(VolumetricCloudTemporalTest, RelativeCameraRoundTripsRaysFarFromTheOrigin)
     const Vec3 eye(2000.0f, 2.0f, -5000.0f);
     const Mat4 view = Mat4::LookAtLH(eye, eye + Vec3(0.2f, 0.05f, 1.0f), Vec3::Up());
     const Mat4 projection = Mat4::PerspectiveFovLH_ZO(1.0471976f, 884.0f / 432.0f, 0.1f, 1000.0f);
-    const CloudRelativeCamera camera = MakeCloudRelativeCamera(projection * view, eye);
+    const EyeRelativeCamera camera = MakeEyeRelativeCamera(projection * view, eye);
     ASSERT_TRUE(camera.valid);
     const float width = 884.0f;
     const float height = 432.0f;
@@ -994,7 +994,7 @@ TEST(VolumetricCloudTemporalTest, RelativeCameraRoundTripsRaysFarFromTheOrigin)
             const Vec4 farPoint = camera.inverse * Vec4(ndcX, ndcY, 1.0f, 1.0f);
             const Vec3 ray = Normalize(farPoint.XYZ() / farPoint.w - nearPoint.XYZ() / nearPoint.w);
             for (const float distance : { 3000.0f, 15000.0f, 45000.0f }) {
-                const Vec4 clip = camera.projection * Vec4(ray.x * distance, ray.y * distance, ray.z * distance, 1.0f);
+                const Vec4 clip = camera.viewProjection * Vec4(ray.x * distance, ray.y * distance, ray.z * distance, 1.0f);
                 const double x = (clip.x / clip.w * 0.5f + 0.5f) * width - px;
                 const double y = (clip.y / clip.w * 0.5f + 0.5f) * height - py;
                 worst = std::max(worst, std::max(std::abs(x), std::abs(y)));
@@ -1206,7 +1206,7 @@ TEST(VolumetricCloudTemporalTest, RelativeBasisStaysValidFarFromTheOrigin)
              Extent2D{ 884, 432 } }) {
         const float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
         const Mat4 projection = Mat4::PerspectiveFovLH_ZO(1.0471976f, aspect, 0.1f, 1000.0f);
-        const CloudRelativeCamera camera = MakeCloudRelativeCamera(projection * view, eye);
+        const EyeRelativeCamera camera = MakeEyeRelativeCamera(projection * view, eye);
         ASSERT_TRUE(camera.valid);
         const fx::CameraBasis basis = fx::DeriveCameraBasis(Vec3::Zero(), camera.inverse, extent);
         EXPECT_TRUE(basis.valid) << extent.width << "x" << extent.height;

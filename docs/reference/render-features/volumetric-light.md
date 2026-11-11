@@ -94,7 +94,7 @@ Status `Ok` with `receiver=Used` means shafts are lit by shadows. Set `debugView
 - Night ambient floor is 15% unless the Atmosphere light is active.
 - Wind offset wraps at 65536 world units.
 - Without a usable receiver there are no shadow taps. The shader still needs valid depth textures, so scene depth is bound as a dummy.
-- A view with no valid `invViewProjection` (or zero size) gives `NoValidCamera`.
+- A view with no valid eye-relative camera (`View::relative`) or zero size gives `NoValidCamera`.
 - Memory per view: 3 volumes of 160x90x64 RGBA16F (about 7 MB each) plus 2 history atlases when temporal runs.
 
 ## Related
