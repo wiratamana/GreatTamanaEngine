@@ -51,7 +51,7 @@ struct VolumetricCloudSettings {
     float fadeStart = 0.9f;         // Fraction of the max distance where the clouds start to thin out (the air hazes them before).
 
     // Density model.
-    float coverage = 0.7f; // Sky share under cloud: 0.2 a few puffs, 0.65 scattered, 1 overcast.
+    float coverage = 0.8f; // Sky share under cloud: 0.2 a few puffs, 0.65 scattered, 1 overcast.
     float density = 1.5f;
     float extinction = 0.05f; // Per metre at density 1.
     float weatherScaleM = 25000.0f;
@@ -89,8 +89,8 @@ struct VolumetricCloudSettings {
     float densityRamp = 0.2f;
     float densityTopFade = 0.9f;
     float topFalloffStart = 0.5f; // Where the top roundness starts to fall, as a fraction of the cloud's peak height.
-    float shapeLow = 0.0f;        // Shape noise value that maps to 0 (the noise is stretched between low and high).
-    float shapeHigh = 1.0f;       // Shape noise value that maps to 1.
+    float shapeLow = 0.4f;        // Shape noise value that maps to 0 (the noise is stretched between low and high).
+    float shapeHigh = 0.95f;      // Shape noise value that maps to 1.
     float densityCurve = 0.8f;    // Exponent on the density; below 1 thickens thin cloud and keeps soft edges.
 
     // March.

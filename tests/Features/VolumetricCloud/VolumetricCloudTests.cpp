@@ -452,7 +452,9 @@ TEST(VolumetricCloudParamsTest, TheDetailAndStepSettingsReachTheBlockWithTheShip
     EXPECT_FLOAT_EQ(defaults.inScatter, 0.8f);
     EXPECT_FLOAT_EQ(defaults.sunIntensity, 10.0f);
     EXPECT_FLOAT_EQ(defaults.ambientBottom, 0.42f);
-    EXPECT_FLOAT_EQ(defaults.coverage, 0.7f);
+    EXPECT_FLOAT_EQ(defaults.coverage, 0.8f);
+    EXPECT_FLOAT_EQ(defaults.shapeLow, 0.4f);
+    EXPECT_FLOAT_EQ(defaults.shapeHigh, 0.95f);
     EXPECT_FLOAT_EQ(defaults.peakMin, 0.6f);
     VolumetricCloudSettings s = defaults;
     s.curlAmountM = 120.0f;
@@ -496,7 +498,7 @@ TEST(VolumetricCloudLayerTest, WindMovesAlongTheDirection)
 TEST(VolumetricCloudLayerTest, WindPeriodIsTheCommonRepeatOfTheNoiseTiles)
 {
     const VolumetricCloudSettings defaults = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
-    EXPECT_DOUBLE_EQ(CloudWindPeriodM(defaults), 700000.0);
+    EXPECT_DOUBLE_EQ(CloudWindPeriodM(defaults), 350000.0);
     VolumetricCloudSettings odd = defaults;
     odd.weatherScaleM = 12347.0f;
     odd.shapeScaleM = 5003.0f;
@@ -1363,7 +1365,10 @@ TEST(VolumetricCloudShaderTest, DetailIsCurlWarpedBillowAndWispErosionAndTheCurv
     EXPECT_NE(march.find("return CloudCurve(Saturate(Remap(shape, erosion, 1.0, 0.0, 1.0))) * densityFactor;"), std::string::npos);
     // The exponent lives in one place, CloudCurve(); CloudShape() returns the linear body.
     EXPECT_NE(march.find("float CloudCurve(float body)"), std::string::npos);
-    EXPECT_NE(march.find("return Saturate(Remap(shape * shapeGradient, 1.0 - coverage * weatherCoverage, 1.0, 0.0, 1.0));"), std::string::npos);
+    EXPECT_NE(march.find("return Saturate(Remap(shape * shapeGradient, threshold, rampEnd, 0.0, 1.0));"), std::string::npos);
+    // The body cut level has a floor and the ramp above it can be narrowed (params.structure3.yw).
+    EXPECT_NE(march.find("float threshold = max(1.0 - coverage * weatherCoverage, params.structure3.y);"), std::string::npos);
+    EXPECT_NE(march.find("min(threshold + params.structure3.w, 1.0)"), std::string::npos);
     const std::string lighting = gte::ReadShaderText("VolumetricCloudLighting.glsl");
     EXPECT_NE(lighting.find("return CloudCurve(shape) * factor;"), std::string::npos);
     // A dense sample is shortened so that one step holds at most maxStepDepth optical depths.
@@ -1383,7 +1388,7 @@ TEST(VolumetricCloudShaderTest, TheShapeHasTwoScalesWindShearAndSoftBases)
     EXPECT_NE(march.find("vec2 shear = params.structure.zw * heightFraction;"), std::string::npos);
     EXPECT_NE(march.find("params.structure.zw"), std::string::npos);
     // Hanging bases and the erosion kept in the core.
-    EXPECT_NE(march.find("float baseShift = params.structure2.z * (0.5 - shapeLarge) * 0.4;"), std::string::npos);
+    EXPECT_NE(march.find("float baseShift = params.structure2.z * (0.5 - shapeLarge) * 0.4 + params.structure3.z * (0.5 - shapeMid) * 0.3;"), std::string::npos);
     EXPECT_NE(march.find("mix(params.structure2.x, 1.0, 1.0 - shape)"), std::string::npos);
     EXPECT_NE(march.find("params.structure3.x"), std::string::npos);
 }

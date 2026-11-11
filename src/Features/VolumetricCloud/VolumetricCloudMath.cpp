@@ -183,16 +183,16 @@ VolumetricCloudSettings ApplyVolumetricCloudPreset(
     out.density = defaults.density;
     switch (preset) {
     case VolumetricCloudPreset::Clear:
-        out.coverage = 0.35f;
+        out.coverage = 0.4f;
         out.density = 1.3f;
         break;
     case VolumetricCloudPreset::Scattered:
         break;
     case VolumetricCloudPreset::Broken:
-        out.coverage = 0.85f;
+        out.coverage = 0.9f;
         break;
     case VolumetricCloudPreset::Overcast:
-        out.coverage = 0.95f;
+        out.coverage = 0.97f;
         out.density = 1.5f;
         break;
     }

@@ -86,7 +86,7 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `farWeatherMix` | 0.5 | 0..1 | Far field: share of a second weather map sample (the same file at 2.8 x the tile, shifted) mixed in. Breaks the 25 km repeat of the weather and evens out the big blobs. 0 = off |
 | `farCoverageLift` | 0.1 | 0..0.5 | Far field: added to `coverage`. Makes the far cloud a closed deck instead of crumbs |
 | `farAirScale` | 0.6 | 0.05..1 | Far field, mode 1: share of the distance beyond `farWeatherStartM` that the air in front of a cloud counts. 1 is the physical value; below 1 the horizon deck stays visible instead of dissolving into the haze colour |
-| `coverage` | 0.7 | 0..1 | Sky share under cloud. 0.35 few cumulus, 0.7 scattered, 0.85 broken, 0.95 overcast (the weather map of v3 holds less cloud per coverage value than v2) |
+| `coverage` | 0.8 | 0..1 | Sky share under cloud. 0.4 few cumulus, 0.8 scattered, 0.9 broken, 0.97 overcast (the weather map of v3 holds less cloud per coverage value than v2) |
 | `density` | 1.5 | 0..4 | Density factor after shaping |
 | `extinction` | 0.05 | 0.0005..0.5 | Extinction per metre at density 1 |
 | `weatherScaleM` | 25000 | 1000..500000 | World size of one weather map tile (m) |
@@ -117,8 +117,8 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `densityRamp` | 0.2 | 0.01..0.5 | Density ramp above the base (fraction of the thickness) |
 | `densityTopFade` | 0.9 | 0.5..0.99 | Fraction of the thickness where density starts to fade at the top |
 | `topFalloffStart` | 0.5 | 0..0.95 | Where the top rounding of a cloud starts to fall, as a fraction of its peak height. Low values give flat pancakes, high values towering tops |
-| `shapeLow` | 0 | 0..0.95 | Shape noise value that maps to 0 (the noise is stretched between `shapeLow` and `shapeHigh`) |
-| `shapeHigh` | 1 | 0.05..1 | Shape noise value that maps to 1 |
+| `shapeLow` | 0.4 | 0..0.95 | Shape noise value that maps to 0 (the noise is stretched between `shapeLow` and `shapeHigh`) |
+| `shapeHigh` | 0.95 | 0.05..1 | Shape noise value that maps to 1 |
 | `densityCurve` | 0.8 | 0.2..2 | Exponent on the eroded shape. Below 1 thickens thin cloud and keeps the edge |
 | `stepBaseM` | 20 | 1..2000 | Detailed step length at the camera (m) |
 | `maxStepDepth` | 0.4 | 0.1..20 | Largest optical depth one dense step may have. A longer step is shortened (not below 20 percent of its length) so the ray integrates through the cloud instead of stopping at a jittered point. 20 = off. Costs about 1 ms |
@@ -177,7 +177,7 @@ Resolve detail: a pixel that is not marched this frame reads its history texel e
 ## Cloud coverage knobs
 | Want | Set |
 |---|---|
-| Fewer or more clouds | `coverage` (0.35 sparse, 0.7 default, 0.95 overcast), `peakMin` (cloud type mix: 0.6 default, 1 = all clouds tall) |
+| Fewer or more clouds | `coverage` (0.4 sparse, 0.8 default, 0.97 overcast), `peakMin` (cloud type mix: 0.6 default, 1 = all clouds tall) |
 | Thicker, darker clouds | `density`, `extinction` |
 | Bigger cloud fields or smaller | `weatherScaleM` |
 | Puffier or smoother edges | `detailStrength`, `detailScaleM` |
