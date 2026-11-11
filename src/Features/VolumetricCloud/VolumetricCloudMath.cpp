@@ -377,7 +377,7 @@ VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     p.drainePhase[1] = kCloudDraineG;
     p.drainePhase[2] = kCloudDraineAlpha;
     p.drainePhase[3] = kCloudDraineWeight;
-    const std::uint32_t divisor = CloudResolutionDivisor(safe);
+    const std::uint32_t divisor = CloudResolutionDivisor(safe, facts.viewWidth);
     const CloudSampleOffset offset = CloudBayerOffset(facts.frameIndex, divisor);
     p.lowRes[0] = divisor;
     p.lowRes[1] = offset.x;
@@ -427,15 +427,17 @@ VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     return p;
 }
 
-std::uint32_t CloudResolutionDivisor(const VolumetricCloudSettings& safe) noexcept
+std::uint32_t CloudResolutionDivisor(const VolumetricCloudSettings& safe, std::uint32_t viewWidth) noexcept
 {
-    if (safe.resolutionDivisor < 1.5f) {
-        return 1;
+    if (safe.resolutionDivisor < 0.5f) {
+        if (viewWidth == 0) {
+            return 4;
+        }
+        const long wanted = std::lround(static_cast<double>(viewWidth) / static_cast<double>(kCloudAutoMarchTexels));
+        return static_cast<std::uint32_t>(std::clamp(wanted, 1l, static_cast<long>(kCloudMaxResolutionDivisor)));
     }
-    if (safe.resolutionDivisor < 2.5f) {
-        return 2;
-    }
-    return safe.resolutionDivisor < 3.5f ? 3 : 4;
+    const long rounded = std::lround(static_cast<double>(safe.resolutionDivisor));
+    return static_cast<std::uint32_t>(std::clamp(rounded, 1l, static_cast<long>(kCloudMaxResolutionDivisor)));
 }
 
 CloudSampleOffset CloudBayerOffset(std::uint64_t frameIndex, std::uint32_t divisor) noexcept
@@ -445,11 +447,18 @@ CloudSampleOffset CloudBayerOffset(std::uint64_t frameIndex, std::uint32_t divis
     // Divisor 3: a 3 x 3 order that keeps consecutive frames apart (no two consecutive ranks are neighbours).
     constexpr std::uint32_t kBayer3[9] = { 0, 7, 3, 6, 4, 1, 2, 8, 5 };
     constexpr std::uint32_t kBayer4[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
-    if (divisor < 2 || divisor > 4) {
+    if (divisor < 2 || divisor > kCloudMaxResolutionDivisor) {
         return CloudSampleOffset{};
     }
     const std::uint32_t cells = divisor * divisor;
     const std::uint32_t rank = static_cast<std::uint32_t>(frameIndex % cells);
+    if (divisor > 4) {
+        // Divisors 5 and 6: cell (rank * stride) mod cells with a stride coprime to the cell count visits every cell once
+        // per cycle and keeps consecutive frames far apart.
+        const std::uint32_t stride = divisor == 5 ? 16u : 23u;
+        const std::uint32_t cell = (rank * stride) % cells;
+        return CloudSampleOffset{ cell % divisor, cell / divisor };
+    }
     const std::uint32_t* matrix = divisor == 2 ? kBayer2 : (divisor == 3 ? kBayer3 : kBayer4);
     for (std::uint32_t i = 0; i < cells; ++i) {
         if (matrix[i] == rank) {
@@ -461,7 +470,7 @@ CloudSampleOffset CloudBayerOffset(std::uint64_t frameIndex, std::uint32_t divis
 
 std::uint32_t CloudOwnSampleIndex(std::uint64_t frameIndex, std::uint32_t divisor) noexcept
 {
-    const std::uint64_t cycle = (divisor >= 1 && divisor <= 4) ? std::uint64_t{ divisor } * divisor : 1u;
+    const std::uint64_t cycle = (divisor >= 1 && divisor <= kCloudMaxResolutionDivisor) ? std::uint64_t{ divisor } * divisor : 1u;
     return static_cast<std::uint32_t>((frameIndex / cycle) & 255u);
 }
 
@@ -489,7 +498,7 @@ VolumetricCloudResolveParamsGpu MakeVolumetricCloudResolveParams(const Volumetri
     p.motion[0] = accumulate ? safe.motionBlend : 1.0f;
     p.motion[1] = accumulate ? safe.historySharp : 0.0f;
     p.motion[2] = accumulate && safe.adaptiveBlend >= 0.5f ? 1.0f : 0.0f;
-    const std::uint32_t divisor = CloudResolutionDivisor(safe);
+    const std::uint32_t divisor = CloudResolutionDivisor(safe, facts.viewWidth);
     const CloudSampleOffset offset = CloudBayerOffset(facts.frameIndex, divisor);
     p.counts[0] = divisor;
     p.counts[1] = offset.x;

@@ -137,7 +137,7 @@ struct VolumetricCloudSettings {
     float sunWarmth = 0.25f;        // Tints the sun light on the cloud toward warm; 0 = the colour the atmosphere gives it.
 
     // Resolution and temporal accumulation.
-    float resolutionDivisor = 4.0f; // March at 1/n of the view size per axis; 1, 2, 3 or 4.
+    float resolutionDivisor = 0.0f; // March at 1/n of the view size per axis, n = 1..6; 0 picks n so the march grid is about 320 texels wide.
     float temporal = 1.0f;          // 1 accumulates over frames; 0 shows the current march only.
     float historyBlend = 0.0f;      // Weight of the new samples in a pixel without an exact sample this frame.
     float freshBlend = 0.1f;        // Same for the pixel that was marched itself; with adaptiveBlend the smallest weight a new sample gets.
@@ -247,7 +247,7 @@ inline constexpr std::array kVolumetricCloudFloatSettings{
     VolumetricCloudFloatSetting{ "msDiffuse", &VolumetricCloudSettings::msDiffuse, 0.0f, 8.0f },
     VolumetricCloudFloatSetting{ "msGlow", &VolumetricCloudSettings::msGlow, 0.0f, 8.0f },
     VolumetricCloudFloatSetting{ "sunWarmth", &VolumetricCloudSettings::sunWarmth, 0.0f, 1.0f },
-    VolumetricCloudFloatSetting{ "resolutionDivisor", &VolumetricCloudSettings::resolutionDivisor, 1.0f, 4.0f },
+    VolumetricCloudFloatSetting{ "resolutionDivisor", &VolumetricCloudSettings::resolutionDivisor, 0.0f, 6.0f },
     VolumetricCloudFloatSetting{ "temporal", &VolumetricCloudSettings::temporal, 0.0f, 1.0f },
     VolumetricCloudFloatSetting{ "historyBlend", &VolumetricCloudSettings::historyBlend, 0.0f, 1.0f },
     VolumetricCloudFloatSetting{ "freshBlend", &VolumetricCloudSettings::freshBlend, 0.01f, 1.0f },

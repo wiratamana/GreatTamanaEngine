@@ -124,8 +124,12 @@ float CloudPlanetRadiusKm(const VolumetricCloudSettings& safe, const VolumetricC
 VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     const VolumetricCloudSettings& safe, const VolumetricCloudFrameFacts& facts) noexcept;
 
-// The march resolution divisor in use: the setting rounded to 1, 2 or 4.
-std::uint32_t CloudResolutionDivisor(const VolumetricCloudSettings& safe) noexcept;
+// Width in texels of the march grid when the divisor is automatic (setting 0).
+inline constexpr float kCloudAutoMarchTexels = 320.0f;
+inline constexpr std::uint32_t kCloudMaxResolutionDivisor = 6;
+
+// The march resolution divisor in use: the setting rounded to 1..6; 0 picks it from `viewWidth` (4 when it is unknown).
+std::uint32_t CloudResolutionDivisor(const VolumetricCloudSettings& safe, std::uint32_t viewWidth = 0) noexcept;
 
 // Pixel inside an n x n block that the march samples on `frameIndex`; n*n frames visit every pixel once,
 // in a Bayer order so that consecutive frames land far apart.

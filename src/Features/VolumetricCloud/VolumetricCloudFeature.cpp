@@ -122,7 +122,7 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
 
     // Each target is acquired once per frame; a refused Acquire returns an invalid texture.
     const Extent2D full = f.Extent();
-    const std::uint32_t divisor = CloudResolutionDivisor(m_settings);
+    const std::uint32_t divisor = CloudResolutionDivisor(m_settings, full.width);
     const Extent2D low = fx::ScaledExtent(full, divisor);
     const std::uint32_t slot = static_cast<std::uint32_t>(f.FrameIndex() & 1u);
     const fx::Texture lowColor = view.lowColor.Acquire(f, low, PixelFormat::RGBA16_Float);

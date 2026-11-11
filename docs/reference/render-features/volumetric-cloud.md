@@ -159,7 +159,7 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `msDiffuse` | 0.5 | 0..8 | Weight of the diffusion term `tau/(tau+2)/(1+0.15 tau)/(4 pi)` of the multiple scattering: thick cores and undersides keep light where the octave sum has died out |
 | `msGlow` | 1.5 | 0..8 | Weight of the inner glow of thick cloud seen toward the sun (Nubis^3 multiple-scatter volume) |
 | `sunWarmth` | 0.25 | 0..1 | Tints the sun light on the cloud toward warm |
-| `resolutionDivisor` | 4 | 1..4 | March at 1/n of the view size per axis. 1, 2, 3 or 4 (others round). Divisor 3 walks a 9 frame cycle and costs about 1.3x of divisor 4 at 720p |
+| `resolutionDivisor` | 0 | 0..6 | March at 1/n of the view size per axis. 0 = automatic: n is the view width over 320 texels, rounded, 1..6 (1280 wide = 4, 1920 wide = 6, 501 wide = 2), so the march costs about the same at every view size. 1..6 = fixed n (others round). A pixel is marched once per n*n frames. Divisor 3 costs about 1.5x of divisor 4 at 720p |
 | `temporal` | 1 | 0..1 | 1 accumulates over frames, 0 shows the current march only |
 | `historyBlend` | 0 | 0..1 | Weight of new samples in a pixel that was not marched this frame. 0 holds the history, which keeps the picture sharp; any value above 0 blurs a still picture because the new samples come from the low-res taps |
 | `freshBlend` | 0.1 | 0.01..1 | Same for the pixel that was marched itself. With `adaptiveBlend` it is the smallest weight a new sample gets (the first samples of a still pixel are averaged 1, 1/2, 1/3 ... down to this floor). Lower is calmer, higher is sharper and noisier |

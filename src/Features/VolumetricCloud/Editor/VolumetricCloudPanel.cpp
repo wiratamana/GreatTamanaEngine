@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
@@ -15,8 +16,9 @@ namespace gte {
 namespace {
 
 constexpr std::array<const char*, 5> kDebugViews{ "Off (the clouds)", "Shape slice", "Detail slice", "Weather map", "Blue noise" };
-constexpr std::array<const char*, 4> kDivisorLabels{ "1 (full)", "2 (1/4 of the pixels)", "3 (1/9 of the pixels)", "4 (1/16 of the pixels)" };
-constexpr std::array<float, 4> kDivisorValues{ 1.0f, 2.0f, 3.0f, 4.0f };
+constexpr std::array<const char*, 7> kDivisorLabels{ "Auto (about 320 texels wide)", "1 (full)", "2 (1/4 of the pixels)",
+    "3 (1/9 of the pixels)", "4 (1/16 of the pixels)", "5 (1/25 of the pixels)", "6 (1/36 of the pixels)" };
+constexpr std::array<float, 7> kDivisorValues{ 0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f };
 
 const char* StatusText(VolumetricCloudFrameStatus status) noexcept
 {
@@ -143,12 +145,12 @@ bool BuildVolumetricCloudPanel(
     ImGui::SeparatorText("Quality");
     int divisorIndex = 0;
     for (std::size_t i = 0; i < kDivisorValues.size(); ++i) {
-        if (static_cast<float>(CloudResolutionDivisor(edit)) == kDivisorValues[i]) {
+        if (std::lround(edit.resolutionDivisor) == std::lround(kDivisorValues[i])) {
             divisorIndex = static_cast<int>(i);
         }
     }
     if (ImGui::Combo("March resolution", &divisorIndex, kDivisorLabels.data(), static_cast<int>(kDivisorLabels.size()))) {
-        edit.resolutionDivisor = kDivisorValues[static_cast<std::size_t>(std::clamp(divisorIndex, 0, 3))];
+        edit.resolutionDivisor = kDivisorValues[static_cast<std::size_t>(std::clamp(divisorIndex, 0, 6))];
         changed = true;
     }
     bool temporal = edit.temporal >= 0.5f;

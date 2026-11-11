@@ -1007,12 +1007,12 @@ TEST(VolumetricCloudTemporalTest, RelativeCameraRoundTripsRaysFarFromTheOrigin)
     EXPECT_LT(worst, 0.02);
 }
 
-TEST(VolumetricCloudTemporalTest, DivisorRoundsToOneTwoThreeOrFour)
+TEST(VolumetricCloudTemporalTest, DivisorRoundsToOneThroughSix)
 {
     VolumetricCloudSettings s;
     const auto divisorOf = [&](float value) {
         s.resolutionDivisor = value;
-        return CloudResolutionDivisor(SanitizeVolumetricCloudSettings(s));
+        return CloudResolutionDivisor(SanitizeVolumetricCloudSettings(s), 1280);
     };
     EXPECT_EQ(divisorOf(1.0f), 1u);
     EXPECT_EQ(divisorOf(1.4f), 1u);
@@ -1020,15 +1020,31 @@ TEST(VolumetricCloudTemporalTest, DivisorRoundsToOneTwoThreeOrFour)
     EXPECT_EQ(divisorOf(2.4f), 2u);
     EXPECT_EQ(divisorOf(2.6f), 3u);
     EXPECT_EQ(divisorOf(3.0f), 3u);
-    EXPECT_EQ(divisorOf(3.4f), 3u);
     EXPECT_EQ(divisorOf(3.6f), 4u);
     EXPECT_EQ(divisorOf(4.0f), 4u);
-    EXPECT_EQ(divisorOf(99.0f), 4u);
+    EXPECT_EQ(divisorOf(5.0f), 5u);
+    EXPECT_EQ(divisorOf(6.0f), 6u);
+    EXPECT_EQ(divisorOf(99.0f), 6u);
+}
+
+TEST(VolumetricCloudTemporalTest, TheAutomaticDivisorKeepsTheMarchGridAboutThreeHundredTwentyTexelsWide)
+{
+    const VolumetricCloudSettings automatic = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    EXPECT_FLOAT_EQ(automatic.resolutionDivisor, 0.0f);
+    EXPECT_EQ(CloudResolutionDivisor(automatic, 0), 4u);
+    EXPECT_EQ(CloudResolutionDivisor(automatic, 320), 1u);
+    EXPECT_EQ(CloudResolutionDivisor(automatic, 501), 2u);
+    EXPECT_EQ(CloudResolutionDivisor(automatic, 1280), 4u);
+    EXPECT_EQ(CloudResolutionDivisor(automatic, 1920), 6u);
+    EXPECT_EQ(CloudResolutionDivisor(automatic, 3840), 6u);
+    VolumetricCloudSettings fixed = automatic;
+    fixed.resolutionDivisor = 3.0f;
+    EXPECT_EQ(CloudResolutionDivisor(fixed, 1920), 3u);
 }
 
 TEST(VolumetricCloudTemporalTest, BayerOffsetsVisitEveryCellOncePerCycle)
 {
-    for (const std::uint32_t divisor : { 2u, 3u, 4u }) {
+    for (const std::uint32_t divisor : { 2u, 3u, 4u, 5u, 6u }) {
         const std::uint32_t cells = divisor * divisor;
         std::set<std::pair<std::uint32_t, std::uint32_t>> seen;
         for (std::uint32_t i = 0; i < cells; ++i) {
@@ -1061,6 +1077,19 @@ TEST(VolumetricCloudTemporalTest, ConsecutiveBayerSamplesMostlyLandFarApart)
         far += std::max(dx, dy) >= 2 ? 1 : 0;
     }
     EXPECT_GE(far, 12);
+    // Divisors 5 and 6 never march the same pixel on two consecutive frames and keep them apart too.
+    for (const std::uint32_t divisor : { 5u, 6u }) {
+        int apart = 0;
+        for (std::uint32_t k = 0; k < divisor * divisor; ++k) {
+            const CloudSampleOffset a = CloudBayerOffset(k, divisor);
+            const CloudSampleOffset b = CloudBayerOffset(k + 1, divisor);
+            const int dx = std::abs(static_cast<int>(a.x) - static_cast<int>(b.x));
+            const int dy = std::abs(static_cast<int>(a.y) - static_cast<int>(b.y));
+            EXPECT_GE(dx + dy, 1) << divisor << " " << k;
+            apart += std::max(dx, dy) >= 2 ? 1 : 0;
+        }
+        EXPECT_GE(apart, static_cast<int>(divisor * divisor * 2 / 3)) << divisor;
+    }
 }
 
 TEST(VolumetricCloudTemporalTest, TapIsUsableOnlyWhereItSawTheSameSurface)
@@ -1143,7 +1172,7 @@ TEST(VolumetricCloudTemporalTest, TheTemporalDefaultsAreTheSampleAveragingOnes)
     EXPECT_FLOAT_EQ(d.historySharp, 1.0f);
     EXPECT_FLOAT_EQ(d.adaptiveBlend, 1.0f);
     EXPECT_FLOAT_EQ(d.subpixelJitter, 1.0f);
-    EXPECT_FLOAT_EQ(d.resolutionDivisor, 4.0f);
+    EXPECT_FLOAT_EQ(d.resolutionDivisor, 0.0f);
     // Divisor 3 walks a 9 frame cycle: the own-sample index advances every 9 frames.
     EXPECT_EQ(CloudOwnSampleIndex(9 * 5, 3), 5u);
     EXPECT_EQ(CloudOwnSampleIndex(9 * 5 + 8, 3), 5u);
@@ -1320,7 +1349,7 @@ TEST(VolumetricCloudTemporalTest, ResolveShaderTapRuleUsesTheSameToleranceAsTheR
 
 TEST(VolumetricCloudTemporalTest, EachPixelsOwnSamplesStepByTheGoldenRatio)
 {
-    for (const std::uint32_t divisor : { 1u, 2u, 3u, 4u }) {
+    for (const std::uint32_t divisor : { 1u, 2u, 3u, 4u, 5u, 6u }) {
         const std::uint64_t cycle = std::uint64_t{ divisor } * divisor;
         for (const float blue : { 0.0f, 0.3f, 0.77f }) {
             // One pixel is marched on frames f, f + cycle, f + 2 * cycle, ...
