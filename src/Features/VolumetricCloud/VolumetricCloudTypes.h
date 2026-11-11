@@ -105,7 +105,7 @@ struct VolumetricCloudSettings {
     float jitter = 1.0f;
 
     // Lighting. Intensities scale the sun and sky radiance the engine hands over.
-    float sunIntensity = 10.0f;
+    float sunIntensity = 7.0f;
     float ambientIntensity = 0.28f;
     float sunSteps = 4.0f;          // Samples of the march toward the sun.
     float lightReach = 0.7f;        // Length of that march, as a fraction of the layer thickness.

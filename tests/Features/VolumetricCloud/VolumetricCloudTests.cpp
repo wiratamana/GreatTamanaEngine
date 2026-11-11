@@ -450,7 +450,7 @@ TEST(VolumetricCloudParamsTest, TheDetailAndStepSettingsReachTheBlockWithTheShip
     EXPECT_FLOAT_EQ(defaults.maxStepDepth, 0.4f);
     EXPECT_FLOAT_EQ(defaults.lightDetail, 1.0f);
     EXPECT_FLOAT_EQ(defaults.inScatter, 0.8f);
-    EXPECT_FLOAT_EQ(defaults.sunIntensity, 10.0f);
+    EXPECT_FLOAT_EQ(defaults.sunIntensity, 7.0f);
     EXPECT_FLOAT_EQ(defaults.ambientBottom, 0.42f);
     EXPECT_FLOAT_EQ(defaults.coverage, 0.8f);
     EXPECT_FLOAT_EQ(defaults.shapeLow, 0.4f);
