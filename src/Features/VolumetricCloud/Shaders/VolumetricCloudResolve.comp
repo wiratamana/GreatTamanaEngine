@@ -119,16 +119,20 @@ bool FetchHistory(vec2 texelPosition, float pixelEndKm, out vec4 color, out floa
     return true;
 }
 
-const float kRayBlockedShare = 0.55;
+const float kRayOpenLow = 0.55;
+const float kRayOpenHigh = 0.97;
+const vec3 kRayCool = vec3(0.80, 0.86, 1.0);
 
 // Sun rays: the glow around the sun, looked at through the gaps of the clouds. The pixel averages the glow along the
-// line toward the sun, and a cloud on that line (low transmittance) blocks it.
+// line toward the sun; the blocker is last frame's smooth cloud transmittance, so the rays do not flicker.
 vec3 SunRays(vec2 uv, ivec2 pixel, float pixelEndKm, float cloudTransmittance)
 {
     const int kTaps = 24;
     vec2 aspect = vec2(float(params.sizes.x) / float(params.sizes.y), 1.0);
     vec2 toSun = params.sunRay.xy - uv;
-    float jitter = fract(52.9829189 * fract(dot(vec2(pixel), vec2(0.06711056, 0.00583715))));
+    // The jitter moves every frame (the march offset cycles), so TAA averages it instead of keeping a hatch.
+    float frameShift = fract(0.61803399 * float(params.counts.y + 8u * params.counts.z));
+    float jitter = fract(52.9829189 * fract(dot(vec2(pixel), vec2(0.06711056, 0.00583715))) + frameShift);
     float radius = max(params.sunRayColor.w, 1e-3);
     float sum = 0.0;
     float glowSum = 0.0;
@@ -137,14 +141,17 @@ vec3 SunRays(vec2 uv, ivec2 pixel, float pixelEndKm, float cloudTransmittance)
         vec2 p = uv + toSun * t;
         vec2 fromSun = (p - params.sunRay.xy) * aspect / radius;
         float glow = 1.0 / (1.0 + dot(fromSun, fromSun));
-        float open = textureLod(lowColor, clamp(p, vec2(0.0), vec2(1.0)), 0.0).a;
+        float open = textureLod(historyColor, clamp(p, vec2(0.0), vec2(1.0)), 0.0).a;
         sum += glow * open;
         glowSum += glow;
     }
-    // Only lines that are mostly open count: a half blocked line is no ray, so gaps stand out from the clouds.
-    sum = max(sum - kRayBlockedShare * glowSum, 0.0) / (1.0 - kRayBlockedShare);
+    // Only lines that are mostly open count; the knee is soft so a cloud edge does not switch a ray on and off.
+    float lineOpen = sum / max(glowSum, 1e-4);
+    float ray = glowSum / float(kTaps) * smoothstep(kRayOpenLow, kRayOpenHigh, lineOpen);
     float onGround = smoothstep(0.3, 4.0, pixelEndKm);
-    return params.sunRayColor.rgb * (params.sunRay.z * sum / float(kTaps) * onGround * mix(0.5, 1.0, cloudTransmittance));
+    float luma = dot(params.sunRayColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+    vec3 tint = mix(params.sunRayColor.rgb, vec3(luma) * kRayCool, 0.55);
+    return tint * (params.sunRay.z * ray * onGround * mix(0.25, 1.0, smoothstep(0.5, 1.0, cloudTransmittance)));
 }
 
 void main()

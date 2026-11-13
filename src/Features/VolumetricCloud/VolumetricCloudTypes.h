@@ -165,7 +165,7 @@ struct VolumetricCloudSettings {
     float shaftHaze = 0.06f;     // Extinction per km of the haze that carries the beams near the ground (0 = no extra haze).
     float shaftHeightM = 1500.0f; // Scale height of that haze; it thins out above.
     float shadowFill = 0.25f;     // Share of the blocked sun that reaches shadowed ground as diffuse light.
-    float sunRays = 1.6f;         // Strength of the screen-space sun rays through gaps in the clouds (0 = off).
+    float sunRays = 0.6f;         // Strength of the faint screen-space sun glare through gaps in the clouds (0 = off).
 };
 
 // One tunable float: its endpoint key, field and range.

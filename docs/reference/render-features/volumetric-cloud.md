@@ -181,7 +181,7 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `shaftHaze` | 0.06 | 0..4 | Extinction per km at the ground of the mist that carries the beams in the volumetric light (it stretches the volume to 4 km; the fog of the settings keeps its own range). Thickest for a low sun, gone above about 45 degrees. 0 = no extra mist |
 | `shaftHeightM` | 1500 | 200..6000 | Scale height of that mist |
 | `shadowFill` | 0.25 | 0..1 | Share of the sun the cloud blocks that reaches shadowed receivers as diffuse light, so a shadowed ground is not black |
-| `sunRays` | 1.6 | 0..3 | Screen-space sun rays: the glow around the sun seen through the gaps of the clouds (24 taps in the resolve pass, the cloud transmittance is the occluder). Gone when the sun is behind the camera or well outside the picture, and for a high sun. 0 = off |
+| `sunRays` | 0.6 | 0..3 | Faint screen-space sun glare: the glow around the sun seen through the gaps of the clouds (24 taps in the resolve pass, the smoothed cloud history is the occluder, the jitter changes every frame). Gone when the sun is behind the camera or well outside the picture, and for a high sun. 0 = off |
 | `shaftStrength` | 1 | 0..1 | Light shafts: how much of the sun in-scatter of the air the cloud shadow map removes (aerial perspective, volumetric light, air in front of clouds). 0 = none |
 
 Resolve detail: a pixel that is not marched this frame reads its history texel exactly (positions within 0.004 texel of a texel centre are snapped). Without the snap the 1e-4 texel matrix noise made the rgba16f store round the history down one half-float step on every unmarched frame, which darkened the converged picture the more the lower `freshBlend` was.
