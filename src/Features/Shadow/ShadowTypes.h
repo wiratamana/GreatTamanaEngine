@@ -22,7 +22,9 @@ inline constexpr float kMaxCasterRange = 100000.0f;
 inline constexpr float kMaxTerrainRelief = 8000.0f;
 
 // The automatic caster range uses at least this sun sine, and never grows past this length by itself.
+// Below the ramp sine it fades to the setting, so a sun under the horizon adds no reach.
 inline constexpr float kMinCasterSunSine = 0.03f;
+inline constexpr float kCasterRangeSunRamp = 0.01f;
 inline constexpr float kMaxAutoCasterRange = 20000.0f;
 
 // Frames a depth-range sample stays usable without a newer one.

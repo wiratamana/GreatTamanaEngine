@@ -578,9 +578,28 @@ TEST(ShadowMathTest, EffectiveCasterRangeFollowsReliefOverSunSine)
     };
     EXPECT_NEAR(EffectiveCasterRange(safe, towardSun(30.0f)), 2000.0f, 2.0f);
     EXPECT_NEAR(EffectiveCasterRange(safe, towardSun(10.0f)), 1000.0f / std::sin(0.17453293f), 5.0f);
-    EXPECT_FLOAT_EQ(EffectiveCasterRange(safe, towardSun(0.5f)), kMaxAutoCasterRange);
-    EXPECT_FLOAT_EQ(EffectiveCasterRange(safe, Vec3::Down()), kMaxAutoCasterRange);
+    EXPECT_FLOAT_EQ(EffectiveCasterRange(safe, towardSun(1.5f)), kMaxAutoCasterRange);
     EXPECT_NEAR(EffectiveCasterRange(safe, Vec3::Up()), 1000.0f, 1e-3f);
+}
+
+TEST(ShadowMathTest, EffectiveCasterRangeAddsNothingWhenTheSunIsUnderTheHorizon)
+{
+    ShadowSettings settings;
+    settings.casterRange = 200.0f;
+    settings.terrainReliefM = 1000.0f;
+    const ShadowSettings safe = SanitizeShadowSettings(settings);
+
+    const auto towardSun = [](float elevationDegrees) {
+        const float radians = elevationDegrees * 0.017453292519943295f;
+        return Vec3(std::cos(radians), std::sin(radians), 0.0f);
+    };
+    EXPECT_FLOAT_EQ(EffectiveCasterRange(safe, Vec3::Down()), 200.0f);
+    EXPECT_FLOAT_EQ(EffectiveCasterRange(safe, towardSun(-2.0f)), 200.0f);
+    EXPECT_FLOAT_EQ(EffectiveCasterRange(safe, towardSun(0.0f)), 200.0f);
+    const float grazing = EffectiveCasterRange(safe, towardSun(0.3f));
+    EXPECT_GT(grazing, 200.0f);
+    EXPECT_LT(grazing, kMaxAutoCasterRange);
+    EXPECT_GE(EffectiveCasterRange(safe, towardSun(0.4f)), grazing);
 }
 
 TEST(ShadowMathTest, EffectiveCasterRangeNeverFallsBelowTheSetting)

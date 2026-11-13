@@ -143,8 +143,11 @@ ShadowViewFrustum ExtractViewFrustumRelative(const Vec3& eye, const Mat4& relati
 
 float EffectiveCasterRange(const ShadowSettings& safe, const Vec3& directionTowardSun) noexcept
 {
-    const float sunSine = std::max(SafeSunDirection(directionTowardSun).y, kMinCasterSunSine);
-    const float reach = std::min(safe.terrainReliefM / sunSine, kMaxAutoCasterRange);
+    const float rawSine = SafeSunDirection(directionTowardSun).y;
+    const float sunSine = std::max(rawSine, kMinCasterSunSine);
+    // A sun at or below the horizon lights no terrain, so the range ramps to the setting over the first half degree.
+    const float ramp = std::clamp(rawSine / kCasterRangeSunRamp, 0.0f, 1.0f);
+    const float reach = std::min(safe.terrainReliefM / sunSine, kMaxAutoCasterRange) * (ramp * ramp * (3.0f - 2.0f * ramp));
     return std::max(safe.casterRange, reach);
 }
 

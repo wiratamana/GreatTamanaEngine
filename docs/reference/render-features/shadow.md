@@ -94,10 +94,11 @@
 
 ### Caster range
 - Cascade depth span is `2 * radius + effective range`. World bias does not change with it.
-- Effective range = `max(casterRange, min(terrainReliefM / max(sin(sunElevation), 0.03), 20000))`. 1000 m of relief at 10 degrees gives about 5.8 km; at 3 degrees 19 km; the cap is 20000.
+- Effective range = `max(casterRange, min(terrainReliefM / max(sin(sunElevation), 0.03), 20000))`. 1000 m of relief at 10 degrees gives about 5.8 km; at 3 degrees 19 km; the cap is 20000. The extra reach fades to zero as the sun sine goes from 0.01 to 0, so a sun under the horizon uses the plain `casterRange`.
 - This lets mountains and ridges km away shadow the ground, and the air (Atmosphere beam haze, VolumetricLight), at a low sun.
 - `terrainReliefM` 0 gives the plain `casterRange`. A `casterRange` above 20000 wins over the automatic value.
-- Cost: more casters fall inside the cascade boxes. Measured on an iGPU with a mountain scene: +0.8 to +1.4 ms in the cascade draws at sun 3 to 45 degrees (clock noise is about 1 ms).
+- Cost: the mountain is now drawn into every cascade, so the cascade draws cost what they cost at noon. Measured on an iGPU with a 1.4 M triangle mountain, sun 3 to 10 degrees: +1.2 ms at a 719x359 view and +4.5 ms at 1280x720 (the GPU clock is lower there). A sun under the horizon costs nothing extra.
+- The cost is fill-bound: `maxMapResolution` 1024 gives +0.5 ms instead of +4.8, `cascadeCount` 3 gives +2.3 ms. `terrainReliefM` 500 saves about 1.5 ms at 10 degrees and nothing at 3 degrees.
 
 ## Debug keys
 
