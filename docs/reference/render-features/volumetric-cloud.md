@@ -179,7 +179,7 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `shadowSteps` | 10 | 4..24 | Samples of the shadow ray through the layer. Fewer than 10 misses thin cloud |
 | `shaftSharpness` | 3 | 1..8 | Exponent on the sun transmittance of the air: higher gives crisper beams and darker gaps |
 | `shaftHaze` | 0.6 | 0..4 | Density per km at the ground of the beam haze (its extinction is a quarter of it, so far terrain stays visible): a thin blue-violet haze in the aerial perspective volume (it reaches at least 24 km) that the cloud shadow map lights, so lit and shadowed columns of the air show as light curtains over the ground. Thickest for a low sun, gone above about 45 degrees. 0 = no beam haze |
-| `shaftFill` | 0.3 | 0..4 | Sky light in the shadowed columns of the beam haze, relative to the multiple-scattering table (0 = black columns); the shadowed columns read blue-violet |
+| `shaftFill` | 0.45 | 0..4 | Sky light in the shadowed columns of the beam haze, relative to the multiple-scattering table (0 = black columns); the shadowed columns read blue-violet |
 | `shaftMist` | 0 | 0..4 | Extinction per km of an extra near-field mist in the volumetric light (stretches that volume to 4 km). 0 = none |
 | `shaftHeightM` | 2500 | 200..6000 | Scale height of the beam haze and the mist |
 | `shadowFill` | 0.25 | 0..1 | Share of the sun the cloud blocks that reaches shadowed receivers as diffuse light, so a shadowed ground is not black |
