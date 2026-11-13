@@ -51,13 +51,32 @@ TEST(ShaderContractTest, AerialVolumeSkipsShadowTapsThatCannotChangeTheImage)
         ReadText(std::filesystem::path(GTE_TEST_ATMOSPHERE_SHADER_DIR) / "AtmosphereAerialPerspectiveVolume.comp");
     ASSERT_FALSE(text.empty());
     const std::size_t guard = text.find("planetVisibility > 0.0");
-    const std::size_t tap = text.find("OrthoMapSetVisibility(worldSample");
+    const std::size_t tap = text.find("AirSunVisibilityAt(");
     ASSERT_NE(guard, std::string::npos);
     ASSERT_NE(tap, std::string::npos);
     EXPECT_LT(guard, tap);
     EXPECT_NE(text.find("kMinRayTransmittance"), std::string::npos);
-    EXPECT_NE(text.find("< lastSplitFar"), std::string::npos);
     EXPECT_EQ(text.find("sceneDepth"), std::string::npos);
+}
+
+// The aerial volume and the froxel fog share one sun visibility; neither calls the cascade lookup itself.
+TEST(ShaderContractTest, AirEffectsShareOneSunVisibility)
+{
+    for (const std::filesystem::path path :
+        { std::filesystem::path(GTE_TEST_ATMOSPHERE_SHADER_DIR) / "AtmosphereAerialPerspectiveVolume.comp",
+            std::filesystem::path(GTE_TEST_VOLUMETRIC_SHADER_DIR) / "VolumetricLightInject.comp" }) {
+        const std::string text = ReadText(path);
+        ASSERT_FALSE(text.empty()) << path;
+        EXPECT_NE(text.find("#include \"AirSunVisibility.glsl\""), std::string::npos) << path;
+        EXPECT_NE(text.find("AirSunVisibilityAt("), std::string::npos) << path;
+        EXPECT_EQ(text.find("OrthoMapSetVisibility("), std::string::npos) << path;
+        EXPECT_EQ(text.find("CloudAirSunVisibility("), std::string::npos) << path;
+    }
+    const std::string shared = ReadText(std::filesystem::path(GTE_TEST_SHADERS_DIR) / "AirSunVisibility.glsl");
+    ASSERT_FALSE(shared.empty());
+    EXPECT_NE(shared.find("kAirCascadeFadeShare"), std::string::npos);
+    EXPECT_NE(shared.find("OrthoMapSetVisibility(world, rotation)"), std::string::npos);
+    EXPECT_NE(shared.find("CloudAirHazeSunVisibility("), std::string::npos);
 }
 
 TEST(ShaderContractTest, AerialVolumeReusesSunVisibilityOnEverySecondSample)

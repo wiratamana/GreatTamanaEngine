@@ -78,6 +78,7 @@ float OrthoMapDepthAt(int k, vec2 uv)
 
 #include "OrthoMapSetVisibility.glsl"
 #include "CloudShadowLookup.glsl"
+#include "AirSunVisibility.glsl"
 
 // Below this ray transmittance a sample cannot change the image.
 const float kMinRayTransmittance = 1e-3;
@@ -145,8 +146,6 @@ void main()
     float worldUnitsPerKm = max(shadow.eyeAndUnitsPerKm.w, 1e-6);
     vec3 worldStepPerKm = viewDirection * worldUnitsPerKm;
     float shadowBlend = clamp(shadow.shadowParams.z, 0.0, 1.0);
-    float lastSplitFar = ORTHO_SPLIT_FAR(clamp(int(ORTHO_COUNT), 1, 4) - 1);
-    bool cascadesOn = ORTHO_COUNT > 0u;
     bool cloudShafts = shadow.cloudGrid.w > 0.0;
 
     // Without exaggeration the shaft ray and the haze ray are the same ray.
@@ -164,6 +163,7 @@ void main()
     vec3 shaftTransmittance = vec3(1.0);
     float sunVisibility = 1.0;
     float hazeVisibility = 1.0;
+    float terrainVisibility = 1.0;
     bool tapped = false;
     bool beamHazeOn = shadow.beamHaze.x > 0.0;
     float beamPhase = mix(HazePhase(shadow.beamHaze.z, viewDotLight), 0.0795775, kBeamIsotropicShare);
@@ -216,32 +216,28 @@ void main()
             float planetVisibility = PlanetVisibility(currentPositionKm, directionToSun, planetRadiusKm);
             vec3 shaftBefore = unexaggerated ? accumulatedTransmittance : shaftTransmittance;
 
-            // Mountain shadow on the sun path. The pattern is fixed per column, so nothing flickers.
-            // No taps where the sun is blocked by the planet, the ray is opaque, or beyond the last cascade.
+            // Terrain and cloud shadow on the sun path. The pattern is fixed per column, so nothing flickers.
+            // No taps where the sun is blocked by the planet or the ray is opaque.
             if (!lookupEverySecondSample || (sampleIndex & 1) == 0) {
                 sunVisibility = 1.0;
                 hazeVisibility = 1.0;
+                terrainVisibility = 1.0;
                 tapped = false;
                 if (planetVisibility > 0.0
                     && maxComponent(max(accumulatedTransmittance, shaftBefore)) > kMinRayTransmittance) {
                     vec3 worldSample = eyeWorld + worldStepPerKm * sampleDistanceKm;
-                    if (cascadesOn && dot(worldSample - ORTHO_EYE, ORTHO_FORWARD) < lastSplitFar) {
-                        float rotation = 6.2831853
-                            * InterleavedGradientNoise(vec2(froxelXY)
-                                    + vec2(float(slice) * 7.0 + float(sampleIndex) * 3.0, float(slice) * 13.0), 0u);
-                        sunVisibility = mix(1.0, OrthoMapSetVisibility(worldSample, rotation), shadowBlend);
-                        hazeVisibility = sunVisibility;
-                        tapped = true;
-                    }
-                    if (cloudShafts) {
-                        // The clouds block sun light of the air; the map is read relative to the eye.
-                        vec3 offsetM = worldStepPerKm * sampleDistanceKm;
-                        vec3 cloudPosition = vec3(offsetM.x, eyeWorld.y + offsetM.y, offsetM.z);
-                        vec2 cloudVisibility = CloudAirHazeSunVisibility(cloudShadowMap, shadow.cloudGrid, shadow.cloudLayer, directionToSun, cloudPosition);
-                        sunVisibility *= cloudVisibility.x;
-                        hazeVisibility *= cloudVisibility.y;
-                        tapped = true;
-                    }
+                    // The cloud map is read relative to the eye.
+                    vec3 offsetM = worldStepPerKm * sampleDistanceKm;
+                    vec3 cloudPosition = vec3(offsetM.x, eyeWorld.y + offsetM.y, offsetM.z);
+                    float rotation = 6.2831853
+                        * InterleavedGradientNoise(vec2(froxelXY)
+                                + vec2(float(slice) * 7.0 + float(sampleIndex) * 3.0, float(slice) * 13.0), 0u);
+                    AirSun airSun = AirSunVisibilityAt(cloudShadowMap, shadow.cloudGrid, shadow.cloudLayer,
+                        directionToSun, worldSample, cloudPosition, rotation, shadowBlend);
+                    sunVisibility = airSun.air;
+                    hazeVisibility = airSun.haze;
+                    terrainVisibility = airSun.terrain;
+                    tapped = airSun.known > 0.0 || cloudShafts;
                 }
             }
 

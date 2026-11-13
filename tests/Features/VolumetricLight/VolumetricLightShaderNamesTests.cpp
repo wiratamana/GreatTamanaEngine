@@ -56,8 +56,9 @@ TEST(VolumetricLightShaderNamesTest, InjectExposesBoundNames)
     for (const char* name : { "shadowDepth0", "shadowDepth1", "shadowDepth2", "shadowDepth3" }) {
         ExpectSampler(result, name);
     }
+    ExpectSampler(result, "cloudShadowMap");
     ExpectOutput(result, "injectOutput");
-    EXPECT_EQ(result.descriptorBindings.size(), 6u);
+    EXPECT_EQ(result.descriptorBindings.size(), 7u);
     EXPECT_FALSE(result.hasPushConstantRange);
 }
 

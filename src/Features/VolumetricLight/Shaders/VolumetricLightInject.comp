@@ -62,6 +62,7 @@ float OrthoMapDepthAt(int k, vec2 uv)
 
 #include "OrthoMapSetVisibility.glsl"
 #include "CloudShadowLookup.glsl"
+#include "AirSunVisibility.glsl"
 
 // Beam haze scatters more sun than a local fog: the fog of the settings is sized for a few metres.
 const float kHazeSunGain = 4.0;
@@ -106,13 +107,12 @@ void main()
 
     float rotation = 6.2831853
         * InterleavedGradientNoise(vec2(cell.xy) + vec2(float(cell.z) * 7.0, float(cell.z) * 13.0), params.counts.z);
-    float visibility = OrthoMapSetVisibility(world, rotation);
-    if (params.cloudGrid.w > 0.0) {
-        // The clouds block sun light of the air; the map is read relative to the eye.
-        vec3 offsetM = dir * distance;
-        vec3 cloudPosition = vec3(offsetM.x, params.eyeAndMaxDistance.y + offsetM.y, offsetM.z);
-        visibility *= CloudAirSunVisibility(cloudShadowMap, params.cloudGrid, params.cloudLayer, params.sunDirectionAndG.xyz, cloudPosition);
-    }
+    // The cloud map is read relative to the eye.
+    vec3 offsetM = dir * distance;
+    vec3 cloudPosition = vec3(offsetM.x, params.eyeAndMaxDistance.y + offsetM.y, offsetM.z);
+    AirSun airSun = AirSunVisibilityAt(cloudShadowMap, params.cloudGrid, params.cloudLayer,
+        params.sunDirectionAndG.xyz, world, cloudPosition, rotation, 1.0);
+    float visibility = airSun.air;
     float phase = HenyeyGreenstein(dot(dir, params.sunDirectionAndG.xyz), params.sunDirectionAndG.w);
     // Ambient follows the sun shadow: 1 keeps it everywhere, 0 leaves it only in sunlit air.
     float ambientMask = mix(params.shadowParams.w, 1.0, visibility);
@@ -121,7 +121,7 @@ void main()
         // Forward lobe for the sun in view, a wide lobe for beams seen from the side, and a constant fill light.
         float cosSun = dot(dir, params.sunDirectionAndG.xyz);
         float hazePhase = 0.5 * HenyeyGreenstein(cosSun, 0.8) + 0.5 * HenyeyGreenstein(cosSun, 0.25);
-        scattering += 0.95 * hazeT * params.sunRadiance.rgb * (kHazeSunGain * hazePhase * visibility + params.shaftMedium.z * params.shadowParams.w * kHazeFillTint);
+        scattering += 0.95 * hazeT * params.sunRadiance.rgb * (kHazeSunGain * hazePhase * airSun.haze + params.shaftMedium.z * params.shadowParams.w * kHazeFillTint);
         sigmaT += hazeT;
     }
 
