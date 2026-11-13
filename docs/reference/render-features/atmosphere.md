@@ -62,7 +62,10 @@
 - A small scene gets 0.5 km, 8x and blend 0. The volume pass then does no shadow taps.
 
 ## Cloud shadows in the air
-When the cloud feature publishes its `ShadowMap` channel with a shaft strength above 0, the aerial perspective volume multiplies the sun visibility of each sample by the cloud sun transmittance (`CloudShadowLookup.glsl`). The shaft delta (light removed from the sky background) then includes the cloud shadow, so columns of sky under clouds get darker and the haze over geometry is lit only where the sun passes the layer. At the default auto scale the range is short, so the visible beams come from VolumetricLight (see the cloud doc, `shaftHaze`); set `autoScale` off for km-range beams here.
+When the cloud feature publishes its `ShadowMap` channel with a shaft strength above 0, the aerial perspective volume multiplies the sun visibility of each sample by the cloud sun transmittance (`CloudShadowLookup.glsl`). The shaft delta (light removed from the sky background) then includes the cloud shadow, so columns of sky under clouds get darker and the haze over geometry is lit only where the sun passes the layer. The beams of the cloud shadow come from the beam haze of this volume (cloud setting `shaftHaze`), which reaches at least 24 km while it is on. The near mist of VolumetricLight is a separate option (`shaftMist`, default 0).
+
+## Sun visibility of the air
+Every air sample asks `AirSunVisibilityAt` (`Shaders/AirSunVisibility.glsl`, shared with VolumetricLight): the sun cascades, with the shadow fading out over the last quarter of the last cascade, then the cloud map. Terrain shadow reaches only as far as the cascades and only if the cascade depth span holds the terrain (`terrainReliefM` in [Shadow](shadow.md)). Beyond the last cascade the air is lit. The beam haze fill light (`shaftFill`) is reduced to 30 percent in terrain shadow and stays complete in cloud shadow.
 
 ## Debug keys
 

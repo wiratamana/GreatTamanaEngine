@@ -110,6 +110,8 @@ const float kBeamFarFadeKm = 22.0;
 const float kBeamIsotropicShare = 0.15;
 // The haze removes less light than it scatters toward the eye, so far terrain stays visible while the beams stay bright.
 const float kBeamExtinctionShare = 0.25;
+// Share of the sky fill that reaches haze in the umbra of terrain; haze in cloud shadow keeps all of it.
+const float kBeamUmbraFill = 0.3;
 
 void main()
 {
@@ -251,7 +253,8 @@ void main()
             if (hazeExtinction > 0.0) {
                 vec3 hazeScattering = hazeExtinction * kBeamAlbedo;
                 vec3 hazeSun = (kBeamSunGain * exp(-sampleDistanceKm / kBeamFarFadeKm)) * hazeVisibility * planetVisibility * transmittanceToSun * (beamPhase * hazeScattering);
-                vec3 hazeFill = (shadow.beamHaze.w * kBeamFillGain) * multipleScatteredLuminance * hazeScattering;
+                float fillShare = mix(kBeamUmbraFill, 1.0, terrainVisibility);
+                vec3 hazeFill = (fillShare * shadow.beamHaze.w * kBeamFillGain) * multipleScatteredLuminance * hazeScattering;
                 source += sunRadiance * (hazeSun + hazeFill);
             }
 
