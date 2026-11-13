@@ -554,7 +554,7 @@ VolumetricCloudResolveParamsGpu MakeVolumetricCloudResolveParams(const Volumetri
     p.sunRay[0] = resolve.sunUv[0];
     p.sunRay[1] = resolve.sunUv[1];
     p.sunRay[2] = safe.sunRays * resolve.sunRayFade;
-    p.sunRay[3] = kCloudSunRayLength;
+    p.sunRay[3] = safe.sunStar * resolve.sunRayFade;
     for (int i = 0; i < 3; ++i) {
         p.sunRayColor[i] = resolve.sunColor[i];
     }

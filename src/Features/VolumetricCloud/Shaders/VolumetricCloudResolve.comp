@@ -16,7 +16,7 @@ layout(std430, binding = 0) readonly buffer VolumetricCloudResolveParams {
     vec4 motion;        // x extra blend at one pixel of motion, y sharp (Catmull-Rom) history 0..1, z adaptive sample count 0/1.
     uvec4 counts;       // x divisor, yz sample offset, w history valid.
     uvec4 sizes;        // xy view size, zw march target size.
-    vec4 sunRay;        // xy sun position in the view, z strength (0 = off), w length (share of the way to the sun).
+    vec4 sunRay;        // xy sun position in the view, z strength of the rays (0 = off), w strength of the starburst (0 = off).
     vec4 sunRayColor;   // rgb colour, w glow radius (view height units).
 } params;
 
@@ -127,6 +127,7 @@ const float kRayContrastGain = 2.0;
 const float kRayDeadZone = 0.3;
 const float kRayWidth = 0.010;     // Half width of a ray near the pixel (view height units).
 const float kRayWidthGrowth = 0.035; // Extra half width at the sun end.
+const float kRayLength = 0.9;        // Share of the way to the sun that the rays reach.
 
 // Sun rays: the glow around the sun, looked at through the gaps of the clouds. The pixel averages the glow along the
 // line toward the sun; the blocker is last frame's smooth cloud transmittance, so the rays do not flicker.
@@ -165,11 +166,11 @@ vec3 SunRays(vec2 uv, ivec2 pixel, float pixelEndKm, float cloudTransmittance)
         // The glow weight sits on a fixed lattice, so it is smooth; only the openness is read at jittered places.
         float uFixed = (float(i) + 0.5) / float(kTaps);
         float weight = 2.0 * (1.0 - uFixed);
-        float tFixed = (1.0 - (1.0 - uFixed) * (1.0 - uFixed)) * params.sunRay.w;
+        float tFixed = (1.0 - (1.0 - uFixed) * (1.0 - uFixed)) * kRayLength;
         vec2 fromSun = (uv + toSun * tFixed - params.sunRay.xy) * aspect / radius;
         float glow = 1.0 / (1.0 + dot(fromSun, fromSun));
         float u = (float(i) + 0.5 + 0.7 * (pixelShift - 0.5) + 0.7 * (frameShift - 0.5)) / float(kTaps);
-        float t = (1.0 - (1.0 - u) * (1.0 - u)) * params.sunRay.w;
+        float t = (1.0 - (1.0 - u) * (1.0 - u)) * kRayLength;
         float side = ((i & 1) == 0 ? -1.0 : 1.0) * (0.35 + 0.65 * fract(pixelShift * 7.31 + float(i) * 0.37));
         vec2 p = uv + toSun * t + sideDirection * (side * (kRayWidth + kRayWidthGrowth * t));
         float open = textureLod(historyColor, clamp(p, vec2(0.0), vec2(1.0)), 0.0).a;
@@ -206,7 +207,7 @@ vec3 SunStar(vec2 uv)
     float falloff = exp(-r / (0.35 * kStarRadius)) * (1.0 - r / kStarRadius);
     float core = 0.02 / (r + 0.012);
     vec3 tint = mix(params.sunRayColor.rgb, vec3(1.0), 0.5);
-    return tint * (kStarGain * params.sunRay.z * seen * falloff * (spikes * 0.9 + core * 0.25));
+    return tint * (kStarGain * params.sunRay.w * seen * falloff * (spikes * 0.9 + core * 0.25));
 }
 
 void main()
@@ -356,6 +357,8 @@ void main()
     vec3 color = scene * cloud.a + cloud.rgb;
     if (params.sunRay.z > 0.0) {
         color += SunRays(uv, pixel, pixelEndKm, cloud.a);
+    }
+    if (params.sunRay.w > 0.0) {
         color += SunStar(uv);
     }
     if (any(isnan(color)) || any(isinf(color))) {

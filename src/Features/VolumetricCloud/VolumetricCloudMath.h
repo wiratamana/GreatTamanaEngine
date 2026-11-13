@@ -174,7 +174,6 @@ std::uint32_t CloudOwnSampleIndex(std::uint64_t frameIndex, std::uint32_t diviso
 float CloudMarchJitter(float blueNoise, std::uint64_t frameIndex, std::uint32_t divisor) noexcept;
 
 // Screen-space sun rays: how far toward the sun a pixel looks (share of the way) and the radius of the sun glow.
-inline constexpr float kCloudSunRayLength = 0.9f;
 inline constexpr float kCloudSunRayGlowRadius = 0.18f;
 
 // Previous-frame data of the resolve pass.

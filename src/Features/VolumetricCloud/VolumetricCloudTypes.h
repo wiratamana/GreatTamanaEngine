@@ -167,7 +167,8 @@ struct VolumetricCloudSettings {
     float shaftMist = 0.0f;      // Extinction per km of an extra near-field mist in the volumetric light (0 = none).
     float shaftHeightM = 2500.0f; // Scale height of that haze; it thins out above.
     float shadowFill = 0.25f;     // Share of the blocked sun that reaches shadowed ground as diffuse light.
-    float sunRays = 1.0f;         // Strength of the faint screen-space sun glare through gaps in the clouds (0 = off).
+    float sunRays = 0.0f;         // Strength of the faint screen-space sun glare through gaps in the clouds (0 = off).
+    float sunStar = 1.0f;         // Strength of the small starburst on the sun where it shows through a gap (0 = off).
 };
 
 // One tunable float: its endpoint key, field and range.
@@ -289,6 +290,7 @@ inline constexpr std::array kVolumetricCloudFloatSettings{
     VolumetricCloudFloatSetting{ "shaftHeightM", &VolumetricCloudSettings::shaftHeightM, 200.0f, 6000.0f },
     VolumetricCloudFloatSetting{ "shadowFill", &VolumetricCloudSettings::shadowFill, 0.0f, 1.0f },
     VolumetricCloudFloatSetting{ "sunRays", &VolumetricCloudSettings::sunRays, 0.0f, 3.0f },
+    VolumetricCloudFloatSetting{ "sunStar", &VolumetricCloudSettings::sunStar, 0.0f, 3.0f },
 };
 
 // Where the light of the clouds came from in the last frame.
@@ -366,7 +368,7 @@ struct VolumetricCloudResolveParamsGpu {
     float motion[4] = {};               // x extra blend at one pixel of motion, y Catmull-Rom history weight, z adaptive sample count (0/1).
     std::uint32_t counts[4] = {};       // x divisor, yz sample offset inside the block, w history valid.
     std::uint32_t sizes[4] = {};        // xy view size, zw march target size.
-    float sunRay[4] = {};               // xy sun position in the view (0..1), z strength (0 = off), w length of the ray (share of the way to the sun).
+    float sunRay[4] = {};               // xy sun position in the view (0..1), z strength of the rays (0 = off), w strength of the starburst (0 = off).
     float sunRayColor[4] = {};          // rgb colour of the rays, w glow radius (view height units).
 };
 static_assert(sizeof(VolumetricCloudResolveParamsGpu) == 128 + 8 * 16);
