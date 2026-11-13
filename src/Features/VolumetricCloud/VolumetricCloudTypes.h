@@ -161,8 +161,8 @@ struct VolumetricCloudSettings {
     float shadowDensity = 1.0f;  // Factor on the optical depth of the shadow ray; above 1 darker shadows.
     float shadowSteps = 10.0f;   // Samples of the shadow ray through the layer.
     float shaftStrength = 1.0f;  // 0 = no light shafts; 1 = the air loses the sun light the clouds block (uses the shadow map).
-    float shaftSharpness = 4.0f; // Exponent on the sun transmittance of the air; higher gives crisper beams and darker gaps.
-    float shaftHaze = 0.8f;     // Density per km of the haze that carries the light curtains near the ground (its extinction is a quarter of it; 0 = none).
+    float shaftSharpness = 3.0f; // Exponent on the sun transmittance of the air; higher gives crisper beams and darker gaps.
+    float shaftHaze = 0.6f;     // Density per km of the haze that carries the light curtains near the ground (its extinction is a quarter of it; 0 = none).
     float shaftFill = 0.3f;      // Sky light in the shadowed columns of the haze (0 = black, 1 = like the sky's multiple scattering).
     float shaftMist = 0.0f;      // Extinction per km of an extra near-field mist in the volumetric light (0 = none).
     float shaftHeightM = 2500.0f; // Scale height of that haze; it thins out above.
