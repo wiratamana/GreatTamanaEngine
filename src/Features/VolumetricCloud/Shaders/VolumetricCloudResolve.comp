@@ -123,8 +123,8 @@ const float kRayOpenLow = 0.35;
 const float kRayOpenHigh = 0.75;
 const vec3 kRayCool = vec3(0.80, 0.86, 1.0);
 const float kRaySurroundRadius = 0.12; // Where the pixel looks around for the darker surroundings of a ray.
-const float kRayContrastGain = 2.5;
-const float kRayDeadZone = 0.15;
+const float kRayContrastGain = 2.0;
+const float kRayDeadZone = 0.3;
 const float kRayWidth = 0.010;     // Half width of a ray near the pixel (view height units).
 const float kRayWidthGrowth = 0.035; // Extra half width at the sun end.
 
