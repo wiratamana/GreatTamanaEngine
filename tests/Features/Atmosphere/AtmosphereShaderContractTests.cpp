@@ -86,8 +86,8 @@ TEST(ShaderContractTest, AerialVolumeBoundsTheBeamLight)
         ReadText(std::filesystem::path(GTE_TEST_ATMOSPHERE_SHADER_DIR) / "AtmosphereAerialPerspectiveVolume.comp");
     ASSERT_FALSE(text.empty());
     EXPECT_NE(text.find("const float kBeamLightCap"), std::string::npos);
-    EXPECT_NE(text.find("vec3 BoundBeamLight(vec3 light)"), std::string::npos);
-    EXPECT_NE(text.find("sunRadiance * BoundBeamLight(accumulatedBeam)"), std::string::npos);
+    EXPECT_NE(text.find("vec3 BoundBeamLight(vec3 light, float cap)"), std::string::npos);
+    EXPECT_NE(text.find("sunRadiance * BoundBeamLight(accumulatedBeam, beamCap)"), std::string::npos);
     EXPECT_NE(text.find("IsFiniteVec3(slab.rgb)"), std::string::npos);
 }
 
