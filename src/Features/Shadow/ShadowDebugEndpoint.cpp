@@ -31,6 +31,7 @@ constexpr std::array kSettingKeys{
     SettingKey{ "cascadeBlendFraction", &ShadowSettings::cascadeBlendFraction },
     SettingKey{ "distanceFadeFraction", &ShadowSettings::distanceFadeFraction },
     SettingKey{ "casterRange", &ShadowSettings::casterRange },
+    SettingKey{ "terrainReliefM", &ShadowSettings::terrainReliefM },
     SettingKey{ "cullCasters", &ShadowSettings::cullCasters },
     SettingKey{ "casterCullPaddingFraction", &ShadowSettings::casterCullPaddingFraction },
     SettingKey{ "constBiasTexels", &ShadowSettings::constBiasTexels },
@@ -142,6 +143,7 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const ShadowV
     Add(out, key("frameIndex"), Count(v.frameIndex));
     Add(out, key("sunElevationDegrees"), Shown(v.sunElevationDegrees));
     Add(out, key("effectiveMaxDistance"), Shown(v.effectiveMaxDistance));
+    Add(out, key("effectiveCasterRange"), Shown(v.cascades.casterRange));
     Add(out, key("resolutionInUse"), static_cast<std::int64_t>(v.resolutionInUse));
     Add(out, key("cascadeBytes"), Count(v.cascadeBytes));
     Add(out, key("timing.deltaSeconds"), Shown(v.deltaSeconds));

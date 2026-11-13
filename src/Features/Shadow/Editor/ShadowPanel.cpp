@@ -138,7 +138,8 @@ bool BuildShadowPanel(ShadowSettings& edit, const ShadowViewSnapshot& game, cons
     changed |= ImGui::SliderFloat("Split lambda", &edit.splitLambda, 0.0f, 1.0f);
     changed |= ImGui::SliderFloat("Blend fraction", &edit.cascadeBlendFraction, 0.0f, 0.5f);
     changed |= ImGui::SliderFloat("Fade fraction", &edit.distanceFadeFraction, 0.0f, 0.5f);
-    changed |= ImGui::DragFloat("Caster range", &edit.casterRange, 1.0f, 1.0f, kMaxCasterRange);
+    changed |= ImGui::DragFloat("Caster range (min)", &edit.casterRange, 1.0f, 1.0f, kMaxCasterRange);
+    changed |= ImGui::DragFloat("Terrain relief (m)", &edit.terrainReliefM, 10.0f, 0.0f, kMaxTerrainRelief);
     changed |= ImGui::Checkbox("Stabilize cascades", &edit.stabilizeCascades);
 
     ImGui::SeparatorText("SDSM");

@@ -83,6 +83,10 @@ ShadowViewFrustum ExtractViewFrustum(const Vec3& eye, const Mat4& invViewProject
 // absolute inverse, without its rounding far from the origin; `eye` stays the real world position.
 ShadowViewFrustum ExtractViewFrustumRelative(const Vec3& eye, const Mat4& relativeInverse) noexcept;
 
+// Caster range the cascade boxes use: terrainReliefM / sun sine, at least casterRange, at most kMaxAutoCasterRange
+// (a larger casterRange wins). `safe` must be sanitized.
+float EffectiveCasterRange(const ShadowSettings& safe, const Vec3& directionTowardSun) noexcept;
+
 // Fits up to 4 stable cascades to the camera. `safe` must be sanitized.
 // With a depth range the splits cover that range, otherwise [view near, shadow distance].
 ShadowCascadeSet BuildShadowCascades(const ShadowViewFrustum& frustum, const Vec3& directionTowardSun,

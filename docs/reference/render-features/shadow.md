@@ -33,7 +33,7 @@
 | Splits | "Practical" scheme. `splitLambda` 0 = uniform, 1 = logarithmic |
 | Cascade shape | Bounding sphere of the slice, relative to the eye, rounded up to 1/16 unit |
 | Stable edges | Light-space center snaps to whole texels in double precision (`stabilizeCascades`) |
-| Near plane | `casterRange` beyond the sphere toward the sun. No depth clamp, no hardware bias |
+| Near plane | Effective caster range (see Caster range) beyond the sphere toward the sun. No depth clamp, no hardware bias |
 | SDSM | Reduce pass finds min and max depth. `fx::GpuReadback` returns it 2 frames later |
 | SDSM smoothing | Range is padded, grows at once, shrinks over `sdsmShrinkSeconds`, snaps to a log grid |
 | SDSM fallback | `useSdsm` off, a pass of the group off, shader missing, or no sample for 120 frames: fixed splits over `[near, maxDistance]` |
@@ -78,7 +78,8 @@
 | `maxDistance` | 20000 | 1..100000 | Shadow distance, clamped to camera far |
 | `splitLambda` | 0.85 | 0..1 | Uniform to log splits |
 | `cascadeBlendFraction`, `distanceFadeFraction` | 0.10, 0.10 | 0..0.5 | Blend band, fade band |
-| `casterRange` | 200 | 1..100000 | Extra distance toward the sun |
+| `casterRange` | 200 | 1..100000 | Smallest extra distance toward the sun |
+| `terrainReliefM` | 1000 | 0..8000 | Tallest relief to catch. Range = relief / sun sine. 0 = off |
 | `cullCasters`, `casterCullPaddingFraction` | true, 0.25 | padding 0..2 | Caster culling |
 | `constBiasTexels`, `slopeBiasTexels`, `normalOffsetTexels` | 1.5, 1, 1 | 0..16 | Bias |
 | `filterRadiusTexels`, `filterSamples` | 1.5, 4 | 0..8; 1, 4, 8, 16 | PCF filter |
@@ -92,9 +93,11 @@
 - The shader slope bias is `max(slopeBiasTexels, filterRadiusTexels)`.
 
 ### Caster range
-- Cascade depth span is `2 * radius + casterRange`. World bias does not change with it.
-- Needed: `casterRange >= relief / sin(sunElevation)`, up to 100000. 1000 m of relief at 3 degrees needs about 19 km.
-- Default stays 200. A larger value costs depth precision in small cascades.
+- Cascade depth span is `2 * radius + effective range`. World bias does not change with it.
+- Effective range = `max(casterRange, min(terrainReliefM / max(sin(sunElevation), 0.03), 20000))`. 1000 m of relief at 10 degrees gives about 5.8 km; at 3 degrees 19 km; the cap is 20000.
+- This lets mountains and ridges km away shadow the ground, and the air (Atmosphere beam haze, VolumetricLight), at a low sun.
+- `terrainReliefM` 0 gives the plain `casterRange`. A `casterRange` above 20000 wins over the automatic value.
+- Cost: more casters fall inside the cascade boxes. Measured on an iGPU with a mountain scene: +0.8 to +1.4 ms in the cascade draws at sun 3 to 45 degrees (clock noise is about 1 ms).
 
 ## Debug keys
 
@@ -105,7 +108,7 @@
 |---|---|
 | `status`, `mask.status` | `NotRendered`, `Ok`, `NoValidCamera`, `ShadersNotReady`, `TargetFailed`, `PassDisabled`, `Skipped` |
 | `resolutionInUse`, `cascadeBytes` | Real map size and memory. Never the cap |
-| `sunElevationDegrees`, `effectiveMaxDistance`, `frameIndex`, `timing.deltaSeconds` | Frame facts |
+| `sunElevationDegrees`, `effectiveMaxDistance`, `effectiveCasterRange`, `frameIndex`, `timing.deltaSeconds` | Frame facts. `effectiveCasterRange` is the range the cascade boxes really use |
 | `cascade<i>.sliceStart`, `.sliceEnd`, `.radius`, `.texelWorldSize`, `.depthRange` | Cascade shape |
 | `cascade<i>.gridX`, `.gridY` | Snapped center in texels. Edges may move only when these change |
 | `sdsm.active`, `.rawNear`, `.rawFar`, `.nearDepth`, `.farDepth`, `.ageFrames` | Depth-range fit |
@@ -125,7 +128,7 @@ curl.exe -o game.png "http://127.0.0.1:8080/get_game_view"
 - A surface that faces away from the sun counts as shadowed.
 - Materials use the vertex normal. The mask uses a depth-derived normal. Tune `normalOffsetTexels` and `slopeBiasTexels` for acne or peter-panning.
 - A lit pixel costs up to 2 cascades x `filterSamples` taps.
-- A caster farther than `casterRange` from a cascade is clipped.
+- A caster farther toward the sun than the effective caster range from a cascade is clipped. A mountain taller than `terrainReliefM` casts no shadow into the cascades at a low sun.
 - A low sun gives long shadows and needs a large slope bias on coarse cascades.
 - The depth range lags 2 frames. A resolution or SDSM switch re-samples shadows once.
 - Settings are not saved in scene files.

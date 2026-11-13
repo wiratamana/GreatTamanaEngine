@@ -511,6 +511,7 @@ TEST(ShadowMathTest, CascadeDepthRangeIsTwiceTheRadiusPlusTheCasterRange)
     ASSERT_TRUE(frustum.valid);
     ShadowSettings settings;
     settings.casterRange = 321.0f;
+    settings.terrainReliefM = 0.0f;
     const ShadowSettings safe = SanitizeShadowSettings(settings);
 
     const ShadowCascadeSet set = BuildShadowCascades(frustum, Normalize(Vec3(0.4f, 0.7f, 0.3f)), safe, 2048);
@@ -528,6 +529,7 @@ TEST(ShadowMathTest, CasterRangeBoundsTheNearPlaneBeyondTheSphere)
     ASSERT_TRUE(frustum.valid);
     ShadowSettings settings;
     settings.casterRange = 25000.0f;
+    settings.terrainReliefM = 0.0f;
     const ShadowSettings safe = SanitizeShadowSettings(settings);
     const Vec3 sun = Normalize(Vec3(0.4f, 0.7f, 0.3f));
 
@@ -548,6 +550,65 @@ TEST(ShadowMathTest, CasterRangeBoundsTheNearPlaneBeyondTheSphere)
         EXPECT_GE(ndcZ(cascade.radius + 0.99f * safe.casterRange), 0.0f) << c;
         EXPECT_LE(ndcZ(cascade.radius + 0.99f * safe.casterRange), 1.0f) << c;
         EXPECT_LT(ndcZ(cascade.radius + 1.01f * safe.casterRange), 0.0f) << c;
+    }
+}
+
+TEST(ShadowMathTest, TerrainReliefIsClampedAndKeptByDefault)
+{
+    EXPECT_FLOAT_EQ(ShadowSettings{}.terrainReliefM, 1000.0f);
+    ShadowSettings settings;
+    settings.terrainReliefM = 50000.0f;
+    EXPECT_FLOAT_EQ(SanitizeShadowSettings(settings).terrainReliefM, kMaxTerrainRelief);
+    settings.terrainReliefM = -5.0f;
+    EXPECT_FLOAT_EQ(SanitizeShadowSettings(settings).terrainReliefM, 0.0f);
+    settings.terrainReliefM = std::numeric_limits<float>::quiet_NaN();
+    EXPECT_FLOAT_EQ(SanitizeShadowSettings(settings).terrainReliefM, ShadowSettings{}.terrainReliefM);
+}
+
+TEST(ShadowMathTest, EffectiveCasterRangeFollowsReliefOverSunSine)
+{
+    ShadowSettings settings;
+    settings.casterRange = 200.0f;
+    settings.terrainReliefM = 1000.0f;
+    const ShadowSettings safe = SanitizeShadowSettings(settings);
+
+    const auto towardSun = [](float elevationDegrees) {
+        const float radians = elevationDegrees * 0.017453292519943295f;
+        return Vec3(std::cos(radians), std::sin(radians), 0.0f);
+    };
+    EXPECT_NEAR(EffectiveCasterRange(safe, towardSun(30.0f)), 2000.0f, 2.0f);
+    EXPECT_NEAR(EffectiveCasterRange(safe, towardSun(10.0f)), 1000.0f / std::sin(0.17453293f), 5.0f);
+    EXPECT_FLOAT_EQ(EffectiveCasterRange(safe, towardSun(0.5f)), kMaxAutoCasterRange);
+    EXPECT_FLOAT_EQ(EffectiveCasterRange(safe, Vec3::Down()), kMaxAutoCasterRange);
+    EXPECT_NEAR(EffectiveCasterRange(safe, Vec3::Up()), 1000.0f, 1e-3f);
+}
+
+TEST(ShadowMathTest, EffectiveCasterRangeNeverFallsBelowTheSetting)
+{
+    ShadowSettings settings;
+    settings.casterRange = 321.0f;
+    settings.terrainReliefM = 0.0f;
+    EXPECT_FLOAT_EQ(EffectiveCasterRange(SanitizeShadowSettings(settings), Vec3::Up()), 321.0f);
+
+    settings.casterRange = 50000.0f;
+    settings.terrainReliefM = 1000.0f;
+    EXPECT_FLOAT_EQ(EffectiveCasterRange(SanitizeShadowSettings(settings), Vec3(1.0f, 0.01f, 0.0f)), 50000.0f);
+}
+
+TEST(ShadowMathTest, CascadeSetReportsTheEffectiveCasterRangeAndUsesItForTheDepthSpan)
+{
+    const ShadowViewFrustum frustum = MakeCameraFrustum(Vec3(0.0f, 2.0f, -10.0f), Vec3::Zero());
+    ASSERT_TRUE(frustum.valid);
+    const ShadowSettings safe = SanitizeShadowSettings(ShadowSettings{});
+    const Vec3 sun = Normalize(Vec3(0.4f, 0.7f, 0.3f));
+
+    const ShadowCascadeSet set = BuildShadowCascades(frustum, sun, safe, 2048);
+    ASSERT_TRUE(set.valid);
+    EXPECT_FLOAT_EQ(set.casterRange, EffectiveCasterRange(safe, sun));
+    EXPECT_GT(set.casterRange, safe.casterRange);
+    for (std::uint32_t c = 0; c < set.count; ++c) {
+        const ShadowCascade& cascade = set.cascades[c];
+        EXPECT_NEAR(cascade.depthRange, 2.0f * cascade.radius + set.casterRange, 1e-2f * (1.0f + cascade.radius)) << c;
     }
 }
 

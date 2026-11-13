@@ -79,6 +79,7 @@ ShadowSettings SanitizeShadowSettings(const ShadowSettings& settings) noexcept
     s.cascadeBlendFraction = SanitizeFloat(settings.cascadeBlendFraction, 0.0f, 0.5f, d.cascadeBlendFraction);
     s.distanceFadeFraction = SanitizeFloat(settings.distanceFadeFraction, 0.0f, 0.5f, d.distanceFadeFraction);
     s.casterRange = SanitizeFloat(settings.casterRange, 1.0f, kMaxCasterRange, d.casterRange);
+    s.terrainReliefM = SanitizeFloat(settings.terrainReliefM, 0.0f, kMaxTerrainRelief, d.terrainReliefM);
     s.casterCullPaddingFraction =
         SanitizeFloat(settings.casterCullPaddingFraction, 0.0f, 2.0f, d.casterCullPaddingFraction);
     s.constBiasTexels = SanitizeFloat(settings.constBiasTexels, 0.0f, 16.0f, d.constBiasTexels);
@@ -140,6 +141,13 @@ ShadowViewFrustum ExtractViewFrustumRelative(const Vec3& eye, const Mat4& relati
     return frustum;
 }
 
+float EffectiveCasterRange(const ShadowSettings& safe, const Vec3& directionTowardSun) noexcept
+{
+    const float sunSine = std::max(SafeSunDirection(directionTowardSun).y, kMinCasterSunSine);
+    const float reach = std::min(safe.terrainReliefM / sunSine, kMaxAutoCasterRange);
+    return std::max(safe.casterRange, reach);
+}
+
 ShadowCascadeSet BuildShadowCascades(const ShadowViewFrustum& frustum, const Vec3& directionTowardSun,
     const ShadowSettings& safe, std::uint32_t resolution, std::optional<ShadowDepthRange> sdsmRange) noexcept
 {
@@ -182,6 +190,8 @@ ShadowCascadeSet BuildShadowCascades(const ShadowViewFrustum& frustum, const Vec
 
     // Light rotation: the light looks along -directionTowardSun.
     const Vec3 sunDirection = SafeSunDirection(directionTowardSun);
+    const double casterRange = EffectiveCasterRange(safe, sunDirection);
+    set.casterRange = static_cast<float>(casterRange);
     const Vec3 lightForward = Normalize(-sunDirection);
     const Vec3 upHint = std::abs(Dot(lightForward, Vec3::Up())) > 0.999f ? Vec3::Forward() : Vec3::Up();
     const Mat4 lightRotation = Mat4::LookAtLH(Vec3::Zero(), lightForward, upHint);
@@ -225,7 +235,7 @@ ShadowCascadeSet BuildShadowCascades(const ShadowViewFrustum& frustum, const Vec
         }
 
         // The near plane sits casterRange beyond the sphere toward the sun; xy is centered on the snapped center.
-        const double zMin = lz - static_cast<double>(radius) - safe.casterRange;
+        const double zMin = lz - static_cast<double>(radius) - casterRange;
         const double zMax = lz + radius;
         const Mat4 view = Mat4::Translation(
                               Vec3(static_cast<float>(-lx), static_cast<float>(-ly), static_cast<float>(-zMin)))

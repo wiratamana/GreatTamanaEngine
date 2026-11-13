@@ -15,8 +15,15 @@ inline constexpr const char* kShadowFeatureName = "Shadow";
 
 inline constexpr std::uint32_t kMaxShadowCascades = 4;
 
-// Upper bound of ShadowSettings::casterRange, world units. Needed range is relief / sin(sun elevation).
+// Upper bound of ShadowSettings::casterRange, world units.
 inline constexpr float kMaxCasterRange = 100000.0f;
+
+// Upper bound of ShadowSettings::terrainReliefM, world units.
+inline constexpr float kMaxTerrainRelief = 8000.0f;
+
+// The automatic caster range uses at least this sun sine, and never grows past this length by itself.
+inline constexpr float kMinCasterSunSine = 0.03f;
+inline constexpr float kMaxAutoCasterRange = 20000.0f;
 
 // Frames a depth-range sample stays usable without a newer one.
 inline constexpr std::uint64_t kSdsmMaxHoldFrames = 120;
@@ -41,7 +48,8 @@ struct ShadowSettings {
     float splitLambda = 0.85f;          // 0 = uniform splits, 1 = logarithmic.
     float cascadeBlendFraction = 0.10f; // Of each cascade length, 0..0.5.
     float distanceFadeFraction = 0.10f; // Of maxDistance, 0..0.5.
-    float casterRange = 200.0f;         // Extra distance toward the sun beyond a cascade's bounding sphere.
+    float casterRange = 200.0f;         // Smallest extra distance toward the sun beyond a cascade's bounding sphere.
+    float terrainReliefM = 1000.0f;     // Tallest caster height to catch: range = relief / sun sine. 0 = off.
     bool cullCasters = true;
     float casterCullPaddingFraction = 0.25f; // Caster box padding, fraction of its largest extent.
     float constBiasTexels = 1.5f;
@@ -123,6 +131,7 @@ struct ShadowCascadeSet {
     float fadeStart = 0.0f;
     bool sdsmActive = false;     // Splits were fitted to a measured range.
     ShadowDepthRange fittedRange;
+    float casterRange = 0.0f;    // Distance toward the sun the cascade boxes really reach beyond their spheres.
 };
 
 // Channel "Map": cascade pass to mask pass.
