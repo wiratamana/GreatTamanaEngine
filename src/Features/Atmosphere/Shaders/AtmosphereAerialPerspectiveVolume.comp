@@ -100,9 +100,13 @@ float HazePhase(float g, float cosAngle)
 }
 
 // The beam haze scatters mostly forward and a little everywhere; it looks pale blue-violet, like a hazy sky.
-const vec3 kBeamAlbedo = vec3(0.6, 0.95, 1.9);
-const float kBeamSunGain = 7.0;
-const float kBeamIsotropicShare = 0.3;
+const vec3 kBeamAlbedo = vec3(0.12, 0.2, 0.4);
+const float kBeamSunGain = 5.0;
+// The beam light fades with distance so the horizon does not turn white.
+const float kBeamFarFadeKm = 16.0;
+const float kBeamIsotropicShare = 0.15;
+// The haze removes less light than it scatters toward the eye, so far terrain stays visible while the beams stay bright.
+const float kBeamExtinctionShare = 0.25;
 
 void main()
 {
@@ -204,7 +208,7 @@ void main()
             if (beamHazeOn) {
                 float worldHeightKm = max(eyeWorld.y + worldStepPerKm.y * sampleDistanceKm, 0.0) / worldUnitsPerKm;
                 hazeExtinction = shadow.beamHaze.x * exp(-worldHeightKm / shadow.beamHaze.y);
-                extinctionCoefficient += vec3(hazeExtinction);
+                extinctionCoefficient += vec3(hazeExtinction * kBeamExtinctionShare);
             }
 
             float planetVisibility = PlanetVisibility(currentPositionKm, directionToSun, planetRadiusKm);
@@ -248,7 +252,7 @@ void main()
             vec3 source = sunRadiance * (sunVisibility * sunTerm + multipleScatteringSource);
             if (hazeExtinction > 0.0) {
                 vec3 hazeScattering = hazeExtinction * kBeamAlbedo;
-                vec3 hazeSun = kBeamSunGain * hazeVisibility * planetVisibility * transmittanceToSun * (beamPhase * hazeScattering);
+                vec3 hazeSun = (kBeamSunGain * exp(-sampleDistanceKm / kBeamFarFadeKm)) * hazeVisibility * planetVisibility * transmittanceToSun * (beamPhase * hazeScattering);
                 vec3 hazeFill = shadow.beamHaze.w * multipleScatteredLuminance * hazeScattering;
                 source += sunRadiance * (hazeSun + hazeFill);
             }
