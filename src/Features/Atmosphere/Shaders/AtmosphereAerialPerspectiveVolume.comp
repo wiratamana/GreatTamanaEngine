@@ -156,7 +156,7 @@ void main()
 
     float viewDotLight = clamp(dot(viewDirection, directionToSun), -1.0, 1.0);
     float beamCap = kBeamLightCap * mix(1.0, kBeamForwardCapScale, smoothstep(0.6, 0.95, viewDotLight));
-float rayleighPhaseValue = RayleighPhaseFunction(viewDotLight);
+    float rayleighPhaseValue = RayleighPhaseFunction(viewDotLight);
     float miePhaseValue = CornetteShanksMiePhaseFunction(atmosphereParameters.miePhaseG, viewDotLight);
     vec3 sunRadiance = frameUniforms.sunIlluminance;
 
