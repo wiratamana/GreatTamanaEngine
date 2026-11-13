@@ -177,13 +177,13 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `shadowUpdate` | 3 | 1..4 | Each 8 x 8 texel tile of the map is redone once per this many frames. 1 = every frame (2.2 ms), 4 = about 1 ms |
 | `shadowDensity` | 1 | 0.1..8 | Factor on the optical depth of the shadow ray; above 1 darker, harder shadows |
 | `shadowSteps` | 10 | 4..24 | Samples of the shadow ray through the layer. Fewer than 10 misses thin cloud |
-| `shaftSharpness` | 3 | 1..8 | Exponent on the sun transmittance of the air: higher gives crisper beams and darker gaps |
-| `shaftHaze` | 0.5 | 0..4 | Extinction per km at the ground of the beam haze: a thin blue-violet haze in the aerial perspective volume (it reaches at least 24 km) that the cloud shadow map lights, so lit and shadowed columns of the air show as light curtains over the ground. Thickest for a low sun, gone above about 45 degrees. 0 = no beam haze |
-| `shaftFill` | 0.6 | 0..4 | Sky light in the shadowed columns of the beam haze, relative to the multiple-scattering table (0 = black columns) |
+| `shaftSharpness` | 4 | 1..8 | Exponent on the sun transmittance of the air: higher gives crisper beams and darker gaps |
+| `shaftHaze` | 0.35 | 0..4 | Extinction per km at the ground of the beam haze: a thin blue-violet haze in the aerial perspective volume (it reaches at least 24 km) that the cloud shadow map lights, so lit and shadowed columns of the air show as light curtains over the ground. Thickest for a low sun, gone above about 45 degrees. 0 = no beam haze |
+| `shaftFill` | 0.5 | 0..4 | Sky light in the shadowed columns of the beam haze, relative to the multiple-scattering table (0 = black columns) |
 | `shaftMist` | 0 | 0..4 | Extinction per km of an extra near-field mist in the volumetric light (stretches that volume to 4 km). 0 = none |
 | `shaftHeightM` | 2500 | 200..6000 | Scale height of the beam haze and the mist |
 | `shadowFill` | 0.25 | 0..1 | Share of the sun the cloud blocks that reaches shadowed receivers as diffuse light, so a shadowed ground is not black |
-| `sunRays` | 1 | 0..3 | Faint screen-space sun glare: the glow around the sun seen through the gaps of the clouds (24 taps in the resolve pass, the smoothed cloud history is the occluder, the jitter changes every frame). Gone when the sun is behind the camera or well outside the picture, and for a high sun. 0 = off |
+| `sunRays` | 1 | 0..3 | Screen-space sun starburst (six soft spikes on the sun where it shows through a gap) and soft rays that show only as light against darker surroundings: the glow around the sun seen through the gaps of the clouds (24 taps in the resolve pass, the smoothed cloud history is the occluder, the jitter changes every frame). Gone when the sun is behind the camera or well outside the picture, and for a high sun. 0 = off |
 | `shaftStrength` | 1 | 0..1 | Light shafts: how much of the sun in-scatter of the air the cloud shadow map removes (aerial perspective, volumetric light, air in front of clouds). 0 = none |
 
 Resolve detail: a pixel that is not marched this frame reads its history texel exactly (positions within 0.004 texel of a texel centre are snapped). Without the snap the 1e-4 texel matrix noise made the rgba16f store round the history down one half-float step on every unmarched frame, which darkened the converged picture the more the lower `freshBlend` was.

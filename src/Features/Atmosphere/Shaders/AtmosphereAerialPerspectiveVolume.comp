@@ -100,8 +100,8 @@ float HazePhase(float g, float cosAngle)
 }
 
 // The beam haze scatters mostly forward and a little everywhere; it looks pale blue-violet, like a hazy sky.
-const vec3 kBeamAlbedo = vec3(0.65, 1.0, 1.7);
-const float kBeamSunGain = 3.0;
+const vec3 kBeamAlbedo = vec3(0.6, 0.95, 1.9);
+const float kBeamSunGain = 7.0;
 const float kBeamIsotropicShare = 0.3;
 
 void main()

@@ -119,9 +119,12 @@ bool FetchHistory(vec2 texelPosition, float pixelEndKm, out vec4 color, out floa
     return true;
 }
 
-const float kRayOpenLow = 0.55;
-const float kRayOpenHigh = 0.97;
+const float kRayOpenLow = 0.35;
+const float kRayOpenHigh = 0.75;
 const vec3 kRayCool = vec3(0.80, 0.86, 1.0);
+const float kRaySurroundRadius = 0.12; // Where the pixel looks around for the darker surroundings of a ray.
+const float kRayContrastGain = 2.5;
+const float kRayDeadZone = 0.15;
 const float kRayWidth = 0.010;     // Half width of a ray near the pixel (view height units).
 const float kRayWidthGrowth = 0.035; // Extra half width at the sun end.
 
@@ -129,36 +132,81 @@ const float kRayWidthGrowth = 0.035; // Extra half width at the sun end.
 // line toward the sun; the blocker is last frame's smooth cloud transmittance, so the rays do not flicker.
 vec3 SunRays(vec2 uv, ivec2 pixel, float pixelEndKm, float cloudTransmittance)
 {
-    const int kTaps = 24;
+    const int kTaps = 12;
+    // Pixels inside a cloud show no rays: they skip the whole pass.
+    float openHere = smoothstep(0.8, 0.97, cloudTransmittance);
+    if (openHere <= 0.0) {
+        return vec3(0.0);
+    }
     vec2 aspect = vec2(float(params.sizes.x) / float(params.sizes.y), 1.0);
+    // Rays show only as light against their darker surroundings: an even open sky gets none, and skips the line.
+    float surroundOpen = 0.0;
+    for (int k = 0; k < 4; ++k) {
+        float angle = 1.5707963 * float(k) + 0.5;
+        vec2 q = uv + vec2(cos(angle), sin(angle)) * kRaySurroundRadius / aspect;
+        surroundOpen += textureLod(historyColor, clamp(q, vec2(0.0), vec2(1.0)), 0.0).a;
+    }
+    surroundOpen *= 0.25;
+    if (surroundOpen > 1.0 - kRayDeadZone) {
+        return vec3(0.0);
+    }
     vec2 toSun = params.sunRay.xy - uv;
-    // The jitter moves every frame (the march offset cycles), so TAA averages it instead of keeping a hatch.
+    // The jitter moves every frame (the march offset cycles) so TAA averages it; the pixel only decides the side.
     float frameShift = fract(0.61803399 * float(params.counts.y + 8u * params.counts.z));
-    float jitter = fract(52.9829189 * fract(dot(vec2(pixel), vec2(0.06711056, 0.00583715))) + frameShift);
+    float pixelShift = fract(52.9829189 * fract(dot(vec2(pixel), vec2(0.06711056, 0.00583715))));
     float radius = max(params.sunRayColor.w, 1e-3);
-    float sum = 0.0;
-    float glowSum = 0.0;
-    // The line is read slightly to the left and right in turn: gaps narrower than the ray width fade out,
-    // so the rays are soft curtains and not thin spokes.
+    // The glow peaks at the sun, so the taps crowd toward it: t = 1 - (1 - u)^2, weighted by dt / du.
     vec2 aspectLine = toSun * aspect;
     vec2 sideDirection = normalize(vec2(-aspectLine.y, aspectLine.x) + vec2(1e-6)) / aspect;
+    float sum = 0.0;
+    float glowSum = 0.0;
+    float weightSum = 0.0;
     for (int i = 0; i < kTaps; ++i) {
-        float t = (float(i) + jitter) / float(kTaps) * params.sunRay.w;
-        float side = ((i & 1) == 0 ? -1.0 : 1.0) * (0.35 + 0.65 * fract(jitter * 7.31 + float(i) * 0.37));
-        vec2 p = uv + toSun * t + sideDirection * (side * (kRayWidth + kRayWidthGrowth * t));
-        vec2 fromSun = (p - params.sunRay.xy) * aspect / radius;
+        // The glow weight sits on a fixed lattice, so it is smooth; only the openness is read at jittered places.
+        float uFixed = (float(i) + 0.5) / float(kTaps);
+        float weight = 2.0 * (1.0 - uFixed);
+        float tFixed = (1.0 - (1.0 - uFixed) * (1.0 - uFixed)) * params.sunRay.w;
+        vec2 fromSun = (uv + toSun * tFixed - params.sunRay.xy) * aspect / radius;
         float glow = 1.0 / (1.0 + dot(fromSun, fromSun));
+        float u = (float(i) + 0.5 + 0.7 * (pixelShift - 0.5) + 0.7 * (frameShift - 0.5)) / float(kTaps);
+        float t = (1.0 - (1.0 - u) * (1.0 - u)) * params.sunRay.w;
+        float side = ((i & 1) == 0 ? -1.0 : 1.0) * (0.35 + 0.65 * fract(pixelShift * 7.31 + float(i) * 0.37));
+        vec2 p = uv + toSun * t + sideDirection * (side * (kRayWidth + kRayWidthGrowth * t));
         float open = textureLod(historyColor, clamp(p, vec2(0.0), vec2(1.0)), 0.0).a;
-        sum += glow * open;
-        glowSum += glow;
+        sum += glow * open * weight;
+        glowSum += glow * weight;
+        weightSum += weight;
     }
-    // Only lines that are mostly open count; the knee is soft so a cloud edge does not switch a ray on and off.
     float lineOpen = sum / max(glowSum, 1e-4);
-    float ray = glowSum / float(kTaps) * smoothstep(kRayOpenLow, kRayOpenHigh, lineOpen);
+    float contrast = clamp((smoothstep(kRayOpenLow, kRayOpenHigh, lineOpen) - surroundOpen - kRayDeadZone) * kRayContrastGain, 0.0, 1.0);
+    float ray = glowSum / max(weightSum, 1e-4) * contrast;
     float onGround = smoothstep(0.3, 4.0, pixelEndKm);
     float luma = dot(params.sunRayColor.rgb, vec3(0.2126, 0.7152, 0.0722));
     vec3 tint = mix(params.sunRayColor.rgb, vec3(luma) * kRayCool, 0.55);
-    return tint * (params.sunRay.z * ray * onGround * mix(0.25, 1.0, smoothstep(0.5, 1.0, cloudTransmittance)));
+    return tint * (params.sunRay.z * ray * onGround * openHere);
+}
+
+const float kStarRadius = 0.16;   // Reach of the spikes (view height units).
+const float kStarGain = 2.5;
+
+// A small starburst on the sun where the sun shows through a gap: six soft spikes, stable in time.
+vec3 SunStar(vec2 uv)
+{
+    vec2 aspect = vec2(float(params.sizes.x) / float(params.sizes.y), 1.0);
+    vec2 fromSun = (uv - params.sunRay.xy) * aspect;
+    float r = length(fromSun);
+    if (r > kStarRadius) {
+        return vec3(0.0);
+    }
+    vec2 sunUv = clamp(params.sunRay.xy, vec2(0.0), vec2(1.0));
+    float seen = smoothstep(0.35, 0.95, textureLod(historyColor, sunUv, 0.0).a)
+        * step(kClearDepthThreshold, textureLod(sourceDepth, sunUv, 0.0).r);
+    float angle = atan(fromSun.y, fromSun.x);
+    float spikes = pow(abs(cos(3.0 * angle + 0.5)), 28.0);
+    float falloff = exp(-r / (0.35 * kStarRadius)) * (1.0 - r / kStarRadius);
+    float core = 0.02 / (r + 0.012);
+    vec3 tint = mix(params.sunRayColor.rgb, vec3(1.0), 0.5);
+    return tint * (kStarGain * params.sunRay.z * seen * falloff * (spikes * 0.9 + core * 0.25));
 }
 
 void main()
@@ -308,6 +356,7 @@ void main()
     vec3 color = scene * cloud.a + cloud.rgb;
     if (params.sunRay.z > 0.0) {
         color += SunRays(uv, pixel, pixelEndKm, cloud.a);
+        color += SunStar(uv);
     }
     if (any(isnan(color)) || any(isinf(color))) {
         color = scene;
