@@ -101,9 +101,9 @@ float HazePhase(float g, float cosAngle)
 
 // The beam haze scatters mostly forward and a little everywhere; it looks pale blue-violet, like a hazy sky.
 const vec3 kBeamAlbedo = vec3(0.12, 0.2, 0.4);
-const float kBeamSunGain = 5.0;
+const float kBeamSunGain = 8.0;
 // The beam light fades with distance so the horizon does not turn white.
-const float kBeamFarFadeKm = 16.0;
+const float kBeamFarFadeKm = 22.0;
 const float kBeamIsotropicShare = 0.15;
 // The haze removes less light than it scatters toward the eye, so far terrain stays visible while the beams stay bright.
 const float kBeamExtinctionShare = 0.25;

@@ -186,7 +186,7 @@ vec3 SunRays(vec2 uv, ivec2 pixel, float pixelEndKm, float cloudTransmittance)
     return tint * (params.sunRay.z * ray * onGround * openHere);
 }
 
-const float kStarRadius = 0.16;   // Reach of the spikes (view height units).
+const float kStarRadius = 0.13;   // Reach of the spikes (view height units).
 const float kStarGain = 2.5;
 
 // A small starburst on the sun where the sun shows through a gap: six soft spikes, stable in time.
@@ -202,7 +202,7 @@ vec3 SunStar(vec2 uv)
     float seen = smoothstep(0.35, 0.95, textureLod(historyColor, sunUv, 0.0).a)
         * step(kClearDepthThreshold, textureLod(sourceDepth, sunUv, 0.0).r);
     float angle = atan(fromSun.y, fromSun.x);
-    float spikes = pow(abs(cos(3.0 * angle + 0.5)), 28.0);
+    float spikes = pow(abs(cos(3.0 * angle + 0.5)), 40.0);
     float falloff = exp(-r / (0.35 * kStarRadius)) * (1.0 - r / kStarRadius);
     float core = 0.02 / (r + 0.012);
     vec3 tint = mix(params.sunRayColor.rgb, vec3(1.0), 0.5);
