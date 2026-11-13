@@ -173,7 +173,9 @@ vec3 SunRays(vec2 uv, ivec2 pixel, float pixelEndKm, float cloudTransmittance)
         float t = (1.0 - (1.0 - u) * (1.0 - u)) * kRayLength;
         float side = ((i & 1) == 0 ? -1.0 : 1.0) * (0.35 + 0.65 * fract(pixelShift * 7.31 + float(i) * 0.37));
         vec2 p = uv + toSun * t + sideDirection * (side * (kRayWidth + kRayWidthGrowth * t));
-        float open = textureLod(historyColor, clamp(p, vec2(0.0), vec2(1.0)), 0.0).a;
+        vec2 tapUv = clamp(p, vec2(0.0), vec2(1.0));
+        // A tap that sees a surface (mountain, building) is blocked.
+        float open = textureLod(historyColor, tapUv, 0.0).a * step(kClearDepthThreshold, textureLod(sourceDepth, tapUv, 0.0).r);
         sum += glow * open * weight;
         glowSum += glow * weight;
         weightSum += weight;
@@ -190,8 +192,21 @@ vec3 SunRays(vec2 uv, ivec2 pixel, float pixelEndKm, float cloudTransmittance)
 const float kStarRadius = 0.13;   // Reach of the spikes (view height units).
 const float kStarGain = 2.5;
 
+// Share of this pixel and its four neighbours that show sky: the spikes fade out at a silhouette instead of cutting.
+float SkyShare(vec2 uv, float ownDepth)
+{
+    vec2 texel = 1.0 / vec2(params.sizes.xy);
+    float share = step(kClearDepthThreshold, ownDepth);
+    share += step(kClearDepthThreshold, textureLod(sourceDepth, uv + vec2(texel.x, 0.0), 0.0).r);
+    share += step(kClearDepthThreshold, textureLod(sourceDepth, uv - vec2(texel.x, 0.0), 0.0).r);
+    share += step(kClearDepthThreshold, textureLod(sourceDepth, uv + vec2(0.0, texel.y), 0.0).r);
+    share += step(kClearDepthThreshold, textureLod(sourceDepth, uv - vec2(0.0, texel.y), 0.0).r);
+    return share * 0.2;
+}
+
 // A small starburst on the sun where the sun shows through a gap: six soft spikes, stable in time.
-vec3 SunStar(vec2 uv)
+// The spikes are drawn over sky only; a ridge or a building in front of the sun carries none.
+vec3 SunStar(vec2 uv, float ownDepth)
 {
     vec2 aspect = vec2(float(params.sizes.x) / float(params.sizes.y), 1.0);
     vec2 fromSun = (uv - params.sunRay.xy) * aspect;
@@ -202,6 +217,7 @@ vec3 SunStar(vec2 uv)
     vec2 sunUv = clamp(params.sunRay.xy, vec2(0.0), vec2(1.0));
     float seen = smoothstep(0.35, 0.95, textureLod(historyColor, sunUv, 0.0).a)
         * step(kClearDepthThreshold, textureLod(sourceDepth, sunUv, 0.0).r);
+    seen *= SkyShare(uv, ownDepth);
     float angle = atan(fromSun.y, fromSun.x);
     float spikes = pow(abs(cos(3.0 * angle + 0.5)), 40.0);
     float falloff = exp(-r / (0.35 * kStarRadius)) * (1.0 - r / kStarRadius);
@@ -359,7 +375,7 @@ void main()
         color += SunRays(uv, pixel, pixelEndKm, cloud.a);
     }
     if (params.sunRay.w > 0.0) {
-        color += SunStar(uv);
+        color += SunStar(uv, rawDepth);
     }
     if (any(isnan(color)) || any(isinf(color))) {
         color = scene;

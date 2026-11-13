@@ -940,7 +940,7 @@ TEST(VolumetricCloudShaderNamesTest, MarchExposesBoundNames)
         EXPECT_EQ(binding->type, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) << output;
         EXPECT_EQ(binding->access, ReflectedAccess::WriteOnly) << output;
     }
-    EXPECT_EQ(result.descriptorBindings.size(), 13u);
+    EXPECT_EQ(result.descriptorBindings.size(), 14u);
     EXPECT_FALSE(result.hasPushConstantRange);
 }
 
@@ -1406,7 +1406,7 @@ TEST(VolumetricCloudShaderTest, DetailIsCurlWarpedBillowAndWispErosionAndTheCurv
     EXPECT_NE(march.find("float CloudCurve(float body)"), std::string::npos);
     EXPECT_NE(march.find("return Saturate(Remap(shape * shapeGradient, threshold, rampEnd, 0.0, 1.0));"), std::string::npos);
     // The body cut level has a floor and the ramp above it can be narrowed (params.structure3.yw).
-    EXPECT_NE(march.find("float threshold = max(1.0 - coverage * weatherCoverage, params.structure3.y);"), std::string::npos);
+    EXPECT_NE(march.find("float threshold = max(1.0 - effCoverage, params.structure3.y);"), std::string::npos);
     EXPECT_NE(march.find("min(threshold + params.structure3.w, 1.0)"), std::string::npos);
     const std::string lighting = gte::ReadShaderText("VolumetricCloudLighting.glsl");
     EXPECT_NE(lighting.find("return CloudCurve(shape) * factor;"), std::string::npos);
@@ -1488,6 +1488,16 @@ TEST(VolumetricCloudShaderTest, AStillPixelReadsItsHistoryExactly)
     const std::string resolve = gte::ReadShaderText("VolumetricCloudResolve.comp");
     EXPECT_NE(resolve.find("const float kSnapTexels = 0.004;"), std::string::npos);
     EXPECT_NE(resolve.find("previousTexel = mix(previousTexel, snapped, lessThan(abs(previousTexel - snapped), vec2(kSnapTexels)));"), std::string::npos);
+}
+
+// The starburst and the ray taps never paint or pass through a surface that stands in front of the sun.
+TEST(VolumetricCloudShaderTest, StarburstAndRaysRespectSceneDepth)
+{
+    const std::string resolve = gte::ReadShaderText("VolumetricCloudResolve.comp");
+    EXPECT_NE(resolve.find("float SkyShare(vec2 uv, float ownDepth)"), std::string::npos);
+    EXPECT_NE(resolve.find("seen *= SkyShare(uv, ownDepth);"), std::string::npos);
+    EXPECT_NE(resolve.find("color += SunStar(uv, rawDepth);"), std::string::npos);
+    EXPECT_NE(resolve.find("step(kClearDepthThreshold, textureLod(sourceDepth, tapUv, 0.0).r)"), std::string::npos);
 }
 
 TEST(VolumetricCloudShaderTest, NoImplicitLodInTheComputeShaders)
