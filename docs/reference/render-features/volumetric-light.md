@@ -36,6 +36,8 @@ The sun comes from the first active ECS `DirectionalLight`.
 Resources per view: 3 `PersistentVolume`s (`Raw`, `Blended`, `Integrated`, RGBA16F) and 2 history atlases.
 Slice distance is `maxDistance * (slice / 64) ^ depthExponent`. Effective max distance is `min(maxDistance, last cascade far)` when cascades exist.
 
+Cloud shafts: when the `VolumetricCloud.ShadowMap` channel is published with a shaft strength above 0, the sun visibility of every froxel is also multiplied by the cloud sun transmittance at the froxel position (`CloudShadowLookup.glsl`). The cloud feature also publishes a thin mist (`shaftHaze` per km, scale height `shaftHeightM`, thickest for a low sun) that the inject adds to the medium: it has its own two-lobe phase and a sky-blue fill light, and it stretches the effective max distance to 4000 m. The fog of the settings keeps its own range (its density fades out between 0.7 and 1 times its max distance). No map, or `shaftStrength` 0, gives the old behaviour.
+
 History is dropped on a camera cut, when the sun moves more than 1 degree (weight fades in between), or when any lit setting changes.
 Any early exit also drops history. A disabled `Integrate` pass publishes nothing, so the composite does nothing.
 

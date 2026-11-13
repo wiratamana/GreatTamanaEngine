@@ -28,6 +28,9 @@ static_assert(kVolumetricLightGridDepth % kVolumetricLightAtlasTilesX == 0);
 
 inline constexpr std::uint32_t kVolumetricLightHaltonCycle = 16;
 
+// Range of the beam haze (m): beams only need to carry this far, the froxel slices spread over it.
+inline constexpr float kVolumetricLightShaftRangeM = 4000.0f;
+
 // Matches kDirectScale of the material lighting.
 inline constexpr float kVolumetricLightSunDirectScale = 0.65f;
 
@@ -127,6 +130,7 @@ struct VolumetricLightFrameFacts {
     Vec3 jitter = Vec3{ 0.5f, 0.5f, 0.5f };
     std::array<double, 3> windOffset{}; // World units, wrapped.
     float maxDistance = 0.0f;           // Effective max distance of this frame.
+    float fogMaxDistance = 0.0f;        // Range of the fog density of the settings (0 = the whole range).
     std::uint64_t frameIndex = 0;
 };
 
@@ -171,8 +175,11 @@ struct VolumetricLightInjectParamsGpu {
     float jitter[4] = {};               // xyz in [0,1).
     float shadowParams[4] = {};         // x bias texels, y filter texels, z 1 / map size, w ambient shadowed fraction.
     std::uint32_t counts[4] = {};       // x cascade count, y shadow samples, z frame index.
+    float cloudGrid[4] = {};            // xy cloud map centre minus the eye x, z (m), z 1 / map width (m), w shaft strength (0 = no map).
+    float cloudLayer[4] = {};           // x layer base (m), y layer top (m), z sharpness exponent, w map size (texels).
+    float shaftMedium[4] = {};          // x beam haze extinction per m, y haze scale height (m), z fill factor on the ambient shadowed fraction, w range of the fog density above (m, 0 = whole range).
 };
-static_assert(sizeof(VolumetricLightInjectParamsGpu) == 560);
+static_assert(sizeof(VolumetricLightInjectParamsGpu) == 608);
 static_assert(std::is_trivially_copyable_v<VolumetricLightInjectParamsGpu>);
 
 // std430 block of VolumetricLightTemporal.comp; member order matches the shader.

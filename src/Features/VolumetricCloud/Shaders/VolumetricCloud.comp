@@ -40,6 +40,9 @@ layout(std430, binding = 0) readonly buffer VolumetricCloudParams {
     vec4 structure3;                // x weight of the Worley cells in the shape (popcorn), y body threshold floor, z ragged base, w body ramp width.
     vec4 lightTune;                 // x sky light saturation, y diffusion gain, z inner glow gain, w reserved.
     vec4 lightTune2;                // x sun warmth, yzw reserved.
+    vec4 shadowGrid;                // x map texel (m), yz map centre x, z (m), w 1 = write the cloud shadow map.
+    vec4 shadowShift;               // xy history shift (m), z history blend, w optical depth factor.
+    vec4 shadowTune;                // x edge blur (texels), y update interval (frames), z ray steps, w march: shaft strength (0 = none).
 } params;
 
 layout(binding = 1) uniform sampler2D sourceDepth;
@@ -58,6 +61,7 @@ layout(binding = 9) uniform sampler2D transmittanceLut;
 layout(binding = 10) uniform sampler2D multiScatteringLut;
 layout(binding = 11) uniform sampler2D skyViewLut;
 layout(binding = 12) uniform sampler2D curlMap;          // RG curl of a noise potential, B a second field.
+layout(binding = 13) uniform sampler2D shadowHistory;    // Last cloud shadow map (r transmittance, g optical depth); a stand-in for the march.
 
 const float kNoSurfaceKm = 1000.0;
 
@@ -82,6 +86,50 @@ const float kMinStepShare = 0.2;
 const float kMinStepGrowth = 1e-4;
 const float kMaxStepGrowth = 0.5;
 const int kGrowthRounds = 4;
+// Weather lookup warp and the cell-size probe (L4a).
+const float kWeatherWarpTileM = 50000.0;
+const float kWeatherWarpM = 1200.0;
+const float kMinCloudTop = 0.14;
+const float kBaseLump = 0.2;
+// Far model (L4b): beyond this distance the layer is thinner and its lobes are stretched along the wind into rolls.
+const float kFarStreakStartM = 15000.0;
+const float kFarStreakEndM = 50000.0;
+const float kFarStreakAlong = 5.0;
+const float kFarStreakAcross = 2.5;
+const float kFarTopScale = 0.4;
+const float kFarFill = 0.3;
+const float kCoverageGain = 1.5;
+const float kSmallShapeScale = 2.7;
+const vec3 kSmallShapeOffset = vec3(0.53, 0.07, 0.29);
+const float kSmallModLow = 0.45;
+const float kSmallModGain = 0.9;
+// The finest shape octaves fade out between these distances.
+const float kShapeLodStartM = 12000.0;
+const float kShapeLodEndM = 40000.0;
+// The small-cell octave (about 14 m texels) fades out earlier.
+const float kSmallLodEndM = 60000.0;
+// Dome: broad-mass level needed at the base, extra needed at the top, and the softness of the cut.
+const float kWeatherLodStartM = 15000.0;
+const float kWeatherLodEndM = 45000.0;
+const float kWeatherLodMax = 0.8;
+const float kZoomStartM = 20000.0;
+const float kZoomEndM = 50000.0;
+const float kFarZoom = 2.8;
+const vec3 kFarZoomOffset = vec3(0.21, 0.0, 0.58);
+const float kDomeBase = 0.05;
+const float kDomeSpan = 0.75;
+const float kDomeSoft = 0.12;
+// Skin relief (TEMP L6): the visible surface is shaded with a normal from the density gradient.
+const float kSkinRadiusM = 110.0;
+const float kSkinRadiusPerM = 0.01;
+const float kReliefLow = 0.4;
+const float kReliefHigh = 1.7;
+const float kReliefStrength = 0.6;
+const float kSkinTransmittance = 1.1;
+
+// TEMP L4: bit set = that L4 change off (1 warp, 2 size, 4 specks, 8 base lumps); set with ambientIntensity = 40 + bits.
+int gXoff = 0;
+#define kXoff gXoff
 
 float Saturate(float v)
 {
@@ -163,11 +211,18 @@ bool LayerSegment(float cameraY, float dirY, out float tStart, out float tEnd)
 // Returns the shape; `densityFactor` is the part that scales it.
 // Set by CloudShape(): the weather map holds no cloud at the last sampled position.
 bool gWeatherClear = false;
+// Set by CloudShape(): 0 for an isolated small cell, 1 for a big mass.
+float gCloudSize = 1.0;
+
+// Set by CloudShape(): 0 near, 1 far; the finest shape octaves fade out with distance (they would alias into dots).
+float gShapeLod = 0.0;
+// TEMP L5 debug values written by CloudShape().
+vec3 gDbgShape = vec3(0.0);
 
 // The shape value of one volume fetch: Perlin-Worley body against the Worley fbm, stretched to 0..1.
 float ShapeValue(vec4 sn)
 {
-    float fbm = sn.g * 0.625 + sn.b * 0.25 + sn.a * 0.125;
+    float fbm = sn.g * (0.625 + 0.375 * gShapeLod) + (sn.b * 0.25 + sn.a * 0.125) * (1.0 - gShapeLod);
     // The Worley cells are what makes equal-sized popcorn balls; their weight scales them toward their mean.
     fbm = kShapeWorleyMean + (fbm - kShapeWorleyMean) * params.structure3.x;
     float shape = Remap(sn.r, fbm - 1.0, 1.0, 0.0, 1.0);
@@ -177,21 +232,40 @@ float ShapeValue(vec4 sn)
 float CloudShape(vec3 position, float heightFraction, out float densityFactor)
 {
     vec2 wind = params.weather.yz;
+    int xdbg = int(params.sunColorAndAmbient.w + 0.5);
+    gXoff = (xdbg >= 40 ? xdbg - 40 : 0) | max(int(params.lightMisc.z / 1000.0 + 0.5) - 45, 0); // TEMP: A/B mask
+    int xoff = gXoff;
     // Wind shear: the noise is read at a place that moves with the height, so the top of a cloud leans downwind.
     vec2 shear = params.structure.zw * heightFraction;
     vec2 fromEye = position.xz - params.eyeAndPlanetRadius.xz;
-    float farRamp = smoothstep(params.skyShade2.z, 2.0 * params.skyShade2.z, length(fromEye));
+    float fromEyeLength = length(fromEye);
+    gShapeLod = (xoff & 256) != 0 ? 0.0 : smoothstep(kShapeLodStartM, kShapeLodEndM, fromEyeLength);
+    float farRamp = smoothstep(params.skyShade2.z, 2.0 * params.skyShade2.z, fromEyeLength);
     float coverage = min(params.weather.w + params.farField.x * farRamp, 1.0);
+    float farStreak = (xoff & 16) != 0 ? 0.0 : smoothstep(kFarStreakStartM, kFarStreakEndM, length(fromEye));
     vec2 weatherPosition = position.xz + wind + 0.5 * params.structure.zw;
+    // Domain warp: no straight or long smooth contour of the weather field.
+    weatherPosition += (textureLod(curlMap, weatherPosition / kWeatherWarpTileM, 0.0).rg * 2.0 - 1.0) * ((xoff & 1) != 0 ? 0.0 : kWeatherWarpM);
     vec4 wm = textureLod(weatherMap, weatherPosition / params.weather.x, 0.0);
+    // Mean coverage around the point: tells an isolated small cell (low) from a big mass (high).
+    float massAverage = 1.5 * wm.g;  // the smooth fill channel is a blurred coverage: no extra fetches
+    gCloudSize = (xoff & 2) != 0 ? 1.0 : smoothstep(0.15, 0.75, massAverage);
     // Far away the weather repeats every tile and shows the same big blobs. Blend in a second sample of the map at
     // another scale: the pattern no longer repeats and the far field gets more even, smaller clouds.
-    float farBlend = params.skyShade2.w * farRamp;
+    // The fine texture of the weather map is smaller than a pixel far away and shows as dots: from medium distance on
+    // the coarser second copy of the map takes over (world-fixed, so nothing swims).
+    float weatherLod = (xoff & 2048) != 0 ? 0.0 : kWeatherLodMax * smoothstep(kWeatherLodStartM, kWeatherLodEndM, fromEyeLength);
+    float farBlend = max(params.skyShade2.w * farRamp, weatherLod);
     if (farBlend > 0.0) {
         vec2 farUv = weatherPosition / (params.weather.x * kFarWeatherTileScale) + kFarWeatherOffset;
         wm = mix(wm, textureLod(weatherMap, farUv, 0.0), farBlend);
     }
     float weatherCoverage = max(wm.r, Saturate(coverage - 0.5) * wm.g * 1.1);  // the high-coverage fill tops out at 0.55: no solid sheet
+    // Crisp specks of the map that stand alone are dropped; they would be hard flat flakes.
+    weatherCoverage *= (xoff & 4) != 0 ? 1.0 : smoothstep(0.03, 0.10, massAverage);
+    weatherCoverage = Saturate(weatherCoverage * ((xoff & 64) != 0 ? 1.0 : mix(1.0, kCoverageGain, smoothstep(0.08, 0.3, weatherCoverage))));
+    // The far deck is a band of low rolls: it fills in toward the horizon.
+    weatherCoverage = Saturate(weatherCoverage + kFarFill * farStreak * smoothstep(0.0, 0.06, weatherCoverage));
     // A shape value can not reach the coverage threshold here, so skip the 3D fetch.
     densityFactor = 0.0;
     gWeatherClear = coverage * weatherCoverage <= kMinCoverageProduct;
@@ -201,7 +275,15 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
 
     float altitude = params.layer.x + heightFraction * (params.layer.y - params.layer.x);
     vec3 shapeUv = vec3(position.x + wind.x + shear.x, altitude / params.structure2.y, position.z + wind.y + shear.y) / params.noise.x;
-    float shape = ShapeValue(textureLod(shapeVolume, shapeUv, 0.0));
+    vec4 shapeSample = textureLod(shapeVolume, shapeUv, 0.0);
+    // Far away a texel of the volume is smaller than a pixel and the fine lobes alias into dots: read a zoomed copy
+    // of the same field there (world-fixed, so nothing swims) and cross-fade over the distance.
+    float zoomMix = (xoff & 512) != 0 ? 0.0 : smoothstep(kZoomStartM, kZoomEndM, fromEyeLength);
+    if (zoomMix > 0.0) {
+        vec4 zoomSample = textureLod(shapeVolume, shapeUv / kFarZoom + kFarZoomOffset, 0.0);
+        shapeSample = mix(shapeSample, zoomSample, zoomMix);
+    }
+    float shape = ShapeValue(shapeSample);
     float shapeMid = shape;
     float shapeLarge = shape;
     if (params.structure.x > 0.0 || params.structure2.w > 0.0) {
@@ -212,13 +294,36 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
         float largeShare = Saturate(params.structure.x + params.structure.y * (wm.b - 0.5) * 2.0 + params.structure2.w * farRamp);
         shape = mix(shape, shapeLarge, largeShare);
     }
+    // Small cells get a second, finer lobe octave: bumpy cauliflower surfaces instead of one smooth lobe.
+    float smallness = (xoff & 32) != 0 ? 0.0 : (1.0 - gCloudSize) * (1.0 - smoothstep(0.25 * kSmallLodEndM, kSmallLodEndM, fromEyeLength));
+    if (smallness > 0.02) {
+        float fine = ShapeValue(textureLod(shapeVolume, shapeUv * kSmallShapeScale + kSmallShapeOffset, 0.0));
+        shape *= mix(1.0, kSmallModLow + kSmallModGain * fine, smallness);
+    }
+    // Far model: the big octave read through a coordinate stretched along the wind gives rolls, not lobes.
+    if (farStreak > 0.0) {
+        // Fixed axes: with a stretch of 5 and 2.5 the wind wrap (350000 m) is a whole number of noise tiles, so it never pops.
+        const vec2 windAxis = vec2(1.0, 0.0);
+        const vec2 crossAxis = vec2(0.0, 1.0);
+        vec2 world2 = shapeUv.xz * params.noise.x;
+        vec2 stretched = windAxis * (dot(world2, windAxis) / kFarStreakAlong) + crossAxis * (dot(world2, crossAxis) / kFarStreakAcross);
+        vec3 farUv = vec3(stretched.x, shapeUv.y * params.noise.x, stretched.y) / params.noise.x;
+        shape = mix(shape, ShapeValue(textureLod(shapeVolume, farUv / kLargeShapeScale + kLargeShapeOffset, 0.0)), farStreak);
+    }
 
     float peak = mix(params.density.z, 1.0, wm.b);
     float stop = Saturate(peak + params.heightShape.y);
+    // Small cells are low flat cumulus, big masses are tall: no thin towers.
+    // The noise lifts and lowers the top, so it is lumpy and not a flat plane.
+    stop = (xoff & 2) != 0 ? stop : max(stop * mix(kMinCloudTop, 1.0, gCloudSize) + (shapeMid - 0.5) * 0.5 * (1.0 - ((xoff & 256) != 0 ? 0.6 : 0.25) * gCloudSize), 0.10);
+    stop *= mix(1.0, kFarTopScale, farStreak);
+    float topSoftStart = mix(0.15, ((xoff & 256) != 0 ? params.skip.y : min(params.skip.y, 0.55)), gCloudSize);
     // Hanging bases: where the big octave is high the cloud base is lower, so the underside is bumpy and not one plane.
     float baseShift = params.structure2.z * (0.5 - shapeLarge) * 0.4 + params.structure3.z * (0.5 - shapeMid) * 0.3;
+    // Lumps of 0.5-1 km on the underside: the base is not one smooth surface.
+    baseShift += (xoff & 8) != 0 ? 0.0 : clamp((shapeSample.r - 0.635) * kBaseLump, -0.03, 0.08);
     float roundBottom = Saturate(Remap(heightFraction, baseShift, baseShift + params.heightShape.x, 0.0, 1.0));
-    float roundTop = Saturate(Remap(heightFraction, stop * params.skip.y, stop, 1.0, 0.0));
+    float roundTop = Saturate(Remap(heightFraction, stop * topSoftStart, stop, 1.0, 0.0));
     float shapeGradient = roundBottom * roundTop;
 
     float rampBottom = heightFraction * Saturate(Remap(heightFraction, 0.0, params.heightShape.z, 0.0, 1.0));
@@ -228,7 +333,15 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     // Linear body; CloudDetail erodes it and applies the density curve afterwards, so the fine noise cuts into the
     // soft part of the cloud and not into a body already raised to a power.
     // The cut level never falls below the floor: a big mass keeps its lobes and holes instead of filling solid.
-    float threshold = max(1.0 - coverage * weatherCoverage, params.structure3.y);
+    // Dome: the footprint shrinks with height (small cells more), so a cell is not a prism with vertical walls.
+    float dome = smoothstep(0.15, 1.0, heightFraction);
+    float domeLoss = (xoff & 128) != 0 ? 0.0 : mix(0.5, 0.25, gCloudSize);
+    float effCoverage = coverage * weatherCoverage * (1.0 - domeLoss * dome * dome);
+    // The broad mass field must be higher the higher up we are: the footprint of a mass shrinks toward its top over km.
+    float massNeed = kDomeBase + kDomeSpan * dome;
+    effCoverage *= (xoff & 128) != 0 ? 1.0 : smoothstep(massNeed - kDomeSoft, massNeed + kDomeSoft, massAverage);
+    float threshold = max(1.0 - effCoverage, params.structure3.y);
+    gDbgShape = vec3(weatherCoverage, stop, threshold); // TEMP L5
     float rampEnd = params.structure3.w > 0.0 ? min(threshold + params.structure3.w, 1.0) : 1.0;
     return Saturate(Remap(shape * shapeGradient, threshold, rampEnd, 0.0, 1.0));
 }
@@ -280,6 +393,28 @@ float CloudDensityAt(vec3 position, float detailAmount)
 #include "VolumetricCloudLighting.glsl"
 #include "VolumetricCloudAtmosphere.glsl"
 
+// Outward normal of the cloud skin at a position: minus the gradient of the smooth density (4 taps).
+vec3 SkinNormal(vec3 position, float t)
+{
+    float r = max(kSkinRadiusM, kSkinRadiusPerM * t);
+    // A loop with a run-time count keeps one copy of the density code (an unrolled copy per tap makes the shader slow).
+    vec3 g = vec3(0.0);
+    for (uint i = 0u; i < uint(params.lightMarch.x); ++i) {
+        vec3 k = vec3((i == 0u || i == 3u) ? 1.0 : -1.0, i >= 2u ? 1.0 : -1.0, (i & 1u) == 1u ? 1.0 : -1.0);
+        vec3 p = position + k * r;
+        if ((gXoff & 16384) != 0) {
+            g += k * CloudLightDensity(p);
+        } else {
+            // The raw noise keeps its relief where the density is saturated.
+            float alt = Altitude(dot(p.xz - params.eyeAndPlanetRadius.xz, p.xz - params.eyeAndPlanetRadius.xz), p.y);
+            vec3 uv = vec3(p.x + params.weather.y, alt / params.structure2.y, p.z + params.weather.z) / params.noise.x;
+            g += k * textureLod(shapeVolume, uv, 0.0).r;
+        }
+    }
+    float len = length(g);
+    return len > 1e-5 ? -g / len : vec3(0.0, -1.0, 0.0);
+}
+
 // Marches [tStart, tEnd]. Returns light in rgb and the transmittance in a; `cloudDistance` is the mean
 // distance of the cloud, weighted by how much each step adds to the picture (0 when there is none).
 vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, float rayGrowth, out float cloudDistance)
@@ -319,6 +454,8 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
     float skyVisibilityB = 1.0;
     float sunOpticalDepth = 0.0;
     float skyVisibility = 1.0;
+    bool skinKnown = false;
+    vec3 skinNormal = vec3(0.0, -1.0, 0.0);
 
     for (uint i = 0u; i < maxSteps && t < tEnd && transmittance > params.march.w; ++i) {
         stepLength = (t + stepOffset) * rayGrowth;
@@ -328,6 +465,7 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
         float h = Saturate((altitude - params.layer.x) / (params.layer.y - params.layer.x));
         float factor;
         float shape = CloudShape(position, h, factor);
+        vec3 dbgS = gDbgShape; // TEMP L5
 
         if (coarse) {
             if (shape * factor > 0.0) {
@@ -407,7 +545,44 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
         li.skyVisibility = skyVisibility;
         li.groundRadiance = gGroundRadiance;
         li.lodDensity = Saturate(CloudCurve(shape) * factor);
-        light += transmittance * CloudSourceRadiance(li) * opacity;
+        vec3 src = CloudSourceRadiance(li);
+        if ((gXoff & 8192) == 0 && d > 0.02) {
+            // The skin is where the ray has lost part of its light; the thin fringe in front of it has no relief.
+            if (!skinKnown && transmittance < kSkinTransmittance) {
+                skinKnown = true;
+                skinNormal = SkinNormal(position, t);
+            }
+        }
+        if ((gXoff & 8192) == 0 && skinKnown) {
+            vec3 key = normalize(sunDirection + vec3(0.0, 0.6, 0.0));
+            float relief = mix(kReliefLow, kReliefHigh, 0.5 + 0.5 * dot(skinNormal, key));
+            src *= mix(1.0, relief, kReliefStrength);
+        }
+        int dbg = int(params.sunColorAndAmbient.w + 0.5); // TEMP L1 debug
+        if (dbg > 0) {
+            float cosT = dot(rd, sunDirection);
+            float skyShareDbg = mix(params.lightMisc.y, 1.0, pow(h, 0.7)) * skyVisibility;
+            float tauDbg = sunOpticalDepth;
+            if      (dbg == 1)  src = vec3(exp(-tauDbg));
+            else if (dbg == 2)  src = ambientRadiance * skyShareDbg;
+            else if (dbg == 3)  src = gGroundRadiance * (1.0 - h) * (1.0 - h);
+            else if (dbg == 4)  src = vec3(h);
+            else if (dbg == 5)  src = vec3(shape);
+            else if (dbg == 6)  src = vec3(Saturate(d / 3.0));
+            else if (dbg == 7)  src = vec3(skyVisibility);
+            else if (dbg == 8)  src = vec3(Saturate(log2(1.0 + tauDbg) / 8.0));
+            else if (dbg == 9)  src = li.sunRadiance * SunScatter(cosT, tauDbg);
+            else if (dbg == 10) src = li.sunRadiance * vec3(params.lightTune.y * (tauDbg / (tauDbg + 2.0)) / (1.0 + 0.15 * tauDbg) / (4.0 * kPi));
+            else if (dbg == 11) src = (h < 0.03 || h > 0.97) ? vec3(1.0, 0.0, 0.0) : vec3(0.0);
+            else if (dbg == 12) src = vec3(Saturate(extinction * 20.0));
+            else if (dbg == 13) src = vec3(Saturate(li.lodDensity));
+            else if (dbg == 14) src = vec3(tauDbg / 100.0);
+            else if (dbg == 15) src = vec3(dbgS.x);
+            else if (dbg == 16) src = vec3(dbgS.y);
+            else if (dbg == 17) src = vec3(dbgS.z);
+            src = max(src, vec3(0.0));
+        }
+        light += transmittance * src * opacity;
         float weight = transmittance * opacity;
         distanceSum += weight * t;
         weightSum += weight;
@@ -425,8 +600,97 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
     return vec4(light, transmittance);
 }
 
+// Cloud shadow map mode: each texel holds the sun light that reaches the layer plane at its place. The ray from the
+// place toward the sun is marched through the whole layer with the smooth density (no fine erosion).
+const int kShadowMaxSteps = 24;
+const float kShadowMinSunY = 0.03;
+
+float ShadowNoise(vec2 p)
+{
+    return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+}
+
+vec4 ShadowHistoryAt(vec2 uv, ivec2 size)
+{
+    vec2 p = uv * vec2(size) - 0.5;
+    ivec2 i0 = ivec2(floor(p));
+    vec2 f = p - vec2(i0);
+    ivec2 hi = size - 1;
+    vec4 a = texelFetch(shadowHistory, clamp(i0, ivec2(0), hi), 0);
+    vec4 b = texelFetch(shadowHistory, clamp(i0 + ivec2(1, 0), ivec2(0), hi), 0);
+    vec4 c = texelFetch(shadowHistory, clamp(i0 + ivec2(0, 1), ivec2(0), hi), 0);
+    vec4 d = texelFetch(shadowHistory, clamp(i0 + ivec2(1, 1), ivec2(0), hi), 0);
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+void WriteCloudShadow()
+{
+    ivec2 size = min(imageSize(lowColorOut), imageSize(lowAuxOut));
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    if (texel.x >= size.x || texel.y >= size.y) {
+        return;
+    }
+    float texelM = params.shadowGrid.x;
+    vec2 local = (vec2(texel) + 0.5 - 0.5 * vec2(size)) * texelM;
+    vec2 xz = params.shadowGrid.yz + local;
+    float blend = params.shadowShift.z;
+    bool haveHistory = blend < 0.999;
+    vec2 historyUv = (local + params.shadowShift.xy) / (texelM * vec2(size)) + 0.5;
+    if (haveHistory && !(all(greaterThanEqual(historyUv, vec2(0.0))) && all(lessThanEqual(historyUv, vec2(1.0))))) {
+        haveHistory = false;
+    }
+    ivec2 historySize = textureSize(shadowHistory, 0);
+    uint interval = max(uint(params.shadowTune.y + 0.5), 1u);
+    // Whole 8 x 8 tiles take their turn together, so a skipped tile costs nothing.
+    uint phase = (gl_WorkGroupID.x + 3u * gl_WorkGroupID.y) % interval;
+    if (haveHistory && (params.counts.y % interval) != phase) {
+        vec4 carried = ShadowHistoryAt(historyUv, historySize);
+        imageStore(lowColorOut, texel, carried);
+        imageStore(lowAuxOut, texel, vec4(carried.g, 0.0, 0.0, 0.0));
+        return;
+    }
+    // The history of a texel that is redone is blurred a little (a tent of about one texel): the noise of the
+    // few samples of each update averages out and the shadow edge stays soft.
+    vec4 previous = vec4(1.0, 0.0, 0.0, 1.0);
+    if (haveHistory) {
+        vec2 o = vec2(0.5 * clamp(params.shadowTune.x / 1.5, 0.0, 2.0)) / vec2(historySize);
+        previous = 0.25 * (ShadowHistoryAt(historyUv + vec2(o.x, o.y), historySize) + ShadowHistoryAt(historyUv + vec2(-o.x, o.y), historySize)
+            + ShadowHistoryAt(historyUv + vec2(o.x, -o.y), historySize) + ShadowHistoryAt(historyUv + vec2(-o.x, -o.y), historySize));
+    }
+
+    vec3 sun = params.sunDirectionAndIntensity.xyz;
+    float sunY = max(sun.y, kShadowMinSunY);
+    float base = params.layer.x;
+    float top = params.layer.y;
+    float mid = 0.5 * (base + top);
+    float sBottom = (base - mid) / sunY;
+    float sTop = (top - mid) / sunY;
+    int steps = clamp(int(params.shadowTune.z + 0.5), 1, kShadowMaxSteps);
+    float segment = (sTop - sBottom) / float(steps);
+    float frame = float(params.counts.y & 1023u);
+    vec2 noiseSeed = vec2(texel) + frame * vec2(5.588238, 3.1416);
+    float along = ShadowNoise(noiseSeed);
+    float angle = 6.2831853 * ShadowNoise(noiseSeed + 17.0);
+    vec2 blur = vec2(cos(angle), sin(angle)) * sqrt(ShadowNoise(noiseSeed + 41.0)) * params.shadowTune.x * texelM;
+    float opticalDepth = 0.0;
+    for (int i = 0; i < steps; ++i) {
+        float s = sBottom + (float(i) + along) * segment;
+        vec3 position = vec3(xz.x + blur.x + sun.x * s, mid + sun.y * s, xz.y + blur.y + sun.z * s);
+        opticalDepth += CloudLightDensity(position) * segment;
+    }
+    opticalDepth *= params.density.y * params.shadowShift.w;
+    vec4 current = vec4(exp(-opticalDepth), opticalDepth, 0.0, 1.0);
+    vec4 result = haveHistory ? mix(previous, current, blend) : current;
+    imageStore(lowColorOut, texel, result);
+    imageStore(lowAuxOut, texel, vec4(result.g, 0.0, 0.0, 0.0));
+}
+
 void main()
 {
+    if (params.shadowGrid.w > 0.5) {
+        WriteCloudShadow();
+        return;
+    }
     // A persistent target keeps its old size for one frame after a resize: trust the bound images.
     ivec2 lowSize = min(imageSize(lowColorOut), imageSize(lowAuxOut));
     ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
@@ -486,6 +750,11 @@ void main()
     uint cycleLength = params.lowRes.x * params.lowRes.x;
     uint ownSample = (params.counts.y / cycleLength) & 255u;
     float jitter = fract(bn + kGoldenRatio * float(ownSample));
+    int xmask = int(params.sunColorAndAmbient.w + 0.5);
+    int xall = (xmask >= 40 ? xmask - 40 : 0) | max(int(params.lightMisc.z / 1000.0 + 0.5) - 45, 0); // TEMP A/B mask
+    bool lightJitterOff = (xall & 1024) != 0;
+    gLightJitter = lightJitterOff ? 0.5 : fract(jitter * 1.7 + bn * 3.1);
+    gDiffuseMode = (xall & 4096) != 0 ? 1 : 0;
     if (AtmosphereOn()) {
         gSkyAmbient = SkyAmbientRadiance();
         gGroundRadiance = GroundBounceRadiance(params.sunColorAndAmbient.rgb, params.sunDirectionAndIntensity.xyz);
@@ -503,7 +772,7 @@ void main()
     rayGrowth = min(rayGrowth, kMaxStepGrowth);
     float cloudDistance;
     vec4 cloud = MarchClouds(eye, rd, tStart, tEnd, jitter, rayGrowth, cloudDistance);
-    if (AtmosphereOn() && cloud.a < 1.0 && cloudDistance > 0.0) {
+    if (AtmosphereOn() && cloud.a < 1.0 && cloudDistance > 0.0 && (int(params.sunColorAndAmbient.w + 0.5) == 0 || int(params.sunColorAndAmbient.w + 0.5) >= 20)) {
         // Seen through the air: the cloud light is dimmed and the air in front of the cloud adds its own light.
         vec3 airTransmittance;
         vec3 sunIlluminance = params.sunColorAndAmbient.rgb;
@@ -513,7 +782,9 @@ void main()
         float farKm = params.skyShade2.z * 0.001;
         airKm = airKm <= farKm ? airKm : farKm + (airKm - farKm) * params.farField.y;
         vec3 air = AirInscatter(rd, airKm, params.sunDirectionAndIntensity.xyz, sunIlluminance, airTransmittance);
-        cloud.rgb = cloud.rgb * airTransmittance + (1.0 - cloud.a) * air * params.atmosphereMode.y;
+        float airGain = params.atmosphereMode.y;
+        airTransmittance = mix(airTransmittance, vec3(dot(airTransmittance, vec3(0.2126, 0.7152, 0.0722))), 0.9); // TEMP L2 C3: neutral air transmittance
+        cloud.rgb = cloud.rgb * airTransmittance + (1.0 - cloud.a) * air * airGain;
     }
     if (any(isnan(cloud)) || any(isinf(cloud))) {
         cloud = vec4(0.0, 0.0, 0.0, 1.0);

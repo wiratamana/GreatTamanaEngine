@@ -46,6 +46,8 @@ TEST(SceneLightingUniformLayoutTest, EveryFieldMatchesTheStd140BlockInName_Order
         { "toonLook1", offsetof(SceneLightingUniformData, toonLook) + 16 },
         { "toonLook2", offsetof(SceneLightingUniformData, toonLook) + 32 },
         { "toonLook3", offsetof(SceneLightingUniformData, toonLook) + 48 },
+        GTE_EXPECT_MEMBER(cloudShadowGrid),
+        GTE_EXPECT_MEMBER(cloudShadowLayer),
     };
 #undef GTE_EXPECT_MEMBER
 
@@ -55,7 +57,7 @@ TEST(SceneLightingUniformLayoutTest, EveryFieldMatchesTheStd140BlockInName_Order
         EXPECT_EQ(block.members[i].offset, expected[i].second) << expected[i].first;
     }
     EXPECT_EQ(block.size, sizeof(SceneLightingUniformData));
-    EXPECT_EQ(block.size, 512u);
+    EXPECT_EQ(block.size, 544u);
 }
 
 TEST(SceneLightingUniformLayoutTest, BlockFitsTheEngineUniformLimit)

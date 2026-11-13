@@ -427,6 +427,49 @@ VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     return p;
 }
 
+CloudShadowGrid MakeCloudShadowGrid(
+    const VolumetricCloudSettings& safe, const Vec3& eye, const Vec3& sunDirection, std::uint32_t mapSize) noexcept
+{
+    CloudShadowGrid grid;
+    grid.texelM = safe.shadowRangeKm * 1000.0f / static_cast<float>(std::max(mapSize, 1u));
+    const double texel = static_cast<double>(grid.texelM);
+    // The map is read where a receiver's sun ray crosses the layer: centre it on the crossing of the eye's own ray.
+    const double sunUp = std::max(static_cast<double>(sunDirection.y), 0.04);
+    const double along = (0.5 * (static_cast<double>(safe.layerBaseM) + static_cast<double>(safe.layerTopM)) - static_cast<double>(eye.y)) / sunUp;
+    const double crossX = static_cast<double>(eye.x) + static_cast<double>(sunDirection.x) * along;
+    const double crossZ = static_cast<double>(eye.z) + static_cast<double>(sunDirection.z) * along;
+    grid.centerX = std::round(crossX / texel) * texel;
+    grid.centerZ = std::round(crossZ / texel) * texel;
+    return grid;
+}
+
+void SetCloudShaftLookup(VolumetricCloudParamsGpu& params, const CloudShadowMap& map) noexcept
+{
+    params.shadowGrid[0] = 1.0f / std::max(map.extentM, 1.0f);
+    params.shadowGrid[1] = map.centerX;
+    params.shadowGrid[2] = map.centerZ;
+    params.shadowTune[3] = std::min(map.shaftStrength, 1.0f);
+    params.shadowShift[2] = std::max(map.shaftSharpness, 1.0f);
+}
+
+VolumetricCloudParamsGpu MakeVolumetricCloudShadowParams(const VolumetricCloudSettings& safe,
+    const VolumetricCloudFrameFacts& facts, const VolumetricCloudShadowFacts& shadow) noexcept
+{
+    VolumetricCloudParamsGpu p = MakeVolumetricCloudParams(safe, facts);
+    p.shadowGrid[0] = shadow.grid.texelM;
+    p.shadowGrid[1] = static_cast<float>(shadow.grid.centerX);
+    p.shadowGrid[2] = static_cast<float>(shadow.grid.centerZ);
+    p.shadowGrid[3] = 1.0f;
+    p.shadowShift[0] = static_cast<float>(shadow.shiftX);
+    p.shadowShift[1] = static_cast<float>(shadow.shiftZ);
+    p.shadowShift[2] = shadow.historyBlend;
+    p.shadowShift[3] = safe.shadowDensity;
+    p.shadowTune[0] = safe.shadowSoftness;
+    p.shadowTune[1] = std::round(safe.shadowUpdate);
+    p.shadowTune[2] = std::round(safe.shadowSteps);
+    return p;
+}
+
 std::uint32_t CloudResolutionDivisor(const VolumetricCloudSettings& safe, std::uint32_t viewWidth) noexcept
 {
     if (safe.resolutionDivisor < 0.5f) {
@@ -508,6 +551,14 @@ VolumetricCloudResolveParamsGpu MakeVolumetricCloudResolveParams(const Volumetri
     p.sizes[1] = facts.viewHeight;
     p.sizes[2] = resolve.lowWidth;
     p.sizes[3] = resolve.lowHeight;
+    p.sunRay[0] = resolve.sunUv[0];
+    p.sunRay[1] = resolve.sunUv[1];
+    p.sunRay[2] = safe.sunRays * resolve.sunRayFade;
+    p.sunRay[3] = kCloudSunRayLength;
+    for (int i = 0; i < 3; ++i) {
+        p.sunRayColor[i] = resolve.sunColor[i];
+    }
+    p.sunRayColor[3] = kCloudSunRayGlowRadius;
     return p;
 }
 

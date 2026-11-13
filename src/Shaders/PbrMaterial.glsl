@@ -76,7 +76,8 @@ vec3 ShadePbrLinear(PbrSurface s, vec3 worldPosition)
     vec3 reflected = reflect(-v, n);
     vec3 specularAmbient = SceneHemisphereAmbient(reflected) * EnvBrdfApprox(f0, roughness, nDotV)
         * SpecularOcclusion(nDotV, s.occlusion, roughness);
-    vec3 diffuseAmbient = diffuseColor * SceneHemisphereAmbient(n) * s.occlusion;
+    vec3 skyFill = SceneSunWritten() ? CloudDiffuseFill(worldPosition, n, sunDirection, SceneSunIlluminance()) : vec3(0.0);
+    vec3 diffuseAmbient = diffuseColor * (SceneHemisphereAmbient(n) + skyFill) * s.occlusion;
     return min(diffuseAmbient + specularAmbient + direct, vec3(kMaxSceneRadiance));
 }
 

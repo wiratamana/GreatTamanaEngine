@@ -25,6 +25,10 @@ constexpr std::array kSettingKeys{
     SettingKey{ "exposure", &ToneMappingSettings::exposure },
     SettingKey{ "saturation", &ToneMappingSettings::saturation },
     SettingKey{ "dither", &ToneMappingSettings::dither },
+    SettingKey{ "vignette", &ToneMappingSettings::vignette },
+    SettingKey{ "contrast", &ToneMappingSettings::contrast },
+    SettingKey{ "splitTone", &ToneMappingSettings::splitTone },
+    SettingKey{ "grain", &ToneMappingSettings::grain },
 };
 
 constexpr std::string_view kModeKey = "mode";

@@ -68,8 +68,10 @@ struct AerialShadowParamsGpu {
     float forwardAndBias[4] = {};    // xyz camera forward, w bias in texels.
     float shadowParams[4] = {};      // x filter texels, y 1 / map size, z shadow blend.
     std::uint32_t counts[4] = {};    // x cascade count (0 = no shadow taps), y taps per sample.
+    float cloudGrid[4] = {};         // xy cloud map centre minus the eye x, z (m), z 1 / map width (m), w shaft strength (0 = no map).
+    float cloudLayer[4] = {};        // x layer base (m), y layer top (m), z sharpness exponent, w map size (texels).
 };
-static_assert(sizeof(AerialShadowParamsGpu) == 384, "AerialShadowParamsGpu must match the shader block");
+static_assert(sizeof(AerialShadowParamsGpu) == 416, "AerialShadowParamsGpu must match the shader block");
 static_assert(std::is_trivially_copyable_v<AerialShadowParamsGpu>);
 
 // Why a view's aerial volume did or did not use the sun cascades.

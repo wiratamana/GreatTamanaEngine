@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AtmosphereTypes.h"
+#include "../../Game/Lighting/CloudShadowMap.h"
 #include "../../Game/Lighting/SunShadowReceiver.h"
 #include "../../Math/Vec3.h"
 
@@ -44,6 +45,7 @@ AerialReceiverState ClassifyAerialReceiver(const SunShadowReceiver* published, c
 
 // Shadow block of the aerial volume pass. The cascade count is 0 (no shadow taps) when `receiver` is null or
 // `shadowBlend` is not positive.
-AerialShadowParamsGpu MakeAerialShadowParams(const SunShadowReceiver* receiver, float shadowBlend) noexcept;
+AerialShadowParamsGpu MakeAerialShadowParams(const SunShadowReceiver* receiver, float shadowBlend,
+    const CloudShadowMap* cloud = nullptr, const Vec3& eye = Vec3::Zero()) noexcept;
 
 } // namespace gte

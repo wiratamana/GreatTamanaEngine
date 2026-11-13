@@ -18,12 +18,15 @@ namespace {
 
 TEST(VolumetricLightParamsTest, LayoutMatchesTheShaderBlocks)
 {
-    EXPECT_EQ(sizeof(VolumetricLightInjectParamsGpu), 560u);
+    EXPECT_EQ(sizeof(VolumetricLightInjectParamsGpu), 608u);
     EXPECT_EQ(offsetof(VolumetricLightInjectParamsGpu, cascadeViewProjection), 64u);
     EXPECT_EQ(offsetof(VolumetricLightInjectParamsGpu, cascadeSplitFar), 320u);
     EXPECT_EQ(offsetof(VolumetricLightInjectParamsGpu, eyeAndMaxDistance), 384u);
     EXPECT_EQ(offsetof(VolumetricLightInjectParamsGpu, shadowParams), 528u);
     EXPECT_EQ(offsetof(VolumetricLightInjectParamsGpu, counts), 544u);
+    EXPECT_EQ(offsetof(VolumetricLightInjectParamsGpu, cloudGrid), 560u);
+    EXPECT_EQ(offsetof(VolumetricLightInjectParamsGpu, cloudLayer), 576u);
+    EXPECT_EQ(offsetof(VolumetricLightInjectParamsGpu, shaftMedium), 592u);
 
     EXPECT_EQ(sizeof(VolumetricLightTemporalParamsGpu), 192u);
     EXPECT_EQ(offsetof(VolumetricLightTemporalParamsGpu, prevViewProjection), 64u);

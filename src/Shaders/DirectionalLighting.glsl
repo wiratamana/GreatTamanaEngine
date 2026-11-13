@@ -3,7 +3,7 @@
 #ifndef DIRECTIONAL_LIGHTING_GLSL
 #define DIRECTIONAL_LIGHTING_GLSL
 
-// Scene-services binding 8; must match SceneLightingUniformData (512 bytes).
+// Scene-services binding 8; must match SceneLightingUniformData (544 bytes).
 layout(set = 1, binding = 8, std140) uniform SceneGlobalUniformBlock {
     vec4 sunDirectionAndValid;         // xyz = toward sun, w = 1 when written
     vec4 sunIlluminance;               // xyz = sun color * intensity, w = padding
@@ -25,6 +25,8 @@ layout(set = 1, binding = 8, std140) uniform SceneGlobalUniformBlock {
     vec4 toonLook1;                    // x rim strength, y rim width, z hair highlight, w emissive boost
     vec4 toonLook2;                    // x face flatten, y outline NDC height, z outline darkness, w debug view
     vec4 toonLook3;                    // x shade blend, y gem heuristic, z gold glint, w viewport aspect
+    vec4 cloudShadowGrid;              // xy map centre x, z (m), z 1 / map width (m), w strength (0 = no map)
+    vec4 cloudShadowLayer;             // x layer base (m), y layer top (m), z diffuse fill share, w map size (texels)
 } uSceneLighting;
 
 // Used while the block has never been written (the block is all zeros then).
@@ -46,11 +48,18 @@ vec3 LinearToSrgb(vec3 c)
     return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
 }
 
+#include "CloudShadowLookup.glsl"
+
 #ifdef DIRECTIONAL_LIGHTING_NO_SHADOWS
 
 float SunShadowAmount(vec3 position, vec3 normal, float nDotL)
 {
     return 0.0;
+}
+
+vec3 CloudDiffuseFill(vec3 position, vec3 normal, vec3 sunDirection, vec3 sunIlluminance)
+{
+    return vec3(0.0);
 }
 
 #else
@@ -60,6 +69,8 @@ layout(set = 1, binding = 0) uniform sampler2D uShadowCascade0;
 layout(set = 1, binding = 1) uniform sampler2D uShadowCascade1;
 layout(set = 1, binding = 2) uniform sampler2D uShadowCascade2;
 layout(set = 1, binding = 3) uniform sampler2D uShadowCascade3;
+// Cloud shadow map: scene slot 4, r = sun transmittance over the layer plane (white when nothing is published).
+layout(set = 1, binding = 4) uniform sampler2D uCloudShadow;
 
 float ShadowDepthAt(int k, vec2 uv)
 {
@@ -110,8 +121,15 @@ float SampleCascadeShadow(int k, vec3 position, vec3 normal, float nDotL, float 
     return occluded / float(samples);
 }
 
-// 0 = fully lit, 1 = fully shadowed. Cascade pick, blend and distance fade as in the mask pass.
-float SunShadowAmount(vec3 position, vec3 normal, float nDotL)
+// Share of the sun the cloud layer lets through at `position`; 1 without a map.
+float CloudSunVisibility(vec3 position)
+{
+    return CloudSunTransmittance(uCloudShadow, uSceneLighting.cloudShadowGrid, uSceneLighting.cloudShadowLayer,
+        uSceneLighting.sunDirectionAndValid.xyz, position);
+}
+
+// 0 = fully lit, 1 = fully shadowed by the cascades. Cascade pick, blend and distance fade as in the mask pass.
+float CascadeShadowAmount(vec3 position, vec3 normal, float nDotL)
 {
     int count = int(uSceneLighting.shadowParams.x + 0.5);
     if (count <= 0) { return 0.0; }
@@ -146,6 +164,23 @@ float SunShadowAmount(vec3 position, vec3 normal, float nDotL)
     return shadow * (1.0 - smoothstep(fadeStart, fadeEnd, viewDepth));
 }
 
+// 0 = fully lit, 1 = no sun: the cascade shadow and the cloud shadow together.
+float SunShadowAmount(vec3 position, vec3 normal, float nDotL)
+{
+    float cascade = CascadeShadowAmount(position, normal, nDotL);
+    return 1.0 - (1.0 - cascade) * CloudSunVisibility(position);
+}
+
+// Diffuse light of the sky under a cloud: a share of the sun that the layer blocked, spread over the upper hemisphere.
+vec3 CloudDiffuseFill(vec3 position, vec3 normal, vec3 sunDirection, vec3 sunIlluminance)
+{
+    float fill = uSceneLighting.cloudShadowLayer.z;
+    if (fill <= 0.0 || uSceneLighting.cloudShadowGrid.w <= 0.0) { return vec3(0.0); }
+    float blocked = 1.0 - CloudSunTransmittanceFast(uCloudShadow, uSceneLighting.cloudShadowGrid,
+        vec4(uSceneLighting.cloudShadowLayer.xy, 1.0, uSceneLighting.cloudShadowLayer.w), sunDirection, position);
+    return sunIlluminance * (kDirectScale * max(sunDirection.y, 0.0) * fill * blocked * (normal.y * 0.5 + 0.5));
+}
+
 #endif // DIRECTIONAL_LIGHTING_NO_SHADOWS
 
 bool SceneSunWritten() { return uSceneLighting.sunDirectionAndValid.w >= 0.5; }
@@ -174,6 +209,7 @@ vec3 ShadeDirectionalLinear(vec3 baseColorLinear, vec3 worldNormal, bool useShad
     float ndotl = max(dot(n, sunDirection), 0.0);
     vec3 ambient = SceneHemisphereAmbient(n);
 
+    if (useShadow && written) { ambient += CloudDiffuseFill(worldPosition, n, sunDirection, sunIlluminance); }
     float shadow = (useShadow && written && ndotl > 0.0) ? SunShadowAmount(worldPosition, n, ndotl) : 0.0;
     float sunVisibility = 1.0 - uSceneLighting.shadowParams.y * shadow;
 

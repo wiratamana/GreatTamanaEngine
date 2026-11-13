@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../../Game/Lighting/CloudShadowMap.h"
 #include "../../Game/Lighting/DirectionalLightResolver.h"
 #include "../../Game/Lighting/SunLightModulation.h"
 #include "../../Game/Lighting/SunShadowReceiver.h"
@@ -53,7 +54,7 @@ inline SceneLightingSettings SanitizeSceneLightingSettings(const SceneLightingSe
     return s;
 }
 
-// Scene Services binding 8 (std140, 512 bytes). Member names and order match
+// Scene Services binding 8 (std140, 544 bytes). Member names and order match
 // SceneGlobalUniformBlock in DirectionalLighting.glsl.
 struct SceneLightingUniformData {
     float sunDirectionAndValid[4];         // xyz = toward sun, w = 1 once written
@@ -73,15 +74,18 @@ struct SceneLightingUniformData {
     Mat4 cascadeViewProjection2;
     Mat4 cascadeViewProjection3;
     float toonLook[4][4];                  // ToonLook v0..v3; all zero when no toon look was published
+    float cloudShadowGrid[4];              // xy = map centre x, z (m), z = 1 / map width (m), w = strength (0 = no map)
+    float cloudShadowLayer[4];             // x layer base (m), y layer top (m), z diffuse fill share, w map size (texels)
 };
-static_assert(sizeof(SceneLightingUniformData) == 512);
+static_assert(sizeof(SceneLightingUniformData) == 544);
 static_assert(std::is_trivially_copyable_v<SceneLightingUniformData>);
 
 // Packs sun, eye, optional cascades, light modulation and toon tail. A non-finite sun direction becomes up.
 // No receiver or zero material strength zeroes the cascade fields.
 inline SceneLightingUniformData PackSceneLightingUniformData(const ResolvedDirectionalLight& sun,
     const SceneLightingSettings& settings, const Vec3& eye, const SunShadowReceiver* receiver = nullptr,
-    const SunLightModulation* sunLight = nullptr, const ToonLook* toonLook = nullptr) noexcept
+    const SunLightModulation* sunLight = nullptr, const ToonLook* toonLook = nullptr,
+    const CloudShadowMap* cloudShadow = nullptr) noexcept
 {
     const bool finite = std::isfinite(sun.directionTowardSun.x) && std::isfinite(sun.directionTowardSun.y)
         && std::isfinite(sun.directionTowardSun.z);
@@ -115,6 +119,18 @@ inline SceneLightingUniformData PackSceneLightingUniformData(const ResolvedDirec
         std::memcpy(data.toonLook[1], toonLook->v1, sizeof(toonLook->v1));
         std::memcpy(data.toonLook[2], toonLook->v2, sizeof(toonLook->v2));
         std::memcpy(data.toonLook[3], toonLook->v3, sizeof(toonLook->v3));
+    }
+
+    // The cloud shadow does not depend on the cascades, so it is packed before they can end the function.
+    if (cloudShadow != nullptr && CloudShadowMapUsable(*cloudShadow)) {
+        data.cloudShadowGrid[0] = cloudShadow->centerX;
+        data.cloudShadowGrid[1] = cloudShadow->centerZ;
+        data.cloudShadowGrid[2] = 1.0f / cloudShadow->extentM;
+        data.cloudShadowGrid[3] = std::min(cloudShadow->strength, 1.0f);
+        data.cloudShadowLayer[0] = cloudShadow->layerBaseM;
+        data.cloudShadowLayer[1] = cloudShadow->layerTopM;
+        data.cloudShadowLayer[2] = std::clamp(cloudShadow->skyFill, 0.0f, 1.0f);
+        data.cloudShadowLayer[3] = static_cast<float>(kCloudShadowMapSize);
     }
 
     if (receiver == nullptr || !(receiver->materialStrength > 0.0f) || receiver->cascadeCount == 0) {

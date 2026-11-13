@@ -237,8 +237,13 @@ void AtmosphereFeature::AerialVolume(fx::PostOpaqueFrame& f)
     const AerialScaleResult resolved = ResolveAerialScale(view.scaleState, receiver, m_settings, f.FrameIndex());
     frame.aerialPerspectiveMaxDistanceKm = resolved.scale.maxDistanceKm;
     frame.aerialPerspectiveScatteringExaggeration = resolved.scale.exaggeration;
-    const AerialShadowParamsGpu shadowParams = MakeAerialShadowParams(receiver, resolved.scale.shadowBlend);
-    const bool sampled = shadowParams.counts[0] > 0;
+    // Cloud shadow map of this view: the clouds block sun light of the air (light shafts).
+    const std::optional<CloudShadowMap> cloudPublished = m_cloudShadow.Fetch(f);
+    const bool cloudShafts = cloudPublished.has_value() && CloudShadowMapUsable(*cloudPublished)
+        && cloudPublished->shaftStrength > 0.0f;
+    const AerialShadowParamsGpu shadowParams = MakeAerialShadowParams(
+        receiver, resolved.scale.shadowBlend, cloudShafts ? &*cloudPublished : nullptr, v.eye);
+    const bool sampled = shadowParams.counts[0] > 0 || cloudShafts;
 
     snap.maxDistanceKm = resolved.scale.maxDistanceKm;
     snap.exaggeration = resolved.scale.exaggeration;
@@ -261,7 +266,11 @@ void AtmosphereFeature::AerialVolume(fx::PostOpaqueFrame& f)
         if (!shaftDelta.IsValid()) {
             return;
         }
-        const auto map = [&](std::uint32_t i) { return receiver->maps[std::min(i, receiver->cascadeCount - 1)]; };
+        const auto map = [&](std::uint32_t i) {
+            return receiver != nullptr ? receiver->maps[std::min(i, receiver->cascadeCount - 1)] : f.SceneDepth();
+        };
+        // A sampler needs a valid image even when the clouds publish no map (the strength 0 skips the read).
+        const fx::Texture cloudMap = cloudShafts ? cloudPublished->map : shared->transmittance;
         done = f.Compute(m_aerialVolumeShader, "AtmosphereAerialPerspectiveVolumePass")
                    .Params(view.aerialAtmosphereParams, shared->parameters)
                    .Params("frame", view.aerialFrameParams, frame)
@@ -272,6 +281,7 @@ void AtmosphereFeature::AerialVolume(fx::PostOpaqueFrame& f)
                    .Bind("shadowDepth1", fx::Depth(map(1)))
                    .Bind("shadowDepth2", fx::Depth(map(2)))
                    .Bind("shadowDepth3", fx::Depth(map(3)))
+                   .Bind("cloudShadowMap", cloudMap)
                    .Bind("destinationVolume", volume)
                    .Bind("destinationShaftDelta", shaftDelta)
                    .Dispatch(kAerialDispatchSize);

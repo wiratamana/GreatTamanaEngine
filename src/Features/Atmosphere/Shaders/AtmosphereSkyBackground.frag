@@ -39,6 +39,10 @@ void main()
     vec2 uv = ViewDirectionToSkyViewLutUv(viewDirection, lutSize, viewHeightKm, pc.planetRadiusKm);
 
     vec3 radiance = max(texture(skyViewLut, uv).rgb, vec3(0.0)) * pc.skyIntensity;
+    // TEMP L5: toward the horizon the sky turns pale blue-grey (dust and multiple scattering) instead of teal.
+    float horizonBlend = 1.0 - smoothstep(0.0, 0.2, viewDirection.y);
+    float skyLuma = dot(radiance, vec3(0.2126, 0.7152, 0.0722));
+    radiance = mix(radiance, vec3(skyLuma) * vec3(0.93, 0.98, 1.07), 0.6 * horizonBlend);
     // A soft rim over the last part of the radius keeps the disk edge from aliasing.
     float cosOuter = pc.sunDirectionAndCosRadius.w;
     float cosInner = 1.0 - (1.0 - cosOuter) * kDiskInnerFraction;

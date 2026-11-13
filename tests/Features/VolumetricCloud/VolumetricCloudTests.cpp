@@ -660,7 +660,10 @@ TEST(VolumetricCloudParamsTest, BlockLayoutMatchesTheShader)
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, structure3), 496u);
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, lightTune), 512u);
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, lightTune2), 528u);
-    EXPECT_EQ(sizeof(VolumetricCloudParamsGpu), 544u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, shadowGrid), 544u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, shadowShift), 560u);
+    EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, shadowTune), 576u);
+    EXPECT_EQ(sizeof(VolumetricCloudParamsGpu), 592u);
 }
 
 TEST(VolumetricCloudParamsTest, TheAtmosphereModePassesTheSunUntouchedAndTheCamera)
@@ -972,7 +975,9 @@ TEST(VolumetricCloudTemporalTest, ResolveBlockLayoutMatchesTheShader)
     EXPECT_EQ(offsetof(VolumetricCloudResolveParamsGpu, motion), 176u);
     EXPECT_EQ(offsetof(VolumetricCloudResolveParamsGpu, counts), 192u);
     EXPECT_EQ(offsetof(VolumetricCloudResolveParamsGpu, sizes), 208u);
-    EXPECT_EQ(sizeof(VolumetricCloudResolveParamsGpu), 224u);
+    EXPECT_EQ(offsetof(VolumetricCloudResolveParamsGpu, sunRay), 224u);
+    EXPECT_EQ(offsetof(VolumetricCloudResolveParamsGpu, sunRayColor), 240u);
+    EXPECT_EQ(sizeof(VolumetricCloudResolveParamsGpu), 256u);
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, lowRes), 336u);
     EXPECT_EQ(offsetof(VolumetricCloudParamsGpu, fullSize), 352u);
 }
@@ -1316,7 +1321,8 @@ TEST(VolumetricCloudParamsTest, GlslBlocksHaveTheCppMembersAtTheCppOffsets)
             GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, farField), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, detailShape),
             GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, structure), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, structure2),
             GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, structure3), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, lightTune),
-            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, lightTune2) });
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, lightTune2), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, shadowGrid),
+            GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, shadowShift), GTE_CLOUD_MEMBER(VolumetricCloudParamsGpu, shadowTune) });
     ExpectBlock(ParseBlock(ReadShaderText("VolumetricCloudResolve.comp"), "VolumetricCloudResolveParams"),
         { GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, invViewProjection),
             GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, prevViewProjection),
@@ -1325,7 +1331,8 @@ TEST(VolumetricCloudParamsTest, GlslBlocksHaveTheCppMembersAtTheCppOffsets)
             GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, blend),
             GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, motion),
             GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, counts),
-            GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, sizes) });
+            GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, sizes), GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, sunRay),
+            GTE_CLOUD_MEMBER(VolumetricCloudResolveParamsGpu, sunRayColor) });
 #undef GTE_CLOUD_MEMBER
 }
 
@@ -1494,3 +1501,44 @@ TEST(VolumetricCloudShaderTest, NoImplicitLodInTheComputeShaders)
         }
     }
 }
+
+namespace gte {
+namespace {
+
+TEST(VolumetricCloudMathTest, TheShadowMapIsCentredOnTheCrossingOfTheEyesSunRay)
+{
+    VolumetricCloudSettings s;
+    s.layerBaseM = 1500.0f;
+    s.layerTopM = 3500.0f;
+    s.shadowRangeKm = 24.0f;
+    const Vec3 sun = Normalize(Vec3{ 0.0f, 0.5f, 1.0f });
+    const CloudShadowGrid grid = MakeCloudShadowGrid(s, Vec3{ 100.0f, 500.0f, 0.0f }, sun, 128);
+    // Mid layer 2500 m, eye 500 m: 2000 m up along the ray moves it 2000 * sun.z / sun.y toward +z.
+    EXPECT_NEAR(grid.centerZ, 2000.0 * static_cast<double>(sun.z) / static_cast<double>(sun.y), grid.texelM);
+    EXPECT_NEAR(grid.centerX, 100.0, grid.texelM);
+    EXPECT_NEAR(std::fmod(grid.centerZ, static_cast<double>(grid.texelM)), 0.0, 1e-6);
+}
+
+TEST(VolumetricCloudMathTest, TheMarchReadsTheShadowMapForTheAirOnlyWithAShaftStrength)
+{
+    VolumetricCloudSettings s;
+    VolumetricCloudFrameFacts facts;
+    VolumetricCloudParamsGpu p = MakeVolumetricCloudParams(s, facts);
+    EXPECT_FLOAT_EQ(p.shadowTune[3], 0.0f);
+    CloudShadowMap map;
+    map.centerX = 10.0f;
+    map.centerZ = 20.0f;
+    map.extentM = 1000.0f;
+    map.shaftStrength = 0.75f;
+    map.shaftSharpness = 2.0f;
+    SetCloudShaftLookup(p, map);
+    EXPECT_FLOAT_EQ(p.shadowGrid[0], 0.001f);
+    EXPECT_FLOAT_EQ(p.shadowGrid[1], 10.0f);
+    EXPECT_FLOAT_EQ(p.shadowGrid[2], 20.0f);
+    EXPECT_FLOAT_EQ(p.shadowGrid[3], 0.0f);
+    EXPECT_FLOAT_EQ(p.shadowTune[3], 0.75f);
+    EXPECT_FLOAT_EQ(p.shadowShift[2], 2.0f);
+}
+
+} // namespace
+} // namespace gte

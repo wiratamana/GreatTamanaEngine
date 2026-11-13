@@ -1,6 +1,8 @@
 // Sky light for the clouds, read from the atmosphere's look-up tables. Included by VolumetricCloud.comp after
 // the params block and the LUT bindings. Positions are in km from the planet centre (atmosphere space).
 
+#include "CloudShadowLookup.glsl"
+
 const int kAirSamples = 8;
 const float kAmbientZenithWeight = 0.4;
 const float kAmbientRingWeight = 0.15;
@@ -100,6 +102,13 @@ vec3 AirInscatter(vec3 rayDirection, float distanceKm, vec3 sunDirection, vec3 s
         vec3 scatterMie = air.mieScattering * MieDensityAtHeight(air, heightKm) * scale;
         vec3 extinction = ComputeExtinctionCoefficientAtHeight(air, heightKm) * scale;
         float visibility = PlanetVisibility(positionKm, sunDirection, air.planetRadiusKm);
+        if (params.shadowTune.w > 0.0) {
+            // The clouds block sun light of the air (light shafts); the map is read at the sample's world position.
+            vec3 sampleM = params.eyeAndPlanetRadius.xyz + rayDirection * (sampleKm * 1000.0);
+            vec4 cloudGrid = vec4(params.shadowGrid.yz, params.shadowGrid.x, params.shadowTune.w);
+            vec4 cloudLayer = vec4(params.layer.xy, params.shadowShift.z, float(textureSize(shadowHistory, 0).x));
+            visibility *= CloudAirSunVisibility(shadowHistory, cloudGrid, cloudLayer, sunDirection, sampleM);
+        }
 
         vec3 direct = visibility * sunTransmittance * (scatterRayleigh * rayleighPhase + scatterMie * miePhase);
         vec3 source = sunIlluminance * (direct + multiScattered * (scatterRayleigh + scatterMie));

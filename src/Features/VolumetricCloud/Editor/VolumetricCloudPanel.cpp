@@ -142,6 +142,20 @@ bool BuildVolumetricCloudPanel(
     changed |= ImGui::SliderFloat("Inner glow", &edit.msGlow, 0.0f, 4.0f);
     changed |= ImGui::SliderFloat("Sun warmth", &edit.sunWarmth, 0.0f, 1.0f);
 
+    ImGui::SeparatorText("Cloud shadows");
+    changed |= ImGui::SliderFloat("Shadow strength", &edit.shadowStrength, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Shadow range (km)", &edit.shadowRangeKm, 4.0f, 100.0f);
+    changed |= ImGui::SliderFloat("Shadow softness", &edit.shadowSoftness, 0.0f, 4.0f);
+    changed |= ImGui::SliderFloat("Shadow update (frames)", &edit.shadowUpdate, 1.0f, 4.0f, "%.0f");
+    changed |= ImGui::SliderFloat("Shadow density", &edit.shadowDensity, 0.1f, 8.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+    changed |= ImGui::SliderFloat("Shadow steps", &edit.shadowSteps, 4.0f, 24.0f, "%.0f");
+    changed |= ImGui::SliderFloat("Light shafts", &edit.shaftStrength, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Shaft sharpness", &edit.shaftSharpness, 1.0f, 8.0f, "%.1f");
+    changed |= ImGui::SliderFloat("Shaft haze (per km)", &edit.shaftHaze, 0.0f, 4.0f, "%.2f");
+    changed |= ImGui::SliderFloat("Shaft haze height (m)", &edit.shaftHeightM, 200.0f, 6000.0f, "%.0f");
+    changed |= ImGui::SliderFloat("Shadow fill", &edit.shadowFill, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Sun rays", &edit.sunRays, 0.0f, 3.0f);
+
     ImGui::SeparatorText("Quality");
     int divisorIndex = 0;
     for (std::size_t i = 0; i < kDivisorValues.size(); ++i) {

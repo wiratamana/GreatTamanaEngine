@@ -1,10 +1,12 @@
 #pragma once
 
 #include "VolumetricCloudDebugEndpoint.h"
+#include "VolumetricCloudMath.h"
 #include "VolumetricCloudTypes.h"
 #include "../../Core/FeatureKit/FeatureKit.h"
 #include "../../Core/FeatureKit/ScreenSpaceView.h"
 #include "../../Game/Lighting/AtmosphereSkyLuts.h"
+#include "../../Game/Lighting/CloudShadowMap.h"
 #include "../../Game/Lighting/SunLightModulation.h"
 
 #include <array>
@@ -21,6 +23,18 @@ struct VolumetricCloudViewState {
     double windOffset[2] = {};
     double windStep[2] = {};
     fx::TemporalHistory previous; // Valid only when the resolve pass wrote the history last frame.
+
+    // Cloud shadow map: two maps ping-pong by frame index; the dispatch uses its own parameter blocks.
+    fx::GpuParams<VolumetricCloudParamsGpu> shadowParams;
+    fx::GpuParams<AtmosphereParametersGpu> shadowAtmosphereParams;
+    std::array<fx::PersistentTarget, 2> shadowMap{
+        fx::PersistentTarget{ "VolumetricCloud.ShadowMap0" }, fx::PersistentTarget{ "VolumetricCloud.ShadowMap1" } };
+    fx::PersistentTarget shadowAux{ "VolumetricCloud.ShadowAux" };
+    CloudShadowGrid shadowGrid;       // Grid of the last map.
+    std::uint64_t shadowFrame = 0;    // Frame that wrote it.
+    bool shadowGridValid = false;     // The last map is usable as history.
+    CloudShadowMap shadowPublished;   // The map published in `shadowPublishedFrame`; the march reads it for the air.
+    std::uint64_t shadowPublishedFrame = ~std::uint64_t{ 0 };
 
     // March target at 1/divisor of the view size: cloud light + transmittance, and distance + completeness.
     fx::PersistentTarget lowColor{ "VolumetricCloud.LowColor" };
@@ -60,6 +74,8 @@ public:
 
 private:
     void CompositePass(fx::CompositeFrame& f);
+    // Marches the sun ray of every texel of the shadow map through the layer and shares the map with the lit materials.
+    void ShadowMapPass(fx::PreOpaqueFrame& f);
     // Draws the chosen noise texture instead of the clouds. False when nothing was declared.
     bool RunSliceView(fx::CompositeFrame& f, fx::Texture output, VolumetricCloudViewSnapshot& snapshot);
     // Marches the layer at low resolution, resolves it against the history and composites into `output`.
@@ -84,6 +100,8 @@ private:
     fx::ComputeShader m_slice3dShader{ "VolumetricCloudSlice3D" };
     fx::ComputeShader m_slice2dShader{ "VolumetricCloudSlice2D" };
     fx::ViewOutput m_output{ "VolumetricCloud" };
+    fx::SceneSlot m_shadowSlot;
+    fx::Channel<CloudShadowMap> m_shadowData{ kCloudShadowChannel };
     fx::ChannelReader<SunLightModulation> m_sunLight{ kSunLightModulationOwner, kSunLightModulationChannel };
     fx::ChannelReader<AtmosphereSharedLuts> m_sharedLuts{ kAtmosphereLutOwner, kAtmosphereSharedLutsChannel };
     fx::ChannelReader<AtmosphereViewLuts> m_viewLuts{ kAtmosphereLutOwner, kAtmosphereViewLutsChannel };

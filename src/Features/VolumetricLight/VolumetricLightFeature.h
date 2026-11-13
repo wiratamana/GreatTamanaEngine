@@ -3,6 +3,7 @@
 #include "VolumetricLightDebugEndpoint.h"
 #include "VolumetricLightTypes.h"
 #include "../../Core/FeatureKit/FeatureKit.h"
+#include "../../Game/Lighting/CloudShadowMap.h"
 #include "../../Game/Lighting/SunLightModulation.h"
 #include "../../Game/Lighting/SunShadowReceiver.h"
 
@@ -66,7 +67,7 @@ private:
     void CompositePass(fx::CompositeFrame& f);
 
     StageResult RunInject(fx::PostOpaqueFrame& f, VolumetricLightViewState& view, const VolumetricLightFrameFacts& facts,
-        const SunShadowReceiver* receiver);
+        const SunShadowReceiver* receiver, const CloudShadowMap* cloud);
     TemporalResult RunTemporal(fx::PostOpaqueFrame& f, VolumetricLightViewState& view,
         const VolumetricLightFrameFacts& facts, fx::Texture raw, std::uint64_t lightingKey);
     StageResult RunIntegrate(fx::PostOpaqueFrame& f, VolumetricLightViewState& view, float maxDistance, fx::Texture lit);
@@ -82,6 +83,7 @@ private:
     fx::ComputeShader m_compositeShader{ "VolumetricLightComposite" };
     fx::ViewOutput m_composited{ "VolumetricLight" };
     fx::ChannelReader<SunShadowReceiver> m_receiver{ kSunShadowReceiverOwner, kSunShadowReceiverChannel };
+    fx::ChannelReader<CloudShadowMap> m_cloudShadow{ kCloudShadowOwner, kCloudShadowChannel };
     fx::ChannelReader<SunLightModulation> m_sunLight{ kSunLightModulationOwner, kSunLightModulationChannel };
     fx::Channel<VolumetricLightResult> m_result{ "Result" };
 };

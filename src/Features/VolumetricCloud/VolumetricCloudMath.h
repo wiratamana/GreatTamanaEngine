@@ -1,6 +1,7 @@
 #pragma once
 
 #include "VolumetricCloudTypes.h"
+#include "../../Game/Lighting/CloudShadowMap.h"
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
 
@@ -124,6 +125,32 @@ float CloudPlanetRadiusKm(const VolumetricCloudSettings& safe, const VolumetricC
 VolumetricCloudParamsGpu MakeVolumetricCloudParams(
     const VolumetricCloudSettings& safe, const VolumetricCloudFrameFacts& facts) noexcept;
 
+// Where the cloud shadow map sits: a square around the point where the eye's sun ray crosses the layer, whose centre
+// is a multiple of the texel size, so the texel lattice is fixed in the world and the map does not shimmer.
+struct CloudShadowGrid {
+    float texelM = 1.0f;
+    double centerX = 0.0;
+    double centerZ = 0.0;
+};
+
+CloudShadowGrid MakeCloudShadowGrid(
+    const VolumetricCloudSettings& safe, const Vec3& eye, const Vec3& sunDirection, std::uint32_t mapSize) noexcept;
+
+// History of the shadow map: how far the clouds moved since the last map, and how much of the new samples to take.
+struct VolumetricCloudShadowFacts {
+    CloudShadowGrid grid;
+    double shiftX = 0.0; // Where the same cloud sat last time, relative to its place now (m): wind step + grid move.
+    double shiftZ = 0.0;
+    float historyBlend = 1.0f; // 1 = no history.
+};
+
+// Lets the march shader read `map` for the sun light of the air in front of a cloud (shaft strength 0 = off).
+void SetCloudShaftLookup(VolumetricCloudParamsGpu& params, const CloudShadowMap& map) noexcept;
+
+// The parameter block of the dispatch that writes the shadow map (the march shader in its map mode).
+VolumetricCloudParamsGpu MakeVolumetricCloudShadowParams(const VolumetricCloudSettings& safe,
+    const VolumetricCloudFrameFacts& facts, const VolumetricCloudShadowFacts& shadow) noexcept;
+
 // Width in texels of the march grid when the divisor is automatic (setting 0).
 inline constexpr float kCloudAutoMarchTexels = 320.0f;
 inline constexpr std::uint32_t kCloudMaxResolutionDivisor = 6;
@@ -146,6 +173,10 @@ std::uint32_t CloudOwnSampleIndex(std::uint64_t frameIndex, std::uint32_t diviso
 // Start jitter in [0, 1) of a marched pixel: the blue noise value moved by the golden ratio per own sample.
 float CloudMarchJitter(float blueNoise, std::uint64_t frameIndex, std::uint32_t divisor) noexcept;
 
+// Screen-space sun rays: how far toward the sun a pixel looks (share of the way) and the radius of the sun glow.
+inline constexpr float kCloudSunRayLength = 0.9f;
+inline constexpr float kCloudSunRayGlowRadius = 0.18f;
+
 // Previous-frame data of the resolve pass.
 struct VolumetricCloudResolveFacts {
     Mat4 prevViewProjection = Mat4::Identity(); // Last frame's view-projection, eye-relative to THIS frame's eye.
@@ -153,6 +184,9 @@ struct VolumetricCloudResolveFacts {
     bool historyValid = false;
     std::uint32_t lowWidth = 1;
     std::uint32_t lowHeight = 1;
+    float sunUv[2] = {};      // Sun position in the view (0..1); only used when sunRayFade > 0.
+    float sunRayFade = 0.0f;  // 0 = the sun is behind the camera or too high for rays.
+    float sunColor[3] = { 1.0f, 1.0f, 1.0f };
 };
 
 VolumetricCloudResolveParamsGpu MakeVolumetricCloudResolveParams(const VolumetricCloudSettings& safe,

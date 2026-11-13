@@ -152,6 +152,20 @@ struct VolumetricCloudSettings {
     float atmosphereMode = 1.0f;
     float airScale = 1.0f;          // Factor on the air's scattering between the eye and a cloud (mode 1).
     float skyAmbient = 3.5f;        // Factor on the sky light that reaches the clouds (mode 1).
+
+    // Cloud shadows: a map of the sun light the layer lets through, read by the lit materials.
+    float shadowStrength = 1.0f; // 0 = no cloud shadows (the map is not made); 1 = a full cloud blocks the sun fully.
+    float shadowRangeKm = 24.0f; // Width of the map around the camera.
+    float shadowSoftness = 1.5f; // Blur of the shadow edge in map texels.
+    float shadowUpdate = 3.0f;   // Every texel is redone once per this many frames (1..4).
+    float shadowDensity = 1.0f;  // Factor on the optical depth of the shadow ray; above 1 darker shadows.
+    float shadowSteps = 10.0f;   // Samples of the shadow ray through the layer.
+    float shaftStrength = 1.0f;  // 0 = no light shafts; 1 = the air loses the sun light the clouds block (uses the shadow map).
+    float shaftSharpness = 2.0f; // Exponent on the sun transmittance of the air; higher gives crisper beams and darker gaps.
+    float shaftHaze = 0.06f;     // Extinction per km of the haze that carries the beams near the ground (0 = no extra haze).
+    float shaftHeightM = 1500.0f; // Scale height of that haze; it thins out above.
+    float shadowFill = 0.25f;     // Share of the blocked sun that reaches shadowed ground as diffuse light.
+    float sunRays = 1.6f;         // Strength of the screen-space sun rays through gaps in the clouds (0 = off).
 };
 
 // One tunable float: its endpoint key, field and range.
@@ -259,6 +273,18 @@ inline constexpr std::array kVolumetricCloudFloatSettings{
     VolumetricCloudFloatSetting{ "atmosphereMode", &VolumetricCloudSettings::atmosphereMode, 0.0f, 1.0f },
     VolumetricCloudFloatSetting{ "airScale", &VolumetricCloudSettings::airScale, 0.0f, 50.0f },
     VolumetricCloudFloatSetting{ "skyAmbient", &VolumetricCloudSettings::skyAmbient, 0.0f, 10.0f },
+    VolumetricCloudFloatSetting{ "shadowStrength", &VolumetricCloudSettings::shadowStrength, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "shadowRangeKm", &VolumetricCloudSettings::shadowRangeKm, 4.0f, 100.0f },
+    VolumetricCloudFloatSetting{ "shadowSoftness", &VolumetricCloudSettings::shadowSoftness, 0.0f, 4.0f },
+    VolumetricCloudFloatSetting{ "shadowUpdate", &VolumetricCloudSettings::shadowUpdate, 1.0f, 4.0f },
+    VolumetricCloudFloatSetting{ "shadowDensity", &VolumetricCloudSettings::shadowDensity, 0.1f, 8.0f },
+    VolumetricCloudFloatSetting{ "shadowSteps", &VolumetricCloudSettings::shadowSteps, 4.0f, 24.0f },
+    VolumetricCloudFloatSetting{ "shaftStrength", &VolumetricCloudSettings::shaftStrength, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "shaftSharpness", &VolumetricCloudSettings::shaftSharpness, 1.0f, 8.0f },
+    VolumetricCloudFloatSetting{ "shaftHaze", &VolumetricCloudSettings::shaftHaze, 0.0f, 4.0f },
+    VolumetricCloudFloatSetting{ "shaftHeightM", &VolumetricCloudSettings::shaftHeightM, 200.0f, 6000.0f },
+    VolumetricCloudFloatSetting{ "shadowFill", &VolumetricCloudSettings::shadowFill, 0.0f, 1.0f },
+    VolumetricCloudFloatSetting{ "sunRays", &VolumetricCloudSettings::sunRays, 0.0f, 3.0f },
 };
 
 // Where the light of the clouds came from in the last frame.
@@ -319,8 +345,11 @@ struct VolumetricCloudParamsGpu {
     float structure3[4] = {};           // x weight of the Worley cells in the shape, y body threshold floor, z ragged base, w body ramp width.
     float lightTune[4] = {};            // x sky light saturation, y diffusion gain, z inner glow gain, w reserved.
     float lightTune2[4] = {};           // x sun warmth, yzw reserved.
+    float shadowGrid[4] = {};           // x map texel (m), yz map centre x, z (m), w 1 = write the cloud shadow map.
+    float shadowShift[4] = {};          // xy history shift (m), z history blend, w optical depth factor.
+    float shadowTune[4] = {};           // x edge blur (texels), y update interval (frames), z ray steps, w reserved.
 };
-static_assert(sizeof(VolumetricCloudParamsGpu) == 64 + 30 * 16);
+static_assert(sizeof(VolumetricCloudParamsGpu) == 64 + 33 * 16);
 static_assert(std::is_trivially_copyable_v<VolumetricCloudParamsGpu>);
 
 // std430 block of VolumetricCloudResolve.comp; member order matches the shader.
@@ -333,8 +362,10 @@ struct VolumetricCloudResolveParamsGpu {
     float motion[4] = {};               // x extra blend at one pixel of motion, y Catmull-Rom history weight, z adaptive sample count (0/1).
     std::uint32_t counts[4] = {};       // x divisor, yz sample offset inside the block, w history valid.
     std::uint32_t sizes[4] = {};        // xy view size, zw march target size.
+    float sunRay[4] = {};               // xy sun position in the view (0..1), z strength (0 = off), w length of the ray (share of the way to the sun).
+    float sunRayColor[4] = {};          // rgb colour of the rays, w glow radius (view height units).
 };
-static_assert(sizeof(VolumetricCloudResolveParamsGpu) == 128 + 6 * 16);
+static_assert(sizeof(VolumetricCloudResolveParamsGpu) == 128 + 8 * 16);
 static_assert(std::is_trivially_copyable_v<VolumetricCloudResolveParamsGpu>);
 
 // Clamps every field into its documented range; a non-finite number falls back to the default.

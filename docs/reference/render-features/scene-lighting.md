@@ -26,8 +26,8 @@
 | Fact | Value |
 |---|---|
 | Location | scene-services binding 8, `std140` |
-| Struct | `SceneLightingUniformData` in `SceneLightingTypes.h`, 512 bytes. The last 64 bytes (`toonLook0..3`) are the `ToonLook` record |
-| Limit | 512 bytes (`kSceneGlobalUniformBlockSize`) |
+| Struct | `SceneLightingUniformData` in `SceneLightingTypes.h`, 544 bytes. The 64 bytes after the cascades (`toonLook0..3`) are the `ToonLook` record; the last 32 bytes (`cloudShadowGrid`, `cloudShadowLayer`) describe the cloud shadow map of scene slot 4 |
+| Limit | 544 bytes (`kSceneGlobalUniformBlockSize`) |
 | Shader side | `SceneGlobalUniformBlock` in `src/Shaders/DirectionalLighting.glsl` |
 | Same layout | Member names and order match the GLSL block. A `static_assert` checks the size |
 

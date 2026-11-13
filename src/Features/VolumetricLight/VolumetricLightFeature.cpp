@@ -61,7 +61,8 @@ VolumetricLightViewSnapshot VolumetricLightFeature::Snapshot(rg::ViewScope scope
 }
 
 VolumetricLightFeature::StageResult VolumetricLightFeature::RunInject(fx::PostOpaqueFrame& f,
-    VolumetricLightViewState& view, const VolumetricLightFrameFacts& facts, const SunShadowReceiver* receiver)
+    VolumetricLightViewState& view, const VolumetricLightFrameFacts& facts, const SunShadowReceiver* receiver,
+    const CloudShadowMap* cloud)
 {
     StageResult result;
     result.texture = view.raw.Acquire(f);
@@ -74,14 +75,21 @@ VolumetricLightFeature::StageResult VolumetricLightFeature::RunInject(fx::PostOp
     const auto pick = [&](std::uint32_t i) {
         return receiver != nullptr ? receiver->maps[std::min(i, receiver->cascadeCount - 1)] : f.SceneDepth();
     };
-    const bool dispatched = f.Compute(m_injectShader, "VolumetricLight.Inject.Dispatch")
-                                .Params(view.injectParams, MakeVolumetricLightInjectParams(m_settings, receiver, facts))
-                                .Bind("shadowDepth0", fx::Depth(pick(0)))
-                                .Bind("shadowDepth1", fx::Depth(pick(1)))
-                                .Bind("shadowDepth2", fx::Depth(pick(2)))
-                                .Bind("shadowDepth3", fx::Depth(pick(3)))
-                                .Bind("injectOutput", result.texture)
-                                .Dispatch(kGridColumns, kVolumetricLightGridDepth);
+    const bool cloudShafts = cloud != nullptr && CloudShadowMapUsable(*cloud) && cloud->shaftStrength > 0.0f;
+    fx::ComputeChain chain = f.Compute(m_injectShader, "VolumetricLight.Inject.Dispatch");
+    chain.Params(view.injectParams, MakeVolumetricLightInjectParams(m_settings, receiver, facts, cloudShafts ? cloud : nullptr))
+        .Bind("shadowDepth0", fx::Depth(pick(0)))
+        .Bind("shadowDepth1", fx::Depth(pick(1)))
+        .Bind("shadowDepth2", fx::Depth(pick(2)))
+        .Bind("shadowDepth3", fx::Depth(pick(3)))
+        .Bind("injectOutput", result.texture);
+    // A sampler needs a valid image even without a cloud map (the shaft strength 0 skips the read).
+    if (cloudShafts) {
+        chain.Bind("cloudShadowMap", cloud->map);
+    } else {
+        chain.Bind("cloudShadowMap", fx::Depth(f.SceneDepth()));
+    }
+    const bool dispatched = chain.Dispatch(kGridColumns, kVolumetricLightGridDepth);
     if (!dispatched) {
         f.ReportOnce("VolumetricLight.Inject.Dispatch was refused");
         result.failure = VolumetricLightFrameStatus::ShadersNotReady;
@@ -214,12 +222,19 @@ void VolumetricLightFeature::VolumePass(fx::PostOpaqueFrame& f)
     facts.frameIndex = f.FrameIndex();
     facts.maxDistance = VolumetricLightEffectiveMaxDistance(
         cfg, hasReceiver, hasReceiver ? receiver->splitFar[receiver->cascadeCount - 1] : 0.0f);
+    // Beam haze needs range: the slices stretch to it and the fog of the settings keeps its own range.
+    const std::optional<CloudShadowMap> cloudShadow = m_cloudShadow.Fetch(f);
+    if (cloudShadow && CloudShadowMapUsable(*cloudShadow) && cloudShadow->shaftStrength > 0.0f
+        && cloudShadow->shaftHazePerM > 0.0f && facts.maxDistance < kVolumetricLightShaftRangeM) {
+        facts.fogMaxDistance = facts.maxDistance;
+        facts.maxDistance = kVolumetricLightShaftRangeM;
+    }
     if (cfg.jitter) {
         snap.jitterIndex = static_cast<std::uint32_t>(f.FrameIndex() % kVolumetricLightHaltonCycle);
         facts.jitter = VolumetricLightHaltonJitter(snap.jitterIndex);
     }
 
-    const StageResult injected = RunInject(f, view, facts, receiver);
+    const StageResult injected = RunInject(f, view, facts, receiver, cloudShadow ? &*cloudShadow : nullptr);
     if (injected.failure != VolumetricLightFrameStatus::Ok) {
         bail(injected.failure);
         return;

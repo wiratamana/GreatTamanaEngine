@@ -61,6 +61,9 @@
 - The grid has 4 steps per octave, so the value does not flicker inside one step.
 - A small scene gets 0.5 km, 8x and blend 0. The volume pass then does no shadow taps.
 
+## Cloud shadows in the air
+When the cloud feature publishes its `ShadowMap` channel with a shaft strength above 0, the aerial perspective volume multiplies the sun visibility of each sample by the cloud sun transmittance (`CloudShadowLookup.glsl`). The shaft delta (light removed from the sky background) then includes the cloud shadow, so columns of sky under clouds get darker and the haze over geometry is lit only where the sun passes the layer. At the default auto scale the range is short, so the visible beams come from VolumetricLight (see the cloud doc, `shaftHaze`); set `autoScale` off for km-range beams here.
+
 ## Debug keys
 
 Writable (`/feature_debug/set`): `sceneLightFollowsAtmosphere`, `autoScale`, `aerialPerspectiveStrength`, `aerialPerspectiveMaxDistanceKm`, `aerialPerspectiveDepthExponent`, `aerialPerspectiveSamplesPerSlice`, `aerialPerspectiveScatteringExaggeration`, `skyIntensity`, `sunDiskIntensity`, `sunDiskRadiusDeg`, `multiScatteringStrength`, `miePhaseG`, `rayleighScaleHeightKm`, `mieScaleHeightKm`.

@@ -8,6 +8,8 @@ const vec3 kOctaveTint = vec3(0.9, 0.97, 1.1);
 // Sun light at full warmth: the blue falls first, like light that crossed more air.
 const vec3 kSunWarmTint = vec3(1.0, 0.88, 0.7);
 const float kGlowEccentricity = 0.3;
+// Share of its segment a sun sample may move (1 = anywhere inside).
+const float kLightJitterSpan = 0.9;
 
 struct CloudLightInput {
     vec3 position;          // World position of the sample, metres.
@@ -63,6 +65,13 @@ float CloudLightDensity(vec3 position)
     return CloudCurve(shape) * factor;
 }
 
+// Per-ray random number in 0..1 that changes with every own sample of the pixel; the light samples move inside
+// their segment with it, so the history averages the sampling noise instead of showing a fixed dot pattern.
+float gLightJitter = 0.5;
+int gDiffuseMode = 0;
+float kDiffuseGain = 1.6;
+float kDiffuseDecay = 0.03;
+
 // Optical depth from a sample toward the sun. Steps double in length, so a few samples cover the reach.
 float SunOpticalDepth(vec3 position, vec3 sunDirection)
 {
@@ -73,7 +82,7 @@ float SunOpticalDepth(vec3 position, vec3 sunDirection)
     float travelled = 0.0;
     float opticalDepth = 0.0;
     for (uint i = 0u; i < steps; ++i) {
-        float centre = travelled + 0.5 * segment;
+        float centre = travelled + (0.5 + (fract(gLightJitter + kGoldenRatio * float(i)) - 0.5) * kLightJitterSpan) * segment;
         vec3 samplePosition = position + sunDirection * centre;
         // The nearest sample also carries the fine erosion, which gives the self-shadowing its detail.
         float sampleDensity = (i == 0u && params.lightMisc.w > 0.0)
@@ -147,6 +156,11 @@ vec3 CloudSourceRadiance(CloudLightInput s)
         // The diffusion term is the light that bounced around inside the cloud: it decays slowly with optical depth.
         float tau = s.sunOpticalDepth;
         vec3 diffuse = vec3(params.lightTune.y * (tau / (tau + 2.0)) / (1.0 + 0.15 * tau) / (4.0 * kPi));
+        // TEMP L5: light that leaks through the mass above falls off with its optical depth over a wide range, so a
+        // thick mass shows tone where its thickness changes.
+        if (gDiffuseMode == 1) {
+            diffuse = vec3(params.lightTune.y * kDiffuseGain * (tau / (tau + 2.0)) * exp(-tau * kDiffuseDecay) / (4.0 * kPi));
+        }
         // Inner glow: looking toward the sun, the deep light of a thick cloud shines through its lobes.
         float glowDecay = mix(0.25, mix(0.25, 0.05, s.lodDensity), Saturate(cosTheta / 0.9));
         vec3 glow = vec3(params.lightTune.z * s.lodDensity * exp(-tau * glowDecay) * HenyeyGreenstein(cosTheta, kGlowEccentricity));
@@ -155,5 +169,7 @@ vec3 CloudSourceRadiance(CloudLightInput s)
     float skyShare = mix(params.lightMisc.y, 1.0, pow(s.heightFraction, 0.7)) * s.skyVisibility;
     // Light bounced up from the ground reaches the low part of the cloud.
     float groundShare = (1.0 - s.heightFraction) * (1.0 - s.heightFraction);
+    // TEMP L2 C1: the ground under a thick cloud is in its shadow, so it bounces little light up.
+    groundShare *= mix(0.15, 1.0, exp(-0.15 * s.sunOpticalDepth));
     return sun + s.ambientRadiance * skyShare + s.groundRadiance * groundShare;
 }

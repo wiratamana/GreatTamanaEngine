@@ -16,6 +16,8 @@ layout(std430, binding = 0) readonly buffer VolumetricCloudResolveParams {
     vec4 motion;        // x extra blend at one pixel of motion, y sharp (Catmull-Rom) history 0..1, z adaptive sample count 0/1.
     uvec4 counts;       // x divisor, yz sample offset, w history valid.
     uvec4 sizes;        // xy view size, zw march target size.
+    vec4 sunRay;        // xy sun position in the view, z strength (0 = off), w length (share of the way to the sun).
+    vec4 sunRayColor;   // rgb colour, w glow radius (view height units).
 } params;
 
 layout(binding = 1) uniform sampler2D sourceColor;
@@ -115,6 +117,34 @@ bool FetchHistory(vec2 texelPosition, float pixelEndKm, out vec4 color, out floa
     }
     distanceKm = distanceWeight > 0.0 ? distanceSum / distanceWeight : 0.0;
     return true;
+}
+
+const float kRayBlockedShare = 0.55;
+
+// Sun rays: the glow around the sun, looked at through the gaps of the clouds. The pixel averages the glow along the
+// line toward the sun, and a cloud on that line (low transmittance) blocks it.
+vec3 SunRays(vec2 uv, ivec2 pixel, float pixelEndKm, float cloudTransmittance)
+{
+    const int kTaps = 24;
+    vec2 aspect = vec2(float(params.sizes.x) / float(params.sizes.y), 1.0);
+    vec2 toSun = params.sunRay.xy - uv;
+    float jitter = fract(52.9829189 * fract(dot(vec2(pixel), vec2(0.06711056, 0.00583715))));
+    float radius = max(params.sunRayColor.w, 1e-3);
+    float sum = 0.0;
+    float glowSum = 0.0;
+    for (int i = 0; i < kTaps; ++i) {
+        float t = (float(i) + jitter) / float(kTaps) * params.sunRay.w;
+        vec2 p = uv + toSun * t;
+        vec2 fromSun = (p - params.sunRay.xy) * aspect / radius;
+        float glow = 1.0 / (1.0 + dot(fromSun, fromSun));
+        float open = textureLod(lowColor, clamp(p, vec2(0.0), vec2(1.0)), 0.0).a;
+        sum += glow * open;
+        glowSum += glow;
+    }
+    // Only lines that are mostly open count: a half blocked line is no ray, so gaps stand out from the clouds.
+    sum = max(sum - kRayBlockedShare * glowSum, 0.0) / (1.0 - kRayBlockedShare);
+    float onGround = smoothstep(0.3, 4.0, pixelEndKm);
+    return params.sunRayColor.rgb * (params.sunRay.z * sum / float(kTaps) * onGround * mix(0.5, 1.0, cloudTransmittance));
 }
 
 void main()
@@ -262,6 +292,9 @@ void main()
     imageStore(historyAuxOut, pixel, vec4(cloudDistanceKm, pixelEndKm, newCount, 0.0));
 
     vec3 color = scene * cloud.a + cloud.rgb;
+    if (params.sunRay.z > 0.0) {
+        color += SunRays(uv, pixel, pixelEndKm, cloud.a);
+    }
     if (any(isnan(color)) || any(isinf(color))) {
         color = scene;
     }

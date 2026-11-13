@@ -37,6 +37,8 @@ layout(std430, binding = 5) readonly buffer AerialShadowBlock {
     vec4 forwardAndBias;    // xyz camera forward, w bias in texels.
     vec4 shadowParams;      // x filter texels, y 1 / map size, z shadow blend.
     uvec4 counts;           // x cascade count, y taps per sample.
+    vec4 cloudGrid;         // xy cloud map centre minus the eye x, z (m), z 1 / map width (m), w shaft strength (0 = no map).
+    vec4 cloudLayer;        // x layer base (m), y layer top (m), z sharpness exponent, w map size (texels).
 } shadow;
 
 layout(binding = 6) uniform sampler2D shadowDepth0;
@@ -46,6 +48,9 @@ layout(binding = 9) uniform sampler2D shadowDepth3;
 
 // RGB = light the shadows remove from the unshadowed sky along the column (never positive).
 layout(binding = 10, rgba16f) uniform writeonly image2D destinationShaftDelta;
+
+// Sun light the cloud layer lets through (see CloudShadowLookup.glsl); r = transmittance.
+layout(binding = 11) uniform sampler2D cloudShadowMap;
 
 float OrthoMapDepthAt(int k, vec2 uv)
 {
@@ -71,6 +76,7 @@ float OrthoMapDepthAt(int k, vec2 uv)
 #define ORTHO_INV_MAP_SIZE shadow.shadowParams.y
 
 #include "OrthoMapSetVisibility.glsl"
+#include "CloudShadowLookup.glsl"
 
 // Below this ray transmittance a sample cannot change the image.
 const float kMinRayTransmittance = 1e-3;
@@ -121,6 +127,8 @@ void main()
     vec3 worldStepPerKm = viewDirection * worldUnitsPerKm;
     float shadowBlend = clamp(shadow.shadowParams.z, 0.0, 1.0);
     float lastSplitFar = ORTHO_SPLIT_FAR(clamp(int(ORTHO_COUNT), 1, 4) - 1);
+    bool cascadesOn = ORTHO_COUNT > 0u;
+    bool cloudShafts = shadow.cloudGrid.w > 0.0;
 
     // Without exaggeration the shaft ray and the haze ray are the same ray.
     bool unexaggerated = scatteringExaggeration == 1.0;
@@ -186,11 +194,18 @@ void main()
                 if (planetVisibility > 0.0
                     && maxComponent(max(accumulatedTransmittance, shaftBefore)) > kMinRayTransmittance) {
                     vec3 worldSample = eyeWorld + worldStepPerKm * sampleDistanceKm;
-                    if (dot(worldSample - ORTHO_EYE, ORTHO_FORWARD) < lastSplitFar) {
+                    if (cascadesOn && dot(worldSample - ORTHO_EYE, ORTHO_FORWARD) < lastSplitFar) {
                         float rotation = 6.2831853
                             * InterleavedGradientNoise(vec2(froxelXY)
                                     + vec2(float(slice) * 7.0 + float(sampleIndex) * 3.0, float(slice) * 13.0), 0u);
                         sunVisibility = mix(1.0, OrthoMapSetVisibility(worldSample, rotation), shadowBlend);
+                        tapped = true;
+                    }
+                    if (cloudShafts) {
+                        // The clouds block sun light of the air; the map is read relative to the eye.
+                        vec3 offsetM = worldStepPerKm * sampleDistanceKm;
+                        vec3 cloudPosition = vec3(offsetM.x, eyeWorld.y + offsetM.y, offsetM.z);
+                        sunVisibility *= CloudAirSunVisibility(cloudShadowMap, shadow.cloudGrid, shadow.cloudLayer, directionToSun, cloudPosition);
                         tapped = true;
                     }
                 }

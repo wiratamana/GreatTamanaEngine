@@ -381,7 +381,7 @@ VolumetricLightHistory MakeVolumetricLightHistory(const VolumetricLightFrameFact
 }
 
 VolumetricLightInjectParamsGpu MakeVolumetricLightInjectParams(const VolumetricLightSettings& safe,
-    const SunShadowReceiver* receiver, const VolumetricLightFrameFacts& facts) noexcept
+    const SunShadowReceiver* receiver, const VolumetricLightFrameFacts& facts, const CloudShadowMap* cloud) noexcept
 {
     VolumetricLightInjectParamsGpu p;
     p.invViewProjection = facts.invViewProjection;
@@ -440,6 +440,21 @@ VolumetricLightInjectParamsGpu MakeVolumetricLightInjectParams(const VolumetricL
     p.shadowParams[3] = safe.ambientShadowedFraction;
     p.counts[1] = safe.shadowSamples;
     p.counts[2] = static_cast<std::uint32_t>(facts.frameIndex);
+    // The cloud map is read relative to the eye, so a far camera keeps its precision.
+    if (cloud != nullptr && CloudShadowMapUsable(*cloud) && cloud->shaftStrength > 0.0f) {
+        p.cloudGrid[0] = cloud->centerX - facts.eye.x;
+        p.cloudGrid[1] = cloud->centerZ - facts.eye.z;
+        p.cloudGrid[2] = 1.0f / cloud->extentM;
+        p.cloudGrid[3] = std::min(cloud->shaftStrength, 1.0f);
+        p.cloudLayer[0] = cloud->layerBaseM;
+        p.cloudLayer[1] = cloud->layerTopM;
+        p.cloudLayer[2] = std::max(cloud->shaftSharpness, 1.0f);
+        p.cloudLayer[3] = static_cast<float>(kCloudShadowMapSize);
+        p.shaftMedium[0] = std::max(cloud->shaftHazePerM, 0.0f);
+        p.shaftMedium[1] = std::max(cloud->shaftHeightM, 1.0f);
+        p.shaftMedium[2] = 2.0f;
+        p.shaftMedium[3] = facts.fogMaxDistance;
+    }
     return p;
 }
 

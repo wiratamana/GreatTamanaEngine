@@ -58,7 +58,7 @@ Blend (`fx::Blend`): `Replace` writes over the view (ToneMapping, last). `AlphaO
 | `ClearReadback`, `CopyReadbackToHost` | `bool` | Passes of the `GpuReadback` flow |
 | `ExposeAsViewOutput(output, tex)` | void | Call only after the writing pass was declared |
 | `PublishToScene(slot, tex)` | void | Feeds material shaders. See scene slots |
-| `SetSceneUniforms(value)` | void | `T` trivially copyable, at most 512 bytes |
+| `SetSceneUniforms(value)` | void | `T` trivially copyable, at most 544 bytes |
 | `ShaderReady(computeShader)` | `bool` | Builds the shader now if needed. False while a failed build cools down |
 | `FrameIndex()` | `uint64` | Same for both view scopes of one frame. Use it for "N frames ago" |
 | `DeltaSeconds()` | `float` | Real seconds, clamped to 0.25. Not paused by playback pause. Never divide by it |
@@ -155,7 +155,7 @@ Every chain ends with a terminal call. A refused call makes the terminal declare
 | Slot count | 8 (`kSceneSlotCount`). Shader binding is `layout(set = 1, binding = N)` |
 | Kinds | `Image2D`, `Depth2D`, `Image3D` |
 | Depth flag | Derived from the kind. Never set by hand: a wrong flag can crash the driver |
-| Uniform block | `SetSceneUniforms(T)`. Binding 8. At most 512 bytes. Checked at compile time |
+| Uniform block | `SetSceneUniforms(T)`. Binding 8. At most 544 bytes. Checked at compile time |
 | Shipped use | Shadow declares 4 `Depth2D` slots, indices 0..3. Slots 4..7 are free |
 | `Image3D` limit | One shared dummy for all `Image3D` slots. Sound for one `Image3D` slot only. No feature uses one |
 

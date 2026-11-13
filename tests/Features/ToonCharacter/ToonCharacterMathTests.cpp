@@ -218,7 +218,7 @@ TEST(ToonCharacterMathTest, LookRecordLayoutMatchesTheUniformTail)
     EXPECT_EQ(offsetof(ToonLook, v2), 32u);
     EXPECT_EQ(offsetof(ToonLook, v3), 48u);
     EXPECT_TRUE(std::is_trivially_copyable_v<ToonLook>);
-    EXPECT_EQ(sizeof(SceneLightingUniformData), 512u);
+    EXPECT_EQ(sizeof(SceneLightingUniformData), 544u);
     EXPECT_EQ(offsetof(SceneLightingUniformData, toonLook), 448u);
 }
 

@@ -5,6 +5,7 @@
 #include "AtmosphereTypes.h"
 #include "../../Core/FeatureKit/FeatureKit.h"
 #include "../../Game/Lighting/AtmosphereSkyLuts.h"
+#include "../../Game/Lighting/CloudShadowMap.h"
 #include "../../Game/Lighting/SunLightModulation.h"
 #include "../../Game/Lighting/SunShadowReceiver.h"
 
@@ -94,6 +95,7 @@ private:
     fx::Channel<AtmosphereAerialResult> m_aerial{ "AerialVolume" };
     fx::Channel<SunLightModulation> m_sunLight{ kSunLightModulationChannel };
     fx::ChannelReader<SunShadowReceiver> m_receiver{ kSunShadowReceiverOwner, kSunShadowReceiverChannel };
+    fx::ChannelReader<CloudShadowMap> m_cloudShadow{ kCloudShadowOwner, kCloudShadowChannel };
     AtmosphereDebugEndpoint m_debugEndpoint{ *this };
 };
 

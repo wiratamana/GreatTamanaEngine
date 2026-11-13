@@ -28,8 +28,10 @@ void SceneLightingFeature::Setup(fx::FeatureSetup& s)
             m_applied.For(f.Scope()) = SunLightModulationSnapshot{ applied, f.FrameIndex() };
             const std::optional<SunShadowReceiver> receiver = m_receiver.Fetch(f);
             const std::optional<ToonLook> toonLook = m_toonLook.Fetch(f);
+            const std::optional<CloudShadowMap> cloudShadow = m_cloudShadow.Fetch(f);
             f.SetSceneUniforms(PackSceneLightingUniformData(ResolveActiveDirectionalLight(f.Scene()), m_settings,
-                f.View().eye, receiver ? &*receiver : nullptr, &applied, toonLook ? &*toonLook : nullptr));
+                f.View().eye, receiver ? &*receiver : nullptr, &applied, toonLook ? &*toonLook : nullptr,
+                cloudShadow ? &*cloudShadow : nullptr));
         },
         fx::Gate::Always());
 }

@@ -3,6 +3,7 @@
 #include "SceneLightingDebugEndpoint.h"
 #include "SceneLightingTypes.h"
 #include "../../Core/FeatureKit/FeatureKit.h"
+#include "../../Game/Lighting/CloudShadowMap.h"
 #include "../../Game/Lighting/SunLightModulation.h"
 #include "../../Game/Lighting/SunShadowReceiver.h"
 #include "../../Game/Lighting/ToonLook.h"
@@ -29,6 +30,7 @@ private:
     fx::ChannelReader<SunShadowReceiver> m_receiver{ kSunShadowReceiverOwner, kSunShadowReceiverChannel };
     fx::ChannelReader<SunLightModulation> m_sunLight{ kSunLightModulationOwner, kSunLightModulationChannel };
     fx::ChannelReader<ToonLook> m_toonLook{ kToonLookOwner, kToonLookChannel };
+    fx::ChannelReader<CloudShadowMap> m_cloudShadow{ kCloudShadowOwner, kCloudShadowChannel };
 };
 
 } // namespace gte

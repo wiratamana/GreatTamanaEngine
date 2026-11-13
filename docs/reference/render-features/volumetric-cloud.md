@@ -171,8 +171,27 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `atmosphereMode` | 1 | 0..1 | 1 lights the clouds from the Atmosphere tables (falls back to 0 when none are published), 0 is the standalone look |
 | `airScale` | 1 | 0..50 | Mode 1: factor on the air's scattering and extinction between the eye and a cloud |
 | `skyAmbient` | 3.5 | 0..10 | Mode 1: factor on the sky light that reaches the clouds (at the reference sky intensity 6, whatever `skyIntensity` the Atmosphere shows) |
+| `shadowStrength` | 1 | 0..1 | Cloud shadows: how much of the sun a receiver under a thick cloud loses. 0 = no shadow map is made (no cost) |
+| `shadowRangeKm` | 24 | 4..100 | Width of the shadow map around the camera (128 x 128 texels). Beyond its edge the sun is not shadowed |
+| `shadowSoftness` | 1.5 | 0..4 | Edge blur of the cloud shadow in map texels |
+| `shadowUpdate` | 3 | 1..4 | Each 8 x 8 texel tile of the map is redone once per this many frames. 1 = every frame (2.2 ms), 4 = about 1 ms |
+| `shadowDensity` | 1 | 0.1..8 | Factor on the optical depth of the shadow ray; above 1 darker, harder shadows |
+| `shadowSteps` | 10 | 4..24 | Samples of the shadow ray through the layer. Fewer than 10 misses thin cloud |
+| `shaftSharpness` | 2 | 1..8 | Exponent on the sun transmittance of the air: higher gives crisper beams and darker gaps |
+| `shaftHaze` | 0.06 | 0..4 | Extinction per km at the ground of the mist that carries the beams in the volumetric light (it stretches the volume to 4 km; the fog of the settings keeps its own range). Thickest for a low sun, gone above about 45 degrees. 0 = no extra mist |
+| `shaftHeightM` | 1500 | 200..6000 | Scale height of that mist |
+| `shadowFill` | 0.25 | 0..1 | Share of the sun the cloud blocks that reaches shadowed receivers as diffuse light, so a shadowed ground is not black |
+| `sunRays` | 1.6 | 0..3 | Screen-space sun rays: the glow around the sun seen through the gaps of the clouds (24 taps in the resolve pass, the cloud transmittance is the occluder). Gone when the sun is behind the camera or well outside the picture, and for a high sun. 0 = off |
+| `shaftStrength` | 1 | 0..1 | Light shafts: how much of the sun in-scatter of the air the cloud shadow map removes (aerial perspective, volumetric light, air in front of clouds). 0 = none |
 
 Resolve detail: a pixel that is not marched this frame reads its history texel exactly (positions within 0.004 texel of a texel centre are snapped). Without the snap the 1e-4 texel matrix noise made the rgba16f store round the history down one half-float step on every unmarched frame, which darkened the converged picture the more the lower `freshBlend` was.
+
+## Cloud shadows
+- The cloud pass also writes a map of the sun light the layer lets through (`VolumetricCloud.Shadow.Dispatch`, a PreOpaque pass; the same compute shader as the march, in a map mode). The map is a 128 x 128 RGBA16F texture (r = sun transmittance, g = optical depth) over the layer plane, centred on the camera and snapped to its texel lattice, so it does not shimmer when the camera moves.
+- Each texel marches the sun ray through the whole layer with the smooth density (no fine erosion), 10 jittered steps, and blends with the history of the last map (shifted by the wind and the grid move). The map is shown to the materials as scene slot 4 and described by the `VolumetricCloud.ShadowMap` channel (`Game/Lighting/CloudShadowMap.h`); the packed numbers sit in the scene uniform block (`cloudShadowGrid`, `cloudShadowLayer`).
+- A lit material reads it in `SunShadowAmount()` (`DirectionalLighting.glsl`, function `CloudSunTransmittance()` in `CloudShadowLookup.glsl`): the receiver's sun ray is followed to the middle of the layer, the map is read there with a cubic B-spline, and the result multiplies the sun term together with the cascade shadow. Ambient light stays. A receiver inside the layer is shaded only by the part above it; above the layer there is no shadow.
+- No map (clouds off, `shadowStrength` 0, sun below 2.4 degrees, pass toggled off) = the slot is the white dummy = no change to any picture. The shadow fades in between sun heights 0.04 and 0.10 (sine of the elevation).
+- Cost on the Iris Xe at 1280x720: about 0.8 ms for the dispatch at the defaults (`shadowUpdate` 3).
 
 ## Cloud coverage knobs
 | Want | Set |
@@ -245,13 +264,13 @@ Cheap levers at 1920x1080 and divisor 4 (S2 / S8): `maxSteps` 64 saves 3.6 / 5.3
 Memory per view: 4 full-size RGBA16F history targets (about 12 MB at 884x432), small march targets, and about 9.6 MB of noise shared by all views.
 
 ## Limits
-- No cloud shadows on the ground and no cloud shadow on other clouds from outside the layer.
+- Cloud shadows reach the lit materials, the aerial perspective (light shafts over the haze and in the sky), the volumetric light and the air in front of clouds. The map is centred on the point where the camera's sun ray crosses the layer and covers `shadowRangeKm` around it; air or ground farther from the camera than about half of that range is not shadowed. No cloud shadow on other clouds from outside the layer.
 - The noise has no mips. Detail fades out with distance instead.
 - Divisor 2 (crisper edges) costs 26..41 ms on the Iris Xe at 720p; the automatic divisor keeps the march grid at about 320 texels wide instead.
 - A coarser divisor is a little softer (mean error against a full-res reference 0.8 at divisor 4 against 0.5 at divisor 2, out of 255, still camera). A still picture at divisor 6 converges to nearly the same picture as divisor 4 but needs 36 frames per sample of a pixel (about 10 samples = 12 s at 30 fps). Moving clouds are soft: wind of 40 m/s keeps 86 percent of the still sharpness, 200 m/s about 75 percent. A newly exposed screen edge and the first frames after a resize or a camera cut show the raw block pattern for up to n*n frames.
 - TemporalAa (-150) sees the clouds as normal pixels. Its jitter is not fed into the march pattern. TemporalAa, Gtao and Ssgi use the same eye-relative camera, so they stay on far from the origin.
 - Mode 1 reads the sky of the camera's height only: one sky-view lookup set for the whole picture and the camera's position for the air. Clouds that are far away and high see the same sky light as the ones overhead.
-- Clouds do not shadow the ground, the aerial perspective shafts or the sun glow of the sky. They only dim what is behind them. A sun glow behind a cloud is dimmed by the cloud transmittance, like any other pixel.
+- Clouds do not shadow the aerial perspective shafts or the sun glow of the sky. They only dim what is behind them. A sun glow behind a cloud is dimmed by the cloud transmittance, like any other pixel.
 - Mode 1 follows the planet's shadow: at a sun angle just below the horizon only the high far clouds stay lit and the rest go dark, as the sky does. Mode 0 keeps lighting them with a fixed twilight tint.
 - The layer is a sphere shell around a planet centred below the camera. Horizontal camera position does not bend it.
 - Perspective cameras only. A view with no valid eye-relative camera (`View::relative`) gives `NoValidCamera`.

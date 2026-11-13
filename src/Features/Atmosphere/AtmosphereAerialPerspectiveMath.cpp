@@ -84,13 +84,28 @@ AerialReceiverState ClassifyAerialReceiver(const SunShadowReceiver* published, c
                                                                                 : AerialReceiverState::Mismatch;
 }
 
-AerialShadowParamsGpu MakeAerialShadowParams(const SunShadowReceiver* receiver, float shadowBlend) noexcept
+AerialShadowParamsGpu MakeAerialShadowParams(const SunShadowReceiver* receiver, float shadowBlend,
+    const CloudShadowMap* cloud, const Vec3& eye) noexcept
 {
     AerialShadowParamsGpu p;
     p.counts[1] = kAerialShadowTaps;
     p.eyeAndUnitsPerKm[3] = kWorldUnitsPerKilometer;
     p.forwardAndBias[3] = kAerialShadowBiasTexels;
     p.shadowParams[0] = kAerialShadowFilterTexels;
+    // The cloud map is read relative to the eye, so a far camera keeps its precision.
+    if (cloud != nullptr && CloudShadowMapUsable(*cloud) && cloud->shaftStrength > 0.0f) {
+        p.eyeAndUnitsPerKm[0] = eye.x;
+        p.eyeAndUnitsPerKm[1] = eye.y;
+        p.eyeAndUnitsPerKm[2] = eye.z;
+        p.cloudGrid[0] = cloud->centerX - eye.x;
+        p.cloudGrid[1] = cloud->centerZ - eye.z;
+        p.cloudGrid[2] = 1.0f / cloud->extentM;
+        p.cloudGrid[3] = std::min(cloud->shaftStrength, 1.0f);
+        p.cloudLayer[0] = cloud->layerBaseM;
+        p.cloudLayer[1] = cloud->layerTopM;
+        p.cloudLayer[2] = std::max(cloud->shaftSharpness, 1.0f);
+        p.cloudLayer[3] = static_cast<float>(kCloudShadowMapSize);
+    }
     if (receiver == nullptr || !(shadowBlend > 0.0f)) {
         return p;
     }

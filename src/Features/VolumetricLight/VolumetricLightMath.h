@@ -2,6 +2,7 @@
 
 #include "VolumetricLightTypes.h"
 #include "../../Core/Extent.h"
+#include "../../Game/Lighting/CloudShadowMap.h"
 #include "../../Game/Lighting/SunShadowReceiver.h"
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
@@ -112,8 +113,10 @@ VolumetricLightHistory MakeVolumetricLightHistory(const VolumetricLightFrameFact
     std::uint64_t lightingKey, const VolumetricLightHistory& previous) noexcept;
 
 // `receiver` is null when no usable cascade data exists: the shader then sees every point as lit.
+// `cloud` is null or unusable when the clouds publish no shadow map; its shaft strength lets the clouds block the sun.
 VolumetricLightInjectParamsGpu MakeVolumetricLightInjectParams(const VolumetricLightSettings& safe,
-    const SunShadowReceiver* receiver, const VolumetricLightFrameFacts& facts) noexcept;
+    const SunShadowReceiver* receiver, const VolumetricLightFrameFacts& facts,
+    const CloudShadowMap* cloud = nullptr) noexcept;
 
 // `usable` false makes the shader ignore the history.
 VolumetricLightTemporalParamsGpu MakeVolumetricLightTemporalParams(const VolumetricLightSettings& safe,

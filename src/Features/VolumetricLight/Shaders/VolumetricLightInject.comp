@@ -24,6 +24,9 @@ layout(std430, binding = 0) readonly buffer InjectParams {
     vec4 jitter;                // xyz in [0,1).
     vec4 shadowParams;          // x bias texels, y filter texels, z 1 / map size, w ambient shadowed fraction.
     uvec4 counts;               // x cascade count, y shadow samples, z frame index.
+    vec4 cloudGrid;             // xy cloud map centre minus the eye x, z (m), z 1 / map width (m), w shaft strength (0 = no map).
+    vec4 cloudLayer;            // x layer base (m), y layer top (m), z sharpness exponent, w map size (texels).
+    vec4 shaftMedium;           // x beam haze extinction per m, y haze scale height (m), z fill factor on the ambient shadowed fraction, w range of the fog density (m, 0 = all).
 } params;
 
 layout(binding = 1) uniform sampler2D shadowDepth0;
@@ -31,6 +34,8 @@ layout(binding = 2) uniform sampler2D shadowDepth1;
 layout(binding = 3) uniform sampler2D shadowDepth2;
 layout(binding = 4) uniform sampler2D shadowDepth3;
 layout(binding = 5, rgba16f) uniform writeonly image3D injectOutput;
+// Sun light the cloud layer lets through (see CloudShadowLookup.glsl); r = transmittance.
+layout(binding = 6) uniform sampler2D cloudShadowMap;
 
 float OrthoMapDepthAt(int k, vec2 uv)
 {
@@ -56,6 +61,12 @@ float OrthoMapDepthAt(int k, vec2 uv)
 #define ORTHO_INV_MAP_SIZE params.shadowParams.z
 
 #include "OrthoMapSetVisibility.glsl"
+#include "CloudShadowLookup.glsl"
+
+// Beam haze scatters more sun than a local fog: the fog of the settings is sized for a few metres.
+const float kHazeSunGain = 4.0;
+// Sky light that fills the shadowed mist: bluer than the sun.
+const vec3 kHazeFillTint = vec3(0.55, 0.8, 1.2);
 
 void main()
 {
@@ -83,16 +94,36 @@ void main()
     if (startDistance > 0.0) {
         sigmaT *= smoothstep(0.0, startDistance, distance);
     }
+    float fogRange = params.shaftMedium.w;
+    if (fogRange > 0.0) {
+        // The fog of the settings keeps its own range when the beam haze stretches the slices further.
+        sigmaT *= 1.0 - smoothstep(0.7 * fogRange, fogRange, distance);
+    }
     sigmaT = max(sigmaT, 0.0);
     float sigmaS = sigmaT * params.densityParams.y;
+    // Beam haze: a thin layer of mist near the ground that makes the sun shafts of the clouds visible.
+    float hazeT = params.shaftMedium.x * exp(-max(world.y, 0.0) / max(params.shaftMedium.y, 1.0));
 
     float rotation = 6.2831853
         * InterleavedGradientNoise(vec2(cell.xy) + vec2(float(cell.z) * 7.0, float(cell.z) * 13.0), params.counts.z);
     float visibility = OrthoMapSetVisibility(world, rotation);
+    if (params.cloudGrid.w > 0.0) {
+        // The clouds block sun light of the air; the map is read relative to the eye.
+        vec3 offsetM = dir * distance;
+        vec3 cloudPosition = vec3(offsetM.x, params.eyeAndMaxDistance.y + offsetM.y, offsetM.z);
+        visibility *= CloudAirSunVisibility(cloudShadowMap, params.cloudGrid, params.cloudLayer, params.sunDirectionAndG.xyz, cloudPosition);
+    }
     float phase = HenyeyGreenstein(dot(dir, params.sunDirectionAndG.xyz), params.sunDirectionAndG.w);
     // Ambient follows the sun shadow: 1 keeps it everywhere, 0 leaves it only in sunlit air.
     float ambientMask = mix(params.shadowParams.w, 1.0, visibility);
     vec3 scattering = sigmaS * (params.sunRadiance.rgb * (phase * visibility) + params.ambientRadiance.rgb * ambientMask);
+    if (hazeT > 0.0) {
+        // Forward lobe for the sun in view, a wide lobe for beams seen from the side, and a constant fill light.
+        float cosSun = dot(dir, params.sunDirectionAndG.xyz);
+        float hazePhase = 0.5 * HenyeyGreenstein(cosSun, 0.8) + 0.5 * HenyeyGreenstein(cosSun, 0.25);
+        scattering += 0.95 * hazeT * params.sunRadiance.rgb * (kHazeSunGain * hazePhase * visibility + params.shaftMedium.z * params.shadowParams.w * kHazeFillTint);
+        sigmaT += hazeT;
+    }
 
     vec4 value = vec4(scattering, sigmaT);
     if (HasNonFinite(value)) {
