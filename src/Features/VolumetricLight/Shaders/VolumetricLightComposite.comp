@@ -28,12 +28,16 @@ void main()
     float depth = texture(sourceDepth, uv).r;
     vec3 scene = texture(sourceColor, uv).rgb;
 
-    // Sky pixels see a fraction of the fog column.
+    // Sky pixels see a fraction of the fog column. The fog exists only inside the volume, so a surface beyond its
+    // range gets less of it the farther it lies (up to twice the range) and none after that.
     float maxDistance = pc.eyeAndMaxDistance.w;
     float distance = maxDistance * uintBitsToFloat(pc.frameAndDebug.z);
+    float rangeFade = 1.0;
     if (depth < kClearDepthThreshold) {
         vec4 w = pc.invViewProjection * vec4(uv * 2.0 - 1.0, depth, 1.0);
-        distance = min(length(w.xyz / w.w - pc.eyeAndMaxDistance.xyz), maxDistance);
+        float surfaceDistance = length(w.xyz / w.w - pc.eyeAndMaxDistance.xyz);
+        distance = min(surfaceDistance, maxDistance);
+        rangeFade = 1.0 - smoothstep(maxDistance, 2.0 * maxDistance, surfaceDistance);
     }
 
     float sliceCount = float(textureSize(integratedVolume, 0).z);
@@ -46,7 +50,7 @@ void main()
     if (HasNonFinite(fog)) {
         fog = vec4(0.0, 0.0, 0.0, 1.0);
     }
-    fog = mix(vec4(0.0, 0.0, 0.0, 1.0), fog, clamp(slice, 0.0, 1.0)); // Fade in over the first slice.
+    fog = mix(vec4(0.0, 0.0, 0.0, 1.0), fog, clamp(slice, 0.0, 1.0) * rangeFade); // Fade in over the first slice.
 
     float strength = pc.strengthExponentReserved.x;
     vec3 inScatter = fog.rgb * strength;

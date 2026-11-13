@@ -36,7 +36,11 @@ The sun comes from the first active ECS `DirectionalLight`.
 Resources per view: 3 `PersistentVolume`s (`Raw`, `Blended`, `Integrated`, RGBA16F) and 2 history atlases.
 Slice distance is `maxDistance * (slice / 64) ^ depthExponent`. Effective max distance is `min(maxDistance, last cascade far)` when cascades exist.
 
-Cloud shafts: when the `VolumetricCloud.ShadowMap` channel is published with a shaft strength above 0, the sun visibility of every froxel is also multiplied by the cloud sun transmittance at the froxel position (`CloudShadowLookup.glsl`). The cloud feature also publishes a thin mist (`shaftHaze` per km, scale height `shaftHeightM`, thickest for a low sun) that the inject adds to the medium: it has its own two-lobe phase and a sky-blue fill light, and it stretches the effective max distance to 4000 m. The fog of the settings keeps its own range (its density fades out between 0.7 and 1 times its max distance). No map, or `shaftStrength` 0, gives the old behaviour.
+Sun visibility: the inject and the Atmosphere aerial volume call one function, `AirSunVisibilityAt` in `Shaders/AirSunVisibility.glsl`. It takes the sun cascades (the shadow fades out over the last quarter of the last cascade, so air never jumps from shadowed to lit), then the cloud map. Cascade shadows only hold terrain that fits the cascade depth span, see `terrainReliefM` in [Shadow](shadow.md).
+
+Role split: this fog is the near field inside `maxDistance`. The aerial volume owns the air beyond it. A surface farther than `maxDistance` gets less of the fog column the farther it lies (none at twice `maxDistance`), so a mountain km away is not covered by a column of near air.
+
+Cloud shafts: when the `VolumetricCloud.ShadowMap` channel is published with a shaft strength above 0, the sun visibility of every froxel is also multiplied by the cloud sun transmittance at the froxel position (`CloudShadowLookup.glsl`). The cloud feature also publishes a thin mist (`shaftMist` per km, scale height `shaftHeightM`, thickest for a low sun, default 0) that the inject adds to the medium: it has its own two-lobe phase and a sky-blue fill light, and it stretches the effective max distance to 4000 m. The fog of the settings keeps its own range (its density fades out between 0.7 and 1 times its max distance). No map, or `shaftStrength` 0, gives the old behaviour.
 
 History is dropped on a camera cut, when the sun moves more than 1 degree (weight fades in between), or when any lit setting changes.
 Any early exit also drops history. A disabled `Integrate` pass publishes nothing, so the composite does nothing.
@@ -64,7 +68,7 @@ Sanitized on write (`SanitizeVolumetricLightSettings`). NaN and infinity become 
 | `temporal` / `jitter` | true / true | bool | History blend / Halton jitter |
 | `historyBlend` | 0.9 | 0..0.98 | Temporal blend |
 | `strength` | 1.0 | 0..1 | Composite strength. 0 draws nothing |
-| `skyDistanceFraction` | 0.3 | 0..1 | Share of `maxDistance` fog that sky pixels see |
+| `skyDistanceFraction` | 0.3 | 0..1 | Share of `maxDistance` fog that sky pixels see. Sky pixels have no depth, so the range fade does not apply to them |
 | `debugView` | `Off` | `Off`, `InScatterOnly`, `Transmittance` | Show one part of the volume |
 
 ## Debug keys
