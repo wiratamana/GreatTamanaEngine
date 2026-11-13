@@ -88,6 +88,7 @@ TEST(ShaderContractTest, AerialVolumeBoundsTheBeamLight)
     EXPECT_NE(text.find("const float kBeamLightCap"), std::string::npos);
     EXPECT_NE(text.find("vec3 BoundBeamLight(vec3 light)"), std::string::npos);
     EXPECT_NE(text.find("sunRadiance * BoundBeamLight(accumulatedBeam)"), std::string::npos);
+    EXPECT_NE(text.find("IsFiniteVec3(slab.rgb)"), std::string::npos);
 }
 
 TEST(ShaderContractTest, AerialVolumeReusesSunVisibilityOnEverySecondSample)
