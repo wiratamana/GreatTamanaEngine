@@ -122,6 +122,8 @@ bool FetchHistory(vec2 texelPosition, float pixelEndKm, out vec4 color, out floa
 const float kRayOpenLow = 0.55;
 const float kRayOpenHigh = 0.97;
 const vec3 kRayCool = vec3(0.80, 0.86, 1.0);
+const float kRayWidth = 0.010;     // Half width of a ray near the pixel (view height units).
+const float kRayWidthGrowth = 0.035; // Extra half width at the sun end.
 
 // Sun rays: the glow around the sun, looked at through the gaps of the clouds. The pixel averages the glow along the
 // line toward the sun; the blocker is last frame's smooth cloud transmittance, so the rays do not flicker.
@@ -136,9 +138,14 @@ vec3 SunRays(vec2 uv, ivec2 pixel, float pixelEndKm, float cloudTransmittance)
     float radius = max(params.sunRayColor.w, 1e-3);
     float sum = 0.0;
     float glowSum = 0.0;
+    // The line is read slightly to the left and right in turn: gaps narrower than the ray width fade out,
+    // so the rays are soft curtains and not thin spokes.
+    vec2 aspectLine = toSun * aspect;
+    vec2 sideDirection = normalize(vec2(-aspectLine.y, aspectLine.x) + vec2(1e-6)) / aspect;
     for (int i = 0; i < kTaps; ++i) {
         float t = (float(i) + jitter) / float(kTaps) * params.sunRay.w;
-        vec2 p = uv + toSun * t;
+        float side = ((i & 1) == 0 ? -1.0 : 1.0) * (0.35 + 0.65 * fract(jitter * 7.31 + float(i) * 0.37));
+        vec2 p = uv + toSun * t + sideDirection * (side * (kRayWidth + kRayWidthGrowth * t));
         vec2 fromSun = (p - params.sunRay.xy) * aspect / radius;
         float glow = 1.0 / (1.0 + dot(fromSun, fromSun));
         float open = textureLod(historyColor, clamp(p, vec2(0.0), vec2(1.0)), 0.0).a;

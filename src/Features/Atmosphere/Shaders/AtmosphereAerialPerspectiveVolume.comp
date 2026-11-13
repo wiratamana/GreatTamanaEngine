@@ -39,6 +39,7 @@ layout(std430, binding = 5) readonly buffer AerialShadowBlock {
     uvec4 counts;           // x cascade count, y taps per sample.
     vec4 cloudGrid;         // xy cloud map centre minus the eye x, z (m), z 1 / map width (m), w shaft strength (0 = no map).
     vec4 cloudLayer;        // x layer base (m), y layer top (m), z sharpness exponent, w map size (texels).
+    vec4 beamHaze;          // x extinction per km of the beam haze (0 = none), y scale height (km), z phase g, w fill of the shadowed columns.
 } shadow;
 
 layout(binding = 6) uniform sampler2D shadowDepth0;
@@ -90,6 +91,18 @@ bool IsFiniteVec3(vec3 v)
 {
     return !(any(isnan(v)) || any(isinf(v)));
 }
+
+// Henyey-Greenstein phase of the beam haze (per steradian).
+float HazePhase(float g, float cosAngle)
+{
+    float g2 = g * g;
+    return (1.0 - g2) / (12.5663706 * pow(max(1.0 + g2 - 2.0 * g * cosAngle, 1e-4), 1.5));
+}
+
+// The beam haze scatters mostly forward and a little everywhere; it looks pale blue-violet, like a hazy sky.
+const vec3 kBeamAlbedo = vec3(0.65, 1.0, 1.7);
+const float kBeamSunGain = 3.0;
+const float kBeamIsotropicShare = 0.3;
 
 void main()
 {
@@ -144,7 +157,10 @@ void main()
     vec3 shaftDelta = vec3(0.0);
     vec3 shaftTransmittance = vec3(1.0);
     float sunVisibility = 1.0;
+    float hazeVisibility = 1.0;
     bool tapped = false;
+    bool beamHazeOn = shadow.beamHaze.x > 0.0;
+    float beamPhase = mix(HazePhase(shadow.beamHaze.z, viewDotLight), 0.0795775, kBeamIsotropicShare);
 
     for (int slice = 0; slice < volumeSize.z; ++slice) {
         float distance0Km =
@@ -183,6 +199,14 @@ void main()
             vec3 scatterMie = scatterMiePhysical * scatteringExaggeration;
             vec3 totalScattering = scatterRayleigh + scatterMie;
 
+            // Thin haze hugging the ground: it only adds extinction and its own scattering below.
+            float hazeExtinction = 0.0;
+            if (beamHazeOn) {
+                float worldHeightKm = max(eyeWorld.y + worldStepPerKm.y * sampleDistanceKm, 0.0) / worldUnitsPerKm;
+                hazeExtinction = shadow.beamHaze.x * exp(-worldHeightKm / shadow.beamHaze.y);
+                extinctionCoefficient += vec3(hazeExtinction);
+            }
+
             float planetVisibility = PlanetVisibility(currentPositionKm, directionToSun, planetRadiusKm);
             vec3 shaftBefore = unexaggerated ? accumulatedTransmittance : shaftTransmittance;
 
@@ -190,6 +214,7 @@ void main()
             // No taps where the sun is blocked by the planet, the ray is opaque, or beyond the last cascade.
             if (!lookupEverySecondSample || (sampleIndex & 1) == 0) {
                 sunVisibility = 1.0;
+                hazeVisibility = 1.0;
                 tapped = false;
                 if (planetVisibility > 0.0
                     && maxComponent(max(accumulatedTransmittance, shaftBefore)) > kMinRayTransmittance) {
@@ -199,13 +224,16 @@ void main()
                             * InterleavedGradientNoise(vec2(froxelXY)
                                     + vec2(float(slice) * 7.0 + float(sampleIndex) * 3.0, float(slice) * 13.0), 0u);
                         sunVisibility = mix(1.0, OrthoMapSetVisibility(worldSample, rotation), shadowBlend);
+                        hazeVisibility = sunVisibility;
                         tapped = true;
                     }
                     if (cloudShafts) {
                         // The clouds block sun light of the air; the map is read relative to the eye.
                         vec3 offsetM = worldStepPerKm * sampleDistanceKm;
                         vec3 cloudPosition = vec3(offsetM.x, eyeWorld.y + offsetM.y, offsetM.z);
-                        sunVisibility *= CloudAirSunVisibility(cloudShadowMap, shadow.cloudGrid, shadow.cloudLayer, directionToSun, cloudPosition);
+                        vec2 cloudVisibility = CloudAirHazeSunVisibility(cloudShadowMap, shadow.cloudGrid, shadow.cloudLayer, directionToSun, cloudPosition);
+                        sunVisibility *= cloudVisibility.x;
+                        hazeVisibility *= cloudVisibility.y;
                         tapped = true;
                     }
                 }
@@ -218,6 +246,12 @@ void main()
             vec3 multipleScatteringSource = multipleScatteredLuminance * totalScattering;
 
             vec3 source = sunRadiance * (sunVisibility * sunTerm + multipleScatteringSource);
+            if (hazeExtinction > 0.0) {
+                vec3 hazeScattering = hazeExtinction * kBeamAlbedo;
+                vec3 hazeSun = kBeamSunGain * hazeVisibility * planetVisibility * transmittanceToSun * (beamPhase * hazeScattering);
+                vec3 hazeFill = shadow.beamHaze.w * multipleScatteredLuminance * hazeScattering;
+                source += sunRadiance * (hazeSun + hazeFill);
+            }
 
             // Closed-form in-scattering over the segment: source * (1 - T) / extinction.
             vec3 segmentTransmittance = exp(-extinctionCoefficient * segmentLengthKm);

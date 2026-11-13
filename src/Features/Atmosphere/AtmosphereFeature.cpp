@@ -22,6 +22,7 @@ constexpr std::int32_t kViewLutPriority = 0;
 constexpr std::int32_t kAerialVolumePriority = 20;
 constexpr std::int32_t kSkyBackgroundPriority = 100;
 constexpr std::int32_t kCompositePriority = -1000;
+constexpr float kBeamHazeReachKm = 24.0f; // Least range of the aerial volume while the cloud beam haze is on.
 
 constexpr Extent2D kTransmittanceSize{ 256, 256 };
 constexpr Extent2D kMultiScatteringSize{ 64, 64 };
@@ -240,12 +241,16 @@ void AtmosphereFeature::AerialVolume(fx::PostOpaqueFrame& f)
     // Cloud shadow map of this view: the clouds block sun light of the air (light shafts).
     const std::optional<CloudShadowMap> cloudPublished = m_cloudShadow.Fetch(f);
     const bool cloudShafts = cloudPublished.has_value() && CloudShadowMapUsable(*cloudPublished)
-        && cloudPublished->shaftStrength > 0.0f;
+        && (cloudPublished->shaftStrength > 0.0f || cloudPublished->beamHazePerKm > 0.0f);
+    // The beam haze is lit out to several km, so the volume reaches at least that far.
+    if (cloudShafts && cloudPublished->beamHazePerKm > 0.0f) {
+        frame.aerialPerspectiveMaxDistanceKm = std::max(frame.aerialPerspectiveMaxDistanceKm, kBeamHazeReachKm);
+    }
     const AerialShadowParamsGpu shadowParams = MakeAerialShadowParams(
         receiver, resolved.scale.shadowBlend, cloudShafts ? &*cloudPublished : nullptr, v.eye);
     const bool sampled = shadowParams.counts[0] > 0 || cloudShafts;
 
-    snap.maxDistanceKm = resolved.scale.maxDistanceKm;
+    snap.maxDistanceKm = frame.aerialPerspectiveMaxDistanceKm;
     snap.exaggeration = resolved.scale.exaggeration;
     snap.shadowBlend = resolved.scale.shadowBlend;
     snap.cascadeCount = shadowParams.counts[0];

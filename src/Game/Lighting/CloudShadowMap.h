@@ -33,6 +33,8 @@ struct CloudShadowMap {
     float shaftSharpness = 1.0f;    // >= 1: exponent on the air's sun transmittance; higher makes the beams crisper.
     float shaftHazePerM = 0.0f;     // Extinction per m of the haze near the ground that carries the beams (0 = none).
     float shaftHeightM = 1500.0f;   // Scale height of that haze (m).
+    float beamHazePerKm = 0.0f;     // Extinction per km of the haze the air volume lights through the map (0 = none).
+    float beamFill = 0.3f;          // Sky light in the shadowed columns of that haze, relative to the multi-scattering table.
     float skyFill = 0.0f;           // 0..1: share of the blocked sun that reaches shadowed receivers as diffuse light.
 };
 

@@ -77,4 +77,14 @@ float CloudAirSunVisibility(sampler2D shadowMap, vec4 grid, vec4 layer, vec3 sun
     return mix(1.0, max(shadow, kAirShadowFloor), low);
 }
 
+// Sun visibility of the beam haze: the same low-air rule as above, but the shadow may go much darker, so the light
+// curtains and the shadowed air between them contrast. x = visibility of air, y = visibility of the beam haze.
+const float kHazeShadowFloor = 0.06;
+vec2 CloudAirHazeSunVisibility(sampler2D shadowMap, vec4 grid, vec4 layer, vec3 sun, vec3 position)
+{
+    float shadow = CloudSunTransmittanceFast(shadowMap, grid, layer, sun, position);
+    float low = 1.0 - smoothstep(0.4 * layer.x, 1.2 * layer.x, position.y);
+    return mix(vec2(1.0), vec2(max(shadow, kAirShadowFloor), max(shadow, kHazeShadowFloor)), low);
+}
+
 #endif // CLOUD_SHADOW_LOOKUP_GLSL

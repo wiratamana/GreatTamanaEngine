@@ -408,8 +408,10 @@ void VolumetricCloudFeature::ShadowMapPass(fx::PreOpaqueFrame& f)
     map.shaftSharpness = cfg.shaftSharpness;
     // The beam haze is thickest for a low sun and thins out above about 45 degrees.
     const float hazeFade = 1.0f - std::clamp((sunUp - kHazeFadeSunLow) / (kHazeFadeSunHigh - kHazeFadeSunLow), 0.0f, 1.0f);
-    map.shaftHazePerM = cfg.shaftHaze * 0.001f * hazeFade * hazeFade * (3.0f - 2.0f * hazeFade) * fadeSmooth;
+    map.beamHazePerKm = cfg.shaftHaze * hazeFade * hazeFade * (3.0f - 2.0f * hazeFade) * fadeSmooth;
+    map.shaftHazePerM = cfg.shaftMist * 0.001f * hazeFade * hazeFade * (3.0f - 2.0f * hazeFade) * fadeSmooth;
     map.shaftHeightM = cfg.shaftHeightM;
+    map.beamFill = cfg.shaftFill;
     map.skyFill = cfg.shadowFill;
     f.PublishToScene(m_shadowSlot, current);
     m_shadowData.Publish(f, map);

@@ -161,11 +161,13 @@ struct VolumetricCloudSettings {
     float shadowDensity = 1.0f;  // Factor on the optical depth of the shadow ray; above 1 darker shadows.
     float shadowSteps = 10.0f;   // Samples of the shadow ray through the layer.
     float shaftStrength = 1.0f;  // 0 = no light shafts; 1 = the air loses the sun light the clouds block (uses the shadow map).
-    float shaftSharpness = 2.0f; // Exponent on the sun transmittance of the air; higher gives crisper beams and darker gaps.
-    float shaftHaze = 0.06f;     // Extinction per km of the haze that carries the beams near the ground (0 = no extra haze).
-    float shaftHeightM = 1500.0f; // Scale height of that haze; it thins out above.
+    float shaftSharpness = 3.0f; // Exponent on the sun transmittance of the air; higher gives crisper beams and darker gaps.
+    float shaftHaze = 0.5f;     // Extinction per km of the haze that carries the light curtains near the ground (0 = no extra haze).
+    float shaftFill = 0.6f;      // Sky light in the shadowed columns of the haze (0 = black, 1 = like the sky's multiple scattering).
+    float shaftMist = 0.0f;      // Extinction per km of an extra near-field mist in the volumetric light (0 = none).
+    float shaftHeightM = 2500.0f; // Scale height of that haze; it thins out above.
     float shadowFill = 0.25f;     // Share of the blocked sun that reaches shadowed ground as diffuse light.
-    float sunRays = 0.6f;         // Strength of the faint screen-space sun glare through gaps in the clouds (0 = off).
+    float sunRays = 1.0f;         // Strength of the faint screen-space sun glare through gaps in the clouds (0 = off).
 };
 
 // One tunable float: its endpoint key, field and range.
@@ -282,6 +284,8 @@ inline constexpr std::array kVolumetricCloudFloatSettings{
     VolumetricCloudFloatSetting{ "shaftStrength", &VolumetricCloudSettings::shaftStrength, 0.0f, 1.0f },
     VolumetricCloudFloatSetting{ "shaftSharpness", &VolumetricCloudSettings::shaftSharpness, 1.0f, 8.0f },
     VolumetricCloudFloatSetting{ "shaftHaze", &VolumetricCloudSettings::shaftHaze, 0.0f, 4.0f },
+    VolumetricCloudFloatSetting{ "shaftFill", &VolumetricCloudSettings::shaftFill, 0.0f, 4.0f },
+    VolumetricCloudFloatSetting{ "shaftMist", &VolumetricCloudSettings::shaftMist, 0.0f, 4.0f },
     VolumetricCloudFloatSetting{ "shaftHeightM", &VolumetricCloudSettings::shaftHeightM, 200.0f, 6000.0f },
     VolumetricCloudFloatSetting{ "shadowFill", &VolumetricCloudSettings::shadowFill, 0.0f, 1.0f },
     VolumetricCloudFloatSetting{ "sunRays", &VolumetricCloudSettings::sunRays, 0.0f, 3.0f },

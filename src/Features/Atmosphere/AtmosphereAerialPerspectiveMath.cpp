@@ -18,6 +18,7 @@ constexpr float kSunMatchMinDot = 0.9999f; // Receiver sun and this frame's sun 
 constexpr float kShadowBlendStartKm = 0.5f;
 constexpr float kShadowBlendEndKm = 4.0f;
 constexpr float kExaggerationBudgetKm = 4.0f;
+constexpr float kBeamHazePhaseG = 0.65f; // Forward lobe of the beam haze.
 
 float SmoothStep(float edge0, float edge1, float x) noexcept
 {
@@ -93,7 +94,7 @@ AerialShadowParamsGpu MakeAerialShadowParams(const SunShadowReceiver* receiver, 
     p.forwardAndBias[3] = kAerialShadowBiasTexels;
     p.shadowParams[0] = kAerialShadowFilterTexels;
     // The cloud map is read relative to the eye, so a far camera keeps its precision.
-    if (cloud != nullptr && CloudShadowMapUsable(*cloud) && cloud->shaftStrength > 0.0f) {
+    if (cloud != nullptr && CloudShadowMapUsable(*cloud) && (cloud->shaftStrength > 0.0f || cloud->beamHazePerKm > 0.0f)) {
         p.eyeAndUnitsPerKm[0] = eye.x;
         p.eyeAndUnitsPerKm[1] = eye.y;
         p.eyeAndUnitsPerKm[2] = eye.z;
@@ -105,6 +106,10 @@ AerialShadowParamsGpu MakeAerialShadowParams(const SunShadowReceiver* receiver, 
         p.cloudLayer[1] = cloud->layerTopM;
         p.cloudLayer[2] = std::max(cloud->shaftSharpness, 1.0f);
         p.cloudLayer[3] = static_cast<float>(kCloudShadowMapSize);
+        p.beamHaze[0] = std::max(cloud->beamHazePerKm, 0.0f);
+        p.beamHaze[1] = std::max(cloud->shaftHeightM, 100.0f) * 0.001f;
+        p.beamHaze[2] = kBeamHazePhaseG;
+        p.beamHaze[3] = std::max(cloud->beamFill, 0.0f);
     }
     if (receiver == nullptr || !(shadowBlend > 0.0f)) {
         return p;

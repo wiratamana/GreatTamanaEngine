@@ -32,7 +32,7 @@ SunShadowReceiver MakeReceiver(std::uint32_t count)
 
 TEST(AerialShadowParamsTest, LayoutMatchesTheShaderBlock)
 {
-    EXPECT_EQ(sizeof(AerialShadowParamsGpu), 416u);
+    EXPECT_EQ(sizeof(AerialShadowParamsGpu), 432u);
     EXPECT_EQ(offsetof(AerialShadowParamsGpu, cascadeSplitFar), 256u);
     EXPECT_EQ(offsetof(AerialShadowParamsGpu, cascadeBlendWidth), 272u);
     EXPECT_EQ(offsetof(AerialShadowParamsGpu, cascadeTexelWorld), 288u);
@@ -43,6 +43,7 @@ TEST(AerialShadowParamsTest, LayoutMatchesTheShaderBlock)
     EXPECT_EQ(offsetof(AerialShadowParamsGpu, counts), 368u);
     EXPECT_EQ(offsetof(AerialShadowParamsGpu, cloudGrid), 384u);
     EXPECT_EQ(offsetof(AerialShadowParamsGpu, cloudLayer), 400u);
+    EXPECT_EQ(offsetof(AerialShadowParamsGpu, beamHaze), 416u);
 }
 
 TEST(AerialShadowParamsTest, CloudShaftsAreReadRelativeToTheEye)
@@ -57,6 +58,8 @@ TEST(AerialShadowParamsTest, CloudShaftsAreReadRelativeToTheEye)
     map.strength = 1.0f;
     map.shaftStrength = 0.5f;
     map.shaftSharpness = 3.0f;
+    map.beamHazePerKm = 0.2f;
+    map.shaftHeightM = 1200.0f;
     const AerialShadowParamsGpu p = MakeAerialShadowParams(nullptr, 1.0f, &map, Vec3{ 1000.0f, 20.0f, 100.0f });
     EXPECT_EQ(p.counts[0], 0u);
     EXPECT_FLOAT_EQ(p.cloudGrid[0], 500.0f);
@@ -64,6 +67,8 @@ TEST(AerialShadowParamsTest, CloudShaftsAreReadRelativeToTheEye)
     EXPECT_FLOAT_EQ(p.cloudGrid[2], 1.0f / 20000.0f);
     EXPECT_FLOAT_EQ(p.cloudGrid[3], 0.5f);
     EXPECT_FLOAT_EQ(p.cloudLayer[2], 3.0f);
+    EXPECT_FLOAT_EQ(p.beamHaze[0], 0.2f);
+    EXPECT_FLOAT_EQ(p.beamHaze[1], 1.2f);
     EXPECT_FLOAT_EQ(p.eyeAndUnitsPerKm[1], 20.0f);
 
     map.shaftStrength = 0.0f;
