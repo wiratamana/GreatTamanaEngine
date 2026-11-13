@@ -112,6 +112,17 @@ const float kBeamIsotropicShare = 0.15;
 const float kBeamExtinctionShare = 0.25;
 // Share of the sky fill that reaches haze in the umbra of terrain; haze in cloud shadow keeps all of it.
 const float kBeamUmbraFill = 0.3;
+// Ceiling for the beam light a view ray collects (sun units per channel): a long lit haze path glows but never whites out.
+const float kBeamLightCap = 0.15;
+
+// Smooth ceiling: small values pass unchanged, large ones approach the cap; the hue is kept.
+vec3 BoundBeamLight(vec3 light)
+{
+    float peak = max(light.x, max(light.y, light.z));
+    float ratio = peak / kBeamLightCap;
+    float bounded = peak / sqrt(sqrt(1.0 + ratio * ratio * ratio * ratio));
+    return light * (bounded / max(peak, 1e-6));
+}
 
 void main()
 {
@@ -160,6 +171,7 @@ void main()
     ivec2 multiScatteringLutSize = textureSize(multiScatteringLut, 0);
 
     vec3 accumulatedLuminance = vec3(0.0);
+    vec3 accumulatedBeam = vec3(0.0);
     vec3 accumulatedTransmittance = vec3(1.0);
     vec3 shaftDelta = vec3(0.0);
     vec3 shaftTransmittance = vec3(1.0);
@@ -250,12 +262,13 @@ void main()
             vec3 multipleScatteringSource = multipleScatteredLuminance * totalScattering;
 
             vec3 source = sunRadiance * (sunVisibility * sunTerm + multipleScatteringSource);
+            vec3 beamSource = vec3(0.0);
             if (hazeExtinction > 0.0) {
                 vec3 hazeScattering = hazeExtinction * kBeamAlbedo;
                 vec3 hazeSun = (kBeamSunGain * exp(-sampleDistanceKm / kBeamFarFadeKm)) * hazeVisibility * planetVisibility * transmittanceToSun * (beamPhase * hazeScattering);
                 float fillShare = mix(kBeamUmbraFill, 1.0, terrainVisibility);
                 vec3 hazeFill = (fillShare * shadow.beamHaze.w * kBeamFillGain) * multipleScatteredLuminance * hazeScattering;
-                source += sunRadiance * (hazeSun + hazeFill);
+                beamSource = hazeSun + hazeFill;
             }
 
             // Closed-form in-scattering over the segment: source * (1 - T) / extinction.
@@ -263,6 +276,7 @@ void main()
             vec3 inscatterFactor = (vec3(1.0) - segmentTransmittance) / max(extinctionCoefficient, vec3(1e-5));
 
             accumulatedLuminance += accumulatedTransmittance * (source * inscatterFactor);
+            accumulatedBeam += accumulatedTransmittance * (beamSource * inscatterFactor);
 
             if (unexaggerated) {
                 if (tapped) {
@@ -284,7 +298,7 @@ void main()
 
         // Scalar transmittance is the plain average of the R/G/B channels.
         float scalarTransmittance = (accumulatedTransmittance.r + accumulatedTransmittance.g + accumulatedTransmittance.b) / 3.0;
-        vec4 slab = vec4(accumulatedLuminance, scalarTransmittance);
+        vec4 slab = vec4(accumulatedLuminance + sunRadiance * BoundBeamLight(accumulatedBeam), scalarTransmittance);
         if (!IsFiniteVec3(accumulatedLuminance) || isnan(scalarTransmittance) || isinf(scalarTransmittance)) {
             slab = vec4(0.0, 0.0, 0.0, 1.0);
         }

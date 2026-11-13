@@ -79,6 +79,17 @@ TEST(ShaderContractTest, AirEffectsShareOneSunVisibility)
     EXPECT_NE(shared.find("CloudAirHazeSunVisibility("), std::string::npos);
 }
 
+// The beam light a view ray collects has a soft ceiling, so a lit haze path cannot white out a backlit mountain.
+TEST(ShaderContractTest, AerialVolumeBoundsTheBeamLight)
+{
+    const std::string text =
+        ReadText(std::filesystem::path(GTE_TEST_ATMOSPHERE_SHADER_DIR) / "AtmosphereAerialPerspectiveVolume.comp");
+    ASSERT_FALSE(text.empty());
+    EXPECT_NE(text.find("const float kBeamLightCap"), std::string::npos);
+    EXPECT_NE(text.find("vec3 BoundBeamLight(vec3 light)"), std::string::npos);
+    EXPECT_NE(text.find("sunRadiance * BoundBeamLight(accumulatedBeam)"), std::string::npos);
+}
+
 TEST(ShaderContractTest, AerialVolumeReusesSunVisibilityOnEverySecondSample)
 {
     const std::string text =
