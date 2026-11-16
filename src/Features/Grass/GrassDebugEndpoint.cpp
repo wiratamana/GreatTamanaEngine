@@ -269,6 +269,44 @@ bool ReadFloat(std::span<const fx::FeatureDebugArg> args, std::string_view key, 
     return true;
 }
 
+void AddTileSource(fx::FeatureDebugResult& out, const GrassTileSourceReport& r)
+{
+    constexpr std::array<std::string_view, static_cast<std::size_t>(GrassTileReason::Count)> kReasonNames{ "initial", "moved",
+        "stream", "carve", "water", "settings" };
+    Add(out, "source.terrainOpen", r.terrainOpen);
+    Add(out, "source.building", r.building);
+    Add(out, "source.complete", r.complete);
+    Add(out, "source.revision", Count(r.revision));
+    Add(out, "source.size", static_cast<std::int64_t>(r.size));
+    Add(out, "source.texelSize", Shown(r.texelSize));
+    Add(out, "source.originX", r.originX);
+    Add(out, "source.originZ", r.originZ);
+    Add(out, "source.lastBuildMs", r.lastBuildMs);
+    Add(out, "source.maxBuildMs", r.maxBuildMs);
+    Add(out, "source.lastMainMs", r.lastMainMs);
+    Add(out, "source.coverageLevel0", Shown(r.coverageLevel0));
+    Add(out, "source.coverageNodes", Shown(r.coverageNodes));
+    Add(out, "source.submergedShare", Shown(r.submergedShare));
+    Add(out, "source.builds", Count(r.builds));
+    Add(out, "source.skippedIncomplete", Count(r.skippedIncomplete));
+    for (std::size_t i = 0; i < kReasonNames.size(); ++i) {
+        Add(out, "source.reason." + std::string(kReasonNames[i]), Count(r.reasons[i]));
+    }
+}
+
+void AddProbe(fx::FeatureDebugResult& out, const std::string& prefix, const GrassProbeReport& r)
+{
+    Add(out, prefix + "ok", r.ok);
+    Add(out, prefix + "message", r.message);
+    Add(out, prefix + "tileHeight", r.tileHeight);
+    Add(out, prefix + "meshHeight", r.meshHeight);
+    Add(out, prefix + "noiseHeight", r.noiseHeight);
+    Add(out, prefix + "tileMinusMesh", r.tileHeight - r.meshHeight);
+    Add(out, prefix + "nodeLevel", static_cast<std::int64_t>(r.nodeLevel));
+    Add(out, prefix + "tileSubmerged", r.tileSubmerged);
+    Add(out, prefix + "waterHere", r.waterHere);
+    Add(out, prefix + "waterSurface", r.waterSurface);
+}
 } // namespace
 
 fx::FeatureDebugResult GrassDebugEndpoint::GetState() const
@@ -285,6 +323,9 @@ fx::FeatureDebugResult GrassDebugEndpoint::GetState() const
         Add(out, "tile.originZ", tile->originZ);
         Add(out, "tile.seaLevel", Shown(tile->seaLevel));
         Add(out, "tile.revision", Count(tile->revision));
+    }
+    if (const GrassTileReportFn& hook = m_feature.TileReportHook()) {
+        AddTileSource(out, hook());
     }
     const Vec3 eye = m_feature.LastEye();
     Add(out, "eye", std::to_string(Shown(eye.x)) + "," + std::to_string(Shown(eye.y)) + "," + std::to_string(Shown(eye.z)));
@@ -395,9 +436,99 @@ fx::FeatureDebugResult GrassDebugEndpoint::Invoke(std::string_view action, std::
         m_feature.EnableSyntheticTile(spec);
         return GetState();
     }
+    if (action == "tile") {
+        fx::FeatureDebugResult out;
+        const GrassTileReportFn& hook = m_feature.TileReportHook();
+        Add(out, "provider", hook != nullptr);
+        if (hook) {
+            AddTileSource(out, hook());
+        }
+        return out;
+    }
+    if (action == "probe" || action == "probe_batch") {
+        const GrassProbeFn& hook = m_feature.ProbeHook();
+        if (!hook) {
+            return Fail("", "no tile provider is connected (open the terrain first)");
+        }
+        fx::FeatureDebugResult out;
+        if (action == "probe") {
+            float x = 0.0f;
+            float z = 0.0f;
+            if (!ReadFloat(args, "x", 0.0f, x) || !ReadFloat(args, "z", 0.0f, z) || FindArg(args, "x") == nullptr
+                || FindArg(args, "z") == nullptr) {
+                return Fail("x", "probe needs numeric x and z");
+            }
+            const GrassProbeReport r = hook(x, z);
+            AddProbe(out, "", r);
+            return out;
+        }
+        // Random points around the camera: error of the tile height against the drawn mesh.
+        float count = 0.0f;
+        float radius = 0.0f;
+        float seed = 0.0f;
+        ReadFloat(args, "n", 32.0f, count);
+        ReadFloat(args, "radius", 60.0f, radius);
+        ReadFloat(args, "seed", 1.0f, seed);
+        const int n = std::clamp(static_cast<int>(count), 1, 500);
+        const Vec3 eye = m_feature.LastEye();
+        std::uint32_t state = static_cast<std::uint32_t>(seed) * 2654435761u + 12345u;
+        const auto next01 = [&state]() {
+            state = state * 1664525u + 1013904223u;
+            return static_cast<float>(state >> 8) / 16777216.0f;
+        };
+        std::vector<double> errors;
+        std::vector<double> noiseErrors;
+        int outside = 0;
+        int water = 0;
+        double worst = 0.0;
+        double worstX = 0.0;
+        double worstZ = 0.0;
+        for (int i = 0; i < n; ++i) {
+            const double x = static_cast<double>(eye.x) + (next01() * 2.0 - 1.0) * radius;
+            const double z = static_cast<double>(eye.z) + (next01() * 2.0 - 1.0) * radius;
+            const GrassProbeReport r = hook(x, z);
+            if (!r.ok) {
+                ++outside;
+                continue;
+            }
+            if (r.tileSubmerged) {
+                ++water;
+            }
+            const double err = std::abs(r.tileHeight - r.meshHeight);
+            errors.push_back(err);
+            noiseErrors.push_back(std::abs(r.noiseHeight - r.meshHeight));
+            if (err > worst) {
+                worst = err;
+                worstX = x;
+                worstZ = z;
+            }
+        }
+        std::sort(errors.begin(), errors.end());
+        std::sort(noiseErrors.begin(), noiseErrors.end());
+        const auto pick = [](const std::vector<double>& v, double q) {
+            return v.empty() ? 0.0 : v[std::min(v.size() - 1, static_cast<std::size_t>(q * static_cast<double>(v.size())))];
+        };
+        double mean = 0.0;
+        for (const double e : errors) {
+            mean += e;
+        }
+        mean = errors.empty() ? 0.0 : mean / static_cast<double>(errors.size());
+        Add(out, "points", static_cast<std::int64_t>(errors.size()));
+        Add(out, "outsideTile", static_cast<std::int64_t>(outside));
+        Add(out, "submergedPoints", static_cast<std::int64_t>(water));
+        Add(out, "tileVsMesh.meanM", mean);
+        Add(out, "tileVsMesh.p50M", pick(errors, 0.5));
+        Add(out, "tileVsMesh.p95M", pick(errors, 0.95));
+        Add(out, "tileVsMesh.maxM", errors.empty() ? 0.0 : errors.back());
+        Add(out, "tileVsMesh.worstAt", std::to_string(worstX) + "," + std::to_string(worstZ));
+        Add(out, "noiseVsMesh.p50M", pick(noiseErrors, 0.5));
+        Add(out, "noiseVsMesh.p95M", pick(noiseErrors, 0.95));
+        Add(out, "noiseVsMesh.maxM", noiseErrors.empty() ? 0.0 : noiseErrors.back());
+        return out;
+    }
     fx::FeatureDebugResult result;
     result.ok = false;
-    result.message = "unknown action; supported: reset_defaults, synthetic_tile, clear_tile";
+    result.message = "unknown action; supported: reset_defaults, synthetic_tile, clear_tile, tile, probe, probe_batch";
     return result;
 }
 

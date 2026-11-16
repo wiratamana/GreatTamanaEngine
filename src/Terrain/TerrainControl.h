@@ -7,6 +7,7 @@
 #include "TerrainCarve.h"
 #include "TerrainFlight.h"
 #include "TerrainSettings.h"
+#include "TerrainSurface.h"
 #include "TerrainTypes.h"
 
 #include <cstdint>
@@ -223,6 +224,15 @@ public:
     virtual TerrainResult SetCarve(std::shared_ptr<const ITerrainCarve> carve, std::span<const Rect2> dirty) = 0;
     // Height from the noise field (no erosion). Empty when the world is not open.
     virtual std::optional<TerrainHeightProbe> ProbeHeight(double x, double z) const = 0;
+    // Resident node meshes over a world rectangle (the drawn surface, erosion and carve included). Empty when closed.
+    virtual SurfaceSnapshot SnapshotSurface(double minX, double minZ, double maxX, double maxZ) const
+    {
+        static_cast<void>(minX);
+        static_cast<void>(minZ);
+        static_cast<void>(maxX);
+        static_cast<void>(maxZ);
+        return {};
+    }
     virtual void SetOceanQuadVisible(bool visible) = 0;
     virtual bool OceanQuadVisible() const = 0;
     // Nodes whose highest point is below `y` are not drawn (deep seabed hidden by opaque water). -1e30 = off.

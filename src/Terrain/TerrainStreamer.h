@@ -82,6 +82,8 @@ public:
 
     const TerrainSettings& Settings() const noexcept { return m_field->Settings(); }
     const TerrainHeightField& Field() const noexcept { return *m_field; }
+    // Shared owner of the field: it is const and thread safe, so a worker may keep it past a Clear().
+    std::shared_ptr<const TerrainHeightField> FieldShared() const noexcept { return m_field; }
     void SetConfig(const StreamerConfig& config) noexcept { m_config = config; }
 
     // Applies new settings; returns what kind of rebuild it caused. Evictions land in the next Update().

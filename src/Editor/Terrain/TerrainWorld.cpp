@@ -302,6 +302,14 @@ std::optional<terrain::TerrainHeightProbe> TerrainWorld::ProbeHeight(double x, d
     return terrain::TerrainHeightProbe{ field.BaseHeight(x, z, 2.0), field.Height(x, z, 2.0) };
 }
 
+terrain::SurfaceSnapshot TerrainWorld::SnapshotSurface(double minX, double minZ, double maxX, double maxZ) const
+{
+    if (!m_open || !m_streamer) {
+        return {};
+    }
+    return terrain::CollectSurface(*m_streamer, terrain::MakeLayout(m_settings), minX, minZ, maxX, maxZ);
+}
+
 void TerrainWorld::SetOceanQuadVisible(bool visible)
 {
     m_oceanQuadVisible = visible;

@@ -11,6 +11,7 @@
 #include "EditorLayer.h"
 #include "FurinaShowcaseSceneOpener.h"
 #include "HizDemoSceneOpener.h"
+#include "Grass/GrassTileProvider.h"
 #include "Terrain/TerrainWorld.h"
 #include "Water/WaterWorld.h"
 #include "../Game/Game.h"
@@ -68,6 +69,9 @@ private:
 
     // Handles the water world works through (terrain world and the Water render feature), resolved fresh on every call.
     WaterWorldServices MakeWaterWorldServices();
+
+    // Handles the Grass tile provider works through (terrain, water and the Grass render feature), resolved fresh on every call.
+    GrassTileServices MakeGrassTileServices();
 
     // Handles to what the Furina showcase scene works through, resolved fresh on every call.
     FurinaShowcaseServices MakeFurinaShowcaseServices();
@@ -130,6 +134,8 @@ private:
     TerrainWorld m_terrainWorld{ [this] { return MakeTerrainWorldServices(); } };
     // Water bodies; feeds the terrain carve and the Water render feature. Served by the /water/* routes.
     WaterWorld m_waterWorld{ [this] { return MakeWaterWorldServices(); } };
+    // Builds the Grass height tile from the live terrain and water on a worker thread.
+    GrassTileProvider m_grassTiles{ [this] { return MakeGrassTileServices(); } };
     // Cross-thread hand-off for project assembly hot reload; not passed to NetworkServer's constructor.
     ProjectAssemblyHotReloadCommandBridge m_hotReloadCommandBridge;
 

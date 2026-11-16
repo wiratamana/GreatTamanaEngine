@@ -93,6 +93,7 @@ public:
     terrain::TerrainResult SetCameraPose(const terrain::TerrainCameraPose& pose) override;
     terrain::TerrainResult SetCarve(std::shared_ptr<const terrain::ITerrainCarve> carve, std::span<const terrain::Rect2> dirty) override;
     std::optional<terrain::TerrainHeightProbe> ProbeHeight(double x, double z) const override;
+    terrain::SurfaceSnapshot SnapshotSurface(double minX, double minZ, double maxX, double maxZ) const override;
     void SetOceanQuadVisible(bool visible) override;
     bool OceanQuadVisible() const override { return m_oceanQuadVisible; }
     void SetSeabedCullBelow(double y) override { m_seabedCullBelow = y; }

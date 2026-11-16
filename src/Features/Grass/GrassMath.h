@@ -87,4 +87,7 @@ float GrassSyntheticHeight(const GrassSyntheticSpec& spec, double x, double z) n
 GrassHeightTile MakeSyntheticGrassTile(const GrassSyntheticSpec& spec, double centerX, double centerZ, std::uint32_t size,
     float texelSize, std::uint64_t revision);
 
+// Bilinear height and submerged flag of a tile at a world point, as the cull shader reads it. False outside the tile.
+bool SampleGrassTile(const GrassHeightTile& tile, double x, double z, float& height, float& submerged) noexcept;
+
 } // namespace gte

@@ -4,6 +4,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -245,6 +247,46 @@ struct GrassHeightTile {
         return size >= 2 && texelSize > 0.0f && data.size() == static_cast<std::size_t>(size) * size * 2u;
     }
 };
+
+// Why the editor layer rebuilt the height tile.
+enum class GrassTileReason : std::uint8_t { Initial, Moved, Stream, Carve, Water, Settings, Count };
+
+// What the editor layer's tile provider reports (read by the endpoint).
+struct GrassTileSourceReport {
+    bool terrainOpen = false;
+    bool building = false;
+    bool complete = false;            // Every texel near the camera came from a finest-level node.
+    std::uint64_t revision = 0;
+    std::uint32_t size = 0;
+    float texelSize = 0.0f;
+    double originX = 0.0;
+    double originZ = 0.0;
+    double lastBuildMs = 0.0;         // Worker thread time of the last build.
+    double maxBuildMs = 0.0;
+    double lastMainMs = 0.0;          // Main thread time of the last request (node collection) plus the submit.
+    float coverageLevel0 = 0.0f;      // Share of texels within reach that came from level-0 nodes.
+    float coverageNodes = 0.0f;       // Share that came from any resident node (the rest is noise fallback).
+    float submergedShare = 0.0f;
+    std::uint64_t builds = 0;
+    std::uint64_t skippedIncomplete = 0; // Builds dropped because too little terrain was resident.
+    std::uint64_t reasons[static_cast<std::size_t>(GrassTileReason::Count)] = {};
+};
+
+// One point compared across the three height sources (metres).
+struct GrassProbeReport {
+    bool ok = false;
+    std::string message;
+    double tileHeight = 0.0;  // What the grass shader reads.
+    double meshHeight = 0.0;  // The drawn terrain triangles.
+    double noiseHeight = 0.0; // Noise plus carve, no erosion (what /terrain/height reports).
+    int nodeLevel = -1;
+    bool tileSubmerged = false;
+    bool waterHere = false;
+    double waterSurface = 0.0;
+};
+
+using GrassTileReportFn = std::function<GrassTileSourceReport()>;
+using GrassProbeFn = std::function<GrassProbeReport(double x, double z)>;
 
 enum class GrassFrameStatus : std::uint8_t {
     NotRendered,

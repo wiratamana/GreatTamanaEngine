@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 namespace gte {
@@ -52,6 +53,15 @@ public:
     bool SyntheticTileEnabled() const noexcept { return m_syntheticOn; }
     const GrassSyntheticSpec& SyntheticSpec() const noexcept { return m_syntheticSpec; }
 
+    // Callbacks of the editor layer's tile provider, for the debug endpoint. Main thread; empty functions clear them.
+    void SetTileSourceHooks(GrassTileReportFn report, GrassProbeFn probe)
+    {
+        m_tileReport = std::move(report);
+        m_probe = std::move(probe);
+    }
+    const GrassTileReportFn& TileReportHook() const noexcept { return m_tileReport; }
+    const GrassProbeFn& ProbeHook() const noexcept { return m_probe; }
+
     // Camera of the primary view as of the last frame (world metres).
     Vec3 LastEye() const noexcept { return m_lastEye; }
 
@@ -68,6 +78,8 @@ private:
     bool m_syntheticOn = false;
     GrassSyntheticSpec m_syntheticSpec;
     std::uint64_t m_tileRevision = 0;
+    GrassTileReportFn m_tileReport;
+    GrassProbeFn m_probe;
     Vec3 m_lastEye;
     double m_time = 0.0;
     double m_ownOffset[2] = {};

@@ -284,4 +284,32 @@ GrassHeightTile MakeSyntheticGrassTile(const GrassSyntheticSpec& spec, double ce
     return tile;
 }
 
+bool SampleGrassTile(const GrassHeightTile& tile, double x, double z, float& height, float& submerged) noexcept
+{
+    if (!tile.Valid()) {
+        return false;
+    }
+    const double u = (x - tile.originX) / static_cast<double>(tile.texelSize);
+    const double v = (z - tile.originZ) / static_cast<double>(tile.texelSize);
+    const double last = static_cast<double>(tile.size - 1);
+    if (u < 0.0 || v < 0.0 || u > last || v > last) {
+        return false;
+    }
+    const auto i0 = std::min(static_cast<std::uint32_t>(u), tile.size - 2);
+    const auto j0 = std::min(static_cast<std::uint32_t>(v), tile.size - 2);
+    const auto fu = static_cast<float>(u - i0);
+    const auto fv = static_cast<float>(v - j0);
+    const auto at = [&](std::uint32_t i, std::uint32_t j, std::uint32_t channel) {
+        return tile.data[(static_cast<std::size_t>(j) * tile.size + i) * 2u + channel];
+    };
+    const auto lerp2 = [&](std::uint32_t channel) {
+        const float a = at(i0, j0, channel) + fu * (at(i0 + 1, j0, channel) - at(i0, j0, channel));
+        const float b = at(i0, j0 + 1, channel) + fu * (at(i0 + 1, j0 + 1, channel) - at(i0, j0 + 1, channel));
+        return a + fv * (b - a);
+    };
+    height = lerp2(0);
+    submerged = lerp2(1);
+    return true;
+}
+
 } // namespace gte

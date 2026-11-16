@@ -634,6 +634,21 @@ WaterWorldServices EditorHost::MakeWaterWorldServices()
     return services;
 }
 
+GrassTileServices EditorHost::MakeGrassTileServices()
+{
+    GrassTileServices services;
+    services.terrain = &m_terrainWorld;
+    services.water = &m_waterWorld;
+    for (const std::unique_ptr<IEngineFeatureModule>& module : m_builtinFeatureModules) {
+        fx::Feature* feature = module ? fx::FindFeature(*module) : nullptr;
+        if (feature != nullptr && std::string_view(feature->Name()) == kGrassFeatureName) {
+            services.grass = dynamic_cast<GrassFeature*>(feature);
+            break;
+        }
+    }
+    return services;
+}
+
 void EditorHost::ServiceHizDemoMenuAction()
 {
     const HizDemoEditorHandles handles = m_editorLayer->HizDemoHandles();
@@ -836,6 +851,12 @@ int EditorHost::Run()
             waterUi->world = &m_waterWorld;
         }
         m_waterWorld.Tick(static_cast<double>(nowTicksNs) / 1.0e9);
+        if (m_terrainWorld.IsOpen()) {
+            const Vec3 grassEye = RenderSystem::ResolveActiveCameraWorldPosition(m_game.GetRegistry());
+            m_grassTiles.Tick(static_cast<double>(nowTicksNs) / 1.0e9, static_cast<double>(grassEye.x), static_cast<double>(grassEye.z));
+        } else {
+            m_grassTiles.Tick(static_cast<double>(nowTicksNs) / 1.0e9, 0.0, 0.0);
+        }
 
         m_editorLayer->NewFrame();
 
