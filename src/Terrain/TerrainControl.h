@@ -25,6 +25,7 @@ struct TerrainOpenOptions {
     TerrainProfile profile = TerrainProfile::Lean;
     std::uint32_t poolSlots = 0; // 0 = chosen from the settings (see TerrainPoolSlotsFor).
     bool water = true;           // A flat ocean quad at sea level.
+    bool renderBudget = true;    // Lean and geometry-only profiles also lower shadow and aerial perspective quality.
 };
 
 // Tunables that are not part of the saved world.
@@ -34,6 +35,7 @@ struct TerrainRuntimeOptions {
     bool collectGpuStats = true;    // Ask the culling feature for its counters.
     int streamingMaxInFlight = 4;   // Node jobs running at once.
     int unloadDelayFrames = 90;
+    int bakeNodesPerSide = 16;      // Save bakes this many finest-level nodes per side around the camera.
 };
 
 // The square of land the live preview shows: 128 quads of `spacing` metres around the centre.
@@ -125,14 +127,6 @@ inline std::uint32_t TerrainPoolSlotsFor(const TerrainRuntimeOptions& runtime) n
     const int visible = runtime.maxVisibleNodes > 0 ? runtime.maxVisibleNodes : 512;
     return static_cast<std::uint32_t>(visible + visible / 2 + 32);
 }
-
-// Saves and loads the baked world file; supplied by whoever owns the file format.
-class ITerrainAssetIo {
-public:
-    virtual ~ITerrainAssetIo() = default;
-    virtual bool Save(const std::filesystem::path& path, const TerrainSettings& settings, std::string* error) = 0;
-    virtual bool Load(const std::filesystem::path& path, TerrainSettings& settings, std::string* error) = 0;
-};
 
 class ITerrainWorld {
 public:

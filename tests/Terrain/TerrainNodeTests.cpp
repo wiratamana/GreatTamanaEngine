@@ -207,7 +207,7 @@ TEST(TerrainNodeTests, TrianglesFaceUpAndSkirtsFaceOutward)
     const std::vector<std::uint32_t> idx = BuildSharedIndices(q);
     const std::size_t gridIndices = static_cast<std::size_t>(q) * static_cast<std::size_t>(q) * 6u;
     const std::size_t perEdge = static_cast<std::size_t>(q) * 6u;
-    // Front face normal: cross(c - a, b - a), as the engine draws them.
+    // Front face normal: cross(b - a, c - a); verified live, the engine lights the other order from below.
     for (std::size_t t = 0; t + 2 < idx.size(); t += 3) {
         ASSERT_LT(idx[t], m.vertices.size());
         ASSERT_LT(idx[t + 1], m.vertices.size());
@@ -216,7 +216,7 @@ TEST(TerrainNodeTests, TrianglesFaceUpAndSkirtsFaceOutward)
             const TerrainVertex& v = m.vertices[idx[i]];
             return Vec3{ v.position[0], v.position[1], v.position[2] };
         };
-        const Vec3 n = Cross(pos(t + 2) - pos(t), pos(t + 1) - pos(t));
+        const Vec3 n = Cross(pos(t + 1) - pos(t), pos(t + 2) - pos(t));
         if (t < gridIndices) {
             EXPECT_GT(n.y, 0.0f) << "grid triangle " << t / 3;
         } else {
@@ -303,7 +303,7 @@ TEST(TerrainMaterialTests, RampImageHasExpectedSizeAndOpaqueAlpha)
 TEST(TerrainMaterialTests, Height01RoundTrips)
 {
     const TerrainSettings s{};
-    for (float h : { -300.0f, 0.0f, 500.0f, 1700.0f }) {
+    for (float h : { -290.0f, 0.0f, 500.0f, 1150.0f }) {
         EXPECT_NEAR(HeightFromHeight01(Height01(h, s), s), h, 0.01f);
     }
 }

@@ -370,6 +370,9 @@ terrain::TerrainResult TerrainWorld::OpenImpl(const terrain::TerrainOpenOptions&
 
     m_selector = std::make_unique<terrain::LodSelector>(settings);
     m_streamer = std::make_unique<terrain::TerrainStreamer>(settings);
+    if (m_baked) {
+        m_streamer->SetNodeProvider(terrain::MakeBakedNodeProvider(m_baked));
+    }
     ApplySelectorBudget();
     ApplyStreamerConfig();
 
@@ -423,7 +426,7 @@ terrain::TerrainResult TerrainWorld::OpenImpl(const terrain::TerrainOpenOptions&
     SetEntityName(registry, entities.preview, "Terrain Preview");
 
     TerrainFeatureState features;
-    if (!ApplyTerrainFeatures(svc.compositor, svc.gpuDrivenScene, options.profile, settings, features, error)) {
+    if (!ApplyTerrainFeatures(svc.compositor, svc.gpuDrivenScene, options.profile, settings, options.renderBudget, svc.findEndpoint, features, error)) {
         return Failure("render features: " + error);
     }
 
@@ -491,7 +494,7 @@ terrain::TerrainResult TerrainWorld::CloseImpl(const char* reason)
     const bool auxReleased = m_aux ? m_aux->Reset() : true;
     m_pool.reset();
     m_aux.reset();
-    const bool restored = RestoreTerrainFeatures(svc.compositor, svc.gpuDrivenScene, m_features);
+    const bool restored = RestoreTerrainFeatures(svc.compositor, svc.gpuDrivenScene, svc.findEndpoint, m_features);
     m_livePreview = false;
     m_savedCamera.reset();
     m_stats = terrain::TerrainStats{};
@@ -760,6 +763,8 @@ void TerrainWorld::TickStreaming(const TerrainTickContext& context, Game& game, 
     m_selector->Select(view, m_wanted, &selection);
     m_stats.selectMs = MsSince(selectStart);
 
+    m_update.ready.clear();
+    m_update.evicted.clear();
     m_streamer->Update(m_wanted, context.frameIndex, context.nowSeconds, m_update);
 
     // Evictions first: their slots go back to the pool (hidden before they can be reused).
@@ -963,29 +968,47 @@ void TerrainWorld::CollectNodes(std::vector<terrain::TerrainNodeInfo>& out) cons
 
 terrain::TerrainResult TerrainWorld::SaveAsset(const std::filesystem::path& path)
 {
-    if (m_assetIo == nullptr) {
-        return Failure("the terrain asset format is not linked into the editor yet");
+    if (!m_open || !m_streamer) {
+        return Failure("open the terrain before saving it");
+    }
+    // Bakes a square of finest-level nodes around the camera; the world outside stays procedural.
+    const terrain::TerrainLayout layout = terrain::MakeLayout(m_settings);
+    const std::int32_t side = std::clamp(m_runtime.bakeNodesPerSide, 1, 64);
+    const std::int32_t half = static_cast<std::int32_t>(layout.worldHalfExtent / layout.nodeSizeLevel0);
+    const std::int32_t cx = static_cast<std::int32_t>(std::floor(m_stats.cameraX / layout.nodeSizeLevel0));
+    const std::int32_t cz = static_cast<std::int32_t>(std::floor(m_stats.cameraZ / layout.nodeSizeLevel0));
+    const std::int32_t firstX = std::clamp(cx - side / 2, -half, half - side);
+    const std::int32_t firstZ = std::clamp(cz - side / 2, -half, half - side);
+    const Clock::time_point start = Clock::now();
+    const std::optional<terrain::BakedTerrain> baked = terrain::BakeRegion(
+        m_settings, firstX, firstZ, static_cast<std::uint32_t>(side), static_cast<std::uint32_t>(side));
+    if (!baked.has_value()) {
+        return Failure("baking failed (bad region)");
     }
     std::string error;
-    if (!m_assetIo->Save(path, m_settings, &error)) {
+    if (!terrain::SaveTerrainAsset(path, *baked, &error)) {
         return Failure(error.empty() ? "saving failed" : error);
     }
-    return Success("saved " + path.string());
+    return Success("saved " + std::to_string(side * side) + " nodes (" + std::to_string(static_cast<int>(MsSince(start)))
+        + " ms) to " + path.string());
 }
 
 terrain::TerrainResult TerrainWorld::LoadAsset(const std::filesystem::path& path)
 {
-    if (m_assetIo == nullptr) {
-        return Failure("the terrain asset format is not linked into the editor yet");
-    }
-    terrain::TerrainSettings loaded = m_settings;
     std::string error;
-    if (!m_assetIo->Load(path, loaded, &error)) {
+    std::optional<terrain::BakedTerrain> loaded = terrain::LoadTerrainAsset(path, &error);
+    if (!loaded.has_value()) {
         return Failure(error.empty() ? "loading failed" : error);
     }
-    terrain::TerrainResult result = SetSettings(loaded);
+    const terrain::TerrainSettings settings = loaded->settings;
+    const std::int32_t countX = static_cast<std::int32_t>(loaded->countX);
+    m_baked = std::make_shared<const terrain::BakedTerrain>(std::move(*loaded));
+    terrain::TerrainResult result = SetSettings(settings);
+    if (m_streamer) {
+        m_streamer->SetNodeProvider(terrain::MakeBakedNodeProvider(m_baked));
+    }
     if (result.ok) {
-        result.message = "loaded " + path.string();
+        result.message = "loaded " + path.string() + " (" + std::to_string(countX) + " nodes wide)";
     }
     return result;
 }

@@ -1,6 +1,7 @@
 #include "EditorHost.h"
 
 #include "Logger.h"
+#include "Terrain/TerrainCommands.h"
 #include "EditorSceneIOCapability.h"
 #include "EditorLogQueryCapability.h"
 #include "EditorHotReloadDebugCapability.h"
@@ -438,7 +439,7 @@ EditorHost::EditorHost(const std::string& title, int width, int height, bool for
     , m_networkServer(&m_captureBridge, &m_commandBridge, &m_uiCommandBridge, &m_frameDebuggerCommandBridge,
           &m_assetImportCommandBridge, &s_editorLogQueryCapability, &m_renderGraphControlCommandBridge,
           &s_editorHotReloadDebugCapability, &s_editorProjectLifecycleCapability, &s_editorProjectLifecycleCapability,
-          &m_featureDebugCommandBridge, &m_profilerBridge, &m_physicsDebugCommandBridge)
+          &m_featureDebugCommandBridge, &m_profilerBridge, &m_physicsDebugCommandBridge, &m_terrainCommandBridge)
 {
     m_renderer.LogValidationState();
 
@@ -608,13 +609,16 @@ TerrainWorldServices EditorHost::MakeTerrainWorldServices()
     services.renderer = &m_renderer;
     services.sceneServicesSetLayout = m_core.GetSceneServicesDescriptorSet().LayoutHandle();
     services.compositor = m_core.GetRenderFeatureCompositor();
-    for (const std::unique_ptr<IEngineFeatureModule>& module : m_builtinFeatureModules) {
-        fx::Feature* feature = module ? fx::FindFeature(*module) : nullptr;
-        if (feature != nullptr && std::string_view(feature->Name()) == "GpuDrivenScene") {
-            services.gpuDrivenScene = feature->DebugEndpoint();
-            break;
+    services.findEndpoint = [this](std::string_view name) -> fx::IFeatureDebugEndpoint* {
+        for (const std::unique_ptr<IEngineFeatureModule>& module : m_builtinFeatureModules) {
+            fx::Feature* feature = module ? fx::FindFeature(*module) : nullptr;
+            if (feature != nullptr && std::string_view(feature->Name()) == name) {
+                return feature->DebugEndpoint();
+            }
         }
-    }
+        return nullptr;
+    };
+    services.gpuDrivenScene = services.findEndpoint("GpuDrivenScene");
     return services;
 }
 
@@ -673,7 +677,6 @@ int EditorHost::Run()
     Uint64 lastTicksNs = SDL_GetTicksNS();
 
     InputState inputState;
-    bool terrainAutoOpenDone = false;
 
     while (running) {
         // Brackets the whole frame for the profiler; a no-op while profiling is disabled.
@@ -744,6 +747,12 @@ int EditorHost::Run()
             FulfillOrLogDrop(m_physicsDebugCommandBridge, pdPending->id, pdResult, "PhysicsDebug");
         }
 
+        // Terrain commands run on the main thread, at most one per frame.
+        if (const auto terrainPending = m_terrainCommandBridge.TryPeekPendingCommand()) {
+            GTE_PROFILE_SCOPE("EditorHost::ExecuteTerrainCommand");
+            FulfillOrLogDrop(m_terrainCommandBridge, terrainPending->id, ExecuteTerrainCommand(m_terrainWorld, terrainPending->request), "Terrain");
+        }
+
         ServiceHizDemoMenuAction();
 
         // Hot reload: at most once per frame, and it blocks this thread until done (a deliberate hard freeze).
@@ -781,18 +790,6 @@ int EditorHost::Run()
 
         // Stamps log entries until the next Advance() with this frame's number; lives here because Core must not include Logger.h.
         gte::Logger::SetCurrentFrame(m_engineContext.time.FrameCount());
-
-        // Temporary live-debug aid until the terrain routes exist: GTE_TERRAIN_AUTOOPEN=full|lean|geometry_only
-        // opens the terrain scene once, on frame 30.
-        if (!terrainAutoOpenDone && m_engineContext.time.FrameCount() >= 30) {
-            terrainAutoOpenDone = true;
-            if (const char* profileName = std::getenv("GTE_TERRAIN_AUTOOPEN")) {
-                terrain::TerrainOpenOptions options;
-                terrain::TryParseTerrainProfile(profileName, options.profile);
-                const terrain::TerrainResult opened = m_terrainWorld.Open(options);
-                GTE_LOG_INFO("EditorHost", std::string("terrain auto-open: ") + opened.message);
-            }
-        }
 
         // Streams the terrain world (when open) right after the game update, before this frame's draw is built.
         if (m_terrainWorld.IsOpen()) {

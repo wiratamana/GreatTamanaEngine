@@ -9,12 +9,12 @@ namespace gte::terrain {
 struct TerrainSettings {
     // --- Shape: heights are metres, sea level is 0 ---
     std::uint32_t seed = 1337;
-    float heightScale = 1800.0f;     // Highest possible peak above sea level, metres.
-    float baseFrequency = 0.0005f;   // Master frequency (1/m) of the mountain layer; other layers scale from it.
+    float heightScale = 1200.0f;     // Highest possible peak above sea level, metres.
+    float baseFrequency = 0.0003f;   // Master frequency (1/m) of the mountain layer; other layers scale from it.
     float domainWarpStrength = 220.0f; // Metres of coordinate offset; 0 disables the warp.
     float domainWarpFrequency = 0.0006f;
     std::int32_t octaves = 6;        // Peaks-and-valleys octaves.
-    float gain = 0.5f;
+    float gain = 0.42f;
     float lacunarity = 2.0f;
 
     // --- Continentalness: ocean versus land ---
@@ -28,7 +28,7 @@ struct TerrainSettings {
 
     // --- Fine detail ---
     float detailFrequencyScale = 60.0f;
-    float detailAmplitude = 6.0f;    // Metres. Fades out by itself on coarse LOD levels.
+    float detailAmplitude = 1.5f;    // Metres. Fades out by itself on coarse LOD levels.
     std::int32_t detailOctaves = 3;
 
     // --- Hydraulic erosion (droplets) ---
@@ -44,7 +44,7 @@ struct TerrainSettings {
     std::int32_t erosionBrushRadius = 2;
     std::int32_t erosionMaxLevel = 1;        // LOD levels above this skip erosion.
     std::int32_t erosionEdgeFalloff = 8;     // Samples from the node border where erosion fades to zero.
-    float erosionStrength = 6.0f;            // Multiplier on the carved and deposited height; 1 is the raw simulation.
+    float erosionStrength = 1.5f;            // Multiplier on the carved and deposited height; 1 is the raw simulation.
 
     // --- Material thresholds ---
     float grassMaxSlopeDeg = 32.0f;
@@ -57,7 +57,7 @@ struct TerrainSettings {
     std::int32_t chunkQuads = 64;            // Quads per node side; vertices per side = chunkQuads + 1.
     float lod0Spacing = 2.0f;                // Metres between vertices on the finest level.
     std::int32_t lodLevelCount = 8;          // Levels 0..count-1; the coarsest level are the roots.
-    float lodDistanceFactor = 2.5f;          // A node splits when the camera is closer than factor * node size.
+    float lodDistanceFactor = 2.0f;          // A node splits when the camera is closer than factor * node size.
     std::int32_t worldHalfExtentChunks = 128; // Half world size in finest-level nodes.
 
     // --- Optimisation ---

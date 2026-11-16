@@ -26,6 +26,7 @@
 #include "../Application/FrameCaptureBridge.h"
 #include "../Application/FrameDebuggerCommandBridge.h"
 #include "../Application/PhysicsDebugCommandBridge.h"
+#include "../Application/TerrainCommandBridge.h"
 #include "../Application/RenderGraphControlCommandBridge.h"
 #include "../Application/ProjectAssemblyHotReloadCommandBridge.h"
 #include "../Application/ProjectLifecycleLoadCommandBridge.h"
@@ -117,6 +118,8 @@ private:
     ProfilerSnapshotBridge m_profilerBridge;
     // Backs the /physics_debug/* routes.
     PhysicsDebugCommandBridge m_physicsDebugCommandBridge;
+    // Backs the /terrain/* routes.
+    TerrainCommandBridge m_terrainCommandBridge;
 
     // The streamed terrain world. Declared after Core, the renderer and the feature modules it works through, and
     // before the network server, so the server (and later its routes) is gone before the world.

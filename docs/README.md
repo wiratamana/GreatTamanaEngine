@@ -28,9 +28,10 @@
 |---|---|---|
 | [HTTP cheat sheet](debugging/http-cheat-sheet.md) | One-page guide and recipes for the HTTP debug server | Everyone |
 | [HTTP routes](debugging/http-routes.md) | Capture, logs, scene, camera, editor, asset routes | Tool and script authors |
-| [HTTP routes (debug)](debugging/http-routes-debug.md) | Profiler, faults, feature debug, frame debugger, render graph, project | Tool and script authors |
+| [HTTP routes (debug)](debugging/http-routes-debug.md) | Profiler, faults, feature debug, frame debugger, render graph, project, terrain | Tool and script authors |
 | [Profiling](debugging/profiling.md) | CPU and GPU profiler, how to read it | Performance work |
 | [Physics debug](debugging/physics-debug.md) | Measure, change and see skirt and hair physics over HTTP | Physics work, AI agents |
+| [Terrain](debugging/terrain.md) | Open, change, fly over and measure the streamed terrain over HTTP | Terrain work, AI agents |
 | [Frame debugger](debugging/frame-debugger.md) | Freeze one frame, inspect draw events | Render debugging |
 | [Logging](debugging/logging.md) | Write and read log lines | Developers |
 

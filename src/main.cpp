@@ -80,7 +80,15 @@ int main(int argc, char* argv[])
     const std::uint32_t framesInFlight = OffscreenFramesInFlightFromArgs(argc, argv);
 
     try {
-        gte::EditorHost host("Great Tamana Engine", 1280, 720, forceValidation, presentPolicy, framesInFlight);
+        int winW = 1280;
+        int winH = 720;
+        for (int i = 1; i < argc; ++i) { // local screenshot helper: --window-size=WxH
+            const std::string_view arg(argv[i]);
+            if (arg.substr(0, 14) == "--window-size=") {
+                std::sscanf(std::string(arg.substr(14)).c_str(), "%dx%d", &winW, &winH);
+            }
+        }
+        gte::EditorHost host("Great Tamana Engine", winW, winH, forceValidation, presentPolicy, framesInFlight);
         return host.Run();
     } catch (const std::exception& e) {
         std::fprintf(stderr, "Fatal error: %s\n", e.what());

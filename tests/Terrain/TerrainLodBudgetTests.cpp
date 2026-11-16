@@ -16,6 +16,7 @@ TerrainSettings OpenWorld()
     TerrainSettings s;
     s.frustumCulling = false;
     s.maxViewDistance = 200000.0f;
+    s.lodDistanceFactor = 2.5f;
     return Sanitize(s);
 }
 

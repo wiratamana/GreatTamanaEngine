@@ -1,5 +1,5 @@
 # HTTP routes: debug tools
-> Route reference for profiler, fault injection, feature debug, frame debugger, render graph control, project assembly and physics debug. For anyone who calls the editor's HTTP server.
+> Route reference for profiler, fault injection, feature debug, frame debugger, render graph control, project assembly, physics debug and terrain. For anyone who calls the editor's HTTP server.
 > Verified against code: 2026-11-03
 
 ## TL;DR
@@ -480,6 +480,22 @@ Measure, change and look at the dynamic bone chains (skirt, hair) of a model. Fu
 - Errors: `400` bad input (the body names the key), `404` unknown entity, `409` state conflict, `503` bridge busy, `504` main thread too slow. Read the state before you repeat a write after `504`.
 - All settings are in memory. A restart resets them. `GET /physics_debug/preset?name=default` restores them.
 - Bend settings: `bend_limits_enabled`, `bend_limit_scale`, `bend_limit_min_degrees`, `bend_joint_floor_degrees` (0..45, default 3, legacy 0; minimum own limit of non-root joints).
+
+## Terrain
+Open, change, fly over and measure the streamed procedural world. Full guide, keys and measured costs: [Terrain](terrain.md).
+
+| Route | Params | Reply |
+|---|---|---|
+| `GET /terrain/open` | `profile=full\|lean\|geometry_only`, `poolSlots`, `water`, `budget` | `{"success":true,"message":...}` |
+| `GET /terrain/close` | none | same |
+| `GET /terrain/state` | none | Stats, `runtime` options and all `settings` |
+| `GET /terrain/settings` | none | Only the settings |
+| `GET /terrain/set` | any setting, runtime option or flag as `key=value` | `{"success":true,"message":"applied"}`. All or nothing. |
+| `GET /terrain/flight` | `kind=orbit\|line`, `x`, `z`, `heading`, `radius`, `speed`, `alt`, `minAlt`, `lookDown`, `fixedStep`, `duration` | same |
+| `GET /terrain/stop_flight` | none | same |
+| `GET /terrain/save`, `GET /terrain/load` | `path` | same |
+
+- Errors: `400` bad key or value, `404` unknown action, `409` world refused, `503` busy, `504` main thread too slow.
 
 ## Skinning mode
 Source: `src/Network/NetworkServer.cpp`. Same switch as the Jobs panel combo, set on the main thread. The mode is in memory only.

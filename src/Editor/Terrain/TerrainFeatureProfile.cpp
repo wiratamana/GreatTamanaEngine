@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <exception>
 #include <string_view>
 #include <utility>
@@ -22,6 +23,21 @@ constexpr std::array<std::string_view, 5> kSettingKeys{ "enabled", "mode", "cone
 
 // The fixed-cost features that hurt most on an integrated GPU.
 constexpr std::array<std::string_view, 3> kLeanPrefixes{ "VolumetricLight", "Ssgi", "Gtao" };
+
+// Quality the render budget sets: shadows only near the camera on small maps, fewer aerial perspective samples.
+struct BudgetKey {
+    const char* key;
+    const char* value;
+};
+struct BudgetEntry {
+    std::string_view feature;
+    std::array<BudgetKey, 3> keys;
+    std::size_t count;
+};
+constexpr std::array<BudgetEntry, 2> kRenderBudget{ {
+    { "Shadow", { { { "cascadeCount", "2" }, { "maxMapResolution", "1024" }, { "maxDistance", "1500" } } }, 3 },
+    { "Atmosphere", { { { "aerialPerspectiveSamplesPerSlice", "4" }, { "", "" }, { "", "" } } }, 1 },
+} };
 
 bool StartsWithAny(std::string_view name, std::span<const std::string_view> prefixes) noexcept
 {
@@ -73,20 +89,24 @@ catch (...)
 }
 
 bool RestoreTerrainFeatures(RenderFeatureCompositor* compositor, fx::IFeatureDebugEndpoint* gpuDrivenScene,
-    TerrainFeatureState& state) noexcept
+    const FeatureEndpointLookup& findEndpoint, TerrainFeatureState& state) noexcept
 {
     if (!state.active) {
         return true;
     }
     const bool switched = SetFeaturesEnabled(compositor, kLogCategory, state.disabledFeatures, std::span<const std::string>{});
-    const bool restored = RestoreFeatureSettings(gpuDrivenScene, kLogCategory, "GpuDrivenScene", state.savedSettings);
+    bool restored = RestoreFeatureSettings(gpuDrivenScene, kLogCategory, "GpuDrivenScene", state.savedSettings);
+    for (const SavedFeatureSettings& saved : state.savedBudget) {
+        fx::IFeatureDebugEndpoint* endpoint = findEndpoint ? findEndpoint(saved.feature) : nullptr;
+        restored = RestoreFeatureSettings(endpoint, kLogCategory, saved.feature, saved.args) && restored;
+    }
     state = TerrainFeatureState{};
     return switched && restored;
 }
 
 bool ApplyTerrainFeatures(RenderFeatureCompositor* compositor, fx::IFeatureDebugEndpoint* gpuDrivenScene,
-    terrain::TerrainProfile profile, const terrain::TerrainSettings& settings, TerrainFeatureState& state,
-    std::string& error)
+    terrain::TerrainProfile profile, const terrain::TerrainSettings& settings, bool renderBudget,
+    const FeatureEndpointLookup& findEndpoint, TerrainFeatureState& state, std::string& error)
 {
     if (gpuDrivenScene == nullptr) {
         error = "the GpuDrivenScene feature is missing";
@@ -114,11 +134,34 @@ bool ApplyTerrainFeatures(RenderFeatureCompositor* compositor, fx::IFeatureDebug
         }
         next.active = true;
 
+        if (renderBudget && profile != terrain::TerrainProfile::Full && findEndpoint) {
+            for (const BudgetEntry& entry : kRenderBudget) {
+                fx::IFeatureDebugEndpoint* endpoint = findEndpoint(entry.feature);
+                if (endpoint == nullptr) {
+                    continue;
+                }
+                std::vector<std::string_view> keys;
+                std::vector<fx::FeatureDebugArg> args;
+                for (std::size_t i = 0; i < entry.count; ++i) {
+                    keys.emplace_back(entry.keys[i].key);
+                    args.push_back({ entry.keys[i].key, entry.keys[i].value });
+                }
+                SavedFeatureSettings saved{ std::string(entry.feature), SnapshotFeatureSettings(*endpoint, keys) };
+                const fx::FeatureDebugResult budget = endpoint->Set(args);
+                if (!budget.ok) {
+                    error = std::string(entry.feature) + " refused the render budget: " + budget.message;
+                    RestoreTerrainFeatures(compositor, gpuDrivenScene, findEndpoint, next);
+                    return false;
+                }
+                next.savedBudget.push_back(std::move(saved));
+            }
+        }
+
         if (compositor != nullptr && profile != terrain::TerrainProfile::Full) {
             for (const std::string& name : PlanTerrainFeatureSwitch(profile, compositor->DebugSnapshot())) {
                 if (!TrySetFeatureEnabled(*compositor, name, false)) {
                     error = "could not turn off the feature \"" + name + "\"";
-                    RestoreTerrainFeatures(compositor, gpuDrivenScene, next);
+                    RestoreTerrainFeatures(compositor, gpuDrivenScene, findEndpoint, next);
                     return false;
                 }
                 next.disabledFeatures.push_back(name);
@@ -128,7 +171,7 @@ bool ApplyTerrainFeatures(RenderFeatureCompositor* compositor, fx::IFeatureDebug
         return true;
     } catch (const std::exception& e) {
         error = e.what();
-        RestoreTerrainFeatures(compositor, gpuDrivenScene, next);
+        RestoreTerrainFeatures(compositor, gpuDrivenScene, findEndpoint, next);
         return false;
     }
 }

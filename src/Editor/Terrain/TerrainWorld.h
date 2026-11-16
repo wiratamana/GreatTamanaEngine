@@ -11,6 +11,7 @@
 #include "../../Core/GraphicsHandles.h"
 #include "../../ECS/Entity.h"
 #include "../../Renderer/OffscreenFrameTicket.h"
+#include "../../Terrain/TerrainAsset.h"
 #include "../../Terrain/TerrainControl.h"
 #include "../../Terrain/TerrainFlight.h"
 #include "../../Terrain/TerrainLod.h"
@@ -39,6 +40,7 @@ struct TerrainWorldServices {
     DescriptorSetLayoutHandle sceneServicesSetLayout;
     RenderFeatureCompositor* compositor = nullptr;
     fx::IFeatureDebugEndpoint* gpuDrivenScene = nullptr;
+    FeatureEndpointLookup findEndpoint; // Any render feature by name (Shadow, Atmosphere ...).
 };
 
 struct TerrainTickContext {
@@ -57,9 +59,6 @@ public:
     ~TerrainWorld() override;
     TerrainWorld(const TerrainWorld&) = delete;
     TerrainWorld& operator=(const TerrainWorld&) = delete;
-
-    // The file format owner plugs in here; without it Save and Load report an error.
-    void SetAssetIo(terrain::ITerrainAssetIo* io) noexcept { m_assetIo = io; }
 
     // Per-frame work: flight, LOD selection, streaming, slot writes (bounded), cluster table update, live preview.
     void Tick(const TerrainTickContext& context);
@@ -129,7 +128,7 @@ private:
     std::pair<double, double> FindLandSpot() const;
 
     ServicesFn m_servicesFn;
-    terrain::ITerrainAssetIo* m_assetIo = nullptr;
+    std::shared_ptr<const terrain::BakedTerrain> m_baked; // Serves nodes inside the loaded asset region.
 
     terrain::TerrainSettings m_settings = terrain::Sanitize(terrain::TerrainSettings{});
     terrain::TerrainRuntimeOptions m_runtime;

@@ -105,7 +105,7 @@ std::vector<std::uint32_t> BuildSharedIndices(int quads)
             const std::uint32_t v10 = v00 + 1;
             const std::uint32_t v01 = v00 + stride;
             const std::uint32_t v11 = v01 + 1;
-            const std::uint32_t quad[6] = { v00, v10, v11, v11, v01, v00 };
+            const std::uint32_t quad[6] = { v00, v11, v10, v11, v00, v01 };
             idx.insert(idx.end(), std::begin(quad), std::end(quad));
         }
     }
@@ -125,10 +125,10 @@ std::vector<std::uint32_t> BuildSharedIndices(int quads)
             const std::uint32_t s0 = skirtBase + edge * stride + k;
             const std::uint32_t s1 = s0 + 1;
             if (reversed) {
-                const std::uint32_t r[6] = { t0, s1, t1, t0, s0, s1 };
+                const std::uint32_t r[6] = { t0, t1, s1, t0, s1, s0 };
                 idx.insert(idx.end(), std::begin(r), std::end(r));
             } else {
-                const std::uint32_t f[6] = { t0, t1, s1, t0, s1, s0 };
+                const std::uint32_t f[6] = { t0, s1, t1, t0, s0, s1 };
                 idx.insert(idx.end(), std::begin(f), std::end(f));
             }
         }

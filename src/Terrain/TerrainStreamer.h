@@ -84,6 +84,7 @@ public:
     void SetNodeProvider(NodeProvider provider);
 
     // One call per frame. `wanted` comes from LodSelector. `nowSeconds` is any monotonic clock.
+    // New nodes and evictions are appended to `out`; the caller clears it after consuming them.
     void Update(const std::vector<WantedNode>& wanted, std::uint64_t frame, double nowSeconds, StreamerUpdate& out);
 
     // Nodes to draw this frame: wanted and in view; a ready parent or children fill in for nodes still loading.

@@ -21,6 +21,7 @@ class IAssetScaffoldingCapability;
 class FeatureDebugCommandBridge;
 class ProfilerSnapshotBridge;
 class PhysicsDebugCommandBridge;
+class TerrainCommandBridge;
 } // namespace gte
 
 namespace gte::Network {
@@ -45,7 +46,8 @@ public:
         IAssetScaffoldingCapability* assetScaffoldingCapability = nullptr,
         FeatureDebugCommandBridge* featureDebugCommandBridge = nullptr,
         ProfilerSnapshotBridge* profilerSnapshotBridge = nullptr,
-        PhysicsDebugCommandBridge* physicsDebugCommandBridge = nullptr);
+        PhysicsDebugCommandBridge* physicsDebugCommandBridge = nullptr,
+        TerrainCommandBridge* terrainCommandBridge = nullptr);
     ~NetworkServer();
 
     NetworkServer(const NetworkServer&) = delete;
@@ -89,6 +91,7 @@ private:
     FeatureDebugCommandBridge* m_featureDebugCommandBridge = nullptr;
     ProfilerSnapshotBridge* m_profilerSnapshotBridge = nullptr;
     PhysicsDebugCommandBridge* m_physicsDebugCommandBridge = nullptr;
+    TerrainCommandBridge* m_terrainCommandBridge = nullptr;
 };
 
 } // namespace gte::Network
