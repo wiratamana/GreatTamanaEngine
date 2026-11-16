@@ -279,6 +279,7 @@ bool WaterWorld::PushToFeature(const WaterWorldServices& services)
             { "crestFoam", Fmt(s.foamAmount) },
             { "shoreFoam", Fmt(s.foamAmount) },
             { "ssr", s.ssrEnabled ? "true" : "false" },
+            { "halfRes", s.halfRes ? "true" : "false" },
             { "wetBand", Fmt(std::max(0.1f, s.wetBand)) },
             { "wetStrength", Fmt(s.wetDarken) },
         };
@@ -369,6 +370,19 @@ void WaterWorld::Tick(double nowSeconds)
         if (hide != m_quadHidden) {
             services.terrain->SetOceanQuadVisible(!hide);
             m_quadHidden = hide;
+        }
+        // Deep seabed is hidden by opaque ocean water: skip those nodes (only while the Water feature draws the ocean).
+        bool hasOcean = false;
+        for (const water::WaterBody& b : m_bodies) {
+            hasOcean = hasOcean || b.kind == water::WaterBodyKind::Ocean;
+        }
+        const double hiddenDepth = std::max(static_cast<double>(m_settings.seabedCullDepth), 2.0 * static_cast<double>(m_settings.clarity));
+        const double cullBelow = (m_featureConnected && m_settings.cullDeepSeabed && hasOcean)
+            ? static_cast<double>(m_settings.seaLevel) - hiddenDepth
+            : -1.0e30;
+        if (cullBelow != m_seabedCullBelow) {
+            services.terrain->SetSeabedCullBelow(cullBelow);
+            m_seabedCullBelow = cullBelow;
         }
     }
 }

@@ -95,6 +95,7 @@ public:
     std::optional<terrain::TerrainHeightProbe> ProbeHeight(double x, double z) const override;
     void SetOceanQuadVisible(bool visible) override;
     bool OceanQuadVisible() const override { return m_oceanQuadVisible; }
+    void SetSeabedCullBelow(double y) override { m_seabedCullBelow = y; }
 
 private:
     struct SceneEntities {
@@ -147,6 +148,8 @@ private:
     std::shared_ptr<const terrain::BakedTerrain> m_baked; // Serves nodes inside the loaded asset region.
     std::shared_ptr<const terrain::ITerrainCarve> m_carve; // Survives reopen; applied to every new streamer.
     bool m_oceanQuadVisible = true;
+    double m_seabedCullBelow = -1.0e30;
+    int m_seabedCulled = 0;
 
     terrain::TerrainSettings m_settings = terrain::Sanitize(terrain::TerrainSettings{});
     terrain::TerrainRuntimeOptions m_runtime;

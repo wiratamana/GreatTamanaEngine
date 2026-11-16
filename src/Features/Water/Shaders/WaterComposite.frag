@@ -9,7 +9,9 @@ layout(binding = 1) uniform sampler2D waterDepth; // Window depth of the surface
 
 void main()
 {
-    ivec2 q = clamp(ivec2(gl_FragCoord.xy), ivec2(0), textureSize(waterColor, 0) - ivec2(1));
+    // The water targets are full or half size: look up by uv.
+    ivec2 waterSize = textureSize(waterColor, 0);
+    ivec2 q = clamp(ivec2(inUv * vec2(waterSize)), ivec2(0), waterSize - ivec2(1));
     vec4 water = texelFetch(waterColor, q, 0);
     if (water.a <= 0.0) {
         discard;

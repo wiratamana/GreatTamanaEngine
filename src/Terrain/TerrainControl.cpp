@@ -135,6 +135,7 @@ std::string TerrainStatsToJson(const TerrainStats& s)
     AddInt(out, "carveDirtyNodes", s.carveDirtyNodes);
     AddNumber(out, "carveRebuildMs", s.carveRebuildMs);
     AddBool(out, "oceanQuadVisible", s.oceanQuadVisible);
+    AddInt(out, "seabedCulledNodes", static_cast<std::uint64_t>(s.seabedCulledNodes));
 
     AddText(out, "lastError", s.lastError);
     out += '}';

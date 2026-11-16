@@ -73,6 +73,7 @@ private:
     bool m_flushRequested = false;
     bool m_featureConnected = false;
     bool m_quadHidden = false;
+    double m_seabedCullBelow = -1.0e30;
     int m_carveApplies = 0;
     int m_carveRects = 0;
     int m_featurePushes = 0;

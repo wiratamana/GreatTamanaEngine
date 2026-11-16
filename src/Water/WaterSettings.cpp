@@ -87,6 +87,7 @@ WaterSettings Sanitize(const WaterSettings& in) noexcept
     s.wetBand = ClampF(s.wetBand, 0.0f, 20.0f, d.wetBand);
     s.wetDarken = ClampF(s.wetDarken, 0.0f, 1.0f, d.wetDarken);
     s.waveCount = std::clamp(s.waveCount, 1, 8);
+    s.seabedCullDepth = ClampF(s.seabedCullDepth, 5.0f, 500.0f, d.seabedCullDepth);
     if (static_cast<int>(s.quality) > static_cast<int>(WaterQuality::High)) {
         s.quality = d.quality;
     }
@@ -104,6 +105,7 @@ std::uint64_t Hash(const WaterSettings& s) noexcept
     f.Add(s.clarity); f.Add(s.foamAmount); f.Add(s.wetBand); f.Add(s.wetDarken);
     f.Add(s.ssrEnabled); f.Add(s.waveCount); f.Add(static_cast<std::uint8_t>(s.quality));
     f.Add(s.carveTerrain); f.Add(s.hideOceanQuad);
+    f.Add(s.cullDeepSeabed); f.Add(s.seabedCullDepth); f.Add(s.halfRes);
     return f.h;
 }
 
@@ -115,16 +117,17 @@ bool operator==(const WaterSettings& a, const WaterSettings& b) noexcept
         && SameColor(a.foamColor, b.foamColor) && a.clarity == b.clarity && a.foamAmount == b.foamAmount
         && a.wetBand == b.wetBand && a.wetDarken == b.wetDarken && a.ssrEnabled == b.ssrEnabled
         && a.waveCount == b.waveCount && a.quality == b.quality && a.carveTerrain == b.carveTerrain
-        && a.hideOceanQuad == b.hideOceanQuad;
+        && a.hideOceanQuad == b.hideOceanQuad && a.cullDeepSeabed == b.cullDeepSeabed
+        && a.seabedCullDepth == b.seabedCullDepth && a.halfRes == b.halfRes;
 }
 
 WaterSettings ApplyQuality(WaterSettings s, WaterQuality quality) noexcept
 {
     s.quality = quality;
     switch (quality) {
-    case WaterQuality::Low: s.waveCount = 2; s.ssrEnabled = false; break;
-    case WaterQuality::Medium: s.waveCount = 4; s.ssrEnabled = false; break;
-    default: s.waveCount = 8; s.ssrEnabled = true; break;
+    case WaterQuality::Low: s.waveCount = 2; s.ssrEnabled = false; s.halfRes = true; break;
+    case WaterQuality::Medium: s.waveCount = 4; s.ssrEnabled = false; s.halfRes = false; break;
+    default: s.waveCount = 8; s.ssrEnabled = true; s.halfRes = false; break;
     }
     return s;
 }

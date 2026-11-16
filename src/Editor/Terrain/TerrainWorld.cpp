@@ -1047,8 +1047,13 @@ void TerrainWorld::TickStreaming(const TerrainTickContext& context, Game& game, 
     // Which slots the cull may draw: the draw list, holes filled by ready parents or children.
     m_streamer->BuildDrawList(m_wanted, m_drawList);
     std::fill(m_wantEnabled.begin(), m_wantEnabled.end(), static_cast<std::uint8_t>(0));
+    m_seabedCulled = 0;
     for (const terrain::DrawNode& node : m_drawList) {
         if (const auto it = m_slotOfKey.find(node.key); it != m_slotOfKey.end()) {
+            if (static_cast<double>(m_pool->SlotBox(it->second).max[1]) < m_seabedCullBelow) {
+                ++m_seabedCulled; // Hidden by deep opaque water: not worth drawing.
+                continue;
+            }
             m_wantEnabled[it->second] = 1;
         }
     }
@@ -1087,6 +1092,7 @@ void TerrainWorld::TickStreaming(const TerrainTickContext& context, Game& game, 
     m_stats.carveRebuildMs = streamer.carveRebuildMs;
     m_stats.carveHash = m_streamer->CarveHash();
     m_stats.oceanQuadVisible = m_oceanQuadVisible;
+    m_stats.seabedCulledNodes = m_seabedCulled;
     m_stats.nodesWrittenThisTick = written;
     m_stats.builtTotal = streamer.builtTotal;
     m_stats.evictedTotal = streamer.evictedTotal;

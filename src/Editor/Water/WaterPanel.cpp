@@ -338,6 +338,10 @@ void WaterPanel::DrawSettings(WaterUiBridge& ui)
     changed |= ImGui::Checkbox("Bodies carve the terrain", &s.carveTerrain);
     changed |= ImGui::Checkbox("Hide the old flat ocean quad", &s.hideOceanQuad);
     Hint("The quad writes depth over the seabed and costs shadow time. It stays only when the Water feature is missing.");
+    changed |= ImGui::Checkbox("Skip deep seabed", &s.cullDeepSeabed);
+    Hint("Terrain nodes far below the ocean are not drawn. Deep water hides them anyway.");
+    changed |= ImGui::Checkbox("Half-resolution water", &s.halfRes);
+    Hint("Shades the water at half resolution. Cheaper on big views, a little softer.");
     float debounce = static_cast<float>(ui.world->CarveDebounce());
     if (Slider("Carve delay", debounce, 0.0f, 2.0f, "%.2f s", "How long an edit must rest before the terrain is rebuilt.")) {
         ui.world->SetCarveDebounce(debounce);

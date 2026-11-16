@@ -113,6 +113,7 @@ public:
         return terrain::TerrainHeightProbe{ base, lastCarve ? lastCarve->Apply(x, z, static_cast<float>(base), 2.0) : base };
     }
     void SetOceanQuadVisible(bool visible) override { oceanQuad = visible; }
+    void SetSeabedCullBelow(double y) override { seabedCullBelow = y; }
     bool OceanQuadVisible() const override { return oceanQuad; }
 
     terrain::TerrainSettings settings;
@@ -135,6 +136,7 @@ public:
     std::shared_ptr<const terrain::ITerrainCarve> lastCarve;
     std::vector<terrain::Rect2> lastDirty;
     bool oceanQuad = true;
+    double seabedCullBelow = -1.0e30;
     bool open = false;
     bool preview = false;
     bool aabb = false;

@@ -390,16 +390,21 @@ void main()
     if (p.x >= size.x || p.y >= size.y) {
         return;
     }
+    // The scene images are full size; the water targets may be half size.
+    ivec2 fullSize = textureSize(sceneDepth, 0);
+    ivec2 fp = min(ivec2(vec2(p) * (vec2(fullSize) / vec2(size))), fullSize - ivec2(1));
     uint debugView = params.counts.y;
     bool debugging = debugView != 0u;
 
     // The scene was drawn with the TAA jitter; the unjittered camera sees the same pixel at ndc - jitter.
     vec2 ndc = (vec2(p) + 0.5) / vec2(size) * 2.0 - 1.0 - params.viewInfo.yz;
-    float depth = FetchDepth(sceneDepth, p);
+    // Half size: the top-left pixel of the 2x2 block; the composite depth test keeps the land edge exact.
+    float depth = FetchDepth(sceneDepth, fp);
     bool hasScene = depth < kClearDepthThreshold;
     vec3 scenePos = vec3(0.0);
     if (hasScene) {
-        vec4 sceneH = params.invViewProjection * vec4(ndc, depth, 1.0);
+        vec2 sceneNdc = (vec2(fp) + 0.5) / vec2(fullSize) * 2.0 - 1.0 - params.viewInfo.yz;
+        vec4 sceneH = params.invViewProjection * vec4(sceneNdc, depth, 1.0);
         scenePos = sceneH.xyz / sceneH.w;
     }
 
@@ -434,13 +439,14 @@ void main()
             return;
         }
         // Wet ground keeps its depth: the composite writes the scene depth back unchanged.
-        vec3 dry = texelFetch(sceneColor, p, 0).rgb;
+        vec3 dry = texelFetch(sceneColor, fp, 0).rgb;
         Store(p, vec4(dry * mix(1.0, 0.45, wet), 1.0), depth);
         return;
     }
 
     // Plane hit, then fixed-point refinement against the wave height field.
-    float footprint = max(tWater * params.viewInfo.x, 1e-3);
+    float pixelScale = params.viewInfo.x * (float(fullSize.x) / float(size.x)); // A half-size pixel covers twice the ground.
+    float footprint = max(tWater * pixelScale, 1e-3);
     float t = tWater;
     if (params.counts.x > 0u) {
         for (int i = 0; i < 3; ++i) {
@@ -456,7 +462,7 @@ void main()
     }
 
     vec3 hit = origin + dir * t;
-    footprint = max(t * params.viewInfo.x, 1e-3);
+    footprint = max(t * pixelScale, 1e-3);
     float h;
     vec2 waveSlope;
     float ampSum;
@@ -504,7 +510,7 @@ void main()
         } else if (debugView == 6u) {
             d = vec3(clamp(0.5 + h / max(2.0 * ampSum, 1e-3), 0.0, 1.0));
         } else if (debugView == 7u) {
-            d = ReflectionColor(hit, dir, normal, p, size, fresnel) * fresnel;
+            d = ReflectionColor(hit, dir, normal, p, fullSize, fresnel) * fresnel;
         } else if (debugView == 8u) {
             d = vec3(Hash21(vec2(float(body.id), 3.0)), Hash21(vec2(float(body.id), 11.0)), Hash21(vec2(float(body.id), 29.0)));
         }
@@ -522,11 +528,11 @@ void main()
     vec3 transmit = hasScene ? exp(-sigma * rayDepth) : vec3(0.0);
     vec3 seabed = vec3(0.0);
     if (hasScene && max(transmit.r, max(transmit.g, transmit.b)) > 0.01) {
-        vec2 shift = slope * params.deepColor.w * float(size.y) * smoothstep(0.0, 1.5, verticalDepth);
-        ivec2 p2 = clamp(p + ivec2(shift), ivec2(0), size - ivec2(1));
+        vec2 shift = slope * params.deepColor.w * float(fullSize.y) * smoothstep(0.0, 1.5, verticalDepth);
+        ivec2 p2 = clamp(fp + ivec2(shift), ivec2(0), fullSize - ivec2(1));
         float depth2 = FetchDepth(sceneDepth, p2);
         if (depth2 < windowDepth || depth2 >= kClearDepthThreshold) {
-            p2 = p;
+            p2 = fp;
         }
         seabed = texelFetch(sceneColor, p2, 0).rgb;
     }
@@ -537,7 +543,7 @@ void main()
     // Reflection: sky from the look-up table, screen-space hits when enabled.
     float shoreFresnel = smoothstep(0.0, 0.35, verticalDepth);
     float reflectWeight = fresnel * shoreFresnel;
-    vec3 reflection = ReflectionColor(hit, dir, normal, p, size, reflectWeight);
+    vec3 reflection = ReflectionColor(hit, dir, normal, p, fullSize, reflectWeight);
     vec3 color = mix(under, reflection * params.surfaceInfo.w, reflectWeight);
 
     // Sun glint.

@@ -157,6 +157,7 @@ struct TerrainStats {
     int carveDirtyNodes = 0;           // Nodes the last carve change invalidated.
     double carveRebuildMs = 0.0;       // Wall time of the last finished carve rebuild.
     bool oceanQuadVisible = true;
+    int seabedCulledNodes = 0;         // Resident nodes kept out of the draw because deep water hides them.
 
     std::string lastError;
 };
@@ -224,6 +225,8 @@ public:
     virtual std::optional<TerrainHeightProbe> ProbeHeight(double x, double z) const = 0;
     virtual void SetOceanQuadVisible(bool visible) = 0;
     virtual bool OceanQuadVisible() const = 0;
+    // Nodes whose highest point is below `y` are not drawn (deep seabed hidden by opaque water). -1e30 = off.
+    virtual void SetSeabedCullBelow(double y) = 0;
 };
 
 // Stats as one JSON object (numbers and strings only), for the HTTP routes.

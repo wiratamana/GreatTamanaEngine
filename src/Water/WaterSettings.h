@@ -27,6 +27,9 @@ struct WaterSettings {
     WaterQuality quality = WaterQuality::Medium;
     bool carveTerrain = true;    // Master switch: bodies reshape the terrain.
     bool hideOceanQuad = true;   // Hide the old flat ocean quad while water is active.
+    bool cullDeepSeabed = true;  // Do not draw terrain nodes far below the ocean (hidden by deep water).
+    float seabedCullDepth = 60.0f; // Metres below the ocean where a node counts as hidden, 5..500.
+    bool halfRes = false;        // Shade the water at half resolution (cheaper, softer).
 };
 
 // Clamps every field to a safe range; NaN and infinity become the default.

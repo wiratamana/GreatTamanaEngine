@@ -34,6 +34,9 @@ void VisitSettings(S& s, V&& v)
     v("quality", s.quality);
     v("carveTerrain", s.carveTerrain);
     v("hideOceanQuad", s.hideOceanQuad);
+    v("cullDeepSeabed", s.cullDeepSeabed);
+    v("seabedCullDepth", s.seabedCullDepth);
+    v("halfRes", s.halfRes);
 }
 
 Json ColorJson(const float (&c)[3]) { return Json::array({ c[0], c[1], c[2] }); }

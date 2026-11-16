@@ -91,6 +91,7 @@ struct WaterSettings {
 
     // Rendering budget.
     float maxDistance = 100000.0f;       // 100..1e6, ocean ray length limit in metres.
+    bool halfRes = false;                // Shade at half resolution; the composite keeps the scene depth edges exact.
 
     WaterDebugView debugView = WaterDebugView::Off;
 };

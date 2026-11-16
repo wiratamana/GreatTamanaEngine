@@ -145,8 +145,14 @@ void WaterFeature::SurfacePass(fx::PostOpaqueFrame& f)
         return;
     }
 
-    const fx::Texture color = view.color.Acquire(f, v.extent, PixelFormat::RGBA16_Float);
-    const fx::Texture depth = view.depth.Acquire(f, v.extent, PixelFormat::R32_Float);
+    // Half-res shading: the shade pass runs on a quarter of the pixels; the composite looks each full pixel up by uv.
+    Extent2D shadeExtent = v.extent;
+    if (cfg.halfRes) {
+        shadeExtent.width = (v.extent.width + 1) / 2;
+        shadeExtent.height = (v.extent.height + 1) / 2;
+    }
+    const fx::Texture color = view.color.Acquire(f, shadeExtent, PixelFormat::RGBA16_Float);
+    const fx::Texture depth = view.depth.Acquire(f, shadeExtent, PixelFormat::R32_Float);
     if (!color.IsValid() || !depth.IsValid()) {
         bail(WaterFrameStatus::TargetFailed);
         return;
@@ -185,7 +191,7 @@ void WaterFeature::SurfacePass(fx::PostOpaqueFrame& f)
                             .Bind("skyViewLut", skyValid ? luts->skyView : f.SceneColor())
                             .Bind("waterColorOut", color)
                             .Bind("waterDepthOut", depth)
-                            .Dispatch(v.extent);
+                            .Dispatch(shadeExtent);
     if (!shaded) {
         f.ReportOnce("Water.Shade.Dispatch was refused");
         bail(WaterFrameStatus::ShadersNotReady);
@@ -196,7 +202,7 @@ void WaterFeature::SurfacePass(fx::PostOpaqueFrame& f)
                            .Bind("waterColor", color)
                            .Bind("waterDepth", depth)
                            .Target(f.SceneColor())
-                           .DepthTest(f.SceneDepth(), fx::DepthCompare::Always, /*write=*/true)
+                           .DepthTest(f.SceneDepth(), cfg.halfRes ? fx::DepthCompare::LessEqual : fx::DepthCompare::Always, /*write=*/true)
                            .Draw();
     if (!drawn) {
         f.ReportOnce("Water.Composite.Draw was refused");
@@ -207,7 +213,7 @@ void WaterFeature::SurfacePass(fx::PostOpaqueFrame& f)
     snap.extent = v.extent;
     snap.waveCount = cfg.waveCount;
     snap.skyValid = skyValid;
-    snap.textureBytes = std::uint64_t{ v.extent.width } * v.extent.height * kBytesPerPixel;
+    snap.textureBytes = std::uint64_t{ shadeExtent.width } * shadeExtent.height * kBytesPerPixel;
     snap.status = WaterFrameStatus::Ok;
     view.snapshot = snap;
 }
