@@ -479,6 +479,36 @@ void RegisterFeatureDebugRoutes(httplib::Server& server, FeatureDebugCommandBrid
     registerCommand("/feature_debug/state", FeatureDebugRoute::State, FeatureDebugCommandKind::GetState);
     registerCommand("/feature_debug/set", FeatureDebugRoute::Set, FeatureDebugCommandKind::Set);
     registerCommand("/feature_debug/invoke", FeatureDebugRoute::Invoke, FeatureDebugCommandKind::Invoke);
+
+    // Short routes for two Grass actions: /grass/tile (height tile source) and /grass/probe?x=&z= (root height check).
+    const auto registerAlias = [&server, bridge, respond, bridgeMissing](const char* path, const char* feature, const char* action) {
+        server.Get(path, [bridge, feature, action, respond, bridgeMissing](const httplib::Request& req, httplib::Response& res) {
+            std::vector<std::pair<std::string, std::string>> params(req.params.begin(), req.params.end());
+            params.emplace_back("name", feature);
+            params.emplace_back("action", action);
+            ParsedFeatureDebugQuery parsed = ParseFeatureDebugQuery(FeatureDebugRoute::Invoke, params);
+            if (!parsed.valid) {
+                respond(res, { 400, BuildGenericErrorResponseJson(parsed.errorMessage) });
+                return;
+            }
+            if (bridge == nullptr) {
+                bridgeMissing(res);
+                return;
+            }
+            FeatureDebugCommandRequest request;
+            request.kind = FeatureDebugCommandKind::Invoke;
+            request.featureName = parsed.featureName;
+            request.action = std::move(parsed.action);
+            request.args = std::move(parsed.args);
+            const FeatureDebugCommandBridge::SubmitResult submit = bridge->SubmitAndWait(std::move(request));
+            const fx::FeatureDebugResult empty;
+            respond(res, BuildFeatureDebugReply(submit.alreadyPending, submit.timedOut, submit.result && submit.result->found,
+                             parsed.featureName, submit.result ? submit.result->result : empty));
+        });
+    };
+    registerAlias("/grass/tile", "Grass", "tile");
+    registerAlias("/grass/probe", "Grass", "probe");
+    registerAlias("/grass/probe_batch", "Grass", "probe_batch");
 }
 
 // Writes the answer of a failed viewer or Scene camera command.
