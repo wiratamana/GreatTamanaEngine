@@ -245,7 +245,7 @@ Cull and draw (GPU ms, `ground`): Lean 0.54 / 0.65, Medium 0.75 / 1.73, Big 1.38
 - Grass takes the terrain colour from the node vertex colours. Biome limits are still settings: `sandHeight` (7 m, like the terrain `sandMaxHeight`), `alpineHeight` / `alpineFade` (450 m and 150 m, below the terrain snow line at 0.55 x heightScale), `maxSlopeDeg` (40, terrain grass slope is 32 to 42).
 - The pipelined frame mode (`PipelinedDeferredReadback`) refuses every CPU parameter upload, so no feature with `GpuParams` draws in it. Grass is the same.
 - `GrassCull.comp` returns early for a whole group before its barriers. All 64 threads of a group take the same path. Keep it so.
-- Not verified: the Frame Debugger replay of the indirect draws, Vulkan validation (the layer is not installed on the test machine).
+- Not verified: the Frame Debugger replay of the indirect draws, and synchronization validation. Core validation was run (layer is in the Vulkan SDK `Bin` folder; start the editor with `VK_LAYER_PATH` set and `--vulkan-validation`) and showed no Grass messages.
 
 ## Debug views and checks (F3)
 - `debugView=LodColor`, `Sway` (blue to red by tip angle) and `ChunkBounds` all work on the packed instance.
