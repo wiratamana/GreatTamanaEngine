@@ -78,6 +78,8 @@ GrassSettings SanitizeGrassSettings(const GrassSettings& in) noexcept
     s.slopeFadeDeg = Clamp(in.slopeFadeDeg, d.slopeFadeDeg, 0.0f, 45.0f);
     s.waterMargin = Clamp(in.waterMargin, d.waterMargin, -2.0f, 20.0f);
     s.waterFadeBand = Clamp(in.waterFadeBand, d.waterFadeBand, 0.0f, 20.0f);
+    s.alpineHeight = Clamp(in.alpineHeight, d.alpineHeight, -1000.0f, 100000.0f);
+    s.alpineFade = Clamp(in.alpineFade, d.alpineFade, 0.0f, 5000.0f);
 
     s.lod2Distance = Clamp(in.lod2Distance, d.lod2Distance, 10.0f, kMaxLod2Distance);
     s.lod1Distance = Clamp(in.lod1Distance, d.lod1Distance, 6.0f, s.lod2Distance - 4.0f);
@@ -209,7 +211,7 @@ GrassParamsGpu MakeGrassParams(const GrassSettings& s, const GrassFrameInputs& i
     Set4(p.groundAmbient, in.groundAmbient[0], in.groundAmbient[1], in.groundAmbient[2], 0.0f);
     Set4(p.colorRoot, s.colorRoot[0], s.colorRoot[1], s.colorRoot[2], s.rootAo);
     Set4(p.colorTip, s.colorTip[0], s.colorTip[1], s.colorTip[2], s.tintVariation);
-    Set4(p.cameraWorld, static_cast<float>(in.eyeX), static_cast<float>(in.eyeZ), 0.0f, 0.0f);
+    Set4(p.cameraWorld, static_cast<float>(in.eyeX), static_cast<float>(in.eyeZ), s.alpineHeight, s.alpineFade);
 
     p.instanceBase[0] = 0;
     p.instanceBase[1] = s.instanceCapLod0;

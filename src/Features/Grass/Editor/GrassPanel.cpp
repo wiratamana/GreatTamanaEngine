@@ -104,6 +104,8 @@ bool BuildGrassPanel(GrassSettings& edit, const GrassViewSnapshot& game, const G
         changed |= ImGui::SliderFloat("Slope fade (deg)", &edit.slopeFadeDeg, 0.0f, 30.0f);
         changed |= ImGui::SliderFloat("Water margin (m)", &edit.waterMargin, -1.0f, 5.0f);
         changed |= ImGui::SliderFloat("Waterline fade (m)", &edit.waterFadeBand, 0.0f, 6.0f);
+        changed |= ImGui::SliderFloat("Alpine line (world Y m)", &edit.alpineHeight, 0.0f, 2000.0f);
+        changed |= ImGui::SliderFloat("Alpine fade (m)", &edit.alpineFade, 0.0f, 600.0f);
     }
     if (ImGui::CollapsingHeader("LOD distances", ImGuiTreeNodeFlags_DefaultOpen)) {
         changed |= ImGui::SliderFloat("LOD0 to (m)", &edit.lod0Distance, 5.0f, 120.0f);

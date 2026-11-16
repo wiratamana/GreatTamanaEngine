@@ -28,7 +28,9 @@ namespace {
 
 constexpr const char* kLogCategory = "TerrainWorld";
 constexpr int kPreviewQuads = 128;
-constexpr float kCameraNear = 3.0f;
+constexpr float kCameraNear = 3.0f;           // Near plane high above the ground.
+constexpr float kCameraNearMin = 0.15f;       // Near plane at ground level.
+constexpr double kCameraNearPerClearance = 0.1; // Near plane grows with the height above ground.
 constexpr float kCameraFarMargin = 1500.0f;
 constexpr double kRampRebuildDelaySeconds = 0.3;
 constexpr std::uint64_t kGpuCounterIntervalFrames = 12;
@@ -218,6 +220,24 @@ void TerrainWorld::ApplyCameraRange(Game& game)
     if (Camera* camera = game.GetRegistry().TryGetComponent<Camera>(m_entities.camera)) {
         camera->nearZ = kCameraNear;
         camera->farZ = CameraFarFor(m_settings);
+    }
+}
+
+void TerrainWorld::AdaptCameraNear(Game& game)
+{
+    Registry& registry = game.GetRegistry();
+    Camera* camera = registry.TryGetComponent<Camera>(m_entities.camera);
+    const Transform* t = registry.TryGetComponent<Transform>(m_entities.camera);
+    if (camera == nullptr || t == nullptr || !m_streamer) {
+        return;
+    }
+    // Close to the ground the near plane shrinks so grass and rocks at arm's length are not clipped.
+    const double ground = std::max(static_cast<double>(m_streamer->Field().Height(t->position.x, t->position.z, 16.0)), 0.0);
+    const double clearance = std::max(static_cast<double>(t->position.y) - ground, 0.0);
+    const float wanted = static_cast<float>(std::clamp(clearance * kCameraNearPerClearance, static_cast<double>(kCameraNearMin),
+        static_cast<double>(kCameraNear)));
+    if (std::abs(wanted - camera->nearZ) > 0.02f * camera->nearZ) {
+        camera->nearZ = wanted;
     }
 }
 
@@ -848,6 +868,7 @@ void TerrainWorld::Tick(const TerrainTickContext& context)
         m_stats.frame = context.frameIndex;
         TickFlight(context, *svc.game);
         TickCamera(context, *svc.game);
+        AdaptCameraNear(*svc.game);
         {
             const terrain::RigPose pose = CameraPoseNow(*svc.game);
             m_stats.cameraYawDegrees = pose.yaw * 180.0 / 3.14159265358979323846;

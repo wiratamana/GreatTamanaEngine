@@ -47,6 +47,8 @@ constexpr std::array kSettingKeys{
     SettingKey{ "slopeFadeDeg", &GrassSettings::slopeFadeDeg },
     SettingKey{ "waterMargin", &GrassSettings::waterMargin },
     SettingKey{ "waterFadeBand", &GrassSettings::waterFadeBand },
+    SettingKey{ "alpineHeight", &GrassSettings::alpineHeight },
+    SettingKey{ "alpineFade", &GrassSettings::alpineFade },
     SettingKey{ "lod0Distance", &GrassSettings::lod0Distance },
     SettingKey{ "lod1Distance", &GrassSettings::lod1Distance },
     SettingKey{ "lod2Distance", &GrassSettings::lod2Distance },

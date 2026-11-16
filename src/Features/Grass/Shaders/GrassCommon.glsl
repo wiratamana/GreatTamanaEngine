@@ -32,7 +32,7 @@ layout(std430, binding = 0) readonly buffer GrassParamsBlock {
     vec4 groundAmbient;       // rgb = ground ambient (already scaled by intensity).
     vec4 colorRoot;           // rgb = root albedo (linear), w = root AO 0..1.
     vec4 colorTip;            // rgb = tip albedo (linear), w = per-blade tint variation 0..1.
-    vec4 cameraWorld;         // xy = camera world xz (m), zw = spare.
+    vec4 cameraWorld;         // xy = camera world xz (m), z = alpine line: grass thins out above this world Y, w = its fade band (m).
     uvec4 instanceBase;       // xyz = first instance index of each LOD region.
     uvec4 instanceCap;        // xyz = capacity of each LOD region.
     uvec4 misc;               // x = debug mode (0 normal, 1 LOD colour, 2 sway), y = placement seed.

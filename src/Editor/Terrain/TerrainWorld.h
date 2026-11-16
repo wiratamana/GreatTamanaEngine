@@ -126,6 +126,7 @@ private:
     void ApplySelectorBudget();
     void ApplyStreamerConfig();
     void ApplyCameraRange(Game& game);
+    void AdaptCameraNear(Game& game);
     bool Alive(Game& game) const;
 
     void TickStreaming(const TerrainTickContext& context, Game& game, const OffscreenFrameTicket& ticket);

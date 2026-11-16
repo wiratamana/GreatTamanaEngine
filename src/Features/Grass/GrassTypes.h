@@ -198,6 +198,8 @@ struct GrassSettings {
     float slopeFadeDeg = 8.0f;
     float waterMargin = 0.6f;    // Metres above the water level where grass starts.
     float waterFadeBand = 1.5f;
+    float alpineHeight = 450.0f; // World Y above which grass thins out (rock and snow).
+    float alpineFade = 150.0f;   // Metres over which it fades to nothing.
 
     float lod0Distance = 30.0f;
     float lod1Distance = 80.0f;
@@ -221,7 +223,7 @@ struct GrassSettings {
 
     std::uint32_t gridCells = 22;        // Chunks per side (at most kGrassMaxGridCells); must cover 2 x (lod2 + 16 m).
     std::uint32_t heightTileTexels = 384; // Texels per side of the height tile the editor layer should build (at most 512).
-    float heightTileTexelSize = 1.0f;     // Metres per texel of that tile (0.5..4); the tile must reach 2 x (lod2 + 32 m).
+    float heightTileTexelSize = 1.5f;     // Metres per texel of that tile (0.5..4); the tile must reach 2 x (lod2 + 32 m).
     std::uint32_t instanceCapLod0 = 400000;
     std::uint32_t instanceCapLod1 = 300000;
     std::uint32_t instanceCapLod2 = 200000;
