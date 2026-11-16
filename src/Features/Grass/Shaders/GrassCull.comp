@@ -223,6 +223,7 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
     float m = mix(1.0, patchMask, params.density.w);
     m *= 1.0 - smoothstep(params.slope.x - max(params.slope.y, 0.01), params.slope.x, slopeDeg);
     m *= smoothstep(waterTop, waterTop + max(params.water.z, 1e-3), ts.height);
+    m *= smoothstep(params.water.x + params.water.w, params.water.x + params.water.w + 3.0, ts.height);
     m *= 1.0 - smoothstep(params.cameraWorld.z, params.cameraWorld.z + max(params.cameraWorld.w, 1e-3), ts.height);
     float edgeStart = params.lodDist.z * (1.0 - clamp(params.lodDist.w, 0.01, 1.0));
     m *= 1.0 - smoothstep(edgeStart, params.lodDist.z, dist);

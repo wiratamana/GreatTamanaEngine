@@ -78,6 +78,7 @@ GrassSettings SanitizeGrassSettings(const GrassSettings& in) noexcept
     s.slopeFadeDeg = Clamp(in.slopeFadeDeg, d.slopeFadeDeg, 0.0f, 45.0f);
     s.waterMargin = Clamp(in.waterMargin, d.waterMargin, -2.0f, 20.0f);
     s.waterFadeBand = Clamp(in.waterFadeBand, d.waterFadeBand, 0.0f, 20.0f);
+    s.sandHeight = Clamp(in.sandHeight, d.sandHeight, 0.0f, 200.0f);
     s.alpineHeight = Clamp(in.alpineHeight, d.alpineHeight, -1000.0f, 100000.0f);
     s.alpineFade = Clamp(in.alpineFade, d.alpineFade, 0.0f, 5000.0f);
 
@@ -191,10 +192,10 @@ GrassParamsGpu MakeGrassParams(const GrassSettings& s, const GrassFrameInputs& i
     if (tile != nullptr && tile->Valid()) {
         Set4(p.tile, static_cast<float>(tile->originX - gridX), static_cast<float>(tile->originZ - gridZ), tile->texelSize,
             static_cast<float>(tile->size));
-        Set4(p.water, tile->seaLevel, s.waterMargin, s.waterFadeBand, 0.0f);
+        Set4(p.water, tile->seaLevel, s.waterMargin, s.waterFadeBand, s.sandHeight);
     } else {
         Set4(p.tile, 0.0f, 0.0f, 1.0f, 0.0f);
-        Set4(p.water, 0.0f, s.waterMargin, s.waterFadeBand, 0.0f);
+        Set4(p.water, 0.0f, s.waterMargin, s.waterFadeBand, s.sandHeight);
     }
 
     Set4(p.lodDist, s.lod0Distance, s.lod1Distance, s.lod2Distance, s.edgeFade);

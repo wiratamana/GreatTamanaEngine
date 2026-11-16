@@ -47,6 +47,7 @@ constexpr std::array kSettingKeys{
     SettingKey{ "slopeFadeDeg", &GrassSettings::slopeFadeDeg },
     SettingKey{ "waterMargin", &GrassSettings::waterMargin },
     SettingKey{ "waterFadeBand", &GrassSettings::waterFadeBand },
+    SettingKey{ "sandHeight", &GrassSettings::sandHeight },
     SettingKey{ "alpineHeight", &GrassSettings::alpineHeight },
     SettingKey{ "alpineFade", &GrassSettings::alpineFade },
     SettingKey{ "lod0Distance", &GrassSettings::lod0Distance },
@@ -168,6 +169,11 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const GrassVi
     Add(out, key("extent.h"), static_cast<std::int64_t>(v.extent.height));
     Add(out, key("hizUsed"), v.hizUsed);
     Add(out, key("windShared"), v.windShared);
+    Add(out, key("wind.dirX"), Shown(v.windDirX));
+    Add(out, key("wind.dirZ"), Shown(v.windDirZ));
+    Add(out, key("wind.speed"), Shown(v.windSpeed));
+    Add(out, key("wind.offsetX"), Shown(v.windOffsetX));
+    Add(out, key("wind.offsetZ"), Shown(v.windOffsetZ));
     Add(out, key("gridCells"), static_cast<std::int64_t>(v.gridCells));
     Add(out, key("tileRevision"), Count(v.tileRevision));
     Add(out, key("instanceBytes"), Count(v.instanceBytes));
@@ -274,7 +280,7 @@ bool ReadFloat(std::span<const fx::FeatureDebugArg> args, std::string_view key, 
 void AddTileSource(fx::FeatureDebugResult& out, const GrassTileSourceReport& r)
 {
     constexpr std::array<std::string_view, static_cast<std::size_t>(GrassTileReason::Count)> kReasonNames{ "initial", "moved",
-        "stream", "carve", "water", "settings" };
+        "stream", "carve", "water", "settings", "terrain" };
     Add(out, "source.terrainOpen", r.terrainOpen);
     Add(out, "source.building", r.building);
     Add(out, "source.complete", r.complete);

@@ -43,19 +43,19 @@ void DrawStats(const GrassViewSnapshot& view)
     }
     const GrassStatsGpu& s = view.stats;
     const auto at = [&](GrassStatsWord w) { return static_cast<unsigned>(s.Get(w)); };
-    ImGui::Text("Blades drawn: LOD0 %u, LOD1 %u, LOD2 %u", at(GrassStatsWord::Slot0), at(GrassStatsWord::Slot1),
+    ImGui::TextWrapped("Blades drawn: LOD0 %u, LOD1 %u, LOD2 %u", at(GrassStatsWord::Slot0), at(GrassStatsWord::Slot1),
         at(GrassStatsWord::Slot2));
-    ImGui::Text("Chunks: grid %u, far %u, frustum %u, Hi-Z %u, water %u, no data %u", at(GrassStatsWord::ChunksInGrid),
+    ImGui::TextWrapped("Chunks: grid %u, far %u, frustum %u, Hi-Z %u, water %u, no data %u", at(GrassStatsWord::ChunksInGrid),
         at(GrassStatsWord::ChunksCulledDistance), at(GrassStatsWord::ChunksCulledFrustum), at(GrassStatsWord::ChunksCulledHiz),
         at(GrassStatsWord::ChunksCulledWater), at(GrassStatsWord::ChunksCulledNoData));
-    ImGui::Text("Candidates %u, rejected: LOD step %u, water %u, slope %u, patches %u", at(GrassStatsWord::Candidates),
+    ImGui::TextWrapped("Candidates %u, rejected: LOD step %u, water %u, slope %u, patches %u", at(GrassStatsWord::Candidates),
         at(GrassStatsWord::RejectLod), at(GrassStatsWord::RejectWater), at(GrassStatsWord::RejectSlope),
         at(GrassStatsWord::RejectNoise));
     const unsigned dropped = at(GrassStatsWord::Dropped0) + at(GrassStatsWord::Dropped1) + at(GrassStatsWord::Dropped2);
     if (dropped > 0) {
         ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.2f, 1.0f), "%u blades dropped: a LOD region is full (raise the capacity).", dropped);
     }
-    ImGui::Text("GPU memory: %.1f MiB of instances. Hi-Z %s. Wind: %s.", static_cast<double>(view.instanceBytes) / (1024.0 * 1024.0),
+    ImGui::TextWrapped("GPU memory: %.1f MiB of instances. Hi-Z %s. Wind: %s.", static_cast<double>(view.instanceBytes) / (1024.0 * 1024.0),
         view.hizUsed ? "on" : "off", view.windShared ? "shared with the clouds" : "own fallback");
 }
 
@@ -64,6 +64,7 @@ void DrawStats(const GrassViewSnapshot& view)
 bool BuildGrassPanel(GrassSettings& edit, const GrassViewSnapshot& game, const GrassViewSnapshot& scene)
 {
     bool changed = false;
+    ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.5f);
 
     DrawStatus("Game view", game);
     DrawStatus("Scene view", scene);
@@ -104,6 +105,7 @@ bool BuildGrassPanel(GrassSettings& edit, const GrassViewSnapshot& game, const G
         changed |= ImGui::SliderFloat("Slope fade (deg)", &edit.slopeFadeDeg, 0.0f, 30.0f);
         changed |= ImGui::SliderFloat("Water margin (m)", &edit.waterMargin, -1.0f, 5.0f);
         changed |= ImGui::SliderFloat("Waterline fade (m)", &edit.waterFadeBand, 0.0f, 6.0f);
+        changed |= ImGui::SliderFloat("Bare beach height (m)", &edit.sandHeight, 0.0f, 30.0f);
         changed |= ImGui::SliderFloat("Alpine line (world Y m)", &edit.alpineHeight, 0.0f, 2000.0f);
         changed |= ImGui::SliderFloat("Alpine fade (m)", &edit.alpineFade, 0.0f, 600.0f);
     }
@@ -157,6 +159,7 @@ bool BuildGrassPanel(GrassSettings& edit, const GrassViewSnapshot& game, const G
         edit = GrassSettings{};
         changed = true;
     }
+    ImGui::PopItemWidth();
     return changed;
 }
 

@@ -161,6 +161,11 @@ void GrassFeature::FillEnvironment(fx::PostOpaqueFrame& f, GrassFrameInputs& in,
         in.windOffsetX = m_ownOffset[0];
         in.windOffsetZ = m_ownOffset[1];
     }
+    snap.windDirX = in.windDirX;
+    snap.windDirZ = in.windDirZ;
+    snap.windSpeed = in.windSpeed;
+    snap.windOffsetX = static_cast<float>(in.windOffsetX);
+    snap.windOffsetZ = static_cast<float>(in.windOffsetZ);
 }
 
 void GrassFeature::DrawPass(fx::PostOpaqueFrame& f)

@@ -198,6 +198,7 @@ struct GrassSettings {
     float slopeFadeDeg = 8.0f;
     float waterMargin = 0.6f;    // Metres above the water level where grass starts.
     float waterFadeBand = 1.5f;
+    float sandHeight = 7.0f;     // Metres above the ocean that stay bare (beach sand); fades out over 3 m.
     float alpineHeight = 450.0f; // World Y above which grass thins out (rock and snow).
     float alpineFade = 150.0f;   // Metres over which it fades to nothing.
 
@@ -251,7 +252,7 @@ struct GrassHeightTile {
 };
 
 // Why the editor layer rebuilt the height tile.
-enum class GrassTileReason : std::uint8_t { Initial, Moved, Stream, Carve, Water, Settings, Count };
+enum class GrassTileReason : std::uint8_t { Initial, Moved, Stream, Carve, Water, Settings, Terrain, Count };
 
 // What the editor layer's tile provider reports (read by the endpoint).
 struct GrassTileSourceReport {
@@ -308,6 +309,11 @@ struct GrassViewSnapshot {
     Extent2D extent{};
     bool hizUsed = false;
     bool windShared = false;      // The shared cloud wind was read this frame.
+    float windDirX = 0.0f;        // Wind the blades used: unit direction, speed (m/s) and pattern offset (m).
+    float windDirZ = 0.0f;
+    float windSpeed = 0.0f;
+    float windOffsetX = 0.0f;
+    float windOffsetZ = 0.0f;
     std::uint32_t gridCells = 0;
     std::uint64_t tileRevision = 0;
     std::uint64_t instanceBytes = 0;

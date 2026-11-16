@@ -17,7 +17,7 @@ layout(std430, binding = 0) readonly buffer GrassParamsBlock {
     vec4 camRel;              // x,z = camera grid-relative xz (m), y = camera world y (m), w = chunk size (m).
     ivec4 grid;               // xy = world chunk index of grid cell (0,0), z = cells per side, w = flags.
     vec4 tile;                // xy = grid-relative xz of texel (0,0) centre, z = texel size (m), w = texels per side.
-    vec4 water;               // x = sea level, y = margin above water (m), z = fade band (m), w = spare.
+    vec4 water;               // x = sea level, y = margin above water (m), z = fade band (m), w = bare beach height above the sea (m).
     vec4 lodDist;             // x,y,z = LOD0/LOD1/LOD2 max distance (m), w = edge fade fraction of the last LOD.
     vec4 density;             // xyz = blades per m^2 per LOD, w = patchiness 0..1.
     vec4 slope;               // x = max slope (deg), y = slope fade (deg), z = patch noise scale (m), w = bare threshold.
