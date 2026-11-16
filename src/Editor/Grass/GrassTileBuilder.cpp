@@ -10,6 +10,8 @@ namespace {
 
 constexpr double kSnapTexels = 8.0;
 constexpr float kNoOcean = -1.0e6f;
+constexpr double kMinDriftMetres = 8.0;   // Smallest camera drift that may rebuild the tile.
+constexpr double kDriftSafetyMetres = 8.0;
 
 } // namespace
 
@@ -89,6 +91,41 @@ GrassTileBuild BuildGrassTile(const GrassTileJob& job)
     result.tile = std::move(tile);
     result.buildMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     return result;
+}
+
+std::optional<GrassTileReason> DecideGrassTileRebuild(const GrassTileView& view, const GrassTileSeen& last, const GrassTileSeen& now)
+{
+    if (!view.haveTile) {
+        return GrassTileReason::Initial;
+    }
+    if (now.settingsKey != last.settingsKey) {
+        return GrassTileReason::Settings;
+    }
+    const double half = 0.5 * view.extent;
+    const double allowed = std::max(half - view.reach - kDriftSafetyMetres, kMinDriftMetres);
+    const double drift = std::max(std::abs(view.cameraX - (view.originX + half)), std::abs(view.cameraZ - (view.originZ + half)));
+    if (drift > allowed) {
+        return GrassTileReason::Moved;
+    }
+    if (now.waterHash != last.waterHash) {
+        return GrassTileReason::Water;
+    }
+    if (now.carveHash != last.carveHash || (last.rebuilding > 0 && now.rebuilding == 0)) {
+        return GrassTileReason::Carve;
+    }
+    if (now.terrainHash != last.terrainHash) {
+        return GrassTileReason::Terrain;
+    }
+    // New fine nodes bring better heights. While a terrain edit settles, any rebuilt node counts.
+    if (view.now < view.settleUntil && now.streamRevision != last.streamRevision) {
+        return GrassTileReason::Stream;
+    }
+    for (const terrain::NodeKey& key : now.fineKeys) {
+        if (!last.fineKeys.contains(key)) {
+            return GrassTileReason::Stream;
+        }
+    }
+    return std::nullopt;
 }
 
 } // namespace gte

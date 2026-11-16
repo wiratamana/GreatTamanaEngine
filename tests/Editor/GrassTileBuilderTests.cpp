@@ -154,5 +154,117 @@ TEST(GrassTileBuilderTest, SampleGrassTileIsBilinearAndBounded)
     EXPECT_FALSE(SampleGrassTile(tile, 11.0, 22.1, h, f));
 }
 
+
+// --- Rebuild policy ---
+
+GrassTileView ViewWithTile()
+{
+    GrassTileView v;
+    v.haveTile = true;
+    v.originX = 0.0;
+    v.originZ = 0.0;
+    v.extent = 576.0;  // Half 288; reach 182 + 8 safety leaves 98 m of drift.
+    v.reach = 182.0;
+    v.cameraX = 288.0;
+    v.cameraZ = 288.0;
+    v.now = 100.0;
+    return v;
+}
+
+GrassTileSeen Seen()
+{
+    GrassTileSeen s;
+    s.settingsKey = 1;
+    s.waterHash = 2;
+    s.carveHash = 3;
+    s.terrainHash = 4;
+    s.streamRevision = 5;
+    s.fineKeys = { terrain::NodeKey{ 0, 0, 0 }, terrain::NodeKey{ 1, 0, 0 } };
+    return s;
+}
+
+TEST(GrassTilePolicyTest, NothingChangedMeansNoRebuild)
+{
+    EXPECT_FALSE(DecideGrassTileRebuild(ViewWithTile(), Seen(), Seen()).has_value());
+}
+
+TEST(GrassTilePolicyTest, NoTileMeansInitial)
+{
+    GrassTileView v = ViewWithTile();
+    v.haveTile = false;
+    EXPECT_EQ(DecideGrassTileRebuild(v, Seen(), Seen()), GrassTileReason::Initial);
+}
+
+TEST(GrassTilePolicyTest, DriftInsideTheSlackKeepsTheTileAndOutsideRebuilds)
+{
+    GrassTileView v = ViewWithTile();
+    v.cameraX += 90.0;
+    EXPECT_FALSE(DecideGrassTileRebuild(v, Seen(), Seen()).has_value());
+    v.cameraX += 20.0; // 110 m of drift, more than the 98 m slack.
+    EXPECT_EQ(DecideGrassTileRebuild(v, Seen(), Seen()), GrassTileReason::Moved);
+}
+
+TEST(GrassTilePolicyTest, SmallTileStillAllowsSomeDrift)
+{
+    GrassTileView v = ViewWithTile();
+    v.extent = 300.0; // Smaller than the reach: slack falls back to 8 m.
+    v.cameraX = 150.0 + 7.0;
+    v.cameraZ = 150.0;
+    EXPECT_FALSE(DecideGrassTileRebuild(v, Seen(), Seen()).has_value());
+    v.cameraX = 150.0 + 9.0;
+    EXPECT_EQ(DecideGrassTileRebuild(v, Seen(), Seen()), GrassTileReason::Moved);
+}
+
+TEST(GrassTilePolicyTest, EachInputHasItsOwnReason)
+{
+    const GrassTileView v = ViewWithTile();
+    GrassTileSeen now = Seen();
+    now.settingsKey = 9;
+    EXPECT_EQ(DecideGrassTileRebuild(v, Seen(), now), GrassTileReason::Settings);
+    now = Seen();
+    now.waterHash = 9;
+    EXPECT_EQ(DecideGrassTileRebuild(v, Seen(), now), GrassTileReason::Water);
+    now = Seen();
+    now.carveHash = 9;
+    EXPECT_EQ(DecideGrassTileRebuild(v, Seen(), now), GrassTileReason::Carve);
+    now = Seen();
+    now.terrainHash = 9;
+    EXPECT_EQ(DecideGrassTileRebuild(v, Seen(), now), GrassTileReason::Terrain);
+}
+
+TEST(GrassTilePolicyTest, CarveRebuildFinishingTriggersOnce)
+{
+    GrassTileSeen last = Seen();
+    last.rebuilding = 3;
+    GrassTileSeen now = Seen();
+    now.rebuilding = 2; // Still running.
+    EXPECT_FALSE(DecideGrassTileRebuild(ViewWithTile(), last, now).has_value());
+    now.rebuilding = 0;
+    EXPECT_EQ(DecideGrassTileRebuild(ViewWithTile(), last, now), GrassTileReason::Carve);
+}
+
+TEST(GrassTilePolicyTest, OnlyNewFineNodesTriggerAStreamRebuild)
+{
+    const GrassTileView v = ViewWithTile();
+    GrassTileSeen now = Seen();
+    now.streamRevision = 99; // Churn far away: nodes built and evicted, nothing new inside.
+    now.fineKeys.erase(terrain::NodeKey{ 1, 0, 0 });
+    EXPECT_FALSE(DecideGrassTileRebuild(v, Seen(), now).has_value());
+    now.fineKeys.insert(terrain::NodeKey{ 5, 5, 0 });
+    EXPECT_EQ(DecideGrassTileRebuild(v, Seen(), now), GrassTileReason::Stream);
+}
+
+TEST(GrassTilePolicyTest, SettlingAfterATerrainEditRebuildsOnAnyRebuiltNode)
+{
+    GrassTileView v = ViewWithTile();
+    GrassTileSeen now = Seen();
+    now.streamRevision = 6; // Same keys, new content.
+    EXPECT_FALSE(DecideGrassTileRebuild(v, Seen(), now).has_value());
+    v.settleUntil = v.now + 1.0;
+    EXPECT_EQ(DecideGrassTileRebuild(v, Seen(), now), GrassTileReason::Stream);
+    v.settleUntil = v.now - 1.0;
+    EXPECT_FALSE(DecideGrassTileRebuild(v, Seen(), now).has_value());
+}
+
 } // namespace
 } // namespace gte

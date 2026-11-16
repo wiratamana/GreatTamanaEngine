@@ -16,8 +16,6 @@ constexpr const char* kLogCategory = "GrassTiles";
 constexpr double kMinRebuildSeconds = 0.25;
 constexpr float kMinNodeCoverage = 0.5f;     // Below this the terrain is not resident yet: submit nothing.
 constexpr float kCompleteCoverage = 0.98f;   // Level-0 share that counts as a finished tile.
-constexpr double kMinDriftMetres = 8.0;
-constexpr double kDriftSafetyMetres = 8.0;
 constexpr double kSettleSeconds = 4.0; // After a terrain edit every rebuilt node triggers a tile rebuild.
 
 using Clock = std::chrono::steady_clock;
@@ -91,44 +89,6 @@ void GrassTileProvider::WorkerLoop(const std::stop_token& stop)
     }
 }
 
-std::optional<GrassTileReason> GrassTileProvider::Decide(const GrassFeature& grass, const terrain::SurfaceSnapshot& surface,
-    std::uint64_t waterHash, std::uint64_t settingsKey, std::uint64_t terrainHash, double now, double cameraX,
-    double cameraZ) const
-{
-    if (m_submitted == nullptr) {
-        return GrassTileReason::Initial;
-    }
-    if (settingsKey != m_lastSettingsKey) {
-        return GrassTileReason::Settings;
-    }
-    const double half = 0.5 * static_cast<double>(m_submitted->size) * static_cast<double>(m_submitted->texelSize);
-    const double reach = static_cast<double>(grass.Settings().lod2Distance) + 32.0;
-    const double allowed = std::max(half - reach - kDriftSafetyMetres, kMinDriftMetres);
-    const double drift = std::max(std::abs(cameraX - (m_submitted->originX + half)), std::abs(cameraZ - (m_submitted->originZ + half)));
-    if (drift > allowed) {
-        return GrassTileReason::Moved;
-    }
-    if (waterHash != m_lastWaterHash) {
-        return GrassTileReason::Water;
-    }
-    if (surface.carveHash != m_lastCarveHash || (m_lastRebuilding > 0 && surface.rebuilding == 0)) {
-        return GrassTileReason::Carve;
-    }
-    if (terrainHash != m_lastTerrainHash) {
-        return GrassTileReason::Terrain;
-    }
-    // New fine nodes bring better heights. While a terrain edit settles, any rebuilt node counts.
-    if (now < m_settleUntil && surface.streamRevision != m_lastStreamRevision) {
-        return GrassTileReason::Stream;
-    }
-    for (const std::shared_ptr<const terrain::NodeMesh>& node : surface.nodes) {
-        if (node->key.level <= 1 && !m_lastFineKeys.contains(node->key)) {
-            return GrassTileReason::Stream;
-        }
-    }
-    return std::nullopt;
-}
-
 void GrassTileProvider::Accept(const Finished& finished, GrassFeature& grass)
 {
     const GrassTileBuild& build = finished.build;
@@ -141,15 +101,8 @@ void GrassTileProvider::Accept(const Finished& finished, GrassFeature& grass)
         m_report.coverageNodes = build.coverageNodes;
         m_report.submergedShare = build.submergedShare;
     }
-    m_lastStreamRevision = finished.streamRevision;
-    m_lastCarveHash = finished.carveHash;
-    m_lastWaterHash = finished.waterHash;
-    m_lastSettingsKey = finished.settingsKey;
-    m_lastRebuilding = finished.rebuilding;
+    m_lastSeen = finished.seen;
     m_lastComplete = build.coverageLevel0 >= kCompleteCoverage;
-    m_lastTerrainHash = finished.terrainHash;
-    m_lastFineKeys.clear();
-    m_lastFineKeys.insert(finished.fineKeys.begin(), finished.fineKeys.end());
     if (build.tile == nullptr || build.coverageNodes < kMinNodeCoverage) {
         // The terrain around the camera is not resident yet; a tile of noise guesses would put grass in the air.
         m_waitingForNodes = true;
@@ -236,13 +189,37 @@ void GrassTileProvider::Tick(double nowSeconds, double cameraX, double cameraZ)
     }
     const std::shared_ptr<const water::WaterBodySet> bodies = svc.water != nullptr ? svc.water->Bodies() : nullptr;
     const std::uint64_t waterHash = bodies != nullptr ? bodies->Hash() : 0;
-    const std::uint64_t settingsKey = SettingsKey(settings);
+    GrassTileSeen seen;
+    seen.settingsKey = SettingsKey(settings);
+    seen.waterHash = waterHash;
+    seen.carveHash = surface.carveHash;
+    seen.terrainHash = terrain::Hash(svc.terrain->Settings());
+    seen.streamRevision = surface.streamRevision;
+    seen.rebuilding = surface.rebuilding;
+    for (const std::shared_ptr<const terrain::NodeMesh>& node : surface.nodes) {
+        if (node->key.level <= 1) {
+            seen.fineKeys.insert(node->key);
+        }
+    }
 
-    const std::uint64_t terrainHash = terrain::Hash(svc.terrain->Settings());
-    const std::optional<GrassTileReason> reason =
-        Decide(grass, surface, waterHash, settingsKey, terrainHash, nowSeconds, cameraX, cameraZ);
+    GrassTileView view;
+    view.haveTile = m_submitted != nullptr;
+    if (m_submitted != nullptr) {
+        view.originX = m_submitted->originX;
+        view.originZ = m_submitted->originZ;
+        view.extent = static_cast<double>(m_submitted->size) * static_cast<double>(m_submitted->texelSize);
+    }
+    view.reach = static_cast<double>(settings.lod2Distance) + 32.0;
+    view.cameraX = cameraX;
+    view.cameraZ = cameraZ;
+    view.now = nowSeconds;
+    view.settleUntil = m_settleUntil;
+    const std::optional<GrassTileReason> reason = DecideGrassTileRebuild(view, m_lastSeen, seen);
     if (!reason.has_value()) {
         return;
+    }
+    if (*reason == GrassTileReason::Terrain) {
+        m_settleUntil = nowSeconds + kSettleSeconds;
     }
 
     Pending pending;
@@ -252,24 +229,11 @@ void GrassTileProvider::Tick(double nowSeconds, double cameraX, double cameraZ)
     pending.job.originZ = origin[1];
     pending.job.centerX = cameraX;
     pending.job.centerZ = cameraZ;
-    pending.job.reach = static_cast<double>(settings.lod2Distance) + 32.0;
+    pending.job.reach = view.reach;
     pending.job.waterMargin = settings.waterMargin;
     pending.job.revision = ++m_revisionCounter;
     pending.meta.epoch = m_epoch;
-    pending.meta.streamRevision = surface.streamRevision;
-    pending.meta.carveHash = surface.carveHash;
-    pending.meta.rebuilding = surface.rebuilding;
-    pending.meta.waterHash = waterHash;
-    pending.meta.settingsKey = settingsKey;
-    pending.meta.terrainHash = terrainHash;
-    for (const std::shared_ptr<const terrain::NodeMesh>& node : surface.nodes) {
-        if (node->key.level <= 1) {
-            pending.meta.fineKeys.push_back(node->key);
-        }
-    }
-    if (*reason == GrassTileReason::Terrain) {
-        m_settleUntil = nowSeconds + kSettleSeconds;
-    }
+    pending.meta.seen = std::move(seen);
     pending.job.surface = std::move(surface);
     pending.job.water = bodies;
     m_lastLaunch = nowSeconds;

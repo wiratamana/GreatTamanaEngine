@@ -46,13 +46,7 @@ private:
     struct Finished {
         GrassTileBuild build;
         std::uint64_t epoch = 0;
-        std::uint64_t streamRevision = 0;
-        std::uint64_t carveHash = 0;
-        std::uint64_t waterHash = 0;
-        int rebuilding = 0;
-        std::uint64_t settingsKey = 0;
-        std::uint64_t terrainHash = 0;
-        std::vector<terrain::NodeKey> fineKeys; // Resident level 0 and 1 nodes the build saw.
+        GrassTileSeen seen; // What the build saw.
     };
     struct Pending {
         GrassTileJob job;
@@ -63,9 +57,6 @@ private:
     void Disconnect();
     void WorkerLoop(const std::stop_token& stop);
     void Accept(const Finished& finished, GrassFeature& grass);
-    std::optional<GrassTileReason> Decide(const GrassFeature& grass, const terrain::SurfaceSnapshot& surface,
-        std::uint64_t waterHash, std::uint64_t settingsKey, std::uint64_t terrainHash, double now, double cameraX,
-        double cameraZ) const;
 
     ServicesFn m_services;
     GrassFeature* m_hooked = nullptr;
@@ -78,14 +69,8 @@ private:
     double m_lastLaunch = -1.0e9;
     bool m_waitingForNodes = false;
     bool m_lastComplete = false;
-    std::uint64_t m_lastStreamRevision = 0;
-    std::uint64_t m_lastCarveHash = 0;
-    std::uint64_t m_lastWaterHash = 0;
-    std::uint64_t m_lastSettingsKey = 0;
-    int m_lastRebuilding = 0;
-    std::uint64_t m_lastTerrainHash = 0;
+    GrassTileSeen m_lastSeen;
     double m_settleUntil = -1.0;
-    std::unordered_set<terrain::NodeKey, terrain::NodeKeyHash> m_lastFineKeys;
     double m_lastMainMs = 0.0;
 
     // Shared with the worker.
