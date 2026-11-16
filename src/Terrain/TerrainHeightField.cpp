@@ -105,9 +105,10 @@ struct TerrainHeightField::Impl {
     }
 };
 
-TerrainHeightField::TerrainHeightField(const TerrainSettings& settings)
+TerrainHeightField::TerrainHeightField(const TerrainSettings& settings, std::shared_ptr<const ITerrainCarve> carve)
     : m_settings(settings)
     , m_layout(MakeLayout(settings))
+    , m_carve(std::move(carve))
     , m_impl(std::make_unique<Impl>())
 {
     Impl& impl = *m_impl;
@@ -190,9 +191,18 @@ int TerrainHeightField::LevelForSpacing(double spacing) const noexcept
     return std::clamp(level, 0, static_cast<int>(m_impl->levels.size()) - 1);
 }
 
-float TerrainHeightField::Height(double x, double z, double sampleSpacing) const
+float TerrainHeightField::BaseHeight(double x, double z, double sampleSpacing) const
 {
     return m_impl->Sample(m_impl->LevelFor(sampleSpacing), static_cast<float>(x), static_cast<float>(z));
+}
+
+float TerrainHeightField::Height(double x, double z, double sampleSpacing) const
+{
+    const float base = BaseHeight(x, z, sampleSpacing);
+    if (!m_carve) {
+        return base;
+    }
+    return std::clamp(m_carve->Apply(x, z, base, sampleSpacing), m_impl->minHeight, m_impl->maxHeight);
 }
 
 void TerrainHeightField::FillGrid(double originX, double originZ, double spacing, int countX, int countZ, float* out) const

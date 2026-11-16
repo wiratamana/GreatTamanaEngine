@@ -214,6 +214,20 @@ NodeMesh BuildGridMesh(const TerrainHeightField& field, const GridBuildSpec& spe
         }
     }
 
+    // Carve after erosion over the whole tile (margin included), so neighbouring nodes agree on shared samples.
+    if (const ITerrainCarve* carve = field.Carve()) {
+        carve->ApplyTile(tile, side, g.originX - margin * g.spacing, g.originZ - margin * g.spacing, g.spacing);
+        const float lo = MinHeight(s);
+        const float hi = MaxHeight(s);
+        for (std::size_t i = 0; i < tileCount; ++i) {
+            tile[i] = std::clamp(tile[i], lo, hi);
+        }
+        if (timing != nullptr) {
+            timing->carveMs = MsSince(t0);
+            t0 = Clock::now();
+        }
+    }
+
     NodeMesh mesh;
     mesh.key = spec.key;
     mesh.originX = g.originX;

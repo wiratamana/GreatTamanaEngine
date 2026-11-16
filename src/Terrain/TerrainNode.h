@@ -10,6 +10,7 @@ namespace gte::terrain {
 struct NodeBuildTiming {
     double heightMs = 0.0;
     double erosionMs = 0.0;
+    double carveMs = 0.0; // Zero without a carve.
     double meshMs = 0.0; // Normals, colours, skirt, bounds.
 };
 
