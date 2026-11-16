@@ -1,10 +1,10 @@
 # Render features
 
-> Master table of the 13 built-in render features: order, toggles, data flow, defaults. Read this before any single feature page.
+> Master table of the 14 built-in render features: order, toggles, data flow, defaults. Read this before any single feature page.
 > Verified against code: 2026-11-04
 
 ## TL;DR
-- 13 features ship in `src/Features/`. All use the feature kit (`fx::`), none touches Vulkan.
+- 14 features ship in `src/Features/`. All use the feature kit (`fx::`), none touches Vulkan.
 - Order in a frame: stage first, then priority (low number runs first).
 - Features share data through channels, never by including each other.
 - Settings live in memory only. Scene files do not save them. Set them again after a load.
@@ -27,6 +27,7 @@
 | `TemporalAa` | Temporal anti-aliasing with a sub-pixel jitter (Game view only) | [temporal-aa](temporal-aa.md) | `TemporalAa` |
 | `VolumetricCloud` | Ray-marched cloud layer, low-res march with temporal upsampling | [volumetric-cloud](volumetric-cloud.md) | `VolumetricCloud` |
 | `Water` | Screen-space ocean, lakes and rivers with depth write | [water](water.md) | debug name `Water` (no panel yet) |
+| `Grass` | GPU-placed, GPU-culled procedural grass, three indirect draws | [grass](grass.md) | `Grass` |
 
 ## Order in the frame
 
@@ -38,15 +39,16 @@
 | PreOpaque | 10 | `Shadow.Cascades` | Shadow | `Shadow.Cascade0..3.Draw`, `Shadow.Cluster.L<c>.P<s>.Reset/Cull/Draw` |
 | PreOpaque | 15 | `ToonCharacter.Look` | ToonCharacter | none (`Always`) |
 | PreOpaque | 20 | `SceneLighting.Uniforms` | SceneLighting | none (`Always`) |
-| PreOpaque | 30, 35, 36, 40, 40, 45, 46 | `<Feature>.FrameStamp` | Shadow, Ssgi, Water, Gtao, ToneMapping, VolumetricLight, Bloom | none (`Always`) |
+| PreOpaque | 30, 35, 36, 38, 40, 40, 45, 46 | `<Feature>.FrameStamp` | Shadow, Ssgi, Water, Grass, Gtao, ToneMapping, VolumetricLight, Bloom | none (`Always`) |
 | PreOpaque | 47 | `TemporalAa.FrameStamp` | TemporalAa | none (`Always`) |
 | PreOpaque | 48 | `TemporalAa.Jitter` | TemporalAa | none (`Always`) |
-| PreOpaque | 49 | `VolumetricCloud.FrameStamp` | VolumetricCloud | none (`Always`) |
+| PreOpaque | 49 | `VolumetricCloud.FrameStamp` | VolumetricCloud (also publishes the shared wind) | none (`Always`) |
 | Opaque | -10 | `GpuDrivenScene.SceneCull` | GpuDrivenScene | none (`Always`) |
 | Opaque | 0 | `GpuDrivenScene.Opaque` | GpuDrivenScene | `GpuDrivenScene.*` passes |
 | Opaque | 100 | `ToonCharacter.Surface` | ToonCharacter | `ToonCharacter.Surface.Draw` |
 | Opaque | 110 | `ToonCharacter.Outline` | ToonCharacter | `ToonCharacter.Outline.Draw` |
 | Opaque | 120 | `ToonCharacter.Overlay` | ToonCharacter | `ToonCharacter.Overlay.Draw` |
+| PostOpaque | -20 | `Grass.Draw` | Grass | `Grass.Init`, `Grass.Cull`, `Grass.Stats.Copy`, `Grass.Hiz.Base/Top`, `Grass.Draw.L0..L2` |
 | PostOpaque | 0 | `Shadow.Mask` | Shadow | `Shadow.Mask.Dispatch` |
 | PostOpaque | 20 | `AtmosphereAerialVolume` | Atmosphere | `AtmosphereAerialPerspectiveVolumePass` |
 | PostOpaque | 25 | `Water.Surface` | Water | `Water.Shade.Dispatch`, `Water.Composite.Draw` |
@@ -85,12 +87,13 @@ Shadow.Cascades --> Shadow.Map --> Shadow.Mask --> Shadow.Composite
 Gtao, Ssgi, VolumetricLight: Result channel from build pass to composite pass
 SceneLighting.Uniforms --> scene uniform block, binding 8 --> every lit material
 ToonCharacter.Look --> SceneLighting.Uniforms (last 64 bytes of the block) --> ToonCharacter draws
+VolumetricCloud.FrameStamp --> VolumetricCloud.Wind (WindState) --> Grass.Draw
 ToonCharacter.Surface (claims entities) --> Outline, Overlay (same entities)
 Bloom: PostComposite, reads scene color, adds glow before ToneMapping
 TemporalAa.Jitter (PreOpaque) --> engine draw projection --> scene color and depth --> TemporalAa resolve (PostComposite -150)
 ```
 
-- Plain records in `src/Game/Lighting/` carry the shared data: `SunShadowReceiver.h`, `SunLightModulation.h`, `DirectionalLightResolver.h`, `ToonLook.h`.
+- Plain records in `src/Game/Lighting/` carry the shared data: `SunShadowReceiver.h`, `SunLightModulation.h`, `DirectionalLightResolver.h`, `ToonLook.h`, `WindState.h`.
 - The first active ECS `DirectionalLight` is the sun. With none, a fixed placeholder sun is used.
 - Atmosphere and VolumetricLight read the shadow receiver even in views that show no surface.
 
@@ -98,7 +101,7 @@ TemporalAa.Jitter (PreOpaque) --> engine draw projection --> scene color and dep
 
 | In the Scene view (secondary) | Features |
 |---|---|
-| Off at start | Gtao, Ssgi, VolumetricLight, VolumetricCloud, Atmosphere aerial volume, Atmosphere composite, TemporalAa (not supported there) |
+| Off at start | Grass, Water, Gtao, Ssgi, VolumetricLight, VolumetricCloud, Atmosphere aerial volume, Atmosphere composite, TemporalAa (not supported there) |
 | On at start | Shadow, SceneLighting, GpuDrivenScene, ToneMapping, Bloom, ToonCharacter, sky background, Atmosphere LUTs, sun light |
 
 - Turn one on: `curl.exe "http://127.0.0.1:8080/render_graph/set_feature_enabled?name=Gtao.Occlusion&enabled=true&view=secondary"`.

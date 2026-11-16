@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [Procedural grass feature](#procedural-grass-feature-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
 | [Indirect draw in the fullscreen verb](#indirect-draw-in-the-fullscreen-verb-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
 | [Screen-space water feature](#screen-space-water-feature-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
 | [Terrain on the iGPU: cheaper aerial volume, background save and load](#terrain-on-the-igpu-cheaper-aerial-volume-background-save-and-load-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
@@ -48,6 +49,14 @@
 | [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+
+## Procedural grass feature (branch `feature/precural-landscape`, 2026-11-16)
+
+- **New feature `Grass`.** A compute pass (`Grass.Cull`) places blades per 16 m chunk from a height tile, drops steep, wet and hidden ones (slope, water, frustum, Hi-Z), and writes the survivors and three draw commands. Three indirect draws (`Grass.Draw.L0/L1/L2`) build each blade from `gl_VertexIndex`. Registrations: `Grass.FrameStamp` (PreOpaque 38), `Grass.Draw` (PostOpaque -20). Code in `src/Features/Grass/`. See [Grass](reference/render-features/grass.md).
+- **Height tile input.** `GrassFeature::SubmitHeightTile(shared_ptr<const GrassHeightTile>)`. The editor layer must build the tile from the drawn terrain. Without a tile nothing is drawn. `/feature_debug/invoke?name=Grass&action=synthetic_tile` makes a made-up landscape for tests.
+- **Shared wind.** New `src/Game/Lighting/WindState.h` and channel `VolumetricCloud.Wind`. The cloud feature publishes it every frame from its always-on PreOpaque entry (the cloud march and its tests are unchanged). Grass sways with the cloud drift and falls back to its own wind when the clouds are off.
+- **Panel and debug.** Window `Grass`, `/feature_debug` name `Grass` with counters (`game.stats.*`), debug views `LodColor`, `Sway`, `ChunkBounds`.
+- Cost on the iGPU: +3 ms at 719x360 and +3 to 6 ms at 1264x629 with the default density (about 100k blades). No shadows on grass yet.
 
 ## Indirect draw in the fullscreen verb (branch `feature/precural-landscape`, 2026-11-16)
 

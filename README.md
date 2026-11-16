@@ -6,7 +6,7 @@
 - Windows only. SDL3 window, Dear ImGui docking editor, Vulkan 1.3 (dynamic rendering).
 - Hand-written ECS, math, render graph, job system and profiler.
 - GPU-driven mesh rendering with cluster culling and a Hi-Z pyramid.
-- Render features: Atmosphere, Shadow, Gtao, Ssgi, VolumetricLight, SceneLighting, ToneMapping, GpuDrivenScene.
+- Render features: Atmosphere, Shadow, Gtao, Ssgi, VolumetricLight, SceneLighting, ToneMapping, GpuDrivenScene, Water, VolumetricCloud, Grass.
 - Own asset container `*.gta`. Imports PNG/JPG, glTF, MMD (`.pmx`, `.vmd`) and STL. Scenes are JSON (`*.gtscene`).
 - Per-developer game projects built as DLLs and hot reloaded.
 - A loopback HTTP server on port 8080 for debugging, including image capture.

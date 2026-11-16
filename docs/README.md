@@ -87,6 +87,7 @@
 | [Toon character](reference/render-features/toon-character.md) | Cel shading and outline for marked characters | Tuning, debugging |
 | [Temporal anti-aliasing](reference/render-features/temporal-aa.md) | Jitter and history resolve for the Game view | Tuning, debugging |
 | [Volumetric cloud](reference/render-features/volumetric-cloud.md) | Ray-marched cloud layer with temporal upsampling | Tuning, debugging |
+| [Grass](reference/render-features/grass.md) | GPU-driven procedural grass, height tile input, shared wind | Tuning, debugging |
 
 ## Tools
 | Tool | What it does |
