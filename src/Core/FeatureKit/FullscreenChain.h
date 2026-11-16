@@ -21,8 +21,7 @@ class FullscreenShader;
 enum class DepthCompare : std::uint8_t { Less, LessEqual, Equal, Always };
 
 // One draw into a target, bound by shader variable name. Made by Frame::Fullscreen(), ended by Draw().
-// It draws a fullscreen triangle, or with IndirectDraw() what a GPU buffer says (shader-made triangle list).
-// The frame's scene depth is acknowledged for you unless you bind or acknowledge it yourself.
+// It draws a fullscreen triangle, or with IndirectDraw() what a GPU buffer says. Scene depth is acknowledged for you.
 //   f.Fullscreen(shader, "Tint.Draw").Bind("src", f.SceneColor()).Push(p).Target(f.PrivateTarget()).Draw();
 class FullscreenChain {
 public:
@@ -64,8 +63,7 @@ public:
 
     // Draws the 16-byte command {vertexCount, instanceCount, firstVertex, firstInstance} at `byteOffset` (a multiple
     // of 4) of `args` instead of the triangle; firstInstance must be 0. Needs BufferUse::Indirect.
-    // A compute pass that wrote `args` is barriered first. One pass name per draw (e.g. per LOD) lets one shader
-    // draw several commands.
+    // A compute pass that wrote `args` is barriered first. Use one pass name per draw.
     FullscreenChain& IndirectDraw(GpuBufferRef args, std::uint64_t byteOffset = 0);
 
     // Declares a depth read the shader does not perform.
