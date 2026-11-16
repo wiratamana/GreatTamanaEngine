@@ -1,0 +1,331 @@
+#version 450
+
+// Per pixel: ray against the wave height field, shading, shore fade, foam and wet shore.
+// Writes rgb + coverage and the window depth the composite draw stores into the scene depth.
+#include "ScreenSpaceCommon.glsl"
+#include "AtmosphereCommon.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+
+struct WaterWave {
+    vec4 dirAndK;  // xy direction, z wave number, w crest exponent.
+    vec4 ampPhase; // x amplitude, y frequency, z phase offset, w profile mean.
+};
+
+// Member names and order match WaterShadeParamsGpu.
+layout(std430, binding = 0) readonly buffer WaterShadeParams {
+    mat4 invViewProjection;
+    mat4 viewProjection;
+    vec4 eyeTime;      // xyz eye, w time.
+    vec4 viewInfo;     // x pixel scale, yz jitter NDC, w sea level.
+    vec4 sunDirection; // xyz toward the sun, w sun specular.
+    vec4 sunRadiance;  // rgb sun illuminance, w sky intensity.
+    vec4 skyInfo;      // x eye height km, y planet radius km, z sky valid, w ambient scale.
+    vec4 shallowColor; // rgb, w clarity.
+    vec4 deepColor;    // rgb, w refraction strength.
+    vec4 foamColor;    // rgb, w crest foam.
+    vec4 surfaceInfo;  // x shore foam, y shore width, z roughness, w reflection strength.
+    vec4 rippleInfo;   // x ripple strength, y wave lod scale, z absorption, w max distance.
+    vec4 wetInfo;      // x wet band, y wet strength, z wet fade distance, w ssr max distance.
+    uvec4 counts;      // x wave count, y debug view, z ssr steps, w flags.
+    vec4 ripple[2];    // x scale, yz wrapped offset, w period.
+    WaterWave waves[8];
+} params;
+
+layout(binding = 1) uniform sampler2D sceneDepth;
+layout(binding = 2) uniform sampler2D sceneColor;
+layout(binding = 3) uniform sampler2D skyViewLut;
+layout(binding = 4, rgba16f) uniform writeonly image2D waterColorOut; // rgb radiance, a coverage.
+layout(binding = 5, r32f) uniform writeonly image2D waterDepthOut;    // Window depth.
+
+const float kMaxWaterDepth = 0.99999; // Below kClearDepthThreshold so far water still counts as a surface.
+const float kDirectScale = 0.65;      // Same sun energy scale as the lit material shaders.
+const vec3 kAmbient = vec3(0.95, 1.0, 1.05);
+const uint kFlagSsr = 1u;
+const uint kFlagWet = 2u;
+const uint kFlagSky = 4u;
+
+float Hash21(vec2 p)
+{
+    uvec2 q = uvec2(ivec2(p));
+    uint h = q.x * 1597334673u ^ q.y * 3812015801u;
+    h = (h ^ (h >> 16)) * 2246822519u;
+    h ^= h >> 13;
+    h *= 3266489917u;
+    h ^= h >> 16;
+    return float(h) * (1.0 / 4294967296.0);
+}
+
+// Value noise and its derivative; the lattice repeats every `period` cells so the pattern follows the eye wrap.
+vec3 ValueNoiseD(vec2 x, float period)
+{
+    vec2 i = floor(x);
+    vec2 f = x - i;
+    vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
+    vec2 i0 = mod(i, period);
+    vec2 i1 = mod(i + vec2(1.0), period);
+    float a = Hash21(i0);
+    float b = Hash21(vec2(i1.x, i0.y));
+    float c = Hash21(vec2(i0.x, i1.y));
+    float d = Hash21(i1);
+    float k1 = b - a;
+    float k2 = c - a;
+    float k4 = a - b - c + d;
+    float value = a + k1 * u.x + k2 * u.y + k4 * u.x * u.y;
+    return vec3(value, du * vec2(k1 + k4 * u.y, k2 + k4 * u.x));
+}
+
+// Wave height at eye-relative xz. `footprint` is the world size of a pixel there; fine waves fade out below it.
+float WaveHeight(vec2 rel, float footprint)
+{
+    float h = 0.0;
+    uint n = min(params.counts.x, 8u);
+    for (uint i = 0u; i < n; ++i) {
+        WaterWave w = params.waves[i];
+        float fade = smoothstep(2.0, 6.0, (6.2831853 / w.dirAndK.z) / (footprint * params.rippleInfo.y));
+        float theta = w.dirAndK.z * dot(w.dirAndK.xy, rel) + w.ampPhase.z;
+        float s = 0.5 + 0.5 * sin(theta);
+        h += w.ampPhase.x * fade * (pow(max(s, 1e-5), w.dirAndK.w) - w.ampPhase.w);
+    }
+    return h;
+}
+
+// Height, slope (d/dx, d/dz) and the sum of the faded amplitudes.
+void WaveSurface(vec2 rel, float footprint, out float h, out vec2 slope, out float ampSum)
+{
+    h = 0.0;
+    slope = vec2(0.0);
+    ampSum = 0.0;
+    uint n = min(params.counts.x, 8u);
+    for (uint i = 0u; i < n; ++i) {
+        WaterWave w = params.waves[i];
+        float amp = w.ampPhase.x * smoothstep(2.0, 6.0, (6.2831853 / w.dirAndK.z) / (footprint * params.rippleInfo.y));
+        float theta = w.dirAndK.z * dot(w.dirAndK.xy, rel) + w.ampPhase.z;
+        float sn = sin(theta);
+        float s = 0.5 + 0.5 * sn;
+        float e = w.dirAndK.w;
+        float sPow = pow(max(s, 1e-5), e - 1.0);
+        h += amp * (sPow * s - w.ampPhase.w);
+        slope += w.dirAndK.xy * (amp * e * sPow * 0.5 * cos(theta) * w.dirAndK.z);
+        ampSum += amp;
+    }
+}
+
+// Small drifting ripples: slope and a foam noise value. Fades out when a ripple is smaller than a pixel.
+vec2 RippleSlope(vec2 rel, float footprint, out float foamNoise)
+{
+    vec4 l0 = params.ripple[0];
+    vec4 l1 = params.ripple[1];
+    vec3 n0 = ValueNoiseD(rel * l0.x + l0.yz, l0.w);
+    vec3 n1 = ValueNoiseD(rel * l1.x + l1.yz, l1.w);
+    float f0 = 1.0 - smoothstep(0.1, 0.5, footprint * l0.x);
+    float f1 = 1.0 - smoothstep(0.1, 0.5, footprint * l1.x);
+    foamNoise = n0.x * 0.6 + n1.x * 0.4;
+    return params.rippleInfo.x * (0.15 * l0.x * f0 * n0.yz + 0.07 * l1.x * f1 * n1.yz);
+}
+
+vec3 SkyRadiance(vec3 dir)
+{
+    if ((params.counts.w & kFlagSky) == 0u) {
+        return vec3(0.35, 0.55, 0.9);
+    }
+    float viewHeightKm = max(params.skyInfo.x, params.skyInfo.y);
+    vec2 uv = ViewDirectionToSkyViewLutUv(dir, textureSize(skyViewLut, 0), viewHeightKm, params.skyInfo.y);
+    vec3 radiance = max(texture(skyViewLut, uv).rgb, vec3(0.0)) * params.sunRadiance.w;
+    // Same horizon tint as the sky background so the far water meets the sky seamlessly.
+    float horizonBlend = 1.0 - smoothstep(0.0, 0.2, dir.y);
+    float luma = dot(radiance, vec3(0.2126, 0.7152, 0.0722));
+    return mix(radiance, vec3(luma) * vec3(0.93, 0.98, 1.07), 0.6 * horizonBlend);
+}
+
+float DistributionGgx(float nDotH, float alpha)
+{
+    float a2 = alpha * alpha;
+    float d = nDotH * nDotH * (a2 - 1.0) + 1.0;
+    return a2 / (3.14159265 * d * d);
+}
+
+void Store(ivec2 p, vec4 color, float depth)
+{
+    imageStore(waterColorOut, p, color);
+    imageStore(waterDepthOut, p, vec4(depth));
+}
+
+void main()
+{
+    ivec2 size = imageSize(waterColorOut);
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= size.x || p.y >= size.y) {
+        return;
+    }
+    uint debugView = params.counts.y;
+    bool debugging = debugView != 0u;
+
+    // The scene was drawn with the TAA jitter; the unjittered camera sees the same pixel at ndc - jitter.
+    vec2 ndc = (vec2(p) + 0.5) / vec2(size) * 2.0 - 1.0 - params.viewInfo.yz;
+    float depth = FetchDepth(sceneDepth, p);
+    bool hasScene = depth < kClearDepthThreshold;
+    vec3 scenePos = vec3(0.0);
+    if (hasScene) {
+        vec4 sceneH = params.invViewProjection * vec4(ndc, depth, 1.0);
+        scenePos = sceneH.xyz / sceneH.w;
+    }
+
+    vec4 nearH = params.invViewProjection * vec4(ndc, 0.0, 1.0);
+    vec4 farH = params.invViewProjection * vec4(ndc, 1.0, 1.0);
+    vec3 origin = nearH.xyz / nearH.w;
+    vec3 dir = normalize(farH.xyz / farH.w - origin);
+    float tScene = hasScene ? length(scenePos - origin) : 1e30;
+    float levelRel = params.viewInfo.w - params.eyeTime.y;
+
+    float tWater = -1.0;
+    if (dir.y < -1e-5) {
+        tWater = (levelRel - origin.y) / dir.y;
+    }
+    bool candidate = tWater > 0.0 && tWater < tScene && tWater <= params.rippleInfo.w;
+
+    if (!candidate) {
+        // Not water: optionally darken the dry terrain just above the water line.
+        float wet = 0.0;
+        if (hasScene && (params.counts.w & kFlagWet) != 0u) {
+            float above = scenePos.y - levelRel;
+            float band = params.wetInfo.x;
+            if (above > -0.5 && above < band) {
+                float distFade = 1.0 - smoothstep(0.5 * params.wetInfo.z, params.wetInfo.z, tScene);
+                wet = (1.0 - smoothstep(0.0, band, max(above, 0.0))) * params.wetInfo.y * distFade;
+            }
+        }
+        if (debugging) {
+            vec3 neutral = vec3(0.0);
+            if (debugView == 1u) {
+                neutral = vec3(hasScene ? clamp(tScene / 2000.0, 0.0, 1.0) : 1.0);
+            } else if (debugView == 9u) {
+                neutral = vec3(wet);
+            }
+            Store(p, vec4(neutral, 1.0), depth);
+            return;
+        }
+        if (wet <= 0.001) {
+            Store(p, vec4(0.0), 0.0);
+            return;
+        }
+        // Wet ground keeps its depth: the composite writes the scene depth back unchanged.
+        vec3 dry = texelFetch(sceneColor, p, 0).rgb;
+        Store(p, vec4(dry * mix(1.0, 0.45, wet), 1.0), depth);
+        return;
+    }
+
+    // Plane hit, then fixed-point refinement against the wave height field.
+    float footprint = max(tWater * params.viewInfo.x, 1e-3);
+    float t = tWater;
+    if (params.counts.x > 0u) {
+        for (int i = 0; i < 3; ++i) {
+            vec3 q = origin + dir * t;
+            float h = WaveHeight(q.xz, footprint);
+            float tNext = (levelRel + h - origin.y) / dir.y;
+            t = clamp(tNext, tWater * 0.5, tWater * 1.5 + 2.0);
+        }
+    }
+    if (t <= 0.0 || t >= tScene) {
+        Store(p, debugging ? vec4(0.0, 0.0, 0.0, 1.0) : vec4(0.0), debugging ? depth : 0.0);
+        return;
+    }
+
+    vec3 hit = origin + dir * t;
+    footprint = max(t * params.viewInfo.x, 1e-3);
+    float h;
+    vec2 waveSlope;
+    float ampSum;
+    WaveSurface(hit.xz, footprint, h, waveSlope, ampSum);
+    float foamNoise;
+    vec2 slope = waveSlope + RippleSlope(hit.xz, footprint, foamNoise);
+    vec3 normal = normalize(vec3(-slope.x, 1.0, -slope.y));
+
+    vec3 viewDir = -dir;
+    float nDotV = max(dot(normal, viewDir), 0.0);
+    float fresnel = 0.02 + 0.98 * pow(1.0 - nDotV, 5.0);
+
+    // Depth of the water column under this pixel.
+    float surfaceY = levelRel + h;
+    float verticalDepth = hasScene ? max(surfaceY - scenePos.y, 0.0) : 1e4;
+    float rayDepth = hasScene ? max(tScene - t, 0.0) : 1e4;
+    float clarity = params.shallowColor.w;
+    float shoreWidth = params.surfaceInfo.y;
+    float shoreMask = hasScene ? 1.0 - smoothstep(0.0, shoreWidth, verticalDepth) : 0.0;
+
+    vec4 clip = params.viewProjection * vec4(hit, 1.0);
+    float windowDepth = clamp(clip.z / max(clip.w, 1e-6), 0.0, kMaxWaterDepth);
+
+    // Foam: wave crests (height against the amplitude sum) and a breaking band at the shore.
+    float crestMetric = h / max(ampSum, 1e-3);
+    float crestFoam = smoothstep(0.28, 0.5, crestMetric) * params.foamColor.w * (0.4 + 0.9 * foamNoise);
+    float shoreLine = shoreMask * (0.35 + 0.65 * smoothstep(0.3, 0.8, foamNoise + 0.25 * sin(verticalDepth * 6.0 - params.eyeTime.w * 1.6)));
+    float foam = clamp(crestFoam + shoreLine * params.surfaceInfo.x, 0.0, 1.0);
+
+    if (debugging) {
+        vec3 d = vec3(0.0);
+        if (debugView == 1u) {
+            d = vec3(clamp(t / 2000.0, 0.0, 1.0));
+        } else if (debugView == 2u) {
+            d = vec3(clamp(verticalDepth / max(clarity, 0.1), 0.0, 1.0));
+        } else if (debugView == 3u) {
+            d = vec3(shoreMask);
+        } else if (debugView == 4u) {
+            d = vec3(foam);
+        } else if (debugView == 5u) {
+            d = normal * 0.5 + 0.5;
+        } else if (debugView == 6u) {
+            d = vec3(clamp(0.5 + h / max(2.0 * ampSum, 1e-3), 0.0, 1.0));
+        } else if (debugView == 7u) {
+            d = SkyRadiance(reflect(dir, normal)) * fresnel;
+        } else if (debugView == 8u) {
+            d = vec3(1.0, 0.0, 0.0);
+        }
+        Store(p, vec4(d, 1.0), windowDepth);
+        return;
+    }
+
+    // Light on the water body: hemisphere ambient plus the sun on the surface.
+    float sunUp = max(params.sunDirection.y, 0.0);
+    vec3 bodyLight = kAmbient * params.skyInfo.w + params.sunRadiance.rgb * (kDirectScale * sunUp * max(normal.y, 0.0));
+
+    // Refraction: shift the seabed lookup by the surface slope, keep it only where it still lies behind the water.
+    vec3 seabed = vec3(0.0);
+    if (hasScene) {
+        vec2 shift = slope * params.deepColor.w * float(size.y) * smoothstep(0.0, 1.5, verticalDepth);
+        ivec2 p2 = clamp(p + ivec2(shift), ivec2(0), size - ivec2(1));
+        float depth2 = FetchDepth(sceneDepth, p2);
+        if (depth2 < windowDepth || depth2 >= kClearDepthThreshold) {
+            p2 = p;
+        }
+        seabed = texelFetch(sceneColor, p2, 0).rgb;
+    }
+    vec3 sigma = params.rippleInfo.z / clarity * vec3(1.9, 0.75, 0.55);
+    vec3 transmit = hasScene ? exp(-sigma * rayDepth) : vec3(0.0);
+    float deepMix = 1.0 - exp(-verticalDepth / clarity);
+    vec3 body = mix(params.shallowColor.rgb, params.deepColor.rgb, deepMix) * bodyLight;
+    vec3 under = seabed * transmit + body * (1.0 - transmit);
+
+    // Reflection: sky from the look-up table; below-horizon directions are mirrored up.
+    vec3 reflected = reflect(dir, normal);
+    reflected.y = max(reflected.y, 0.02);
+    vec3 sky = SkyRadiance(normalize(reflected));
+    float shoreFresnel = smoothstep(0.0, 0.35, verticalDepth);
+    vec3 color = mix(under, sky * params.surfaceInfo.w, fresnel * shoreFresnel);
+
+    // Sun glint.
+    vec3 sunDir = params.sunDirection.xyz;
+    float nDotL = max(dot(normal, sunDir), 0.0);
+    if (nDotL > 0.0 && sunDir.y > 0.0) {
+        vec3 halfVec = normalize(sunDir + viewDir);
+        float nDotH = clamp(dot(normal, halfVec), 0.0, 1.0);
+        float vDotH = clamp(dot(viewDir, halfVec), 0.0, 1.0);
+        float f = 0.02 + 0.98 * pow(1.0 - vDotH, 5.0);
+        float a = params.surfaceInfo.z;
+        float vis = 0.25 / max(max(nDotL, 0.1) * max(nDotV, 0.1), 1e-3);
+        color += params.sunRadiance.rgb * (params.sunDirection.w * f * DistributionGgx(nDotH, a) * vis * nDotL * kDirectScale * 3.14159265 * clamp(sunDir.y * 8.0, 0.0, 1.0));
+    }
+
+    color = mix(color, params.foamColor.rgb * (kAmbient * params.skyInfo.w + params.sunRadiance.rgb * kDirectScale * sunUp), foam);
+    Store(p, vec4(min(color, vec3(60000.0)), 1.0), windowDepth);
+}

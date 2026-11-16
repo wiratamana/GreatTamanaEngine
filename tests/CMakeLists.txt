@@ -89,6 +89,9 @@ gte_test_path_defines(GreatTamanaEngineTests "${CMAKE_BINARY_DIR}/shaders"
     GTE_TEST_SSGI_RESOLVE_SPV_PATH=SsgiResolve.comp.spv
     GTE_TEST_SSGI_COMPOSITE_VERT_SPV_PATH=SsgiComposite.vert.spv
     GTE_TEST_SSGI_COMPOSITE_FRAG_SPV_PATH=SsgiComposite.frag.spv
+    GTE_TEST_WATER_SHADE_SPV_PATH=WaterShade.comp.spv
+    GTE_TEST_WATER_COMPOSITE_VERT_SPV_PATH=WaterComposite.vert.spv
+    GTE_TEST_WATER_COMPOSITE_FRAG_SPV_PATH=WaterComposite.frag.spv
     GTE_TEST_VOLUMETRIC_INJECT_SPV_PATH=VolumetricLightInject.comp.spv
     GTE_TEST_VOLUMETRIC_TEMPORAL_SPV_PATH=VolumetricLightTemporal.comp.spv
     GTE_TEST_VOLUMETRIC_INTEGRATE_SPV_PATH=VolumetricLightIntegrate.comp.spv
@@ -127,6 +130,7 @@ gte_test_path_defines(GreatTamanaEngineTests "${CMAKE_SOURCE_DIR}/src"
     GTE_TEST_HIZ_BUILD_TOP_SHADER_PATH=Shaders/HizBuildTop.comp
     GTE_TEST_SSGI_COMMON_GLSL_PATH=Features/Ssgi/Shaders/SsgiCommon.glsl
     GTE_TEST_SSGI_COMPOSITE_GLSL_PATH=Features/Ssgi/Shaders/SsgiComposite.frag
+    GTE_TEST_WATER_SHADE_GLSL_PATH=Features/Water/Shaders/WaterShade.comp
     GTE_TEST_TONEMAPPING_GLSL_PATH=Features/ToneMapping/Shaders/ToneMapping.comp
     GTE_TEST_TEMPORALAA_RESOLVE_GLSL_PATH=Features/TemporalAa/Shaders/TemporalAaResolve.comp)
 gte_test_path_defines(GreatTamanaEngineTests "${CMAKE_BINARY_DIR}/shaders"
