@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [Grass: smooth density, terrain colour, presets](#grass-smooth-density-terrain-colour-presets-branch-featureprecural-landscape-2026-11-17) | `feature/precural-landscape` | 2026-11-17 |
 | [Grass on the real terrain](#grass-on-the-real-terrain-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
 | [Procedural grass feature](#procedural-grass-feature-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
 | [Indirect draw in the fullscreen verb](#indirect-draw-in-the-fullscreen-verb-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
@@ -50,6 +51,16 @@
 | [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+
+## Grass: smooth density, terrain colour, presets (branch `feature/precural-landscape`, 2026-11-17)
+- **Smooth density.** Blade count falls with distance (`GrassDensityAt`, geometric smoothstep between `densityLod0/1/2` at the LOD distances, `densityBlend`). Thinned blades widen (`widthCompensation`, `maxWidthScale`) and shrink to nothing at the far edge (`farHeightFade`). The hard step between LOD0 and LOD1 is gone. `lod1WidthScale` and `lod2WidthScale` are removed.
+- **Terrain colour.** The height tile carries the terrain vertex colour and the submerged bit in one 32 bit word (`GrassTileFlagsColor`, tile stride stays 2 floats). Blades take it at the root, far blades converge to it (`terrainTint`, `farTerrainBlend`). Ground normal blend and a cheap self shadow from the tile gradient (`groundNormalBlend`, `selfShadow`).
+- **Cheaper blades.** The cull does all wind maths and writes a packed 32 byte instance; the vertex shader has no trig. LOD0 default is 4 segments (24 vertices, setting `lod0Segments`). Dense chunks are shared by up to 16 cull groups (cull 1.6 to 0.6 ms at ground level).
+- **Presets** `Lean`, `Medium`, `Big` (new default, 300 m), `Huge` (360 m): `preset=` key, panel buttons, `ApplyGrassPreset`. Tile default is 512 texels at 2 m.
+- **Fix: stale tile after a carve.** A carve swaps node meshes under the same key; the tile provider did not notice, so a new lake had grass in it (tile height 18.3 m against a 8.8 m lake bed). It now compares mesh identity per key.
+- **Fix: tile build cost.** Texels without a resident node read the noise on a coarse lattice (512 tile 440 to 53 ms).
+- **Settings.** `UserSettings()` keeps your values; `Settings()` is the ordered copy the shaders use. Lowering `lod2Distance` no longer destroys `lod1Distance`.
+- Tests: density falloff, presets, user against effective settings, tile colour packing, coarse noise, mesh replacement rebuild.
 
 ## Grass on the real terrain (branch `feature/precural-landscape`, 2026-11-16)
 - `GrassTileProvider` (editor layer) builds the Grass height tile from the resident terrain node meshes and the live water bodies on a worker thread. Roots match the drawn mesh within 7 mm. See [Grass](reference/render-features/grass.md).
