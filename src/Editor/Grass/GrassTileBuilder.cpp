@@ -1,9 +1,13 @@
 #include "GrassTileBuilder.h"
 
+#include "../../Terrain/TerrainMaterial.h"
+
 #include <algorithm>
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <limits>
+#include <vector>
 
 namespace gte {
 
@@ -13,6 +17,56 @@ constexpr double kSnapTexels = 8.0;
 constexpr float kNoOcean = -1.0e6f;
 constexpr double kMinDriftMetres = 8.0;   // Smallest camera drift that may rebuild the tile.
 constexpr double kDriftSafetyMetres = 8.0;
+
+// Noise height on a lattice of kCoarseStep texels, filled on demand.
+class CoarseNoise {
+public:
+    CoarseNoise(const terrain::TerrainHeightField& field, double originX, double originZ, float texel, std::uint32_t size)
+        : m_field(field)
+        , m_originX(originX)
+        , m_originZ(originZ)
+        , m_texel(static_cast<double>(texel))
+        , m_side(size / kCoarseStep + 2)
+        , m_values(static_cast<std::size_t>(m_side) * m_side, std::numeric_limits<float>::quiet_NaN())
+    {
+    }
+
+    // Bilinear noise height at fractional texel coordinates.
+    float Height(double i, double j)
+    {
+        const double u = i / kCoarseStep;
+        const double v = j / kCoarseStep;
+        const auto iu = static_cast<std::uint32_t>(u);
+        const auto iv = static_cast<std::uint32_t>(v);
+        const auto fu = static_cast<float>(u - iu);
+        const auto fv = static_cast<float>(v - iv);
+        const float a = Lattice(iu, iv);
+        const float b = Lattice(iu + 1, iv);
+        const float c = Lattice(iu, iv + 1);
+        const float d = Lattice(iu + 1, iv + 1);
+        return (a + fu * (b - a)) + fv * ((c + fu * (d - c)) - (a + fu * (b - a)));
+    }
+
+private:
+    static constexpr std::uint32_t kCoarseStep = 4;
+
+    float Lattice(std::uint32_t iu, std::uint32_t iv)
+    {
+        float& value = m_values[static_cast<std::size_t>(iv) * m_side + iu];
+        if (std::isnan(value)) {
+            value = m_field.Height(m_originX + static_cast<double>(iu * kCoarseStep) * m_texel,
+                m_originZ + static_cast<double>(iv * kCoarseStep) * m_texel, 2.0);
+        }
+        return value;
+    }
+
+    const terrain::TerrainHeightField& m_field;
+    double m_originX;
+    double m_originZ;
+    double m_texel;
+    std::uint32_t m_side;
+    std::vector<float> m_values;
+};
 
 } // namespace
 
@@ -52,6 +106,10 @@ GrassTileBuild BuildGrassTile(const GrassTileJob& job)
     tile->revision = job.revision;
     tile->data.assign(static_cast<std::size_t>(job.size) * job.size * kGrassTileStride, 0.0f);
 
+    // Where no node is resident the noise field is read on every 4th texel only and interpolated.
+    CoarseNoise coarse(*job.surface.field, job.originX, job.originZ, job.texelSize, job.size);
+    const terrain::TerrainSettings& terrainSettings = job.surface.field->Settings();
+
     const double reach2 = job.reach * job.reach;
     std::uint64_t inReach = 0;
     std::uint64_t nearLevel0 = 0;
@@ -62,7 +120,13 @@ GrassTileBuild BuildGrassTile(const GrassTileJob& job)
         const double z = job.originZ + static_cast<double>(j) * static_cast<double>(job.texelSize);
         for (std::uint32_t i = 0; i < job.size; ++i) {
             const double x = job.originX + static_cast<double>(i) * static_cast<double>(job.texelSize);
-            const terrain::SurfaceHit hit = sampler.Sample(x, z, hint);
+            terrain::SurfaceHit hit;
+            if (!sampler.SampleNodes(x, z, hint, hit)) {
+                // No resident node: a coarse noise guess (bilinear over a sparse lattice) keeps the build cheap.
+                hit.height = coarse.Height(static_cast<double>(i), static_cast<double>(j));
+                hit.level = -1;
+                hit.color = terrain::PackRgba8(terrain::SurfaceColor(hit.height, 0.0f, terrainSettings));
+            }
             float flag = 0.0f;
             if (job.water != nullptr) {
                 const water::WaterSample w = job.water->SampleAt(x, z);

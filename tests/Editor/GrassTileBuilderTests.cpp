@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <bit>
 #include <cmath>
 #include <memory>
 
@@ -84,6 +85,38 @@ TEST(GrassTileBuilderTest, NoNodesMeansNoCoverageNotZeroHeights)
     ASSERT_NE(build.tile, nullptr);
     EXPECT_FLOAT_EQ(build.coverageNodes, 0.0f);
     EXPECT_FLOAT_EQ(build.coverageLevel0, 0.0f);
+}
+
+TEST(GrassTileBuilderTest, TexelsWithoutANodeGetFiniteCoarseNoiseHeights)
+{
+    GrassTileJob job = MakeJob(25.0f, true); // Nodes cover 16 x 16 m only.
+    job.size = 64;                            // The tile reaches far past them.
+    job.reach = 40.0;
+    const GrassTileBuild build = BuildGrassTile(job);
+    ASSERT_NE(build.tile, nullptr);
+    EXPECT_LT(build.coverageNodes, 1.0f);
+    EXPECT_GT(build.coverageNodes, 0.0f);
+    for (std::size_t i = 0; i < build.tile->data.size(); i += kGrassTileStride) {
+        EXPECT_TRUE(std::isfinite(build.tile->data[i])) << i;
+    }
+    // Inside the nodes the heights are still exact.
+    EXPECT_FLOAT_EQ(build.tile->data[(4u * 64u + 4u) * kGrassTileStride], 25.0f);
+}
+
+TEST(GrassTileBuilderTest, TheTileCarriesTheNodeColour)
+{
+    GrassTileJob job = MakeJob(25.0f, true);
+    for (auto& node : job.surface.nodes) {
+        auto edited = std::make_shared<terrain::NodeMesh>(*node);
+        edited->colors.assign(edited->vertices.size(), 0xFF00FF00u | 0x000000C8u); // R = 200, G = 255, B = 0.
+        node = edited;
+    }
+    const GrassTileBuild build = BuildGrassTile(job);
+    ASSERT_NE(build.tile, nullptr);
+    const std::uint32_t bits = std::bit_cast<std::uint32_t>(build.tile->data[1]) & 0x00FFFFFFu;
+    EXPECT_EQ(bits & 255u, 200u);
+    EXPECT_EQ((bits >> 8) & 255u, 255u);
+    EXPECT_EQ((bits >> 16) & 255u, 0u);
 }
 
 TEST(GrassTileBuilderTest, MissingFieldBuildsNothing)

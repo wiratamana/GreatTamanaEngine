@@ -115,13 +115,12 @@ SurfaceSampler::SurfaceSampler(SurfaceSnapshot snapshot)
     }
 }
 
-SurfaceHit SurfaceSampler::Sample(double x, double z, const NodeMesh*& hint) const noexcept
+bool SurfaceSampler::SampleNodes(double x, double z, const NodeMesh*& hint, SurfaceHit& hit) const noexcept
 {
-    SurfaceHit hit;
     if (hint != nullptr && NodeHeightAt(*hint, x, z, hit.height)) {
         hit.level = hint->key.level;
         NodeColorAt(*hint, x, z, hit.color);
-        return hit;
+        return true;
     }
     for (std::size_t level = 0; level < m_hasLevel.size(); ++level) {
         if (!m_hasLevel[level]) {
@@ -135,8 +134,17 @@ SurfaceHit SurfaceSampler::Sample(double x, double z, const NodeMesh*& hint) con
             hint = it->second;
             hit.level = static_cast<int>(level);
             NodeColorAt(*it->second, x, z, hit.color);
-            return hit;
+            return true;
         }
+    }
+    return false;
+}
+
+SurfaceHit SurfaceSampler::Sample(double x, double z, const NodeMesh*& hint) const noexcept
+{
+    SurfaceHit hit;
+    if (SampleNodes(x, z, hint, hit)) {
+        return hit;
     }
     if (m_snapshot.field != nullptr) {
         hit.height = m_snapshot.field->Height(x, z, 2.0);

@@ -50,6 +50,9 @@ public:
     explicit SurfaceSampler(SurfaceSnapshot snapshot);
 
     SurfaceHit Sample(double x, double z, const NodeMesh*& hint) const noexcept;
+
+    // Only the resident nodes: false (hit untouched) where none covers the point, no noise fallback.
+    bool SampleNodes(double x, double z, const NodeMesh*& hint, SurfaceHit& hit) const noexcept;
     const SurfaceSnapshot& Snapshot() const noexcept { return m_snapshot; }
 
 private:
