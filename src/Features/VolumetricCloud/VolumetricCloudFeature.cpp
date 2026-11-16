@@ -5,6 +5,7 @@
 #include "../../Game/Lighting/DirectionalLightResolver.h"
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 
 namespace gte {
@@ -35,7 +36,11 @@ void VolumetricCloudFeature::Setup(fx::FeatureSetup& s)
 {
     // Not a render pass: Always() keeps a toggle from freezing the frame clock the snapshots age against.
     s.PreOpaque("VolumetricCloud.FrameStamp", kFrameStampPriority,
-        [this](fx::PreOpaqueFrame& f) { m_newestFrame = f.FrameIndex(); }, fx::Gate::Always());
+        [this](fx::PreOpaqueFrame& f) {
+            m_newestFrame = f.FrameIndex();
+            PublishWind(f);
+        },
+        fx::Gate::Always());
 
     // The secondary view skips the clouds by default.
     s.DefaultSecondaryViewEnabled(false);
@@ -49,6 +54,24 @@ void VolumetricCloudFeature::Setup(fx::FeatureSetup& s)
         [this](fx::CompositeFrame& f) { CompositePass(f); },
         fx::Gate{ "VolumetricCloud.March.Dispatch", "VolumetricCloud.Resolve.Dispatch", "VolumetricCloud.Debug.Dispatch",
             "VolumetricCloud.CopyToPrivateTarget" });
+}
+
+void VolumetricCloudFeature::PublishWind(fx::PreOpaqueFrame& f)
+{
+    // Both views call this in one frame; the drift moves once.
+    if (f.FrameIndex() != m_windFrame) {
+        m_windFrame = f.FrameIndex();
+        AdvanceCloudWind(m_windOffset, m_windStep, m_settings.windSpeed, m_settings.windDirection, f.DeltaSeconds(), 0.0);
+    }
+    constexpr double kDegreesToRadians = 3.14159265358979323846 / 180.0;
+    const double radians = static_cast<double>(m_settings.windDirection) * kDegreesToRadians;
+    WindState wind;
+    wind.directionX = static_cast<float>(std::cos(radians));
+    wind.directionZ = static_cast<float>(std::sin(radians));
+    wind.speed = m_settings.windSpeed;
+    wind.offsetX = m_windOffset[0];
+    wind.offsetZ = m_windOffset[1];
+    m_windData.Publish(f, wind);
 }
 
 void VolumetricCloudFeature::ApplySettings(const VolumetricCloudSettings& candidate)

@@ -8,6 +8,7 @@
 #include "../../Game/Lighting/AtmosphereSkyLuts.h"
 #include "../../Game/Lighting/CloudShadowMap.h"
 #include "../../Game/Lighting/SunLightModulation.h"
+#include "../../Game/Lighting/WindState.h"
 
 #include <array>
 #include <cstdint>
@@ -76,6 +77,8 @@ private:
     void CompositePass(fx::CompositeFrame& f);
     // Marches the sun ray of every texel of the shadow map through the layer and shares the map with the lit materials.
     void ShadowMapPass(fx::PreOpaqueFrame& f);
+    // Moves the shared wind drift once per frame and publishes it for the features that sway with the clouds.
+    void PublishWind(fx::PreOpaqueFrame& f);
     // Draws the chosen noise texture instead of the clouds. False when nothing was declared.
     bool RunSliceView(fx::CompositeFrame& f, fx::Texture output, VolumetricCloudViewSnapshot& snapshot);
     // Marches the layer at low resolution, resolves it against the history and composites into `output`.
@@ -102,9 +105,15 @@ private:
     fx::ViewOutput m_output{ "VolumetricCloud" };
     fx::SceneSlot m_shadowSlot;
     fx::Channel<CloudShadowMap> m_shadowData{ kCloudShadowChannel };
+    fx::Channel<WindState> m_windData{ kWindStateChannel };
     fx::ChannelReader<SunLightModulation> m_sunLight{ kSunLightModulationOwner, kSunLightModulationChannel };
     fx::ChannelReader<AtmosphereSharedLuts> m_sharedLuts{ kAtmosphereLutOwner, kAtmosphereSharedLutsChannel };
     fx::ChannelReader<AtmosphereViewLuts> m_viewLuts{ kAtmosphereLutOwner, kAtmosphereViewLutsChannel };
+
+    // Shared wind drift, advanced once per frame and never wrapped; the march keeps its own wrapped offsets.
+    double m_windOffset[2] = {};
+    double m_windStep[2] = {};
+    std::uint64_t m_windFrame = ~std::uint64_t{ 0 };
 };
 
 } // namespace gte

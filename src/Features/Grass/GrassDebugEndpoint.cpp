@@ -1,0 +1,405 @@
+#include "GrassDebugEndpoint.h"
+
+#include "GrassFeature.h"
+
+#include <algorithm>
+#include <array>
+#include <charconv>
+#include <cmath>
+#include <initializer_list>
+#include <limits>
+#include <optional>
+#include <string>
+#include <type_traits>
+#include <variant>
+
+namespace gte {
+
+namespace {
+
+using SettingMember = std::variant<bool GrassSettings::*, std::uint32_t GrassSettings::*, float GrassSettings::*>;
+
+struct SettingKey {
+    std::string_view name;
+    SettingMember member;
+};
+
+// Every settable key except debugView and the two colours, which have their own handling.
+constexpr std::array kSettingKeys{
+    SettingKey{ "enabled", &GrassSettings::enabled },
+    SettingKey{ "hizCulling", &GrassSettings::hizCulling },
+    SettingKey{ "collectStats", &GrassSettings::collectStats },
+    SettingKey{ "showChunkBounds", &GrassSettings::showChunkBounds },
+    SettingKey{ "densityLod0", &GrassSettings::densityLod0 },
+    SettingKey{ "densityLod1", &GrassSettings::densityLod1 },
+    SettingKey{ "densityLod2", &GrassSettings::densityLod2 },
+    SettingKey{ "patchiness", &GrassSettings::patchiness },
+    SettingKey{ "patchScaleM", &GrassSettings::patchScaleM },
+    SettingKey{ "bareThreshold", &GrassSettings::bareThreshold },
+    SettingKey{ "bladeHeight", &GrassSettings::bladeHeight },
+    SettingKey{ "bladeWidth", &GrassSettings::bladeWidth },
+    SettingKey{ "bladeTaper", &GrassSettings::bladeTaper },
+    SettingKey{ "heightVariation", &GrassSettings::heightVariation },
+    SettingKey{ "lean", &GrassSettings::lean },
+    SettingKey{ "maxBend", &GrassSettings::maxBend },
+    SettingKey{ "lod1WidthScale", &GrassSettings::lod1WidthScale },
+    SettingKey{ "lod2WidthScale", &GrassSettings::lod2WidthScale },
+    SettingKey{ "maxSlopeDeg", &GrassSettings::maxSlopeDeg },
+    SettingKey{ "slopeFadeDeg", &GrassSettings::slopeFadeDeg },
+    SettingKey{ "waterMargin", &GrassSettings::waterMargin },
+    SettingKey{ "waterFadeBand", &GrassSettings::waterFadeBand },
+    SettingKey{ "lod0Distance", &GrassSettings::lod0Distance },
+    SettingKey{ "lod1Distance", &GrassSettings::lod1Distance },
+    SettingKey{ "lod2Distance", &GrassSettings::lod2Distance },
+    SettingKey{ "edgeFade", &GrassSettings::edgeFade },
+    SettingKey{ "windBend", &GrassSettings::windBend },
+    SettingKey{ "flutterSpeed", &GrassSettings::flutterSpeed },
+    SettingKey{ "flutterStrength", &GrassSettings::flutterStrength },
+    SettingKey{ "gustStrength", &GrassSettings::gustStrength },
+    SettingKey{ "windWaveLengthM", &GrassSettings::windWaveLengthM },
+    SettingKey{ "windGustLengthM", &GrassSettings::windGustLengthM },
+    SettingKey{ "windSpeedFallback", &GrassSettings::windSpeedFallback },
+    SettingKey{ "windDirectionDegFallback", &GrassSettings::windDirectionDegFallback },
+    SettingKey{ "followCloudWind", &GrassSettings::followCloudWind },
+    SettingKey{ "translucency", &GrassSettings::translucency },
+    SettingKey{ "rootAo", &GrassSettings::rootAo },
+    SettingKey{ "tintVariation", &GrassSettings::tintVariation },
+    SettingKey{ "sunVisibility", &GrassSettings::sunVisibility },
+    SettingKey{ "gridCells", &GrassSettings::gridCells },
+    SettingKey{ "heightTileTexels", &GrassSettings::heightTileTexels },
+    SettingKey{ "heightTileTexelSize", &GrassSettings::heightTileTexelSize },
+    SettingKey{ "instanceCapLod0", &GrassSettings::instanceCapLod0 },
+    SettingKey{ "instanceCapLod1", &GrassSettings::instanceCapLod1 },
+    SettingKey{ "instanceCapLod2", &GrassSettings::instanceCapLod2 },
+    SettingKey{ "seed", &GrassSettings::seed },
+};
+
+constexpr std::string_view kDebugViewKey = "debugView";
+constexpr std::string_view kColorRootKey = "colorRoot";
+constexpr std::string_view kColorTipKey = "colorTip";
+constexpr std::array<std::string_view, 3> kDebugViewNames{ "Normal", "LodColor", "Sway" };
+
+struct ScopeName {
+    rg::ViewScope scope;
+    std::string_view prefix;
+};
+constexpr std::array kScopes{
+    ScopeName{ rg::ViewScope::Primary, "game." },
+    ScopeName{ rg::ViewScope::Secondary, "scene." },
+};
+
+std::string_view StatusName(GrassFrameStatus status) noexcept
+{
+    switch (status) {
+    case GrassFrameStatus::NotRendered: return "NotRendered";
+    case GrassFrameStatus::Ok: return "Ok";
+    case GrassFrameStatus::Disabled: return "Disabled";
+    case GrassFrameStatus::NoValidCamera: return "NoValidCamera";
+    case GrassFrameStatus::NoTile: return "NoTile";
+    case GrassFrameStatus::ShadersNotReady: return "ShadersNotReady";
+    case GrassFrameStatus::TargetFailed: return "TargetFailed";
+    case GrassFrameStatus::PassDisabled: return "PassDisabled";
+    }
+    return "NotRendered";
+}
+
+constexpr std::array<std::string_view, static_cast<std::size_t>(GrassStatsWord::Count)> kStatNames{ "chunksInGrid",
+    "chunksCulledDistance", "chunksCulledNoData", "chunksCulledWater", "chunksCulledFrustum", "chunksCulledHiz",
+    "chunksLod0", "chunksLod1", "chunksLod2", "candidates", "accepted0", "accepted1", "accepted2", "rejectNoData",
+    "rejectLodStep", "rejectWater", "rejectSlope", "rejectNoise", "dropped0", "dropped1", "dropped2", "slot0", "slot1",
+    "slot2" };
+
+// A float shown with 6 significant digits, so 0.85f reads 0.85 and not 0.8500000238.
+double Shown(float value) noexcept
+{
+    char text[32];
+    const auto written = std::to_chars(text, text + sizeof(text), value, std::chars_format::general, 6);
+    double shown = value;
+    if (written.ec == std::errc{}) {
+        std::from_chars(text, written.ptr, shown);
+    }
+    return shown;
+}
+
+std::int64_t Count(std::uint64_t value) noexcept
+{
+    return static_cast<std::int64_t>(std::min<std::uint64_t>(value, std::numeric_limits<std::int64_t>::max()));
+}
+
+void Add(fx::FeatureDebugResult& out, std::string key, fx::FeatureDebugValue value)
+{
+    out.fields.push_back({ std::move(key), std::move(value) });
+}
+
+std::string Rgb(const float (&c)[3])
+{
+    return std::to_string(Shown(c[0])) + "," + std::to_string(Shown(c[1])) + "," + std::to_string(Shown(c[2]));
+}
+
+void AddSettings(fx::FeatureDebugResult& out, const GrassSettings& s)
+{
+    for (const SettingKey& key : kSettingKeys) {
+        std::visit(
+            [&](auto member) {
+                using Value = std::remove_cvref_t<decltype(s.*member)>;
+                if constexpr (std::is_same_v<Value, bool>) {
+                    Add(out, std::string(key.name), s.*member);
+                } else if constexpr (std::is_same_v<Value, float>) {
+                    Add(out, std::string(key.name), Shown(s.*member));
+                } else {
+                    Add(out, std::string(key.name), static_cast<std::int64_t>(s.*member));
+                }
+            },
+            key.member);
+    }
+    const auto view = std::min<std::size_t>(static_cast<std::size_t>(s.debugView), kDebugViewNames.size() - 1);
+    Add(out, std::string(kDebugViewKey), std::string(kDebugViewNames[view]));
+    Add(out, std::string(kColorRootKey), Rgb(s.colorRoot));
+    Add(out, std::string(kColorTipKey), Rgb(s.colorTip));
+}
+
+void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const GrassViewSnapshot& v)
+{
+    const auto key = [&](std::string_view name) { return std::string(prefix).append(name); };
+    Add(out, key("status"), std::string(StatusName(v.status)));
+    Add(out, key("frameIndex"), Count(v.frameIndex));
+    Add(out, key("extent.w"), static_cast<std::int64_t>(v.extent.width));
+    Add(out, key("extent.h"), static_cast<std::int64_t>(v.extent.height));
+    Add(out, key("hizUsed"), v.hizUsed);
+    Add(out, key("windShared"), v.windShared);
+    Add(out, key("gridCells"), static_cast<std::int64_t>(v.gridCells));
+    Add(out, key("tileRevision"), Count(v.tileRevision));
+    Add(out, key("instanceBytes"), Count(v.instanceBytes));
+    Add(out, key("stats.valid"), v.statsValid);
+    Add(out, key("stats.frame"), Count(v.statsFrame));
+    if (v.statsValid) {
+        for (std::size_t i = 0; i < kStatNames.size(); ++i) {
+            Add(out, key(std::string("stats.") + std::string(kStatNames[i])), static_cast<std::int64_t>(v.stats.words[i]));
+        }
+        // What is drawn: the slot counter, capped by the region capacity (the cull never writes past it).
+        const std::uint32_t drawn0 = v.stats.Get(GrassStatsWord::Slot0);
+        const std::uint32_t drawn1 = v.stats.Get(GrassStatsWord::Slot1);
+        const std::uint32_t drawn2 = v.stats.Get(GrassStatsWord::Slot2);
+        Add(out, key("stats.requested0"), static_cast<std::int64_t>(drawn0));
+        Add(out, key("stats.requested1"), static_cast<std::int64_t>(drawn1));
+        Add(out, key("stats.requested2"), static_cast<std::int64_t>(drawn2));
+    }
+}
+
+fx::FeatureDebugResult Fail(std::string key, std::string message)
+{
+    fx::FeatureDebugResult result;
+    result.ok = false;
+    result.badKey = std::move(key);
+    result.message = std::move(message);
+    return result;
+}
+
+std::optional<std::array<float, 3>> ParseRgb(std::string_view text) noexcept
+{
+    std::array<float, 3> parts{};
+    for (std::size_t i = 0; i < 3; ++i) {
+        const std::size_t comma = text.find(',');
+        if ((i < 2) == (comma == std::string_view::npos)) {
+            return std::nullopt;
+        }
+        const auto parsed = fx::ParseDebugFloat(text.substr(0, comma));
+        if (!parsed || std::abs(*parsed) > std::numeric_limits<float>::max()) {
+            return std::nullopt;
+        }
+        parts[i] = static_cast<float>(*parsed);
+        text = comma == std::string_view::npos ? std::string_view{} : text.substr(comma + 1);
+    }
+    return parts;
+}
+
+// Parses `text` into the member the key names. False when the text does not fit the member type.
+bool AssignSetting(GrassSettings& s, const SettingKey& key, std::string_view text)
+{
+    return std::visit(
+        [&](auto member) {
+            using Value = std::remove_cvref_t<decltype(s.*member)>;
+            if constexpr (std::is_same_v<Value, bool>) {
+                const auto parsed = fx::ParseDebugBool(text);
+                if (parsed) {
+                    s.*member = *parsed;
+                }
+                return parsed.has_value();
+            } else if constexpr (std::is_same_v<Value, float>) {
+                const auto parsed = fx::ParseDebugFloat(text);
+                if (!parsed || std::abs(*parsed) > std::numeric_limits<float>::max()) {
+                    return false;
+                }
+                s.*member = static_cast<float>(*parsed);
+                return true;
+            } else {
+                const auto parsed = fx::ParseDebugUnsigned(text);
+                if (!parsed || *parsed > std::numeric_limits<std::uint32_t>::max()) {
+                    return false;
+                }
+                s.*member = static_cast<Value>(*parsed);
+                return true;
+            }
+        },
+        key.member);
+}
+
+const fx::FeatureDebugArg* FindArg(std::span<const fx::FeatureDebugArg> args, std::string_view key) noexcept
+{
+    for (const fx::FeatureDebugArg& arg : args) {
+        if (arg.key == key) {
+            return &arg;
+        }
+    }
+    return nullptr;
+}
+
+// Reads an optional float argument; `fallback` when absent. False when present but not a number.
+bool ReadFloat(std::span<const fx::FeatureDebugArg> args, std::string_view key, float fallback, float& out)
+{
+    out = fallback;
+    const fx::FeatureDebugArg* arg = FindArg(args, key);
+    if (arg == nullptr) {
+        return true;
+    }
+    const auto parsed = fx::ParseDebugFloat(arg->value);
+    if (!parsed || std::abs(*parsed) > std::numeric_limits<float>::max()) {
+        return false;
+    }
+    out = static_cast<float>(*parsed);
+    return true;
+}
+
+} // namespace
+
+fx::FeatureDebugResult GrassDebugEndpoint::GetState() const
+{
+    fx::FeatureDebugResult out;
+    AddSettings(out, m_feature.Settings());
+    Add(out, "synthetic.enabled", m_feature.SyntheticTileEnabled());
+    const std::shared_ptr<const GrassHeightTile> tile = m_feature.HeightTile();
+    Add(out, "tile.present", tile != nullptr);
+    if (tile != nullptr) {
+        Add(out, "tile.size", static_cast<std::int64_t>(tile->size));
+        Add(out, "tile.texelSize", Shown(tile->texelSize));
+        Add(out, "tile.originX", tile->originX);
+        Add(out, "tile.originZ", tile->originZ);
+        Add(out, "tile.seaLevel", Shown(tile->seaLevel));
+        Add(out, "tile.revision", Count(tile->revision));
+    }
+    const Vec3 eye = m_feature.LastEye();
+    Add(out, "eye", std::to_string(Shown(eye.x)) + "," + std::to_string(Shown(eye.y)) + "," + std::to_string(Shown(eye.z)));
+    Add(out, "profiler.rows",
+        std::string("Grass.Init, Grass.Cull, Grass.Hiz.*, Grass.Draw.L0..L2: /profiler/table?view=flat&lane=gpu"));
+    for (const ScopeName& scope : kScopes) {
+        AddView(out, scope.prefix, m_feature.Snapshot(scope.scope));
+    }
+    return out;
+}
+
+fx::FeatureDebugResult GrassDebugEndpoint::Set(std::span<const fx::FeatureDebugArg> args)
+{
+    GrassSettings candidate = m_feature.Settings();
+    for (const fx::FeatureDebugArg& arg : args) {
+        if (arg.key == kDebugViewKey) {
+            const auto found = std::find(kDebugViewNames.begin(), kDebugViewNames.end(), std::string_view(arg.value));
+            if (found == kDebugViewNames.end()) {
+                return Fail(arg.key, "debugView must be one of Normal, LodColor, Sway");
+            }
+            candidate.debugView = static_cast<GrassDebugView>(found - kDebugViewNames.begin());
+            continue;
+        }
+        if (arg.key == kColorRootKey || arg.key == kColorTipKey) {
+            const auto rgb = ParseRgb(arg.value);
+            if (!rgb) {
+                return Fail(arg.key, "colour must be r,g,b");
+            }
+            float(&target)[3] = arg.key == kColorRootKey ? candidate.colorRoot : candidate.colorTip;
+            for (std::size_t i = 0; i < 3; ++i) {
+                target[i] = (*rgb)[i];
+            }
+            continue;
+        }
+        const auto found = std::find_if(
+            kSettingKeys.begin(), kSettingKeys.end(), [&](const SettingKey& key) { return key.name == arg.key; });
+        if (found == kSettingKeys.end()) {
+            const bool readOnly = arg.key.starts_with("game.") || arg.key.starts_with("scene.");
+            return Fail(arg.key, readOnly ? "key is read-only" : "unknown key");
+        }
+        if (!AssignSetting(candidate, *found, arg.value)) {
+            return Fail(arg.key, "value does not fit this key");
+        }
+    }
+    m_feature.ApplySettings(candidate);
+    return GetState();
+}
+
+fx::FeatureDebugResult GrassDebugEndpoint::Invoke(std::string_view action, std::span<const fx::FeatureDebugArg> args)
+{
+    const auto checkKeys = [&](std::initializer_list<std::string_view> allowed) -> const fx::FeatureDebugArg* {
+        for (const fx::FeatureDebugArg& arg : args) {
+            if (std::find(allowed.begin(), allowed.end(), std::string_view(arg.key)) == allowed.end()) {
+                return &arg;
+            }
+        }
+        return nullptr;
+    };
+
+    if (action == "reset_defaults") {
+        if (!args.empty()) {
+            return Fail(args.front().key, "reset_defaults takes no arguments");
+        }
+        m_feature.ApplySettings(GrassSettings{});
+        return GetState();
+    }
+    if (action == "clear_tile") {
+        if (!args.empty()) {
+            return Fail(args.front().key, "clear_tile takes no arguments");
+        }
+        m_feature.DisableSyntheticTile();
+        m_feature.SubmitHeightTile(nullptr);
+        return GetState();
+    }
+    if (action == "synthetic_tile") {
+        const std::initializer_list<std::string_view> kAllowed{ "kind", "baseHeight", "amplitude", "wavelength",
+            "seaLevel", "lake", "lakeX", "lakeZ", "lakeRadius", "lakeDepth", "lakeLevel", "cliffX" };
+        if (const fx::FeatureDebugArg* bad = checkKeys(kAllowed)) {
+            return Fail(bad->key, "unknown argument; allowed: kind=flat|hills|cliff, baseHeight, amplitude, wavelength, "
+                                  "seaLevel, lake=true|false, lakeX, lakeZ, lakeRadius, lakeDepth, lakeLevel, cliffX");
+        }
+        GrassSyntheticSpec spec;
+        if (const fx::FeatureDebugArg* kind = FindArg(args, "kind")) {
+            if (kind->value == "flat") {
+                spec.kind = GrassSyntheticKind::Flat;
+            } else if (kind->value == "hills") {
+                spec.kind = GrassSyntheticKind::Hills;
+            } else if (kind->value == "cliff") {
+                spec.kind = GrassSyntheticKind::Cliff;
+            } else {
+                return Fail("kind", "kind must be flat, hills or cliff");
+            }
+        }
+        if (!ReadFloat(args, "baseHeight", spec.baseHeight, spec.baseHeight) || !ReadFloat(args, "amplitude", spec.amplitude, spec.amplitude)
+            || !ReadFloat(args, "wavelength", spec.wavelength, spec.wavelength) || !ReadFloat(args, "seaLevel", spec.seaLevel, spec.seaLevel)
+            || !ReadFloat(args, "lakeX", spec.lakeX, spec.lakeX) || !ReadFloat(args, "lakeZ", spec.lakeZ, spec.lakeZ)
+            || !ReadFloat(args, "lakeRadius", spec.lakeRadius, spec.lakeRadius) || !ReadFloat(args, "lakeDepth", spec.lakeDepth, spec.lakeDepth)
+            || !ReadFloat(args, "lakeLevel", spec.lakeLevel, spec.lakeLevel) || !ReadFloat(args, "cliffX", spec.cliffX, spec.cliffX)) {
+            return Fail("", "every numeric argument must be a finite number");
+        }
+        if (const fx::FeatureDebugArg* lake = FindArg(args, "lake")) {
+            const auto parsed = fx::ParseDebugBool(lake->value);
+            if (!parsed) {
+                return Fail("lake", "lake must be true or false");
+            }
+            spec.lake = *parsed;
+        }
+        m_feature.EnableSyntheticTile(spec);
+        return GetState();
+    }
+    fx::FeatureDebugResult result;
+    result.ok = false;
+    result.message = "unknown action; supported: reset_defaults, synthetic_tile, clear_tile";
+    return result;
+}
+
+} // namespace gte

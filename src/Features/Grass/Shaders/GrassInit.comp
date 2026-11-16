@@ -1,0 +1,36 @@
+#version 450
+
+// Per frame, before the cull: zero the stats words and reset the three indirect draw commands.
+// Dispatch at least 64 invocations. Command layout: 3 x {vertexCount, instanceCount, firstVertex, firstInstance}.
+#include "GrassCommon.glsl"
+
+layout(local_size_x = 64) in;
+
+layout(std430, binding = 1) writeonly buffer GrassCommandsBlock {
+    uint values[];
+} commands;
+
+layout(std430, binding = 2) writeonly buffer GrassStatsBlock {
+    uint words[];
+} stats;
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (i < kGrassStatsWords) {
+        stats.words[i] = 0u;
+    }
+    if (i < kGrassLodCount) {
+        bool list = (uint(params.grid.w) & kGrassFlagTriangleList) != 0u;
+        uint vertexCount = kGrassVertsStrip2;
+        if (i == 0u) {
+            vertexCount = list ? kGrassVertsList0 : kGrassVertsStrip0;
+        } else if (i == 1u) {
+            vertexCount = list ? kGrassVertsList1 : kGrassVertsStrip1;
+        }
+        commands.values[i * 4u + 0u] = vertexCount;
+        commands.values[i * 4u + 1u] = 0u;
+        commands.values[i * 4u + 2u] = 0u;
+        commands.values[i * 4u + 3u] = 0u;
+    }
+}

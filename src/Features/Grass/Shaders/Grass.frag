@@ -1,0 +1,61 @@
+#version 450
+
+// Opaque blade shading: root-to-tip colour, root AO, wrap diffuse, hemisphere ambient, fake translucency.
+// Linear HDR radiance with the same energy scale as DirectionalLighting.glsl (kDirectScale 0.65).
+#include "GrassCommon.glsl"
+
+// NOTE: must match the block in Grass.vert.
+layout(push_constant) uniform GrassPush {
+    uint lod;
+    uint instanceBase;
+    uint reserved0;
+    uint reserved1;
+} pc;
+
+layout(location = 0) in vec3 inNormal;
+layout(location = 1) in vec4 inInfo;
+layout(location = 2) in vec3 inPosRel;
+
+layout(location = 0) out vec4 outColor;
+
+const float kDirectScale = 0.65; // Same sun energy scale as the lit material shaders.
+
+void main()
+{
+    vec3 viewDir = normalize(-inPosRel);
+    // Two-sided: turn the normal toward the viewer (does not depend on the viewport winding).
+    vec3 normal = normalize(inNormal);
+    if (dot(normal, viewDir) < 0.0) {
+        normal = -normal;
+    }
+
+    float t = inInfo.x;
+    float rnd = inInfo.y;
+    float tint = params.colorTip.w;
+    vec3 albedo = mix(params.colorRoot.rgb, params.colorTip.rgb, smoothstep(0.0, 1.0, t));
+    albedo *= 1.0 + tint * (rnd * 2.0 - 1.0) * 0.6;
+    albedo = mix(albedo, albedo * vec3(1.35, 1.1, 0.55), tint * smoothstep(0.6, 1.0, rnd));
+
+    uint debugMode = params.misc.x;
+    if (debugMode == 1u) {
+        vec3 lodColor = pc.lod == 0u ? vec3(0.0, 1.0, 0.0) : (pc.lod == 1u ? vec3(1.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0));
+        albedo = lodColor * 0.5;
+    } else if (debugMode == 2u) {
+        albedo = mix(vec3(0.0, 0.2, 1.0), vec3(1.0, 0.1, 0.0), clamp(inInfo.z / 0.7, 0.0, 1.0)) * 0.5;
+    }
+
+    float ao = mix(params.colorRoot.w, 1.0, smoothstep(0.0, 0.45, t));
+    vec3 sunDir = normalize(params.sunDir.xyz);
+    float sunUp = smoothstep(-0.05, 0.1, sunDir.y);
+    vec3 sun = params.sunRadiance.rgb * (kDirectScale * params.sunRadiance.w * sunUp);
+
+    float wrap = clamp((dot(normal, sunDir) + 0.35) / 1.35, 0.0, 1.0);
+    vec3 ambient = mix(params.groundAmbient.rgb, params.skyAmbient.rgb, normal.y * 0.5 + 0.5);
+    vec3 color = albedo * (ambient * ao + sun * wrap * sqrt(ao));
+
+    // Fake subsurface: light through the blade when the sun is behind it, stronger toward the thin tip.
+    float through = pow(clamp(dot(viewDir, -sunDir), 0.0, 1.0), 3.0);
+    color += albedo * vec3(1.1, 1.2, 0.5) * sun * (through * params.sunDir.w * mix(0.5, 1.0, t) * ao);
+
+    outColor = vec4(color, 1.0);
+}

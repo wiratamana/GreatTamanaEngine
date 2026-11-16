@@ -1,0 +1,428 @@
+#version 450
+
+// One 64-thread group per 16 m grass chunk. The group tests the chunk (distance, tile data, water, frustum, Hi-Z),
+// then every thread places candidate blades, filters them and appends the survivors to the per-LOD instance region.
+// Dispatch: groupCount = gridCells * gridCells, i.e. Extent2D{gridCells * gridCells * 64, 1}. Run GrassInit.comp first.
+// NOTE: bindings must match README_shaders.md; Hi-Z test mirrors ClusterCull.comp.
+#include "GrassCommon.glsl"
+#include "ClusterCullConstants.glsl"
+#include "HizPyramidLayout.glsl"
+
+layout(local_size_x = 64) in;
+
+// Height tile: one vec2 per texel = (terrain height, submerged flag 0/1), row-major, tile.w texels per side.
+layout(std430, binding = 1) readonly buffer GrassHeightTileBlock {
+    vec2 texels[];
+} heightTile;
+
+layout(std430, binding = 2) writeonly buffer GrassInstancesBlock {
+    GrassInstance items[];
+} instances;
+
+// 3 x {vertexCount, instanceCount, firstVertex, firstInstance}; only instanceCount is touched here (atomic).
+layout(std430, binding = 3) buffer GrassCommandsBlock {
+    uint values[];
+} commands;
+
+layout(std430, binding = 4) buffer GrassStatsBlock {
+    uint words[];
+} stats;
+
+// Farthest-depth pyramid atlas of this frame. Bind any 1x1 texture when kGrassFlagHiz is off.
+layout(binding = 5) uniform sampler2D hizAtlas;
+
+shared float sMin[64];
+shared float sMax[64];
+shared float sLand[64];
+shared uint sCount[3];
+shared uint sBase[3];
+
+// Per-chunk values, set before the blade loop.
+vec2 gChunkLoGrid;   // Grid-relative xz of the chunk corner.
+vec2 gChunkWorldLo;  // World xz of the chunk corner.
+uint gSeed;
+uint gOffX;
+uint gOffY;
+
+const uint kRejectNone = 0u;
+const uint kRejectNoData = 1u;
+const uint kRejectLod = 2u;
+const uint kRejectWater = 3u;
+const uint kRejectSlope = 4u;
+const uint kRejectNoise = 5u;
+
+bool HasFlag(uint flag)
+{
+    return (uint(params.grid.w) & flag) != 0u;
+}
+
+uint CandidateCount(uint lod)
+{
+    float cs = params.camRel.w;
+    return uint(ceil(params.density[lod] * cs * cs));
+}
+
+struct TileSample {
+    float height;
+    float flag;
+    vec2 gradient; // d height / dx, d height / dz.
+};
+
+// Bilinear height, submerged flag (max of the 4 texels) and the exact bilinear gradient. False outside the tile.
+bool SampleTile(vec2 gridXz, out TileSample s)
+{
+    int n = int(params.tile.w);
+    float ts = params.tile.z;
+    vec2 q = (gridXz - params.tile.xy) / ts;
+    s.height = 0.0;
+    s.flag = 1.0;
+    s.gradient = vec2(0.0);
+    if (q.x < 0.0 || q.y < 0.0 || q.x >= float(n - 1) || q.y >= float(n - 1)) {
+        return false;
+    }
+    ivec2 i0 = ivec2(floor(q));
+    vec2 f = q - vec2(i0);
+    int index = i0.y * n + i0.x;
+    vec2 a = heightTile.texels[index];
+    vec2 b = heightTile.texels[index + 1];
+    vec2 c = heightTile.texels[index + n];
+    vec2 d = heightTile.texels[index + n + 1];
+    s.height = mix(mix(a.x, b.x, f.x), mix(c.x, d.x, f.x), f.y);
+    s.flag = max(max(a.y, b.y), max(c.y, d.y));
+    s.gradient.x = mix(b.x - a.x, d.x - c.x, f.y) / ts;
+    s.gradient.y = mix(c.x - a.x, d.x - b.x, f.x) / ts;
+    return true;
+}
+
+// True when the box (nearest view distance, nearest depth) lies behind the farthest depth of the pyramid texel.
+bool IsBehind(float nearestW, float farthest)
+{
+    if (!(farthest < 1.0)) {
+        return false; // Clear depth: a pixel of the block was never drawn.
+    }
+    float k = params.depthMap.x;
+    float b = params.depthMap.y;
+    float denominator = (farthest + kHizDepthGuard) - k;
+    if (!(denominator * b > 0.0)) {
+        return false;
+    }
+    float farthestW = b / denominator;
+    return nearestW > farthestW * (1.0 + kHizRelMargin) + kHizAbsMargin;
+}
+
+// Hi-Z test of an eye-relative box. Mirrors Occluded() of ClusterCull.comp.
+bool BoxOccluded(vec3 boxMin, vec3 boxMax)
+{
+    uvec2 base = uvec2(params.hiz.zw);
+    if (base.x == 0u || base.y == 0u) {
+        return false;
+    }
+    vec2 ndcMin = vec2(0.0);
+    vec2 ndcMax = vec2(0.0);
+    float nearestW = 0.0;
+    for (int i = 0; i < 8; ++i) {
+        vec3 corner = vec3((i & 1) != 0 ? boxMax.x : boxMin.x, (i & 2) != 0 ? boxMax.y : boxMin.y,
+            (i & 4) != 0 ? boxMax.z : boxMin.z);
+        vec4 clip = params.viewProjection * vec4(corner, 1.0);
+        if (!(clip.w > 1e-6)) {
+            return false; // A corner is behind the eye: keep.
+        }
+        vec3 ndc = clip.xyz / clip.w;
+        if (any(isnan(ndc)) || any(isinf(ndc))) {
+            return false;
+        }
+        ndcMin = i == 0 ? ndc.xy : min(ndcMin, ndc.xy);
+        ndcMax = i == 0 ? ndc.xy : max(ndcMax, ndc.xy);
+        nearestW = i == 0 ? clip.w : min(nearestW, clip.w);
+    }
+    ndcMin = max(ndcMin, vec2(-1.0));
+    ndcMax = min(ndcMax, vec2(1.0));
+    if (any(greaterThan(ndcMin, ndcMax))) {
+        return false;
+    }
+    vec2 baseSize = vec2(base);
+    vec2 rectMin = clamp((ndcMin * 0.5 + 0.5) * baseSize - kHizRectMarginTexels, vec2(0.0), baseSize);
+    vec2 rectMax = clamp((ndcMax * 0.5 + 0.5) * baseSize + kHizRectMarginTexels, vec2(0.0), baseSize);
+    float extent = max(rectMax.x - rectMin.x, rectMax.y - rectMin.y);
+    uint levelCount = uint(params.depthMap.z);
+    uint level = 0u;
+    while (level + 1u < levelCount && float(1u << level) < extent) {
+        ++level;
+    }
+    uvec2 origin = HizLevelOrigin(base, level);
+    uvec2 size = HizLevelSize(base, level);
+    float scale = 1.0 / float(1u << level);
+    uvec2 lo = min(uvec2(floor(rectMin * scale)), size - 1u);
+    uvec2 hi = min(uvec2(floor(rectMax * scale)), size - 1u);
+    float farthest = texelFetch(hizAtlas, ivec2(origin + lo), 0).r;
+    farthest = max(farthest, texelFetch(hizAtlas, ivec2(origin + uvec2(hi.x, lo.y)), 0).r);
+    farthest = max(farthest, texelFetch(hizAtlas, ivec2(origin + uvec2(lo.x, hi.y)), 0).r);
+    farthest = max(farthest, texelFetch(hizAtlas, ivec2(origin + hi), 0).r);
+    return IsBehind(nearestW, farthest);
+}
+
+// Conservative: rejects only a box fully behind one plane.
+bool BoxOutsideFrustum(vec3 boxMin, vec3 boxMax)
+{
+    vec3 c = 0.5 * (boxMin + boxMax);
+    vec3 e = 0.5 * (boxMax - boxMin);
+    for (int p = 0; p < 6; ++p) {
+        vec3 normal = params.planes[p].xyz;
+        if (dot(normal, c) + params.planes[p].w + dot(abs(normal), e) < 0.0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Places candidate `idx` of the current chunk and filters it. Returns a kReject* code (0 = accepted).
+// Lower densities are index prefixes of higher ones, so a blade only disappears at a density step.
+uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
+{
+    lod = 3u;
+    result = GrassInstance(vec4(0.0), vec4(0.0));
+    uint hb = GrassHash2(gSeed, idx);
+
+    // R2 low-discrepancy sequence in 32-bit fixed point: every prefix covers the chunk evenly.
+    vec2 u = vec2(float((gOffX + idx * 0xC13FA9A9u) >> 8u), float((gOffY + idx * 0x91E10DA5u) >> 8u)) * (1.0 / 16777216.0);
+    vec2 local = u * params.camRel.w;
+    vec2 pg = gChunkLoGrid + local;
+
+    TileSample ts;
+    if (!SampleTile(pg, ts)) {
+        return kRejectNoData;
+    }
+    vec3 eye = vec3(pg.x - params.camRel.x, ts.height - params.camRel.y, pg.y - params.camRel.z);
+    float dist = length(eye);
+    if (dist >= params.lodDist.z) {
+        return kRejectLod;
+    }
+    lod = dist < params.lodDist.x ? 0u : (dist < params.lodDist.y ? 1u : 2u);
+    if (idx >= CandidateCount(lod)) {
+        lod = 3u;
+        return kRejectLod;
+    }
+
+    float waterTop = params.water.x + params.water.y;
+    if (ts.flag > 0.5 || ts.height <= waterTop) {
+        lod = 3u;
+        return kRejectWater;
+    }
+    vec3 normal = normalize(vec3(-ts.gradient.x, 1.0, -ts.gradient.y));
+    float slopeDeg = degrees(acos(clamp(normal.y, 0.0, 1.0)));
+    if (slopeDeg > params.slope.x) {
+        lod = 3u;
+        return kRejectSlope;
+    }
+
+    // Density modulation: low-frequency patches, slope edge, waterline edge and the far edge. All stable per blade.
+    vec2 worldXz = gChunkWorldLo + local;
+    float scale = max(params.slope.z, 1.0);
+    float nz = 0.65 * GrassValueNoise(worldXz / scale) + 0.35 * GrassValueNoise(worldXz / (scale * 0.37) + vec2(17.3, 5.9));
+    float patchMask = smoothstep(params.slope.w - 0.1, params.slope.w + 0.15, nz);
+    float m = mix(1.0, patchMask, params.density.w);
+    m *= 1.0 - smoothstep(params.slope.x - max(params.slope.y, 0.01), params.slope.x, slopeDeg);
+    m *= smoothstep(waterTop, waterTop + max(params.water.z, 1e-3), ts.height);
+    float edgeStart = params.lodDist.z * (1.0 - clamp(params.lodDist.w, 0.01, 1.0));
+    m *= 1.0 - smoothstep(edgeStart, params.lodDist.z, dist);
+    if (GrassUnit(GrassHash2(hb, 0x1234u)) >= m) {
+        lod = 3u;
+        return kRejectNoise;
+    }
+
+    float r1 = GrassUnit(GrassHash2(hb, 1u));
+    float r2 = GrassUnit(GrassHash2(hb, 2u));
+    float r3 = GrassUnit(GrassHash2(hb, 3u));
+    float r4 = GrassUnit(GrassHash2(hb, 4u));
+    float r5 = GrassUnit(GrassHash2(hb, 5u));
+    float height = params.blade.x * (1.0 + params.blade.w * (2.0 * r1 - 1.0)) * (0.85 + 0.3 * nz);
+    float widthScale = lod == 0u ? 1.0 : (lod == 1u ? params.bladeB.y : params.bladeB.z);
+    float width = params.blade.y * (0.8 + 0.4 * r2) * widthScale;
+    float lean = params.bladeB.x * (0.3 + 0.7 * r4);
+    result = GrassInstance(vec4(eye, r3 * 6.2831853), vec4(height, width, lean, r5));
+    return kRejectNone;
+}
+
+void main()
+{
+    uint lid = gl_LocalInvocationID.x;
+    int dim = max(params.grid.z, 1);
+    uint chunkId = gl_WorkGroupID.x;
+    if (chunkId >= uint(dim * dim)) {
+        return;
+    }
+    bool collect = HasFlag(kGrassFlagStats);
+    ivec2 cell = ivec2(int(chunkId) % dim, int(chunkId) / dim);
+    float cs = params.camRel.w;
+    if (collect && lid == 0u) {
+        atomicAdd(stats.words[kStatChunksInGrid], 1u);
+    }
+
+    // 1. Horizontal distance: far chunks leave before any tile read.
+    vec2 lo2 = vec2(cell) * cs - params.camRel.xz;
+    vec2 nearXz = max(max(lo2, -(lo2 + cs)), vec2(0.0));
+    if (length(nearXz) >= params.lodDist.z) {
+        if (collect && lid == 0u) { atomicAdd(stats.words[kStatChunksCulledDistance], 1u); }
+        return;
+    }
+
+    // 2. Tile coverage.
+    int n = int(params.tile.w);
+    float ts = params.tile.z;
+    vec2 gridLo = vec2(cell) * cs;
+    vec2 q0 = (gridLo - params.tile.xy) / ts;
+    vec2 q1 = (gridLo + cs - params.tile.xy) / ts;
+    if (n < 2 || q1.x < 0.0 || q1.y < 0.0 || q0.x > float(n - 1) || q0.y > float(n - 1)) {
+        if (collect && lid == 0u) { atomicAdd(stats.words[kStatChunksCulledNoData], 1u); }
+        return;
+    }
+
+    // 3. Height range of the chunk from the tile (and the highest dry texel).
+    int x0 = clamp(int(floor(q0.x)), 0, n - 1);
+    int x1 = clamp(int(ceil(q1.x)), 0, n - 1);
+    int z0 = clamp(int(floor(q0.y)), 0, n - 1);
+    int z1 = clamp(int(ceil(q1.y)), 0, n - 1);
+    int countX = x1 - x0 + 1;
+    int total = countX * (z1 - z0 + 1);
+    float mn = 1e30;
+    float mx = -1e30;
+    float land = -1e30;
+    for (int k = int(lid); k < total; k += 64) {
+        vec2 t = heightTile.texels[(z0 + k / countX) * n + x0 + k % countX];
+        mn = min(mn, t.x);
+        mx = max(mx, t.x);
+        land = t.y < 0.5 ? max(land, t.x) : land;
+    }
+    sMin[lid] = mn;
+    sMax[lid] = mx;
+    sLand[lid] = land;
+    barrier();
+    for (uint stride = 32u; stride > 0u; stride >>= 1u) {
+        if (lid < stride) {
+            sMin[lid] = min(sMin[lid], sMin[lid + stride]);
+            sMax[lid] = max(sMax[lid], sMax[lid + stride]);
+            sLand[lid] = max(sLand[lid], sLand[lid + stride]);
+        }
+        barrier();
+    }
+    float hMin = sMin[0];
+    float hMax = sMax[0];
+    float hLand = sLand[0];
+
+    // 4. Water: no dry texel above the waterline means no grass here.
+    if (hLand <= params.water.x + params.water.y) {
+        if (collect && lid == 0u) { atomicAdd(stats.words[kStatChunksCulledWater], 1u); }
+        return;
+    }
+
+    // 5. 3D distance and LOD of the chunk (its nearest point). Blades pick their own LOD below.
+    float maxBladeHeight = params.blade.x * (1.0 + params.blade.w) * 1.15;
+    vec3 boxMin = vec3(lo2.x, hMin - params.camRel.y, lo2.y);
+    vec3 boxMax = vec3(lo2.x + cs, hMax + maxBladeHeight - params.camRel.y, lo2.y + cs);
+    float dist = length(max(max(boxMin, -boxMax), vec3(0.0)));
+    if (dist >= params.lodDist.z) {
+        if (collect && lid == 0u) { atomicAdd(stats.words[kStatChunksCulledDistance], 1u); }
+        return;
+    }
+    uint lodMin = dist < params.lodDist.x ? 0u : (dist < params.lodDist.y ? 1u : 2u);
+
+    // 6. Frustum and Hi-Z with the box padded for blade lean and wind.
+    float pad = 0.9 * maxBladeHeight;
+    vec3 padMin = boxMin - vec3(pad, 0.0, pad);
+    vec3 padMax = boxMax + vec3(pad, 0.0, pad);
+    if (BoxOutsideFrustum(padMin, padMax)) {
+        if (collect && lid == 0u) { atomicAdd(stats.words[kStatChunksCulledFrustum], 1u); }
+        return;
+    }
+    if (HasFlag(kGrassFlagHiz) && BoxOccluded(padMin, padMax)) {
+        if (collect && lid == 0u) { atomicAdd(stats.words[kStatChunksCulledHiz], 1u); }
+        return;
+    }
+    if (collect && lid == 0u) {
+        atomicAdd(stats.words[kStatChunksLod0 + lodMin], 1u);
+    }
+
+    // 7. Candidates of this chunk. The seed uses the world chunk index, so placement is stable while the grid scrolls.
+    ivec2 worldChunk = params.grid.xy + cell;
+    gChunkLoGrid = gridLo;
+    gChunkWorldLo = vec2(worldChunk) * cs;
+    gSeed = GrassHash3(uint(worldChunk.x), uint(worldChunk.y), params.misc.y);
+    gOffX = GrassPcg(gSeed ^ 0xA511E9B3u);
+    gOffY = GrassPcg(gSeed ^ 0x63D83595u);
+
+    uint candidates = CandidateCount(lodMin);
+    uint rejected[6] = uint[6](0u, 0u, 0u, 0u, 0u, 0u);
+    uint accepted[3] = uint[3](0u, 0u, 0u);
+
+    // 256 candidates per round (4 per thread); one slot reservation per LOD per round.
+    for (uint base = 0u; base < candidates; base += 256u) {
+        if (lid < 3u) {
+            sCount[lid] = 0u;
+        }
+        barrier();
+
+        uint lodOf[4];
+        uint localSlot[4];
+        GrassInstance made[4];
+        for (uint j = 0u; j < 4u; ++j) {
+            lodOf[j] = 3u;
+            localSlot[j] = 0u;
+            made[j] = GrassInstance(vec4(0.0), vec4(0.0));
+            uint idx = base + lid + 64u * j;
+            if (idx < candidates) {
+                uint lod;
+                GrassInstance blade;
+                uint why = EvalBlade(idx, lod, blade);
+                rejected[why] += 1u;
+                if (why == kRejectNone) {
+                    lodOf[j] = lod;
+                    made[j] = blade;
+                    localSlot[j] = atomicAdd(sCount[lod], 1u);
+                    accepted[lod] += 1u;
+                }
+            }
+        }
+        barrier();
+
+        if (lid < 3u) {
+            uint wanted = sCount[lid];
+            uint slot = 0u;
+            if (wanted > 0u) {
+                slot = atomicAdd(stats.words[kStatSlot0 + lid], wanted);
+                uint cap = params.instanceCap[lid];
+                uint granted = slot >= cap ? 0u : min(wanted, cap - slot);
+                if (granted > 0u) {
+                    atomicAdd(commands.values[lid * 4u + 1u], granted);
+                }
+                if (granted < wanted) {
+                    atomicAdd(stats.words[kStatDropped0 + lid], wanted - granted);
+                }
+            }
+            sBase[lid] = slot;
+        }
+        barrier();
+
+        for (uint j = 0u; j < 4u; ++j) {
+            uint lod = lodOf[j];
+            if (lod < 3u) {
+                uint slot = sBase[lod] + localSlot[j];
+                if (slot < params.instanceCap[lod]) {
+                    instances.items[params.instanceBase[lod] + slot] = made[j];
+                }
+            }
+        }
+    }
+
+    if (collect) {
+        // rejected[0] counts accepted blades; the rest are the reasons.
+        atomicAdd(stats.words[kStatCandidates], rejected[0] + rejected[1] + rejected[2] + rejected[3] + rejected[4] + rejected[5]);
+        atomicAdd(stats.words[kStatAccepted0], accepted[0]);
+        atomicAdd(stats.words[kStatAccepted1], accepted[1]);
+        atomicAdd(stats.words[kStatAccepted2], accepted[2]);
+        atomicAdd(stats.words[kStatRejectNoData], rejected[1]);
+        atomicAdd(stats.words[kStatRejectLod], rejected[2]);
+        atomicAdd(stats.words[kStatRejectWater], rejected[3]);
+        atomicAdd(stats.words[kStatRejectSlope], rejected[4]);
+        atomicAdd(stats.words[kStatRejectNoise], rejected[5]);
+    }
+}
