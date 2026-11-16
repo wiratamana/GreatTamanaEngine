@@ -81,6 +81,10 @@ public:
     void DrawIndexed(std::uint32_t indexCount, std::uint32_t firstIndex = 0, std::int32_t vertexOffset = 0) noexcept;
     void Draw(std::uint32_t vertexCount, std::uint32_t firstVertex = 0) noexcept;
 
+    // One non-indexed draw whose vertex and instance counts come from a VkDrawIndirectCommand at `byteOffset`.
+    // Its firstInstance must be 0 (the device feature is not required).
+    void DrawIndirect(VkBuffer commands, std::uint64_t byteOffset) noexcept;
+
     // --- Compute Recording ---
 
     // Stages push constants for the next dispatch (bytes are copied). A block over kMaxPushConstantBytes, or null

@@ -68,11 +68,23 @@ BindingPlanResult PlanBindings(std::span<const ReflectedDescriptorBinding> refle
 // A size of 0 means no push-constant block (reflected) or none supplied (provided).
 std::optional<std::string> ValidatePushConstantSize(std::uint32_t reflectedSize, std::uint32_t providedSize);
 
-// Declares the layout, reads/writes and bindings of an already validated plan.
-void DeclareBindings(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& plan, DescriptorSetLayoutHandle layout);
+// Which pipeline stages read a pass's bound resources: decides the barrier of a graph storage buffer.
+enum class BindingDomain : std::uint8_t { Compute, Graphics };
 
-// Why a graphics shader cannot back a fullscreen pass, or nullopt. Fullscreen passes use set 0 only,
-// bind combined image samplers and uniform buffers, and have a push block at offset 0.
+// Declares the layout, reads/writes and bindings of an already validated plan.
+void DeclareBindings(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& plan, DescriptorSetLayoutHandle layout,
+    BindingDomain domain = BindingDomain::Compute);
+
+// Bytes of one VkDrawIndirectCommand: vertexCount, instanceCount, firstVertex, firstInstance.
+inline constexpr std::uint64_t kDrawIndirectCommandBytes = 16;
+
+// Why `args` cannot feed an indirect draw, or nullopt: unknown buffer, offset not a multiple of 4, no indirect
+// usage (a buffer with undeclared usage, i.e. an import, passes) or a command that does not fit the buffer.
+std::optional<std::string> ValidateIndirectArgs(const std::optional<BufferDesc>& desc, std::uint64_t byteOffset);
+
+// Why a graphics shader cannot back a fullscreen pass, or nullopt. Fullscreen passes use set 0 only, bind combined
+// image samplers (fragment stage only), uniform buffers and read-only storage buffers, and have a push block at
+// offset 0. A storage buffer must be readonly in every stage that declares it.
 std::optional<std::string> ValidateFullscreenReflection(const ShaderReflectionResult& reflection);
 
 // Why `target` (the DescOf() of a pass target) cannot be rendered to as a color target, or nullopt.
@@ -100,9 +112,10 @@ FullscreenAttachmentPlan PlanFullscreenAttachments(std::span<const std::optional
 
 // Declares a fullscreen pass: bindings, the color targets (all cleared with `clearColor` when set), the optional
 // depth test attachment, and declare-only depth reads (`depthAcknowledgements` are sampled by no shader; the
-// compositor requires the view's depth to be read).
+// compositor requires the view's depth to be read). A set `indirectArgs` declares an IndirectCommandRead of its buffer.
 void DeclareFullscreen(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& plan, DescriptorSetLayoutHandle layout,
     std::span<const TextureHandle> targets, const std::optional<std::array<float, 4>>& clearColor,
-    std::span<const TextureHandle> depthAcknowledgements, const std::optional<TextureHandle>& depthTest);
+    std::span<const TextureHandle> depthAcknowledgements, const std::optional<TextureHandle>& depthTest,
+    const std::optional<IndirectArgsRef>& indirectArgs = std::nullopt);
 
 } // namespace gte::rg

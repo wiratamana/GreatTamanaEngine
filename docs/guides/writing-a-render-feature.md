@@ -152,6 +152,24 @@ GTE_REGISTER_RENDER_FEATURE("Foo", FooFeature);
 - `ComputeShader{"Foo"}` loads `Foo.comp`. `FullscreenShader{"Foo"}` loads `Foo.vert` and `Foo.frag`.
 - `#include` finds files in the shader's own folder first, then in `src/Shaders/`.
 
+#### Procedural indirect draw (grass, particles)
+A `FullscreenShader` can also draw geometry that the vertex shader makes by itself. The count comes from a GPU buffer.
+```cpp
+f.Fullscreen(shader, "Grass.Draw.L0")
+    .Params(params, p).BindBuffer("instances", inst)      // readonly storage blocks, vertex + fragment stage
+    .Push(lod).IndirectDraw(args, /*byteOffset=*/0)       // 16-byte draw command written by a compute pass
+    .Target(f.SceneColor()).DepthTest(f.SceneDepth(), fx::DepthCompare::LessEqual, true).Draw();
+```
+- `args` needs `BufferUse::Indirect | Storage`. The command is `{vertexCount, instanceCount, firstVertex, firstInstance}` and `firstInstance` must be 0.
+- `byteOffset` must be a multiple of 4. Use one pass name per draw (`.L0`, `.L1`, `.L2`) to draw one shader with several commands.
+- The pipeline has no vertex buffers, no culling, triangle list. Build the blade from `gl_VertexIndex` and `gl_InstanceIndex`.
+- Every storage block must be `readonly` (`layout(std430, binding = N) readonly buffer Name { ... } name;`). A block used by both stages needs the same name and type in both files.
+- A block named `params` takes `Params(...)`. It is a readonly storage block, not a uniform block. Other storage blocks take `BindBuffer("name", buffer)`.
+- A push-constant block used by both stages must be identical (same size, offset 0, at most 128 bytes).
+- Sample textures in the fragment shader only. A sampler seen by the vertex stage is refused at build.
+- The graph orders the compute pass before the draw: the instance buffer gets a vertex + fragment storage read barrier, `args` gets an indirect-command read barrier.
+- Give the vertex and fragment shaders instance names for all blocks. Do not strip debug names from the SPIR-V (reflection needs them).
+
 ### 8. Add a debug endpoint (optional)
 Implement `fx::IFeatureDebugEndpoint`: `GetState()`, `Set()` and `Invoke()`. All run on the main thread.
 - `Set()` applies all arguments or none. A bad key goes in `badKey` and the route answers 400.

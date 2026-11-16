@@ -335,6 +335,11 @@ TEST(RenderGraphResourceAccessTest, VertexShaderStorageReadIsNotAWrite)
     EXPECT_FALSE(IsWriteAccess(ResourceAccess::VertexShaderStorageRead));
 }
 
+TEST(RenderGraphResourceAccessTest, GraphicsShaderStorageReadIsNotAWrite)
+{
+    EXPECT_FALSE(IsWriteAccess(ResourceAccess::GraphicsShaderStorageRead));
+}
+
 // --- ToString() - one assertion per enumerator, non-empty, non-null ------
 
 TEST(RenderGraphResourceAccessTest, ToStringCoversEveryEnumeratorNonNullNonEmpty)
@@ -350,6 +355,7 @@ TEST(RenderGraphResourceAccessTest, ToStringCoversEveryEnumeratorNonNullNonEmpty
         ResourceAccess::IndirectCommandRead,
         ResourceAccess::VertexBufferRead,
         ResourceAccess::VertexShaderStorageRead,
+        ResourceAccess::GraphicsShaderStorageRead,
     };
 
     for (const ResourceAccess value : values) {
@@ -371,6 +377,7 @@ TEST(RenderGraphResourceAccessTest, ToStringProducesDistinctNamesForDistinctEnum
     EXPECT_STREQ(ToString(ResourceAccess::IndirectCommandRead), "IndirectCommandRead");
     EXPECT_STREQ(ToString(ResourceAccess::VertexBufferRead), "VertexBufferRead");
     EXPECT_STREQ(ToString(ResourceAccess::VertexShaderStorageRead), "VertexShaderStorageRead");
+    EXPECT_STREQ(ToString(ResourceAccess::GraphicsShaderStorageRead), "GraphicsShaderStorageRead");
 }
 
 // --- BindingStageLabel() - one case per enumerator, non-empty, non-null ---
@@ -388,6 +395,7 @@ TEST(RenderGraphResourceAccessTest, BindingStageLabelCoversEveryEnumeratorNonNul
         ResourceAccess::IndirectCommandRead,
         ResourceAccess::VertexBufferRead,
         ResourceAccess::VertexShaderStorageRead,
+        ResourceAccess::GraphicsShaderStorageRead,
     };
 
     for (const ResourceAccess value : values) {
@@ -409,6 +417,7 @@ TEST(RenderGraphResourceAccessTest, BindingStageLabelMatchesDocumentedStringPerE
     EXPECT_STREQ(BindingStageLabel(ResourceAccess::IndirectCommandRead), "Indirect Command");
     EXPECT_STREQ(BindingStageLabel(ResourceAccess::VertexBufferRead), "Vertex Input");
     EXPECT_STREQ(BindingStageLabel(ResourceAccess::VertexShaderStorageRead), "Vertex Shader");
+    EXPECT_STREQ(BindingStageLabel(ResourceAccess::GraphicsShaderStorageRead), "Graphics Shader");
 }
 
 // --- IsResolvedViewMissingItsSampler() - Safety Net #2's pure predicate ---

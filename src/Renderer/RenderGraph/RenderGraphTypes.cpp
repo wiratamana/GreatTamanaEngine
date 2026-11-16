@@ -26,6 +26,8 @@ bool IsWriteAccess(ResourceAccess access) noexcept
         return false; // Only read by vertex input.
     case ResourceAccess::VertexShaderStorageRead:
         return false; // Only read.
+    case ResourceAccess::GraphicsShaderStorageRead:
+        return false; // Only read.
     }
     return false;
 }
@@ -54,6 +56,8 @@ const char* ToString(ResourceAccess access) noexcept
         return "VertexBufferRead";
     case ResourceAccess::VertexShaderStorageRead:
         return "VertexShaderStorageRead";
+    case ResourceAccess::GraphicsShaderStorageRead:
+        return "GraphicsShaderStorageRead";
     }
     return "Unknown";
 }
@@ -82,6 +86,8 @@ const char* BindingStageLabel(ResourceAccess access) noexcept
         return "Vertex Input";
     case ResourceAccess::VertexShaderStorageRead:
         return "Vertex Shader";
+    case ResourceAccess::GraphicsShaderStorageRead:
+        return "Graphics Shader";
     }
     return "Unknown";
 }

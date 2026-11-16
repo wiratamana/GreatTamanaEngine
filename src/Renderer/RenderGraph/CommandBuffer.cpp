@@ -213,4 +213,9 @@ void CommandBuffer::Draw(std::uint32_t vertexCount, std::uint32_t firstVertex) n
     vkCmdDraw(m_cmd, vertexCount, 1, firstVertex, 0);
 }
 
+void CommandBuffer::DrawIndirect(VkBuffer commands, std::uint64_t byteOffset) noexcept
+{
+    vkCmdDrawIndirect(m_cmd, commands, static_cast<VkDeviceSize>(byteOffset), 1, sizeof(VkDrawIndirectCommand));
+}
+
 } // namespace gte::rg

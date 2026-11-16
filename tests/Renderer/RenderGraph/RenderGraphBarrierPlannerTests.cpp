@@ -134,6 +134,7 @@ TEST(RenderGraphBarrierPlannerTest, TargetsDepthStateIsTrueOnlyForDepthStencilAt
     EXPECT_FALSE(TargetsDepthState(ResourceAccess::IndirectCommandRead));
     EXPECT_FALSE(TargetsDepthState(ResourceAccess::VertexBufferRead));
     EXPECT_FALSE(TargetsDepthState(ResourceAccess::VertexShaderStorageRead));
+    EXPECT_FALSE(TargetsDepthState(ResourceAccess::GraphicsShaderStorageRead));
 }
 
 // --- Texture-side sequence: ComputeShaderWrite -> ShaderRead ---
@@ -566,7 +567,7 @@ TEST(RenderGraphBarrierPlannerTest, EveryBufferWriteAccessIsAWriteState)
     }
     for (const ResourceAccess access : { ResourceAccess::ShaderRead, ResourceAccess::TransferSrc,
              ResourceAccess::ComputeShaderRead, ResourceAccess::IndirectCommandRead, ResourceAccess::VertexBufferRead,
-             ResourceAccess::VertexShaderStorageRead }) {
+             ResourceAccess::VertexShaderStorageRead, ResourceAccess::GraphicsShaderStorageRead }) {
         EXPECT_FALSE(IsBufferWriteState(RequiredStateFor(access, false)));
     }
 }

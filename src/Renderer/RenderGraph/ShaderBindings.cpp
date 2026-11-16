@@ -194,7 +194,8 @@ std::optional<std::string> ValidatePushConstantSize(std::uint32_t reflectedSize,
     return std::nullopt;
 }
 
-void DeclareBindings(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& plan, DescriptorSetLayoutHandle layout)
+void DeclareBindings(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& plan, DescriptorSetLayoutHandle layout,
+    BindingDomain domain)
 {
     assert(layout != DescriptorSetLayoutHandle::Invalid && "a built shader always has a layout");
     pass.BindDescriptorSetLayout(layout);
@@ -220,6 +221,12 @@ void DeclareBindings(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& p
             break;
         case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
             if (binding.kind == BindingResourceKind::TrackedBuffer) {
+                if (domain == BindingDomain::Graphics) {
+                    assert(binding.access == ReflectedAccess::ReadOnly && "a graphics shader reads storage buffers only");
+                    pass.ReadBuffer(binding.trackedBuffer, ResourceAccess::GraphicsShaderStorageRead);
+                    pass.BindStorageBuffer(binding.binding, binding.trackedBuffer);
+                    break;
+                }
                 switch (binding.access) {
                 case ReflectedAccess::ReadOnly: pass.ReadStorageBuffer(binding.binding, binding.trackedBuffer); break;
                 case ReflectedAccess::WriteOnly: pass.WriteStorageBuffer(binding.binding, binding.trackedBuffer); break;
@@ -239,6 +246,25 @@ void DeclareBindings(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& p
     }
 }
 
+std::optional<std::string> ValidateIndirectArgs(const std::optional<BufferDesc>& desc, std::uint64_t byteOffset)
+{
+    if (!desc.has_value()) {
+        return std::string("the indirect args buffer is invalid or unknown to the graph");
+    }
+    if (byteOffset % 4 != 0) {
+        return "the indirect args offset " + std::to_string(byteOffset) + " is not a multiple of 4";
+    }
+    // BufferUsage::None means the usage is not declared (every import): nothing to check.
+    if (desc->usage != BufferUsage::None && !HasUsage(desc->usage, BufferUsage::IndirectBuffer)) {
+        return std::string("the indirect args buffer was created without indirect usage");
+    }
+    if (desc->size != 0 && (byteOffset > desc->size || desc->size - byteOffset < kDrawIndirectCommandBytes)) {
+        return "the indirect args offset " + std::to_string(byteOffset) + " leaves no room for a 16-byte draw command in "
+            + std::to_string(desc->size) + " bytes";
+    }
+    return std::nullopt;
+}
+
 std::optional<std::string> ValidateFullscreenReflection(const ShaderReflectionResult& reflection)
 {
     bool hasSetZero = false;
@@ -247,8 +273,18 @@ std::optional<std::string> ValidateFullscreenReflection(const ShaderReflectionRe
             return "binding " + std::to_string(binding.binding) + " is in set " + std::to_string(binding.set)
                 + ": fullscreen passes use set 0 only";
         }
-        if (binding.type != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER && binding.type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
-            return "binding " + std::to_string(binding.binding) + " is not a combined image sampler or uniform buffer";
+        const bool sampler = binding.type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        const bool storage = binding.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        if (!sampler && !storage && binding.type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
+            return "binding " + std::to_string(binding.binding)
+                + " is not a combined image sampler, uniform buffer or storage buffer";
+        }
+        if (storage && binding.access != ReflectedAccess::ReadOnly) {
+            return "storage buffer '" + binding.name + "' must be readonly in every stage: a draw does not write buffers";
+        }
+        // The graph orders a sampled texture for the fragment stage only.
+        if (sampler && (binding.stages & VK_SHADER_STAGE_VERTEX_BIT) != 0) {
+            return "sampler '" + binding.name + "' is read by the vertex stage: sample textures in the fragment shader";
         }
         hasSetZero = true;
     }
@@ -327,9 +363,13 @@ FullscreenAttachmentPlan PlanFullscreenAttachments(std::span<const std::optional
 
 void DeclareFullscreen(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& plan, DescriptorSetLayoutHandle layout,
     std::span<const TextureHandle> targets, const std::optional<std::array<float, 4>>& clearColor,
-    std::span<const TextureHandle> depthAcknowledgements, const std::optional<TextureHandle>& depthTest)
+    std::span<const TextureHandle> depthAcknowledgements, const std::optional<TextureHandle>& depthTest,
+    const std::optional<IndirectArgsRef>& indirectArgs)
 {
-    DeclareBindings(pass, plan, layout);
+    DeclareBindings(pass, plan, layout, BindingDomain::Graphics);
+    if (indirectArgs.has_value()) {
+        pass.ReadBuffer(indirectArgs->buffer, ResourceAccess::IndirectCommandRead);
+    }
     for (const TextureHandle target : targets) {
         pass.WriteColorAttachment(target, clearColor);
     }

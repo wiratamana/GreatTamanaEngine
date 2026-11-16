@@ -87,6 +87,13 @@ ResourceState RequiredStateFor(ResourceAccess access, bool isDepthResource) noex
             VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
             VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
         };
+    case ResourceAccess::GraphicsShaderStorageRead:
+        // Buffer-only; layout is unused. A StructuredBuffer read by the vertex or the fragment stage.
+        return ResourceState{
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+        };
     }
     return ResourceState{};
 }

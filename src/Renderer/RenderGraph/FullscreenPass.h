@@ -1,13 +1,17 @@
 #pragma once
 
+#include "GpuParams.h"
 #include "PassChain.h"
 #include "RenderGraphHandles.h"
 #include "StaticName.h"
 #include "../../Core/PipelineDesc.h"
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <initializer_list>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 namespace gte::rg {
@@ -45,6 +49,14 @@ public:
 
     FullscreenPass& Blend(BlendMode blend);
 
+    // Draws the indirect command at `byteOffset` of graph buffer `args` instead of one fullscreen triangle; the
+    // shader makes its geometry from gl_VertexIndex / gl_InstanceIndex. firstInstance must be 0. The pass reads
+    // `args` as an indirect command, so a compute pass that wrote it is ordered and barriered first.
+    FullscreenPass& IndirectArgs(BufferHandle args, std::uint64_t byteOffset = 0);
+
+    // Uploads `size` bytes and binds the buffer to the shader variable `bindingName` (a literal: read at Draw()).
+    FullscreenPass& ParamsBytes(std::string_view bindingName, GpuParamsBuffer& params, const void* data, std::size_t size);
+
     // Declares the pass. Returns false when nothing was declared (inert shader or invalid chain).
     // When `replay` is set and the pass was declared, it receives a way to record the same draw again elsewhere.
     bool Draw(FullscreenReplay* replay = nullptr);
@@ -57,6 +69,7 @@ private:
     CompareOp m_depthCompare = CompareOp::Always;
     bool m_depthWrite = false;
     BlendMode m_blend = BlendMode::Opaque;
+    std::optional<IndirectArgsRef> m_indirect;
 };
 
 } // namespace gte::rg

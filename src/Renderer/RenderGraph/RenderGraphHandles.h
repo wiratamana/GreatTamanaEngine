@@ -31,6 +31,11 @@ struct BufferHandle {
     friend bool operator==(const BufferHandle&, const BufferHandle&) noexcept = default;
 };
 
+// Where the VkDrawIndirectCommand of an indirect draw lives: a graph buffer and a byte offset into it.
+struct IndirectArgsRef {
+    BufferHandle buffer{};
+    std::uint64_t byteOffset = 0;
+};
 
 // Which half of an imported texture a binding targets (an imported view can carry a color and a depth image).
 enum class TextureAspect : std::uint8_t {
@@ -54,6 +59,8 @@ enum class ResourceAccess : std::uint8_t {
     VertexBufferRead,
     // A StructuredBuffer read by the vertex SHADER stage itself.
     VertexShaderStorageRead,
+    // A StructuredBuffer read by the vertex or the fragment shader stage of a draw.
+    GraphicsShaderStorageRead,
 };
 
 // What a resource is. A ResourceUsage only ever carries Texture or Buffer; the snapshot/UI additionally

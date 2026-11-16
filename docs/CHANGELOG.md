@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [Indirect draw in the fullscreen verb](#indirect-draw-in-the-fullscreen-verb-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
 | [Screen-space water feature](#screen-space-water-feature-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
 | [Terrain on the iGPU: cheaper aerial volume, background save and load](#terrain-on-the-igpu-cheaper-aerial-volume-background-save-and-load-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
 | [CPU-GPU overlap is the default](#cpu-gpu-overlap-is-the-default-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
@@ -47,6 +48,14 @@
 | [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+
+## Indirect draw in the fullscreen verb (branch `feature/precural-landscape`, 2026-11-16)
+
+- `fx::FullscreenChain` can draw procedural geometry: `IndirectDraw(args, byteOffset)` reads a 16-byte draw command from a GPU buffer. The vertex shader builds the geometry from `gl_VertexIndex` / `gl_InstanceIndex`. See the guide.
+- New chain calls `BindBuffer` (readonly storage blocks, vertex and fragment stage) and `Params`. New `rg::FullscreenPass::IndirectArgs`, `rg::CommandBuffer::DrawIndirect`.
+- New `ResourceAccess::GraphicsShaderStorageRead` (vertex + fragment stage). A compute pass that writes the buffer gets the right barrier. `args` is declared as `IndirectCommandRead`.
+- `ValidateFullscreenReflection` now accepts readonly storage blocks and refuses a sampler seen by the vertex stage.
+- No device feature is needed: one command per draw, `firstInstance` is 0. Tests: `FullscreenIndirectTests.cpp`.
 
 ## Screen-space water feature (branch `feature/precural-landscape`, 2026-11-16)
 
