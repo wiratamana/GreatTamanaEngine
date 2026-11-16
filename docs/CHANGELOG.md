@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [Screen-space water feature](#screen-space-water-feature-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
 | [Terrain on the iGPU: cheaper aerial volume, background save and load](#terrain-on-the-igpu-cheaper-aerial-volume-background-save-and-load-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
 | [CPU-GPU overlap is the default](#cpu-gpu-overlap-is-the-default-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
 | [Frames in flight for the offscreen graph](#frames-in-flight-for-the-offscreen-graph-branch-featuretoon-shading-impl-2026-11-09) | `feature/toon-shading-impl` | 2026-11-09 |
@@ -46,6 +47,16 @@
 | [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+
+## Screen-space water feature (branch `feature/precural-landscape`, 2026-11-16)
+
+- **New feature `Water`.** Ocean, lakes and rivers drawn per pixel, with no mesh. A compute pass (`Water.Shade.Dispatch`) traces each view ray against a wave height field and shades it. A fullscreen draw (`Water.Composite.Draw`) writes colour and `gl_FragDepth` into the view. Registrations: `Water.FrameStamp` (PreOpaque 36), `Water.Surface` (PostOpaque 25). See [Water](reference/render-features/water.md).
+- **Water is in the scene depth.** Atmosphere haze, GTAO, SSGI, TAA and the shadow depth range treat it as a surface. This is the first user of a depth write through the kit fullscreen verb. Measured: with water on the depth buffer holds the water plane instead of the seabed.
+- **Shading.** Sharpened-sine waves with analytic slopes (not true Gerstner), drifting ripple noise without textures, Fresnel, sky reflection from the Atmosphere sky-view table, GGX sun glint, per-channel absorption, depth-aware shore foam, crest foam, refraction by the slope, wet ground above the water line. Optional screen-space reflection (off by default).
+- **Bodies.** Up to 16 bodies (ocean, box lake, polygon lake up to 32 points, river polyline up to 64 points with per-point level and width). The editor layer feeds them through `IWaterBodySource`; `/feature_debug/invoke` can add them for tests.
+- **HTTP.** `/feature_debug/*` name `Water`: every setting, actions `add_ocean`, `add_lake`, `add_river`, `remove_body`, `clear_bodies`, `dump_bodies`, `probe`, and `debugView` masks that show in `/get_game_view`.
+- **Cost (Iris Xe).** 0.4 to 0.6 ms at 719x360, 1.2 to 2.2 ms at 1264x629. The pass is bandwidth bound.
+- **Not done.** No camera under water, no sun shadow or cloud reflection on water, flat silhouettes, no half-resolution mode.
 
 ## Terrain on the iGPU: cheaper aerial volume, background save and load (branch `feature/precural-landscape`, 2026-11-16)
 

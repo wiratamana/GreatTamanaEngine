@@ -66,6 +66,8 @@ More about threads and bridges: [HTTP server](../architecture/http-server.md).
 | Is Hi-Z culling working? | `GET /feature_debug/state?name=GpuDrivenScene` |
 | Change a feature setting | `GET /feature_debug/set?name=<feature>&<key>=<value>` **W** |
 | Reset a feature | `GET /feature_debug/invoke?name=<feature>&action=reset_defaults` **W** |
+| Water: add a lake, river or probe a point | `GET /feature_debug/invoke?name=Water&action=add_lake&minX=..&minZ=..&maxX=..&maxZ=..&level=..` (also `add_river`, `add_ocean`, `probe`, `clear_bodies`). See [Water](../reference/render-features/water.md) **W** |
+| Water: see a mask | `GET /feature_debug/set?name=Water&debugView=ShoreMask` then `GET /get_game_view` (set ToneMapping `mode=Clamp` to read values) **W** |
 | Inspect one draw call | `/frame_debugger/*` (see R6) |
 | Move the scene camera | `GET /scene_camera/set_pose?x=0&y=2&z=5&yaw=0&pitch=0` **W** |
 | Look along an axis, switch Persp / Iso | `GET /scene_camera/view?direction=top&projection=orthographic` **W** |

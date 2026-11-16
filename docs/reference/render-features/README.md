@@ -1,10 +1,10 @@
 # Render features
 
-> Master table of the 12 built-in render features: order, toggles, data flow, defaults. Read this before any single feature page.
+> Master table of the 13 built-in render features: order, toggles, data flow, defaults. Read this before any single feature page.
 > Verified against code: 2026-11-04
 
 ## TL;DR
-- 12 features ship in `src/Features/`. All use the feature kit (`fx::`), none touches Vulkan.
+- 13 features ship in `src/Features/`. All use the feature kit (`fx::`), none touches Vulkan.
 - Order in a frame: stage first, then priority (low number runs first).
 - Features share data through channels, never by including each other.
 - Settings live in memory only. Scene files do not save them. Set them again after a load.
@@ -26,6 +26,7 @@
 | `ToonCharacter` | Cel shading and outline for marked characters | [toon-character](toon-character.md) | `ToonCharacter` |
 | `TemporalAa` | Temporal anti-aliasing with a sub-pixel jitter (Game view only) | [temporal-aa](temporal-aa.md) | `TemporalAa` |
 | `VolumetricCloud` | Ray-marched cloud layer, low-res march with temporal upsampling | [volumetric-cloud](volumetric-cloud.md) | `VolumetricCloud` |
+| `Water` | Screen-space ocean, lakes and rivers with depth write | [water](water.md) | debug name `Water` (no panel yet) |
 
 ## Order in the frame
 
@@ -37,7 +38,7 @@
 | PreOpaque | 10 | `Shadow.Cascades` | Shadow | `Shadow.Cascade0..3.Draw`, `Shadow.Cluster.L<c>.P<s>.Reset/Cull/Draw` |
 | PreOpaque | 15 | `ToonCharacter.Look` | ToonCharacter | none (`Always`) |
 | PreOpaque | 20 | `SceneLighting.Uniforms` | SceneLighting | none (`Always`) |
-| PreOpaque | 30, 35, 40, 40, 45, 46 | `<Feature>.FrameStamp` | Shadow, Ssgi, Gtao, ToneMapping, VolumetricLight, Bloom | none (`Always`) |
+| PreOpaque | 30, 35, 36, 40, 40, 45, 46 | `<Feature>.FrameStamp` | Shadow, Ssgi, Water, Gtao, ToneMapping, VolumetricLight, Bloom | none (`Always`) |
 | PreOpaque | 47 | `TemporalAa.FrameStamp` | TemporalAa | none (`Always`) |
 | PreOpaque | 48 | `TemporalAa.Jitter` | TemporalAa | none (`Always`) |
 | PreOpaque | 49 | `VolumetricCloud.FrameStamp` | VolumetricCloud | none (`Always`) |
@@ -48,6 +49,7 @@
 | Opaque | 120 | `ToonCharacter.Overlay` | ToonCharacter | `ToonCharacter.Overlay.Draw` |
 | PostOpaque | 0 | `Shadow.Mask` | Shadow | `Shadow.Mask.Dispatch` |
 | PostOpaque | 20 | `AtmosphereAerialVolume` | Atmosphere | `AtmosphereAerialPerspectiveVolumePass` |
+| PostOpaque | 25 | `Water.Surface` | Water | `Water.Shade.Dispatch`, `Water.Composite.Draw` |
 | PostOpaque | 50 | `Gtao.Occlusion` | Gtao | `Gtao.Main.Dispatch`, `Gtao.Resolve.Dispatch` |
 | PostOpaque | 55 | `Ssgi.Trace` | Ssgi | `Ssgi.Prepare/Trace/Resolve.Dispatch` |
 | PostOpaque | 60 | `VolumetricLight.Volume` | VolumetricLight | `VolumetricLight.Inject/Temporal/Integrate.Dispatch` |

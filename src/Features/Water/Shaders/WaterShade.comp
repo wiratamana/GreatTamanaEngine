@@ -97,6 +97,9 @@ float WaveHeight(vec2 rel, float footprint, float scale)
     for (uint i = 0u; i < n; ++i) {
         WaterWave w = params.waves[i];
         float fade = smoothstep(4.0, 14.0, (6.2831853 / w.dirAndK.z) / (footprint * params.rippleInfo.y));
+        if (fade <= 0.0) {
+            continue;
+        }
         float theta = w.dirAndK.z * dot(w.dirAndK.xy, rel) + w.ampPhase.z;
         float s = 0.5 + 0.5 * sin(theta);
         h += scale * w.ampPhase.x * fade * (pow(max(s, 1e-5), w.dirAndK.w) - w.ampPhase.w);
@@ -114,6 +117,9 @@ void WaveSurface(vec2 rel, float footprint, float scale, out float h, out vec2 s
     for (uint i = 0u; i < n; ++i) {
         WaterWave w = params.waves[i];
         float amp = scale * w.ampPhase.x * smoothstep(4.0, 14.0, (6.2831853 / w.dirAndK.z) / (footprint * params.rippleInfo.y));
+        if (amp <= 0.0) {
+            continue;
+        }
         float theta = w.dirAndK.z * dot(w.dirAndK.xy, rel) + w.ampPhase.z;
         float sn = sin(theta);
         float s = 0.5 + 0.5 * sn;
@@ -131,10 +137,16 @@ vec2 RippleSlope(vec2 rel, float footprint, vec2 flow, out float foamNoise)
     vec4 l0 = params.ripple[0];
     vec4 l1 = params.ripple[1];
     vec2 moved = rel - flow * params.eyeTime.w;
-    vec3 n0 = ValueNoiseD(moved * l0.x + l0.yz, l0.w);
-    vec3 n1 = ValueNoiseD(moved * l1.x + l1.yz, l1.w);
     float f0 = 1.0 - smoothstep(0.1, 0.5, footprint * l0.x);
     float f1 = 1.0 - smoothstep(0.1, 0.5, footprint * l1.x);
+    vec3 n0 = vec3(0.5, 0.0, 0.0);
+    vec3 n1 = vec3(0.5, 0.0, 0.0);
+    if (f0 > 0.0) {
+        n0 = ValueNoiseD(moved * l0.x + l0.yz, l0.w);
+    }
+    if (f1 > 0.0) {
+        n1 = ValueNoiseD(moved * l1.x + l1.yz, l1.w);
+    }
     foamNoise = n0.x * 0.6 + n1.x * 0.4;
     return params.rippleInfo.x * (0.15 * l0.x * f0 * n0.yz + 0.07 * l1.x * f1 * n1.yz);
 }
@@ -505,8 +517,11 @@ void main()
     vec3 bodyLight = kAmbient * params.skyInfo.w + params.sunRadiance.rgb * (kDirectScale * sunUp * max(normal.y, 0.0));
 
     // Refraction: shift the seabed lookup by the surface slope, keep it only where it still lies behind the water.
+    // Deep water hides the seabed, so its colour is not read at all.
+    vec3 sigma = params.rippleInfo.z / clarity * vec3(1.9, 0.75, 0.55);
+    vec3 transmit = hasScene ? exp(-sigma * rayDepth) : vec3(0.0);
     vec3 seabed = vec3(0.0);
-    if (hasScene) {
+    if (hasScene && max(transmit.r, max(transmit.g, transmit.b)) > 0.01) {
         vec2 shift = slope * params.deepColor.w * float(size.y) * smoothstep(0.0, 1.5, verticalDepth);
         ivec2 p2 = clamp(p + ivec2(shift), ivec2(0), size - ivec2(1));
         float depth2 = FetchDepth(sceneDepth, p2);
@@ -515,8 +530,6 @@ void main()
         }
         seabed = texelFetch(sceneColor, p2, 0).rgb;
     }
-    vec3 sigma = params.rippleInfo.z / clarity * vec3(1.9, 0.75, 0.55);
-    vec3 transmit = hasScene ? exp(-sigma * rayDepth) : vec3(0.0);
     float deepMix = 1.0 - exp(-verticalDepth / clarity);
     vec3 bodyColor = mix(params.shallowColor.rgb, params.deepColor.rgb, deepMix) * bodyLight;
     vec3 under = seabed * transmit + bodyColor * (1.0 - transmit);
