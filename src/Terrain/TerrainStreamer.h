@@ -12,7 +12,9 @@
 
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -30,6 +32,10 @@ class InlineTerrainExecutor final : public ITerrainExecutor {
 public:
     void Run(Jobs::JobFunction fn, void* payload, Jobs::JobHandle&) override { fn(payload); }
 };
+
+// Optional source of ready-made nodes (for example baked data). Runs on worker threads, so it must be
+// thread safe. Returning nullopt makes the streamer generate the node itself.
+using NodeProvider = std::function<std::optional<NodeMesh>(const TerrainSettings& current, const NodeKey& key)>;
 
 struct StreamerConfig {
     std::size_t memoryBudgetBytes = 256u * 1024u * 1024u; // Resident node data; wanted nodes are never evicted.
@@ -74,6 +80,9 @@ public:
     // Applies new settings; returns what kind of rebuild it caused. Evictions land in the next Update().
     SettingsChange SetSettings(const TerrainSettings& settings);
 
+    // Sets (or with an empty function removes) the node provider. Resident nodes are dropped and rebuilt.
+    void SetNodeProvider(NodeProvider provider);
+
     // One call per frame. `wanted` comes from LodSelector. `nowSeconds` is any monotonic clock.
     void Update(const std::vector<WantedNode>& wanted, std::uint64_t frame, double nowSeconds, StreamerUpdate& out);
 
@@ -99,6 +108,7 @@ private:
     StreamerConfig m_config;
     ITerrainExecutor* m_executor = nullptr;
     std::shared_ptr<const TerrainHeightField> m_field;
+    std::shared_ptr<const NodeProvider> m_provider;
     std::uint64_t m_generation = 1;
     std::unordered_map<NodeKey, std::unique_ptr<Entry>, NodeKeyHash> m_entries;
     std::size_t m_bytes = 0;

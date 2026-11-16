@@ -50,6 +50,15 @@ struct LodSelectionStats {
     int inView = 0;
     int rejectedDistance = 0;
     int rejectedFrustum = 0;
+    int passes = 1;                // Selection passes run (more than 1 when a cap lowered the detail).
+    double distanceScale = 1.0;    // Factor multiplier used for the returned leaves.
+    bool overBudget = false;       // Still above a cap at the lowest allowed detail.
+};
+
+// Caps on the number of leaves; the selector lowers lodDistanceFactor (never below 1.5) to stay under them.
+struct LodBudget {
+    int maxInView = 0; // 0 = no cap.
+    int maxTotal = 0;  // In view plus prefetch; 0 = no cap.
 };
 
 class LodSelector {
@@ -58,6 +67,13 @@ public:
 
     // Resets the hysteresis memory.
     void SetSettings(const TerrainSettings& settings);
+
+    // New culling and distance values only: keeps the hysteresis memory and the measured node heights.
+    void SetOptimization(const TerrainSettings& settings) { m_settings = settings; }
+
+    void SetBudget(const LodBudget& budget) noexcept { m_budget = budget; }
+    const LodBudget& Budget() const noexcept { return m_budget; }
+    double DistanceScale() const noexcept { return m_distanceScale; }
 
     // Remembers the real vertical extent of a built node so distance tests stay tight.
     void SetNodeHeightRange(const NodeKey& key, float minY, float maxY);
@@ -78,8 +94,13 @@ private:
         bool measured; // True when `range` came from a built node (own or ancestor).
     };
 
+    // One quadtree walk with `factor`; fills m_splitNext.
+    void SelectPass(const LodView& view, double factor, std::vector<WantedNode>& out, LodSelectionStats& local);
+
     TerrainSettings m_settings;
     TerrainLayout m_layout;
+    LodBudget m_budget;
+    double m_distanceScale = 1.0;
     std::unordered_set<NodeKey, NodeKeyHash> m_split;     // Nodes split by the previous call.
     std::unordered_set<NodeKey, NodeKeyHash> m_splitNext;
     std::unordered_map<NodeKey, HeightRange, NodeKeyHash> m_heightRanges;

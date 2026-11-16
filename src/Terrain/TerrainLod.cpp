@@ -88,15 +88,55 @@ void LodSelector::ForgetNodeHeightRange(const NodeKey& key)
 
 void LodSelector::Select(const LodView& view, std::vector<WantedNode>& out, LodSelectionStats* stats)
 {
-    out.clear();
+    constexpr double kMinFactor = 1.5;      // Below this the 2:1 level balance guarantee is gone.
+    constexpr double kShrink = 0.8;         // Detail drop per extra pass.
+    constexpr double kRecover = 1.02;       // Per frame, while well under the cap.
+    constexpr int kMaxPasses = 6;
+
+    const double baseFactor = static_cast<double>(m_settings.lodDistanceFactor);
+    const double minScale = std::min(1.0, kMinFactor / std::max(baseFactor, kMinFactor));
+    double scale = std::clamp(m_distanceScale, minScale, 1.0);
+
+    const auto overBudget = [this](const LodSelectionStats& s) {
+        return (m_budget.maxInView > 0 && s.inView > m_budget.maxInView)
+            || (m_budget.maxTotal > 0 && s.leaves > m_budget.maxTotal);
+    };
+
     LodSelectionStats local;
+    int passes = 0;
+    while (true) {
+        local = LodSelectionStats{};
+        SelectPass(view, baseFactor * scale, out, local);
+        ++passes;
+        if (!overBudget(local) || passes >= kMaxPasses || scale <= minScale) {
+            break;
+        }
+        scale = std::max(minScale, scale * kShrink);
+    }
+    local.passes = passes;
+    local.distanceScale = scale;
+    local.overBudget = overBudget(local);
+
+    // Win the detail back slowly once the view is well under the cap.
+    const bool roomLeft = (m_budget.maxInView <= 0 || local.inView < m_budget.maxInView * 3 / 4)
+        && (m_budget.maxTotal <= 0 || local.leaves < m_budget.maxTotal * 3 / 4);
+    m_distanceScale = (passes == 1 && roomLeft) ? std::min(1.0, scale * kRecover) : scale;
+
+    m_split.swap(m_splitNext);
+    if (stats != nullptr) {
+        *stats = local;
+    }
+}
+
+void LodSelector::SelectPass(const LodView& view, double factor, std::vector<WantedNode>& out, LodSelectionStats& local)
+{
+    out.clear();
     m_splitNext.clear();
 
     const double rootSize = NodeSize(m_layout, m_layout.rootLevel);
     const int rootSpan = static_cast<int>(std::llround(m_layout.worldHalfExtent / rootSize));
     const bool useFrustum = m_settings.frustumCulling && view.frustum.valid;
     const double maxDist = static_cast<double>(m_settings.maxViewDistance);
-    const double factor = static_cast<double>(m_settings.lodDistanceFactor);
     const HeightRange globalRange{ MinHeight(m_settings), MaxHeight(m_settings) };
 
     m_stack.clear();
@@ -171,10 +211,6 @@ void LodSelector::Select(const LodView& view, std::vector<WantedNode>& out, LodS
             local.inView += inView ? 1 : 0;
             out.push_back({ key, dist, inView });
         }
-    }
-    m_split.swap(m_splitNext);
-    if (stats != nullptr) {
-        *stats = local;
     }
 }
 

@@ -25,6 +25,7 @@ enum class AssetType : std::uint64_t {
     Font = 8,
     Animation = 9,
     Prefab = 10,
+    Terrain = 11, // Baked procedural world: metadata block starts with 'TERR' (see src/Terrain/TerrainAsset.h).
     Other = 1000, // Escape hatch for anything not covered above yet.
 };
 

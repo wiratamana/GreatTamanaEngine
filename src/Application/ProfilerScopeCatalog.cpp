@@ -36,6 +36,8 @@ constexpr auto kRaw = std::to_array<Entry>({
     { "EditorHost::ExecuteFrameDebuggerCommand", "Frame debugger command", "Handles one request of the frame debugger.", "", LoadingAndTools, false },
     { "EditorHost::ExecutePhysicsDebugCommand", "Physics debug command", "Runs one physics debug command that came in through the HTTP debug server.", "", LoadingAndTools, false },
     { "EditorHost::ExecuteHizDemoMenuAction", "Hi-Z demo menu action", "Opens or closes the Hi-Z demo scene.", "", LoadingAndTools, false },
+    { "TerrainWorld::Tick", "Terrain streaming", "Picks the terrain nodes the camera needs, writes new ones into the graphics memory pool and updates the culling table.", "If this is big, lower the visible node cap or the uploads per frame.", Simulation, false },
+    { "Terrain.BuildNode", "Building a terrain node", "A worker thread makes the heights, erosion and vertices of one terrain node.", "", Simulation, false },
     { "EditorHost::ExecuteProjectLifecycleLoad", "Loading a project", "Loads the code of a game project into the editor.", "", LoadingAndTools, false },
     { "EditorHost::ExecuteRenderGraphControlCommand", "Render graph command", "Switches a render pass or feature on or off.", "", LoadingAndTools, false },
     { "EditorHost::PerformProjectAssemblyHotReload", "Hot reload of project code", "Rebuilds and reloads your project code. The editor is frozen while this runs.", "", LoadingAndTools, false },

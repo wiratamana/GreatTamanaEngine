@@ -55,6 +55,44 @@ bool NodeUsesErosion(const TerrainSettings& s, int level) noexcept
     return s.erosionEnabled && s.erosionDropletCount > 0 && level <= s.erosionMaxLevel;
 }
 
+void FinishNodeMesh(NodeMesh& mesh, int quads)
+{
+    const int verts = quads + 1;
+    const float sp = mesh.spacing;
+    const float drop = kSkirtDropSpacings * sp;
+    float minY = 1.0e30f;
+    float maxY = -1.0e30f;
+    const std::size_t gridCount = static_cast<std::size_t>(verts) * static_cast<std::size_t>(verts);
+    for (std::size_t i = 0; i < gridCount; ++i) {
+        const float h = mesh.vertices[i].position[1];
+        minY = std::min(minY, h);
+        maxY = std::max(maxY, h);
+    }
+
+    // Skirt ring: copies of the border vertices pushed down; same normal and colour so lighting has no seam.
+    for (int edge = 0; edge < 4; ++edge) {
+        for (int k = 0; k < verts; ++k) {
+            int ix = 0;
+            int iz = 0;
+            switch (edge) {
+            case 0: ix = k; iz = 0; break;
+            case 1: ix = quads; iz = k; break;
+            case 2: ix = k; iz = quads; break;
+            default: ix = 0; iz = k; break;
+            }
+            const std::size_t src = static_cast<std::size_t>(iz) * static_cast<std::size_t>(verts) + static_cast<std::size_t>(ix);
+            const std::size_t dst = gridCount + static_cast<std::size_t>(edge) * static_cast<std::size_t>(verts) + static_cast<std::size_t>(k);
+            mesh.vertices[dst] = mesh.vertices[src];
+            mesh.vertices[dst].position[1] -= drop;
+            mesh.colors[dst] = mesh.colors[src];
+            minY = std::min(minY, mesh.vertices[dst].position[1]);
+        }
+    }
+
+    mesh.boundsMin = Vec3{ 0.0f, minY, 0.0f };
+    mesh.boundsMax = Vec3{ static_cast<float>(quads) * sp, maxY, static_cast<float>(quads) * sp };
+}
+
 std::vector<std::uint32_t> BuildSharedIndices(int quads)
 {
     const std::uint32_t q = static_cast<std::uint32_t>(quads);
@@ -101,11 +139,29 @@ std::vector<std::uint32_t> BuildSharedIndices(int quads)
 NodeMesh BuildNode(const TerrainHeightField& field, const NodeKey& key, NodeBuildTiming* timing)
 {
     const TerrainSettings& s = field.Settings();
-    const TerrainLayout& layout = field.Layout();
-    const NodeGeometry g = NodeGeometryOf(layout, key);
-    const int q = layout.quads;
+    const NodeGeometry g = NodeGeometryOf(field.Layout(), key);
+    GridBuildSpec spec;
+    spec.key = key;
+    spec.originX = g.originX;
+    spec.originZ = g.originZ;
+    spec.spacing = g.spacing;
+    spec.quads = field.Layout().quads;
+    spec.erode = NodeUsesErosion(s, key.level);
+    spec.erosionSeed = ErosionSeed(s.seed, key.x, key.z, key.level);
+    return BuildGridMesh(field, spec, timing);
+}
+
+NodeMesh BuildGridMesh(const TerrainHeightField& field, const GridBuildSpec& spec, NodeBuildTiming* timing)
+{
+    const TerrainSettings& s = field.Settings();
+    NodeGeometry g;
+    g.originX = spec.originX;
+    g.originZ = spec.originZ;
+    g.spacing = spec.spacing;
+    g.size = spec.spacing * static_cast<double>(spec.quads);
+    const int q = spec.quads;
     const int verts = q + 1;
-    const bool erode = NodeUsesErosion(s, key.level);
+    const bool erode = spec.erode && s.erosionEnabled && s.erosionDropletCount > 0;
     const int margin = erode ? kErosionMargin : 1;
     const int side = verts + 2 * margin;
     const std::size_t tileCount = static_cast<std::size_t>(side) * static_cast<std::size_t>(side);
@@ -130,7 +186,7 @@ NodeMesh BuildNode(const TerrainHeightField& field, const NodeKey& key, NodeBuil
         }
         const double areaScale = static_cast<double>(tileCount) / (96.0 * 96.0);
         const int droplets = static_cast<int>(std::lround(static_cast<double>(s.erosionDropletCount) * areaScale));
-        ErodeTile(tile, side, MakeErosionParams(s), droplets, ErosionSeed(s.seed, key.x, key.z, key.level), 0.0f);
+        ErodeTile(tile, side, MakeErosionParams(s), droplets, spec.erosionSeed, 0.0f);
 
         // Fade the change to zero at the node border so neighbours agree on shared heights and normals.
         const float falloff = static_cast<float>(s.erosionEdgeFalloff);
@@ -159,7 +215,7 @@ NodeMesh BuildNode(const TerrainHeightField& field, const NodeKey& key, NodeBuil
     }
 
     NodeMesh mesh;
-    mesh.key = key;
+    mesh.key = spec.key;
     mesh.originX = g.originX;
     mesh.originZ = g.originZ;
     mesh.spacing = static_cast<float>(g.spacing);
@@ -168,9 +224,6 @@ NodeMesh BuildNode(const TerrainHeightField& field, const NodeKey& key, NodeBuil
     mesh.colors.resize(mesh.vertices.size());
 
     const float sp = mesh.spacing;
-    const float drop = kSkirtDropSpacings * sp;
-    float minY = 1.0e30f;
-    float maxY = -1.0e30f;
     for (int iz = 0; iz < verts; ++iz) {
         for (int ix = 0; ix < verts; ++ix) {
             const float* c = tile + static_cast<std::size_t>(iz + margin) * static_cast<std::size_t>(side) + static_cast<std::size_t>(ix + margin);
@@ -195,34 +248,10 @@ NodeMesh BuildNode(const TerrainHeightField& field, const NodeKey& key, NodeBuil
             v.uv[0] = Height01(h, s);
             v.uv[1] = Slope01(slope);
             mesh.colors[vi] = PackRgba8(SurfaceColor(h, slope, s));
-            minY = std::min(minY, h);
-            maxY = std::max(maxY, h);
         }
     }
 
-    // Skirt ring: copies of the border vertices pushed down; same normal and colour so lighting has no seam.
-    const std::size_t skirtBase = static_cast<std::size_t>(verts) * static_cast<std::size_t>(verts);
-    for (int edge = 0; edge < 4; ++edge) {
-        for (int k = 0; k < verts; ++k) {
-            int ix = 0;
-            int iz = 0;
-            switch (edge) {
-            case 0: ix = k; iz = 0; break;
-            case 1: ix = q; iz = k; break;
-            case 2: ix = k; iz = q; break;
-            default: ix = 0; iz = k; break;
-            }
-            const std::size_t src = static_cast<std::size_t>(iz) * static_cast<std::size_t>(verts) + static_cast<std::size_t>(ix);
-            const std::size_t dst = skirtBase + static_cast<std::size_t>(edge) * static_cast<std::size_t>(verts) + static_cast<std::size_t>(k);
-            mesh.vertices[dst] = mesh.vertices[src];
-            mesh.vertices[dst].position[1] -= drop;
-            mesh.colors[dst] = mesh.colors[src];
-            minY = std::min(minY, mesh.vertices[dst].position[1]);
-        }
-    }
-
-    mesh.boundsMin = Vec3{ 0.0f, minY, 0.0f };
-    mesh.boundsMax = Vec3{ static_cast<float>(q) * sp, maxY, static_cast<float>(q) * sp };
+    FinishNodeMesh(mesh, q);
     if (timing != nullptr) {
         timing->meshMs = MsSince(t0);
     }

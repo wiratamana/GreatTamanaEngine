@@ -11,6 +11,7 @@
 #include "EditorLayer.h"
 #include "FurinaShowcaseSceneOpener.h"
 #include "HizDemoSceneOpener.h"
+#include "Terrain/TerrainWorld.h"
 #include "../Game/Game.h"
 #include "../Network/NetworkServer.h"
 #include "../Renderer/DeviceIdleGuard.h"
@@ -59,6 +60,9 @@ private:
 
     // Handles to what the Hi-Z demo scene works through, resolved fresh on every call.
     HizDemoServices MakeHizDemoServices();
+
+    // Handles to what the terrain world works through, resolved fresh on every call.
+    TerrainWorldServices MakeTerrainWorldServices();
 
     // Handles to what the Furina showcase scene works through, resolved fresh on every call.
     FurinaShowcaseServices MakeFurinaShowcaseServices();
@@ -113,6 +117,10 @@ private:
     ProfilerSnapshotBridge m_profilerBridge;
     // Backs the /physics_debug/* routes.
     PhysicsDebugCommandBridge m_physicsDebugCommandBridge;
+
+    // The streamed terrain world. Declared after Core, the renderer and the feature modules it works through, and
+    // before the network server, so the server (and later its routes) is gone before the world.
+    TerrainWorld m_terrainWorld{ [this] { return MakeTerrainWorldServices(); } };
     // Cross-thread hand-off for project assembly hot reload; not passed to NetworkServer's constructor.
     ProjectAssemblyHotReloadCommandBridge m_hotReloadCommandBridge;
 

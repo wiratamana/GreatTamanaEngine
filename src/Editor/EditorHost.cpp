@@ -54,6 +54,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <optional>
 #include <stdexcept>
@@ -600,6 +601,23 @@ HizDemoServices EditorHost::MakeHizDemoServices()
     return services;
 }
 
+TerrainWorldServices EditorHost::MakeTerrainWorldServices()
+{
+    TerrainWorldServices services;
+    services.game = &m_game;
+    services.renderer = &m_renderer;
+    services.sceneServicesSetLayout = m_core.GetSceneServicesDescriptorSet().LayoutHandle();
+    services.compositor = m_core.GetRenderFeatureCompositor();
+    for (const std::unique_ptr<IEngineFeatureModule>& module : m_builtinFeatureModules) {
+        fx::Feature* feature = module ? fx::FindFeature(*module) : nullptr;
+        if (feature != nullptr && std::string_view(feature->Name()) == "GpuDrivenScene") {
+            services.gpuDrivenScene = feature->DebugEndpoint();
+            break;
+        }
+    }
+    return services;
+}
+
 void EditorHost::ServiceHizDemoMenuAction()
 {
     const HizDemoEditorHandles handles = m_editorLayer->HizDemoHandles();
@@ -655,6 +673,7 @@ int EditorHost::Run()
     Uint64 lastTicksNs = SDL_GetTicksNS();
 
     InputState inputState;
+    bool terrainAutoOpenDone = false;
 
     while (running) {
         // Brackets the whole frame for the profiler; a no-op while profiling is disabled.
@@ -762,6 +781,32 @@ int EditorHost::Run()
 
         // Stamps log entries until the next Advance() with this frame's number; lives here because Core must not include Logger.h.
         gte::Logger::SetCurrentFrame(m_engineContext.time.FrameCount());
+
+        // Temporary live-debug aid until the terrain routes exist: GTE_TERRAIN_AUTOOPEN=full|lean|geometry_only
+        // opens the terrain scene once, on frame 30.
+        if (!terrainAutoOpenDone && m_engineContext.time.FrameCount() >= 30) {
+            terrainAutoOpenDone = true;
+            if (const char* profileName = std::getenv("GTE_TERRAIN_AUTOOPEN")) {
+                terrain::TerrainOpenOptions options;
+                terrain::TryParseTerrainProfile(profileName, options.profile);
+                const terrain::TerrainResult opened = m_terrainWorld.Open(options);
+                GTE_LOG_INFO("EditorHost", std::string("terrain auto-open: ") + opened.message);
+            }
+        }
+
+        // Streams the terrain world (when open) right after the game update, before this frame's draw is built.
+        if (m_terrainWorld.IsOpen()) {
+            TerrainTickContext terrainTick;
+            if (const std::optional<fx::View> primary = m_core.PrimaryCameraView(terrainTick.aspect);
+                primary.has_value() && primary->extent.width > 0 && primary->extent.height > 0) {
+                terrainTick.aspect = static_cast<float>(primary->extent.width) / static_cast<float>(primary->extent.height);
+            }
+            terrainTick.gpuFrame = m_engineContext.gpuFrame;
+            terrainTick.nowSeconds = static_cast<double>(nowTicksNs) / 1.0e9;
+            terrainTick.deltaSeconds = deltaSeconds;
+            terrainTick.frameIndex = m_engineContext.time.FrameCount();
+            m_terrainWorld.Tick(terrainTick);
+        }
 
         m_editorLayer->NewFrame();
 

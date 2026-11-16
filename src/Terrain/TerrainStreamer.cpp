@@ -35,6 +35,7 @@ ITerrainExecutor& DefaultExecutor()
 // Owned by the cache entry until the job is collected, so the job never outlives its data.
 struct TerrainStreamer::Job {
     std::shared_ptr<const TerrainHeightField> field;
+    std::shared_ptr<const NodeProvider> provider;
     NodeKey key;
     std::uint64_t generation = 0;
     std::atomic<bool> cancel{ false };
@@ -62,7 +63,12 @@ void TerrainStreamer::RunNodeJob(void* raw)
     try {
         if (!job.cancel.load(std::memory_order_relaxed)) {
             const auto start = std::chrono::steady_clock::now();
-            job.result = std::make_shared<NodeMesh>(BuildNode(*job.field, job.key));
+            std::optional<NodeMesh> provided;
+            if (job.provider) {
+                provided = (*job.provider)(job.field->Settings(), job.key);
+            }
+            job.result = provided ? std::make_shared<NodeMesh>(std::move(*provided))
+                                  : std::make_shared<NodeMesh>(BuildNode(*job.field, job.key));
             job.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
         }
     } catch (...) {
@@ -137,6 +143,12 @@ void TerrainStreamer::Clear()
     for (const NodeKey& key : doomed) {
         EvictEntry(key);
     }
+}
+
+void TerrainStreamer::SetNodeProvider(NodeProvider provider)
+{
+    m_provider = provider ? std::make_shared<const NodeProvider>(std::move(provider)) : nullptr;
+    Clear();
 }
 
 void TerrainStreamer::EvictEntry(const NodeKey& key)
@@ -223,6 +235,7 @@ void TerrainStreamer::StartJobs(std::uint64_t frame)
         Entry& entry = *candidates[i].entry;
         entry.job = std::make_unique<Job>();
         entry.job->field = m_field;
+        entry.job->provider = m_provider;
         entry.job->key = candidates[i].key;
         entry.job->generation = m_generation;
         entry.state = Entry::State::Running;

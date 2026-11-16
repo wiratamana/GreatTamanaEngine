@@ -104,6 +104,28 @@ public:
         m_clusterBounds = clusterBounds;
     }
 
+    // Writable view of the cluster table for in-place record writes; null when there is none.
+    // Only safe while no frame in flight reads the table; otherwise use ReplaceClusterTable().
+    rg::GpuBuffer* MutableClusterTable() noexcept { return m_clusterTable ? &*m_clusterTable : nullptr; }
+
+    // Swaps in a new table and returns the old one, so the caller can hand it to Renderer::Retire().
+    std::optional<rg::GpuBuffer> ReplaceClusterTable(
+        rg::GpuBuffer table, std::uint32_t count, const std::optional<AABB>& clusterBounds) noexcept
+    {
+        std::optional<rg::GpuBuffer> old = std::move(m_clusterTable);
+        m_clusterTable.emplace(std::move(table));
+        m_clusterCount = count;
+        m_clusterBounds = clusterBounds;
+        return old;
+    }
+
+    // Writes `size` bytes at byte `offset` into a host-writable vertex buffer. Throws when the range does not fit
+    // or the buffer is not host-mapped. The caller guarantees no frame in flight reads that range.
+    void WriteVertexRange(const void* data, std::size_t size, std::size_t offset)
+    {
+        m_vertexBuffer->Copy(0).Upload(data, size, offset);
+    }
+
 private:
     static std::shared_ptr<SlotRingBuffer> SingleCopy(std::shared_ptr<Buffer> buffer)
     {
