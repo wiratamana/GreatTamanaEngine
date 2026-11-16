@@ -84,7 +84,7 @@ constexpr std::array kSettingKeys{
 };
 
 constexpr std::string_view kPresetKey = "preset";
-constexpr std::array<std::string_view, 4> kPresetNames{ "Lean", "Default", "Big", "Huge" };
+constexpr std::array<std::string_view, 4> kPresetNames{ "Lean", "Medium", "Big", "Huge" };
 constexpr std::string_view kDebugViewKey = "debugView";
 constexpr std::string_view kColorRootKey = "colorRoot";
 constexpr std::string_view kColorTipKey = "colorTip";
@@ -372,7 +372,7 @@ fx::FeatureDebugResult GrassDebugEndpoint::Set(std::span<const fx::FeatureDebugA
             const auto found = std::find_if(kPresetNames.begin(), kPresetNames.end(),
                 [&](std::string_view name) { return name == arg.value; });
             if (found == kPresetNames.end()) {
-                return Fail(arg.key, "preset must be one of Lean, Default, Big, Huge");
+                return Fail(arg.key, "preset must be one of Lean, Medium, Big, Huge");
             }
             ApplyGrassPreset(candidate, static_cast<GrassPreset>(found - kPresetNames.begin()));
             continue;

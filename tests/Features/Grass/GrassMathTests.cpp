@@ -295,9 +295,7 @@ TEST(GrassMathTest, PresetsAreValidAndGrowInReach)
         EXPECT_GE(s.gridCells, MinGrassGridCells(s.lod2Distance));
         EXPECT_LE(s.heightTileTexels, kGrassMaxTileTexels);
         EXPECT_GE(s.heightTileTexels * s.heightTileTexelSize, 2.0f * (s.lod2Distance + 2.0f * kGrassChunkSizeM) - 1.0f);
-        if (i != static_cast<std::uint32_t>(GrassPreset::Default)) {
-            EXPECT_GE(s.lod2Distance, lastReach) << i;
-        }
+        EXPECT_GE(s.lod2Distance, lastReach) << i;
         lastReach = s.lod2Distance;
         lastBytes = GrassInstanceBytes(s);
         EXPECT_LE(lastBytes, 128ull * 1024 * 1024);
@@ -335,7 +333,7 @@ TEST(GrassMathTest, DenseChunksGetMoreWorkgroups)
     EXPECT_EQ(GrassSlicesPerChunk(32.0f), 4u);  // 8192 candidates
     EXPECT_EQ(GrassSlicesPerChunk(500.0f), 16u);
     const GrassParamsGpu p = MakeGrassParams(SanitizeGrassSettings(GrassSettings{}), GrassFrameInputs{});
-    EXPECT_FLOAT_EQ(p.extra[3], 4.0f);
+    EXPECT_FLOAT_EQ(p.extra[3], 5.0f); // 40 blades per m2 -> 10240 candidates
 }
 
 TEST(GrassMathTest, WidthAndSegmentsAreClamped)
@@ -350,7 +348,7 @@ TEST(GrassMathTest, WidthAndSegmentsAreClamped)
     EXPECT_EQ(GrassVertexCount(2, 4), 3u);
     const GrassParamsGpu p = MakeGrassParams(SanitizeGrassSettings(GrassSettings{}), GrassFrameInputs{});
     EXPECT_FLOAT_EQ(p.look[3], 4.0f);
-    EXPECT_NEAR(p.densityLog[0], std::log(32.0f), 1e-5f);
+    EXPECT_NEAR(p.densityLog[0], std::log(40.0f), 1e-5f);
     EXPECT_FLOAT_EQ(p.densityLog[3], 1.0f);
 }
 

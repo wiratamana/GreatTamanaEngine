@@ -194,9 +194,9 @@ struct GrassSettings {
 
     // Density in blades per m^2: densityLod0 up close, falling smoothly to densityLod1 at lod0Distance and to densityLod2 at
     // lod1Distance. Thinner densities are index prefixes of denser ones, so blades only ever leave, never move.
-    float densityLod0 = 32.0f;
-    float densityLod1 = 5.0f;
-    float densityLod2 = 0.6f;
+    float densityLod0 = 40.0f;
+    float densityLod1 = 6.0f;
+    float densityLod2 = 0.8f;
     float patchiness = 0.6f;     // 0 = even cover, 1 = bare patches between meadows.
     float patchScaleM = 45.0f;   // Size of one meadow patch.
     float bareThreshold = 0.35f; // Noise level where bare ground starts.
@@ -219,9 +219,9 @@ struct GrassSettings {
     float alpineHeight = 450.0f; // World Y above which grass thins out (rock and snow).
     float alpineFade = 150.0f;   // Metres over which it fades to nothing.
 
-    float lod0Distance = 30.0f;  // Mesh switch LOD0 -> LOD1 and the end of the first density fall.
-    float lod1Distance = 80.0f;
-    float lod2Distance = 150.0f;
+    float lod0Distance = 40.0f;  // Mesh switch LOD0 -> LOD1 and the end of the first density fall.
+    float lod1Distance = 120.0f;
+    float lod2Distance = 300.0f;
     float edgeFade = 0.2f;       // Share of the last LOD where blades thin out.
     float densityBlend = 0.5f;   // Share of a LOD range over which the density falls (0.05 = nearly a step).
     float farHeightFade = 0.15f; // Share of lod2Distance over which blades shrink to nothing.
@@ -245,12 +245,12 @@ struct GrassSettings {
     float colorRoot[3] = {0.025f, 0.06f, 0.012f};
     float colorTip[3] = {0.17f, 0.30f, 0.05f};
 
-    std::uint32_t gridCells = 22;        // Chunks per side (at most kGrassMaxGridCells); must cover 2 x (lod2 + 16 m).
-    std::uint32_t heightTileTexels = 384; // Texels per side of the height tile the editor layer should build (at most 512).
-    float heightTileTexelSize = 1.5f;     // Metres per texel of that tile (0.5..4); the tile must reach 2 x (lod2 + 32 m).
-    std::uint32_t instanceCapLod0 = 400000;
-    std::uint32_t instanceCapLod1 = 300000;
-    std::uint32_t instanceCapLod2 = 200000;
+    std::uint32_t gridCells = 41;        // Chunks per side (at most kGrassMaxGridCells); must cover 2 x (lod2 + 16 m).
+    std::uint32_t heightTileTexels = 512; // Texels per side of the height tile the editor layer should build (at most 512).
+    float heightTileTexelSize = 2.0f;     // Metres per texel of that tile (0.5..4); the tile must reach 2 x (lod2 + 32 m).
+    std::uint32_t instanceCapLod0 = 250000;
+    std::uint32_t instanceCapLod1 = 220000;
+    std::uint32_t instanceCapLod2 = 180000;
     std::uint32_t seed = 1;
 
     bool followCloudWind = true;  // Use the wind the clouds drift with; off uses the fallback values above.
@@ -258,7 +258,7 @@ struct GrassSettings {
 };
 
 // Named starting points for the settings. They only change density, distances and buffer sizes.
-enum class GrassPreset : std::uint32_t { Lean = 0, Default, Big, Huge, Count };
+enum class GrassPreset : std::uint32_t { Lean = 0, Medium, Big, Huge, Count };
 
 // Terrain colour of a tile texel: linear 0..1 per channel in 8 bits each (r lowest).
 inline std::uint32_t GrassPackTerrainColor(float r, float g, float b) noexcept

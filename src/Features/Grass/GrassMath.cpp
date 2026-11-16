@@ -139,7 +139,7 @@ GrassSettings SanitizeGrassSettings(const GrassSettings& in, bool enforceOrder) 
 
 GrassSettings MakeGrassPreset(GrassPreset preset) noexcept
 {
-    GrassSettings s;
+    GrassSettings s; // The defaults are the Big preset.
     switch (preset) {
     case GrassPreset::Lean:
         s.densityLod0 = 16.0f;
@@ -148,33 +148,37 @@ GrassSettings MakeGrassPreset(GrassPreset preset) noexcept
         s.lod0Distance = 20.0f;
         s.lod1Distance = 60.0f;
         s.lod2Distance = 120.0f;
-        s.instanceCapLod0 = 150000;
-        s.instanceCapLod1 = 120000;
-        s.instanceCapLod2 = 80000;
+        s.instanceCapLod0 = 100000;
+        s.instanceCapLod1 = 80000;
+        s.instanceCapLod2 = 60000;
+        s.heightTileTexels = 384;
+        s.heightTileTexelSize = 1.5f;
         break;
-    case GrassPreset::Default:
+    case GrassPreset::Medium:
+        s.densityLod0 = 32.0f;
+        s.densityLod1 = 5.0f;
+        s.densityLod2 = 0.6f;
+        s.lod0Distance = 30.0f;
+        s.lod1Distance = 80.0f;
+        s.lod2Distance = 150.0f;
+        s.instanceCapLod0 = 200000;
+        s.instanceCapLod1 = 160000;
+        s.instanceCapLod2 = 120000;
+        s.heightTileTexels = 384;
+        s.heightTileTexelSize = 1.5f;
         break;
     case GrassPreset::Big:
-        s.densityLod0 = 40.0f;
-        s.densityLod1 = 6.0f;
-        s.densityLod2 = 0.8f;
-        s.lod0Distance = 40.0f;
-        s.lod1Distance = 120.0f;
-        s.lod2Distance = 300.0f;
-        s.instanceCapLod0 = 600000;
-        s.instanceCapLod1 = 500000;
-        s.instanceCapLod2 = 400000;
         break;
     case GrassPreset::Huge:
-        s.densityLod0 = 48.0f;
-        s.densityLod1 = 8.0f;
-        s.densityLod2 = 1.0f;
-        s.lod0Distance = 50.0f;
-        s.lod1Distance = 150.0f;
+        s.densityLod0 = 64.0f;
+        s.densityLod1 = 12.0f;
+        s.densityLod2 = 1.6f;
+        s.lod0Distance = 60.0f;
+        s.lod1Distance = 180.0f;
         s.lod2Distance = 360.0f;
-        s.instanceCapLod0 = 800000;
-        s.instanceCapLod1 = 700000;
-        s.instanceCapLod2 = 600000;
+        s.instanceCapLod0 = 500000;
+        s.instanceCapLod1 = 450000;
+        s.instanceCapLod2 = 350000;
         break;
     case GrassPreset::Count:
         break;
@@ -222,12 +226,12 @@ const char* GrassPresetName(GrassPreset preset) noexcept
 {
     switch (preset) {
     case GrassPreset::Lean: return "Lean";
-    case GrassPreset::Default: return "Default";
+    case GrassPreset::Medium: return "Medium";
     case GrassPreset::Big: return "Big";
     case GrassPreset::Huge: return "Huge";
     case GrassPreset::Count: break;
     }
-    return "Default";
+    return "Big";
 }
 
 GrassGrid MakeGrassGrid(double eyeX, double eyeZ, std::uint32_t cells) noexcept
