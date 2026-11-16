@@ -91,6 +91,11 @@ void DrawWaterGizmos(WaterUiBridge& bridge, const Mat4& vp, Vec2 rectMin, Vec2 r
     const bool free = hovered && !ImGui::IsAnyItemHovered() && !IsGizmoOver() && !IsGizmoUsing();
     const int pick = (free || ownsDrag) ? PickWaterHandle(handles, mouse, kPickRadius) : -1;
     bool hot = pick >= 0 || ownsDrag;
+    bridge.debugHandles = static_cast<int>(handles.size());
+    bridge.debugPick = pick;
+    bridge.debugFree = free;
+    bridge.debugHovered = hovered;
+    bridge.debugMouse = mouse;
 
     if (ownsDrag) {
         if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {

@@ -952,6 +952,7 @@ void TerrainWorld::TickStreaming(const TerrainTickContext& context, Game& game, 
     m_stats.selectMs = MsSince(selectStart);
 
     m_update.ready.clear();
+    m_update.rebuilt.clear();
     m_update.evicted.clear();
     m_streamer->Update(m_wanted, context.frameIndex, context.nowSeconds, m_update);
 

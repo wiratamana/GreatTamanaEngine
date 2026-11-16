@@ -94,6 +94,11 @@ void WaterPanel::DrawStatus(WaterUiBridge& ui)
     if (!ui.status.empty()) {
         ImGui::TextColored(ui.statusIsError ? kBad : kDim, "%s", ui.status.c_str());
     }
+    ImGui::PushStyleColor(ImGuiCol_Text, kDim);
+    ImGui::TextWrapped("Gizmo: %d handles, pick %d, hot %d, drag %d, free %d, hover %d, mouse %.0f,%.0f", ui.debugHandles,
+        ui.debugPick, ui.handleHot ? 1 : 0, ui.dragging ? 1 : 0, ui.debugFree ? 1 : 0, ui.debugHovered ? 1 : 0, ui.debugMouse.x,
+        ui.debugMouse.y);
+    ImGui::PopStyleColor();
 }
 
 void WaterPanel::AddBodyHere(WaterUiBridge& ui, const EditorContext& ctx, bool river)

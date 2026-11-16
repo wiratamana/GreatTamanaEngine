@@ -32,6 +32,7 @@
 | [Profiling](debugging/profiling.md) | CPU and GPU profiler, how to read it | Performance work |
 | [Physics debug](debugging/physics-debug.md) | Measure, change and see skirt and hair physics over HTTP | Physics work, AI agents |
 | [Terrain](debugging/terrain.md) | Open, change, fly over and measure the streamed terrain over HTTP | Terrain work, AI agents |
+| [Water world](debugging/water-world.md) | Lakes, rivers, terrain carve, Water window and `/water/*` routes | Water work, AI agents |
 | [Frame debugger](debugging/frame-debugger.md) | Freeze one frame, inspect draw events | Render debugging |
 | [Logging](debugging/logging.md) | Write and read log lines | Developers |
 

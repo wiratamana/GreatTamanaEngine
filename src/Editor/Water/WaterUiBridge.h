@@ -25,6 +25,13 @@ struct WaterUiBridge {
     double dragPlaneY = 0.0;
     Vec2 dragRect;          // Top-left of the view that owns the drag, so a second view ignores it.
 
+    // What the gizmo saw on its last pass, shown in the panel so an AI can debug the mouse path.
+    int debugHandles = 0;
+    int debugPick = -1;
+    bool debugFree = false;
+    bool debugHovered = false;
+    Vec2 debugMouse;
+
     std::string status;     // Outcome of the last edit, shown in the panel.
     bool statusIsError = false;
 };
