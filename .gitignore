@@ -36,6 +36,7 @@
 /third_party/saba/
 /third_party/glm/
 /third_party/cgltf/
+/third_party/fastnoiselite/
 /third_party/mikktspace/
 /third_party/meshoptimizer/
 /third_party/googletest/

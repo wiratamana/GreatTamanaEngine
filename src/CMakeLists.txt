@@ -32,7 +32,7 @@ foreach(_feature PROJECT_PANEL PROFILER JOB_SYSTEM NETWORK PROJECT_ASSEMBLIES)
 endforeach()
 target_link_libraries(gte_core
     PUBLIC  volk vma stb_image stb_image_write KTX::ktx httplib nlohmann_json Threads::Threads
-    PRIVATE spirv_reflect saba_pmx cgltf mikktspace meshoptimizer)
+    PRIVATE spirv_reflect saba_pmx cgltf mikktspace meshoptimizer fastnoiselite)
 
 # --- Probe-only: a CI link probe instead of the editor ---------------------------
 if(GTE_CORE_STANDALONE_PROBE_ONLY)

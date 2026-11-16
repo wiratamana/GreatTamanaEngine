@@ -6,6 +6,7 @@
 #   fetch_httplib()          httplib.h          target httplib (links ws2_32 crypt32)
 #   fetch_json()             nlohmann/json.hpp  target nlohmann_json
 #   fetch_cgltf()            cgltf.h            target cgltf
+#   fetch_fastnoiselite()    FastNoiseLite.h    target fastnoiselite
 #
 # The *_IMPLEMENTATION macros are defined by the engine sources, not here.
 # Cache: GTE_STB_REF, GTE_HTTPLIB_REF, GTE_JSON_REF, GTE_CGLTF_REF (tag or commit).
@@ -16,6 +17,7 @@ set(GTE_STB_REF "2c980bb59875b0d32144a71867fbdebb2f77cd20" CACHE STRING "nothing
 set(GTE_HTTPLIB_REF "v0.54.1" CACHE STRING "yhirose/cpp-httplib tag")
 set(GTE_JSON_REF "v3.12.0" CACHE STRING "nlohmann/json tag")
 set(GTE_CGLTF_REF "v1.15" CACHE STRING "jkuhlmann/cgltf tag")
+set(GTE_FASTNOISELITE_REF "v1.1.1" CACHE STRING "Auburn/FastNoiseLite tag")
 
 function(fetch_stb)
     gte_fetch_raw(stb_image REPO nothings/stb REF "${GTE_STB_REF}"
@@ -62,5 +64,14 @@ function(fetch_cgltf)
     if(NOT TARGET cgltf)
         add_library(cgltf INTERFACE)
         target_include_directories(cgltf INTERFACE "${CMAKE_SOURCE_DIR}/third_party/cgltf")
+    endif()
+endfunction()
+
+function(fetch_fastnoiselite)
+    gte_fetch_raw(fastnoiselite REPO Auburn/FastNoiseLite REF "${GTE_FASTNOISELITE_REF}"
+        DIR "${CMAKE_SOURCE_DIR}/third_party/fastnoiselite" FILES Cpp/FastNoiseLite.h=FastNoiseLite.h)
+    if(NOT TARGET fastnoiselite)
+        add_library(fastnoiselite INTERFACE)
+        target_include_directories(fastnoiselite INTERFACE "${CMAKE_SOURCE_DIR}/third_party/fastnoiselite")
     endif()
 endfunction()
