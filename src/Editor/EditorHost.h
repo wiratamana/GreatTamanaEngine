@@ -12,6 +12,7 @@
 #include "FurinaShowcaseSceneOpener.h"
 #include "HizDemoSceneOpener.h"
 #include "Terrain/TerrainWorld.h"
+#include "Water/WaterWorld.h"
 #include "../Game/Game.h"
 #include "../Network/NetworkServer.h"
 #include "../Renderer/DeviceIdleGuard.h"
@@ -64,6 +65,9 @@ private:
 
     // Handles to what the terrain world works through, resolved fresh on every call.
     TerrainWorldServices MakeTerrainWorldServices();
+
+    // Handles the water world works through (terrain world and the Water render feature), resolved fresh on every call.
+    WaterWorldServices MakeWaterWorldServices();
 
     // Handles to what the Furina showcase scene works through, resolved fresh on every call.
     FurinaShowcaseServices MakeFurinaShowcaseServices();
@@ -124,6 +128,8 @@ private:
     // The streamed terrain world. Declared after Core, the renderer and the feature modules it works through, and
     // before the network server, so the server (and later its routes) is gone before the world.
     TerrainWorld m_terrainWorld{ [this] { return MakeTerrainWorldServices(); } };
+    // Water bodies; feeds the terrain carve and the Water render feature. Served by the /water/* routes.
+    WaterWorld m_waterWorld{ [this] { return MakeWaterWorldServices(); } };
     // Cross-thread hand-off for project assembly hot reload; not passed to NetworkServer's constructor.
     ProjectAssemblyHotReloadCommandBridge m_hotReloadCommandBridge;
 

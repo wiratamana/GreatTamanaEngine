@@ -245,6 +245,9 @@ WaterSample WaterBodySet::SampleAt(double x, double z) const noexcept
             }
             s = { true, b.id, b.kind, b.level, d, 0.0f };
         } else if (b.kind == WaterBodyKind::River) {
+            if (!m_prepared[i].bounds.Expanded(1.0).Overlaps({ x, z, x, z })) {
+                continue;
+            }
             const RiverHit hit = NearestOnRiver(m_prepared[i].segments, x, z);
             const double edge = hit.distance - 0.5 * static_cast<double>(hit.width);
             if (hit.segment < 0 || edge >= 0.0) {

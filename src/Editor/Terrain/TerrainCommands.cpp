@@ -476,6 +476,49 @@ TerrainCommandResult CameraInputCommand(terrain::ITerrainWorld& world, const Pai
     return Done(world.QueueCameraInput(input, frames));
 }
 
+TerrainCommandResult HeightCommand(terrain::ITerrainWorld& world, const Pairs& params)
+{
+    double x = 0.0;
+    double z = 0.0;
+    bool hasX = false;
+    bool hasZ = false;
+    for (const auto& [key, value] : params) {
+        std::string error;
+        if (key != "x" && key != "z") {
+            return Fail(400, "unknown height option: " + key);
+        }
+        if (!NumberOption(key, value, key == "x" ? x : z, error)) {
+            return Fail(400, error);
+        }
+        (key == "x" ? hasX : hasZ) = true;
+    }
+    if (!hasX || !hasZ) {
+        return Fail(400, "height needs x and z");
+    }
+    const std::optional<terrain::TerrainHeightProbe> probe = world.ProbeHeight(x, z);
+    if (!probe) {
+        return Fail(409, "open the terrain first");
+    }
+    TerrainCommandResult result;
+    result.body = "{\"success\":true,\"baseHeight\":" + std::to_string(probe->baseHeight) + ",\"carvedHeight\":"
+        + std::to_string(probe->carvedHeight) + ",\"carveDelta\":" + std::to_string(probe->carvedHeight - probe->baseHeight) + "}";
+    return result;
+}
+
+TerrainCommandResult OceanQuadCommand(terrain::ITerrainWorld& world, const Pairs& params)
+{
+    for (const auto& [key, value] : params) {
+        bool flag = false;
+        if (key != "visible" || !ParseFlag(value, flag)) {
+            return Fail(400, "ocean_quad needs visible=true|false");
+        }
+        world.SetOceanQuadVisible(flag);
+    }
+    TerrainCommandResult result;
+    result.body = std::string("{\"success\":true,\"oceanQuadVisible\":") + (world.OceanQuadVisible() ? "true" : "false") + "}";
+    return result;
+}
+
 } // namespace
 
 TerrainCommandResult ExecuteTerrainCommand(terrain::ITerrainWorld& world, const TerrainCommandRequest& request)
@@ -519,6 +562,12 @@ TerrainCommandResult ExecuteTerrainCommand(terrain::ITerrainWorld& world, const 
     }
     if (action == "load") {
         return PathCommand(world, request.params, false);
+    }
+    if (action == "height") {
+        return HeightCommand(world, request.params);
+    }
+    if (action == "ocean_quad") {
+        return OceanQuadCommand(world, request.params);
     }
     return Fail(404, "unknown terrain action: " + action);
 }

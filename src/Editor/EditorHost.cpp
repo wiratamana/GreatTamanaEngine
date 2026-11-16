@@ -2,6 +2,7 @@
 
 #include "Logger.h"
 #include "Terrain/TerrainCommands.h"
+#include "Water/WaterCommands.h"
 #include "Terrain/TerrainUiBridge.h"
 #include "../Game/RenderSystem.h"
 #include "EditorSceneIOCapability.h"
@@ -624,6 +625,14 @@ TerrainWorldServices EditorHost::MakeTerrainWorldServices()
     return services;
 }
 
+WaterWorldServices EditorHost::MakeWaterWorldServices()
+{
+    WaterWorldServices services;
+    services.terrain = &m_terrainWorld;
+    services.waterFeature = MakeTerrainWorldServices().findEndpoint("Water");
+    return services;
+}
+
 void EditorHost::ServiceHizDemoMenuAction()
 {
     const HizDemoEditorHandles handles = m_editorLayer->HizDemoHandles();
@@ -757,7 +766,10 @@ int EditorHost::Run()
         // Terrain commands run on the main thread, at most one per frame.
         if (const auto terrainPending = m_terrainCommandBridge.TryPeekPendingCommand()) {
             GTE_PROFILE_SCOPE("EditorHost::ExecuteTerrainCommand");
-            FulfillOrLogDrop(m_terrainCommandBridge, terrainPending->id, ExecuteTerrainCommand(m_terrainWorld, terrainPending->request), "Terrain");
+            const TerrainCommandResult terrainResult = IsWaterAction(terrainPending->request.action)
+                ? ExecuteWaterCommand(m_waterWorld, terrainPending->request)
+                : ExecuteTerrainCommand(m_terrainWorld, terrainPending->request);
+            FulfillOrLogDrop(m_terrainCommandBridge, terrainPending->id, terrainResult, "Terrain");
         }
 
         ServiceHizDemoMenuAction();
@@ -819,6 +831,7 @@ int EditorHost::Run()
         if (terrainUi != nullptr) {
             PublishTerrainSnapshot(m_terrainWorld, *terrainUi, terrainViewProjection ? &*terrainViewProjection : nullptr);
         }
+        m_waterWorld.Tick(static_cast<double>(nowTicksNs) / 1.0e9);
 
         m_editorLayer->NewFrame();
 
