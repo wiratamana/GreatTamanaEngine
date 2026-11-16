@@ -21,12 +21,11 @@ void main()
         stats.words[i] = 0u;
     }
     if (i < kGrassLodCount) {
-        bool list = (uint(params.grid.w) & kGrassFlagTriangleList) != 0u;
-        uint vertexCount = kGrassVertsStrip2;
+        uint vertexCount = kGrassVertsList2;
         if (i == 0u) {
-            vertexCount = list ? kGrassVertsList0 : kGrassVertsStrip0;
+            vertexCount = uint(params.look.w) * 6u;
         } else if (i == 1u) {
-            vertexCount = list ? kGrassVertsList1 : kGrassVertsStrip1;
+            vertexCount = kGrassVertsList1;
         }
         commands.values[i * 4u + 0u] = vertexCount;
         commands.values[i * 4u + 1u] = 0u;

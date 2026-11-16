@@ -51,7 +51,7 @@ std::uint32_t MinGrassTileTexels(float lod2Distance, float texelSize) noexcept
     return static_cast<std::uint32_t>(std::ceil(2.0f * (lod2Distance + 2.0f * kGrassChunkSizeM) / std::max(texelSize, 0.1f)));
 }
 
-GrassSettings SanitizeGrassSettings(const GrassSettings& in) noexcept
+GrassSettings SanitizeGrassSettings(const GrassSettings& in, bool enforceOrder) noexcept
 {
     const GrassSettings d{};
     GrassSettings s = in;
@@ -59,8 +59,12 @@ GrassSettings SanitizeGrassSettings(const GrassSettings& in) noexcept
     s.debugView = static_cast<GrassDebugView>(std::min<std::uint32_t>(static_cast<std::uint32_t>(in.debugView), 3u));
 
     s.densityLod0 = Clamp(in.densityLod0, d.densityLod0, 0.0f, 200.0f);
-    s.densityLod1 = std::min(Clamp(in.densityLod1, d.densityLod1, 0.0f, 200.0f), s.densityLod0);
-    s.densityLod2 = std::min(Clamp(in.densityLod2, d.densityLod2, 0.0f, 200.0f), s.densityLod1);
+    s.densityLod1 = Clamp(in.densityLod1, d.densityLod1, 0.0f, 200.0f);
+    s.densityLod2 = Clamp(in.densityLod2, d.densityLod2, 0.0f, 200.0f);
+    if (enforceOrder) {
+        s.densityLod1 = std::min(s.densityLod1, s.densityLod0);
+        s.densityLod2 = std::min(s.densityLod2, s.densityLod1);
+    }
     s.patchiness = Clamp(in.patchiness, d.patchiness, 0.0f, 1.0f);
     s.patchScaleM = Clamp(in.patchScaleM, d.patchScaleM, 2.0f, 500.0f);
     s.bareThreshold = Clamp(in.bareThreshold, d.bareThreshold, 0.0f, 1.0f);
@@ -71,8 +75,9 @@ GrassSettings SanitizeGrassSettings(const GrassSettings& in) noexcept
     s.heightVariation = Clamp(in.heightVariation, d.heightVariation, 0.0f, 0.9f);
     s.lean = Clamp(in.lean, d.lean, 0.0f, 1.2f);
     s.maxBend = Clamp(in.maxBend, d.maxBend, 0.1f, 1.5f);
-    s.lod1WidthScale = Clamp(in.lod1WidthScale, d.lod1WidthScale, 1.0f, 8.0f);
-    s.lod2WidthScale = Clamp(in.lod2WidthScale, d.lod2WidthScale, 1.0f, 16.0f);
+    s.widthCompensation = Clamp(in.widthCompensation, d.widthCompensation, 0.0f, 1.0f);
+    s.maxWidthScale = Clamp(in.maxWidthScale, d.maxWidthScale, 1.0f, 16.0f);
+    s.lod0Segments = std::clamp(in.lod0Segments, kGrassMinLod0Segments, kGrassMaxLod0Segments);
 
     s.maxSlopeDeg = Clamp(in.maxSlopeDeg, d.maxSlopeDeg, 1.0f, 89.0f);
     s.slopeFadeDeg = Clamp(in.slopeFadeDeg, d.slopeFadeDeg, 0.0f, 45.0f);
@@ -83,9 +88,11 @@ GrassSettings SanitizeGrassSettings(const GrassSettings& in) noexcept
     s.alpineFade = Clamp(in.alpineFade, d.alpineFade, 0.0f, 5000.0f);
 
     s.lod2Distance = Clamp(in.lod2Distance, d.lod2Distance, 10.0f, kMaxLod2Distance);
-    s.lod1Distance = Clamp(in.lod1Distance, d.lod1Distance, 6.0f, s.lod2Distance - 4.0f);
-    s.lod0Distance = Clamp(in.lod0Distance, d.lod0Distance, 2.0f, s.lod1Distance - 2.0f);
+    s.lod1Distance = Clamp(in.lod1Distance, d.lod1Distance, 6.0f, enforceOrder ? s.lod2Distance - 4.0f : kMaxLod2Distance);
+    s.lod0Distance = Clamp(in.lod0Distance, d.lod0Distance, 2.0f, enforceOrder ? s.lod1Distance - 2.0f : kMaxLod2Distance);
     s.edgeFade = Clamp(in.edgeFade, d.edgeFade, 0.01f, 1.0f);
+    s.densityBlend = Clamp(in.densityBlend, d.densityBlend, 0.05f, 1.0f);
+    s.farHeightFade = Clamp(in.farHeightFade, d.farHeightFade, 0.0f, 0.6f);
 
     s.windBend = Clamp(in.windBend, d.windBend, 0.0f, 4.0f);
     s.flutterSpeed = Clamp(in.flutterSpeed, d.flutterSpeed, 0.0f, 60.0f);
@@ -99,6 +106,10 @@ GrassSettings SanitizeGrassSettings(const GrassSettings& in) noexcept
     s.translucency = Clamp(in.translucency, d.translucency, 0.0f, 4.0f);
     s.rootAo = Clamp(in.rootAo, d.rootAo, 0.0f, 1.0f);
     s.tintVariation = Clamp(in.tintVariation, d.tintVariation, 0.0f, 1.0f);
+    s.terrainTint = Clamp(in.terrainTint, d.terrainTint, 0.0f, 1.0f);
+    s.farTerrainBlend = Clamp(in.farTerrainBlend, d.farTerrainBlend, 0.0f, 1.0f);
+    s.groundNormalBlend = Clamp(in.groundNormalBlend, d.groundNormalBlend, 0.0f, 1.0f);
+    s.selfShadow = Clamp(in.selfShadow, d.selfShadow, 0.0f, 1.0f);
     for (int i = 0; i < 3; ++i) {
         s.colorRoot[i] = Clamp(in.colorRoot[i], d.colorRoot[i], 0.0f, 2.0f);
         s.colorTip[i] = Clamp(in.colorTip[i], d.colorTip[i], 0.0f, 2.0f);
@@ -124,6 +135,99 @@ GrassSettings SanitizeGrassSettings(const GrassSettings& in) noexcept
         s.instanceCapLod2 = s.instanceCapLod2 * 3u / 4u;
     }
     return s;
+}
+
+GrassSettings MakeGrassPreset(GrassPreset preset) noexcept
+{
+    GrassSettings s;
+    switch (preset) {
+    case GrassPreset::Lean:
+        s.densityLod0 = 16.0f;
+        s.densityLod1 = 2.5f;
+        s.densityLod2 = 0.3f;
+        s.lod0Distance = 20.0f;
+        s.lod1Distance = 60.0f;
+        s.lod2Distance = 120.0f;
+        s.instanceCapLod0 = 150000;
+        s.instanceCapLod1 = 120000;
+        s.instanceCapLod2 = 80000;
+        break;
+    case GrassPreset::Default:
+        break;
+    case GrassPreset::Big:
+        s.densityLod0 = 40.0f;
+        s.densityLod1 = 6.0f;
+        s.densityLod2 = 0.8f;
+        s.lod0Distance = 40.0f;
+        s.lod1Distance = 120.0f;
+        s.lod2Distance = 300.0f;
+        s.instanceCapLod0 = 600000;
+        s.instanceCapLod1 = 500000;
+        s.instanceCapLod2 = 400000;
+        break;
+    case GrassPreset::Huge:
+        s.densityLod0 = 48.0f;
+        s.densityLod1 = 8.0f;
+        s.densityLod2 = 1.0f;
+        s.lod0Distance = 50.0f;
+        s.lod1Distance = 150.0f;
+        s.lod2Distance = 360.0f;
+        s.instanceCapLod0 = 800000;
+        s.instanceCapLod1 = 700000;
+        s.instanceCapLod2 = 600000;
+        break;
+    case GrassPreset::Count:
+        break;
+    }
+    return SanitizeGrassSettings(s);
+}
+
+float GrassDensityAtDistance(const GrassSettings& s, float distance) noexcept
+{
+    if (!(s.densityLod0 > 0.0f)) {
+        return 0.0f;
+    }
+    const float blend = s.densityBlend;
+    const float e0 = s.lod0Distance;
+    const float e1 = s.lod1Distance;
+    const float s0 = e0 * (1.0f - blend);
+    const float s1 = std::max(e0, e1 * (1.0f - blend));
+    const float t0 = Smooth(s0, e0, distance);
+    const float t1 = Smooth(s1, e1, distance);
+    const float l0 = std::log(std::max(s.densityLod0, 1e-4f));
+    const float l1 = std::log(std::max(s.densityLod1, 1e-4f));
+    const float l2 = std::log(std::max(s.densityLod2, 1e-4f));
+    const float a = l0 + (l1 - l0) * t0;
+    return std::exp(a + (l2 - a) * t1);
+}
+
+void ApplyGrassPreset(GrassSettings& target, GrassPreset preset) noexcept
+{
+    const GrassSettings p = MakeGrassPreset(preset);
+    target.densityLod0 = p.densityLod0;
+    target.densityLod1 = p.densityLod1;
+    target.densityLod2 = p.densityLod2;
+    target.lod0Distance = p.lod0Distance;
+    target.lod1Distance = p.lod1Distance;
+    target.lod2Distance = p.lod2Distance;
+    target.instanceCapLod0 = p.instanceCapLod0;
+    target.instanceCapLod1 = p.instanceCapLod1;
+    target.instanceCapLod2 = p.instanceCapLod2;
+    target.gridCells = p.gridCells;
+    target.heightTileTexelSize = p.heightTileTexelSize;
+    target.heightTileTexels = p.heightTileTexels;
+}
+
+const char* GrassPresetName(GrassPreset preset) noexcept
+{
+    switch (preset) {
+    case GrassPreset::Lean: return "Lean";
+    case GrassPreset::Default: return "Default";
+    case GrassPreset::Big: return "Big";
+    case GrassPreset::Huge: return "Huge";
+    case GrassPreset::Count: break;
+    }
+    return "Default";
 }
 
 GrassGrid MakeGrassGrid(double eyeX, double eyeZ, std::uint32_t cells) noexcept
@@ -163,6 +267,13 @@ std::uint64_t GrassInstanceBytes(const GrassSettings& s) noexcept
     return (std::uint64_t{ s.instanceCapLod0 } + s.instanceCapLod1 + s.instanceCapLod2) * kGrassInstanceBytes;
 }
 
+std::uint32_t GrassSlicesPerChunk(float densityLod0) noexcept
+{
+    constexpr std::uint32_t kCandidatesPerGroup = 2048;
+    const std::uint32_t candidates = GrassCandidatesPerChunk(densityLod0);
+    return std::clamp((candidates + kCandidatesPerGroup - 1u) / kCandidatesPerGroup, 1u, 16u);
+}
+
 GrassParamsGpu MakeGrassParams(const GrassSettings& s, const GrassFrameInputs& in) noexcept
 {
     GrassParamsGpu p{};
@@ -176,7 +287,7 @@ GrassParamsGpu MakeGrassParams(const GrassSettings& s, const GrassFrameInputs& i
     Set4(p.camRel, static_cast<float>(in.eyeX - gridX), static_cast<float>(in.eyeY), static_cast<float>(in.eyeZ - gridZ),
         kGrassChunkSizeM);
 
-    std::int32_t flags = kGrassFlagTriangleList;
+    std::int32_t flags = 0;
     if (in.hizUsable && s.hizCulling) {
         flags |= kGrassFlagHiz;
     }
@@ -202,7 +313,7 @@ GrassParamsGpu MakeGrassParams(const GrassSettings& s, const GrassFrameInputs& i
     Set4(p.density, s.densityLod0, s.densityLod1, s.densityLod2, s.patchiness);
     Set4(p.slope, s.maxSlopeDeg, s.slopeFadeDeg, s.patchScaleM, s.bareThreshold);
     Set4(p.blade, s.bladeHeight, s.bladeWidth, s.bladeTaper, s.heightVariation);
-    Set4(p.bladeB, s.lean, s.lod1WidthScale, s.lod2WidthScale, s.maxBend);
+    Set4(p.bladeB, s.lean, s.widthCompensation, s.maxWidthScale, s.maxBend);
     Set4(p.wind0, in.windDirX, in.windDirZ, in.windSpeed, in.timeSeconds);
     Set4(p.wind1, s.gustStrength, static_cast<float>(in.windOffsetX), static_cast<float>(in.windOffsetZ), s.windBend);
     Set4(p.wind2, s.flutterSpeed, s.flutterStrength, s.windWaveLengthM, s.windGustLengthM);
@@ -229,6 +340,10 @@ GrassParamsGpu MakeGrassParams(const GrassSettings& s, const GrassFrameInputs& i
 
     Set4(p.hiz, in.hizAtlas[0], in.hizAtlas[1], in.hizBase[0], in.hizBase[1]);
     Set4(p.depthMap, in.hizDepthK, in.hizDepthB, in.hizLevels, 0.0f);
+    Set4(p.look, s.terrainTint, s.groundNormalBlend, s.selfShadow, static_cast<float>(s.lod0Segments));
+    Set4(p.extra, s.densityBlend, s.farHeightFade, s.farTerrainBlend, static_cast<float>(GrassSlicesPerChunk(s.densityLod0)));
+    Set4(p.densityLog, std::log(std::max(s.densityLod0, 1e-4f)), std::log(std::max(s.densityLod1, 1e-4f)),
+        std::log(std::max(s.densityLod2, 1e-4f)), s.densityLod0 > 0.0f ? 1.0f : 0.0f);
     return p;
 }
 
@@ -267,7 +382,7 @@ GrassHeightTile MakeSyntheticGrassTile(const GrassSyntheticSpec& spec, double ce
     tile.originZ = std::floor((centerZ - span * 0.5) / texelSize) * texelSize;
     tile.seaLevel = spec.seaLevel;
     tile.revision = revision;
-    tile.data.resize(static_cast<std::size_t>(size) * size * 2u);
+    tile.data.assign(static_cast<std::size_t>(size) * size * kGrassTileStride, 0.0f);
     for (std::uint32_t j = 0; j < size; ++j) {
         for (std::uint32_t i = 0; i < size; ++i) {
             const double x = tile.originX + static_cast<double>(i) * texelSize;
@@ -279,9 +394,9 @@ GrassHeightTile MakeSyntheticGrassTile(const GrassSyntheticSpec& spec, double ce
                 const double dz = z - spec.lakeZ;
                 wet = std::sqrt(dx * dx + dz * dz) < spec.lakeRadius && h <= spec.lakeLevel + 0.05f;
             }
-            const std::size_t at = (static_cast<std::size_t>(j) * size + i) * 2u;
+            const std::size_t at = (static_cast<std::size_t>(j) * size + i) * kGrassTileStride;
             tile.data[at] = h;
-            tile.data[at + 1] = wet ? 1.0f : 0.0f;
+            tile.data[at + 1] = GrassTileFlagsColor(wet, GrassPackTerrainColor(0.05f, 0.12f, 0.03f));
         }
     }
     return tile;
@@ -303,7 +418,8 @@ bool SampleGrassTile(const GrassHeightTile& tile, double x, double z, float& hei
     const auto fu = static_cast<float>(u - i0);
     const auto fv = static_cast<float>(v - j0);
     const auto at = [&](std::uint32_t i, std::uint32_t j, std::uint32_t channel) {
-        return tile.data[(static_cast<std::size_t>(j) * tile.size + i) * 2u + channel];
+        const float value = tile.data[(static_cast<std::size_t>(j) * tile.size + i) * kGrassTileStride + channel];
+        return channel == 1 ? (GrassTileSubmerged(value) ? 1.0f : 0.0f) : value;
     };
     const auto lerp2 = [&](std::uint32_t channel) {
         const float a = at(i0, j0, channel) + fu * (at(i0 + 1, j0, channel) - at(i0, j0, channel));

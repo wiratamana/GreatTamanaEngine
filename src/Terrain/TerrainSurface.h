@@ -34,9 +34,14 @@ SurfaceSnapshot CollectSurface(const TerrainStreamer& streamer, const TerrainLay
 // Height of the node's drawn triangles at a world point. False when the point is outside the node.
 bool NodeHeightAt(const NodeMesh& node, double x, double z, float& out) noexcept;
 
+// Terrain colour of the node's drawn vertices at a world point (RGBA8, R in the lowest byte, as in NodeMesh::colors).
+// Bilinear over the vertex colours. False when the point is outside the node or it has no colours.
+bool NodeColorAt(const NodeMesh& node, double x, double z, std::uint32_t& rgba) noexcept;
+
 struct SurfaceHit {
     float height = 0.0f;
     int level = -1; // Node level the height came from; -1 = noise fallback, -2 = no data at all.
+    std::uint32_t color = 0xFF808080u; // RGBA8 terrain colour (noise fallback: the ramp colour of the noise surface).
 };
 
 // Finds the finest resident node at a point. Const and thread safe; `hint` is the caller's own cache of the last node.

@@ -1,5 +1,6 @@
 #include "TerrainSurface.h"
 
+#include "TerrainMaterial.h"
 #include "TerrainStreamer.h"
 
 #include <algorithm>
@@ -67,6 +68,41 @@ bool NodeHeightAt(const NodeMesh& node, double x, double z, float& out) noexcept
     return true;
 }
 
+bool NodeColorAt(const NodeMesh& node, double x, double z, std::uint32_t& rgba) noexcept
+{
+    if (node.spacing <= 0.0f || node.size <= 0.0f) {
+        return false;
+    }
+    const double lx = x - node.originX;
+    const double lz = z - node.originZ;
+    const double size = static_cast<double>(node.size);
+    if (lx < 0.0 || lz < 0.0 || lx > size || lz > size) {
+        return false;
+    }
+    const int quads = static_cast<int>(std::lround(size / static_cast<double>(node.spacing)));
+    const std::size_t stride = static_cast<std::size_t>(quads) + 1;
+    if (quads < 1 || node.colors.size() < stride * stride) {
+        return false;
+    }
+    const double u = lx / static_cast<double>(node.spacing);
+    const double v = lz / static_cast<double>(node.spacing);
+    const int ix = std::min(static_cast<int>(u), quads - 1);
+    const int iz = std::min(static_cast<int>(v), quads - 1);
+    const auto fu = static_cast<float>(u - ix);
+    const auto fv = static_cast<float>(v - iz);
+    const std::size_t i00 = static_cast<std::size_t>(iz) * stride + static_cast<std::size_t>(ix);
+    const std::uint32_t corners[4] = { node.colors[i00], node.colors[i00 + 1], node.colors[i00 + stride], node.colors[i00 + stride + 1] };
+    rgba = 0xFF000000u;
+    for (int channel = 0; channel < 3; ++channel) {
+        const auto at = [&](int corner) { return static_cast<float>((corners[corner] >> (8 * channel)) & 0xFFu); };
+        const float top = at(0) + fu * (at(1) - at(0));
+        const float bottom = at(2) + fu * (at(3) - at(2));
+        const float value = top + fv * (bottom - top);
+        rgba |= static_cast<std::uint32_t>(std::clamp(value + 0.5f, 0.0f, 255.0f)) << (8 * channel);
+    }
+    return true;
+}
+
 SurfaceSampler::SurfaceSampler(SurfaceSnapshot snapshot)
     : m_snapshot(std::move(snapshot))
 {
@@ -84,6 +120,7 @@ SurfaceHit SurfaceSampler::Sample(double x, double z, const NodeMesh*& hint) con
     SurfaceHit hit;
     if (hint != nullptr && NodeHeightAt(*hint, x, z, hit.height)) {
         hit.level = hint->key.level;
+        NodeColorAt(*hint, x, z, hit.color);
         return hit;
     }
     for (std::size_t level = 0; level < m_hasLevel.size(); ++level) {
@@ -97,12 +134,15 @@ SurfaceHit SurfaceSampler::Sample(double x, double z, const NodeMesh*& hint) con
         if (it != m_byKey.end() && NodeHeightAt(*it->second, x, z, hit.height)) {
             hint = it->second;
             hit.level = static_cast<int>(level);
+            NodeColorAt(*it->second, x, z, hit.color);
             return hit;
         }
     }
     if (m_snapshot.field != nullptr) {
         hit.height = m_snapshot.field->Height(x, z, 2.0);
         hit.level = -1;
+        const TerrainSettings& settings = m_snapshot.field->Settings();
+        hit.color = PackRgba8(SurfaceColor(hit.height, m_snapshot.field->Slope(x, z, 2.0), settings));
         return hit;
     }
     hit.level = -2;

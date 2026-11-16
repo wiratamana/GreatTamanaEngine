@@ -84,15 +84,13 @@ TEST(GrassShaderNamesTest, DrawShadersFitTheFullscreenRules)
 TEST(GrassShaderNamesTest, ShaderTextCarriesTheSharedConstants)
 {
     const std::string text = ReadText(GTE_TEST_GRASS_COMMON_GLSL_PATH);
-    EXPECT_NE(text.find("const uint kGrassVertsList0 = 30u;"), std::string::npos);
     EXPECT_NE(text.find("const uint kGrassVertsList1 = 12u;"), std::string::npos);
     EXPECT_NE(text.find("const uint kGrassVertsList2 = 3u;"), std::string::npos);
     EXPECT_NE(text.find("const uint kStatSlot0 = 21u;"), std::string::npos);
     EXPECT_NE(text.find("const uint kStatDropped0 = 18u;"), std::string::npos);
     EXPECT_NE(text.find("const uint kGrassStatsWords = 32u;"), std::string::npos);
-    EXPECT_EQ(kGrassVertsList[0], 30u);
-    EXPECT_EQ(kGrassVertsList[1], 12u);
-    EXPECT_EQ(kGrassVertsList[2], 3u);
+    EXPECT_EQ(GrassVertexCount(1, 5), 12u);
+    EXPECT_EQ(GrassVertexCount(2, 5), 3u);
     EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::Slot0), 21u);
     EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::Dropped0), 18u);
 
@@ -101,6 +99,8 @@ TEST(GrassShaderNamesTest, ShaderTextCarriesTheSharedConstants)
     ASSERT_NE(block, std::string::npos);
     EXPECT_LT(text.find("mat4 viewProjection;", block), text.find("mat4 drawViewProjection;", block));
     EXPECT_LT(text.find("vec4 sunRadiance;", block), text.find("vec4 depthMap;", block));
+    EXPECT_LT(text.find("vec4 depthMap;", block), text.find("vec4 look;", block));
+    EXPECT_LT(text.find("vec4 look;", block), text.find("vec4 extra;", block));
 }
 
 } // namespace

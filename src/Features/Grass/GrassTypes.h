@@ -2,6 +2,7 @@
 
 #include "../../Core/Extent.h"
 
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -25,14 +26,18 @@ inline constexpr std::uint32_t kGrassStatsWords = 32;
 inline constexpr std::uint32_t kGrassCommandStride = 16;     // Bytes between draw commands.
 inline constexpr std::uint32_t kGrassInstanceBytes = 32;
 inline constexpr std::uint32_t kGrassMaxTileTexels = 512;     // Height tile limit per side (the GPU copy has this fixed size).
+inline constexpr std::uint32_t kGrassTileStride = 2;          // Floats per tile texel: height, then submerged flag and colour as raw bits.
+inline constexpr std::uint32_t kGrassMinLod0Segments = 3;
+inline constexpr std::uint32_t kGrassMaxLod0Segments = 6;
 
-// Strip vertex counts: 5 segments, 2 segments, one triangle. List counts are used when the draw is a triangle list.
-inline constexpr std::uint32_t kGrassVertsStrip[kGrassLodCount] = {12, 6, 3};
-inline constexpr std::uint32_t kGrassVertsList[kGrassLodCount] = {30, 12, 3};
+// Triangle-list vertex counts of one blade: LOD0 has `lod0Segments` quads, LOD1 two quads, LOD2 one triangle.
+inline constexpr std::uint32_t GrassVertexCount(std::uint32_t lod, std::uint32_t lod0Segments) noexcept
+{
+    return lod == 0 ? lod0Segments * 6u : (lod == 1 ? 12u : 3u);
+}
 
 // Bits of GrassParamsGpu::grid[3].
 inline constexpr std::int32_t kGrassFlagHiz = 1;
-inline constexpr std::int32_t kGrassFlagTriangleList = 2;
 inline constexpr std::int32_t kGrassFlagStats = 4;
 
 // Word indices of the stats storage. Words kSlot0..kSlot2 are required by the cull; the rest only count with kGrassFlagStats.
@@ -83,10 +88,14 @@ struct GrassDrawCommand {
 };
 static_assert(sizeof(GrassDrawCommand) == kGrassCommandStride);
 
-// One blade, written by GrassCull.comp and read by Grass.vert.
+// One blade, written by GrassCull.comp and read by Grass.vert. All wind and bend maths is done by the cull.
 struct GrassInstanceGpu {
-    float posRot[4]; // xyz = eye-relative root, w = yaw (rad).
-    float shape[4];  // x = height, y = width, z = lean (rad), w = random 0..1.
+    float root[3];            // Eye-relative root.
+    std::uint32_t heightWidth; // 2 x half: height, width (m).
+    std::uint32_t frame;      // 4 x snorm8: sin(yaw), cos(yaw), bend dir x, bend dir z.
+    std::uint32_t ground;     // 4 x unorm8: ground normal x, z (* 0.5 + 0.5), sin(tip angle), spare.
+    std::uint32_t flutter;    // 2 x half: tip flutter along the blade side and along the bend.
+    std::uint32_t colorRnd;   // Terrain colour r, g, b (bits 24..31, 16..23, 8..15), blade random (bits 0..7).
 };
 static_assert(sizeof(GrassInstanceGpu) == kGrassInstanceBytes);
 
@@ -110,10 +119,10 @@ struct GrassParamsGpu {
     float tile[4];                // 256  xy = grid-relative xz of texel (0,0) centre, z = texel size, w = texels per side.
     float water[4];               // 272  x = sea level, y = margin, z = fade band, w = spare.
     float lodDist[4];             // 288  x,y,z = LOD0/1/2 max distance, w = far edge fade fraction.
-    float density[4];             // 304  xyz = blades per m^2 per LOD, w = patchiness.
+    float density[4];             // 304  xyz = blades per m^2 at the LOD0 / LOD1 / LOD2 distances, w = patchiness.
     float slope[4];               // 320  x = max slope deg, y = slope fade deg, z = patch scale m, w = bare threshold.
     float blade[4];               // 336  x = height, y = width, z = taper, w = height variation.
-    float bladeB[4];              // 352  x = lean rad, y = LOD1 width scale, z = LOD2 width scale, w = max bend rad.
+    float bladeB[4];              // 352  x = lean rad, y = width compensation exponent, z = max width scale, w = max bend rad.
     float wind0[4];               // 368  xy = wind dir (unit xz), z = speed m/s, w = total time s.
     float wind1[4];               // 384  x = gust strength, yz = pattern offset xz (m), w = wind bend strength.
     float wind2[4];               // 400  x = flutter speed rad/s, y = flutter strength, z = wave length m, w = gust length m.
@@ -129,8 +138,11 @@ struct GrassParamsGpu {
     std::uint32_t misc[4];        // 560  x = debug mode (0 normal, 1 LOD colour, 2 sway), y = placement seed.
     float hiz[4];                 // 576  xy = atlas size, zw = level 0 size.
     float depthMap[4];            // 592  x = k, y = b of d = k + b / w, z = level count.
+    float look[4];                // 608  x = terrain tint strength, y = ground normal blend, z = self shadow strength, w = LOD0 segments.
+    float extra[4];               // 624  x = density blend share, y = far height fade share, z = far terrain colour blend, w = workgroups per chunk.
+    float densityLog[4];          // 640  xyz = ln of the three densities (floored at 1e-4), w = 1 when LOD0 density is above 0.
 };
-static_assert(sizeof(GrassParamsGpu) == 608);
+static_assert(sizeof(GrassParamsGpu) == 656);
 static_assert(std::is_trivially_copyable_v<GrassParamsGpu>);
 static_assert(offsetof(GrassParamsGpu, drawViewProjection) == 64);
 static_assert(offsetof(GrassParamsGpu, planes) == 128);
@@ -158,6 +170,9 @@ static_assert(offsetof(GrassParamsGpu, instanceCap) == 544);
 static_assert(offsetof(GrassParamsGpu, misc) == 560);
 static_assert(offsetof(GrassParamsGpu, hiz) == 576);
 static_assert(offsetof(GrassParamsGpu, depthMap) == 592);
+static_assert(offsetof(GrassParamsGpu, look) == 608);
+static_assert(offsetof(GrassParamsGpu, extra) == 624);
+static_assert(offsetof(GrassParamsGpu, densityLog) == 640);
 
 // Number of candidate blades per chunk for a density. Same rounding as CandidateCount() in GrassCull.comp.
 inline std::uint32_t GrassCandidatesPerChunk(float bladesPerM2) noexcept
@@ -177,7 +192,8 @@ struct GrassSettings {
     bool collectStats = true;
     GrassDebugView debugView = GrassDebugView::Normal; // LodColor: LOD0 green, LOD1 yellow, LOD2 red. ChunkBounds: 16 m chunk checker and borders.
 
-    // Density in blades per m^2. LOD1 and LOD2 are index prefixes of LOD0, so they thin out the same blades.
+    // Density in blades per m^2: densityLod0 up close, falling smoothly to densityLod1 at lod0Distance and to densityLod2 at
+    // lod1Distance. Thinner densities are index prefixes of denser ones, so blades only ever leave, never move.
     float densityLod0 = 32.0f;
     float densityLod1 = 5.0f;
     float densityLod2 = 0.6f;
@@ -191,8 +207,9 @@ struct GrassSettings {
     float heightVariation = 0.35f;
     float lean = 0.25f;          // Rest lean (rad).
     float maxBend = 1.2f;        // Largest tip angle (rad).
-    float lod1WidthScale = 2.2f; // Fewer blades are wider so cover stays even.
-    float lod2WidthScale = 4.5f;
+    float widthCompensation = 0.45f; // Thinned blades widen by (full density / local density) to this power.
+    float maxWidthScale = 5.0f;      // Largest widening.
+    std::uint32_t lod0Segments = 4;  // Quads along a near blade (3..6); 6 list vertices each.
 
     float maxSlopeDeg = 40.0f;
     float slopeFadeDeg = 8.0f;
@@ -202,10 +219,12 @@ struct GrassSettings {
     float alpineHeight = 450.0f; // World Y above which grass thins out (rock and snow).
     float alpineFade = 150.0f;   // Metres over which it fades to nothing.
 
-    float lod0Distance = 30.0f;
+    float lod0Distance = 30.0f;  // Mesh switch LOD0 -> LOD1 and the end of the first density fall.
     float lod1Distance = 80.0f;
     float lod2Distance = 150.0f;
     float edgeFade = 0.2f;       // Share of the last LOD where blades thin out.
+    float densityBlend = 0.5f;   // Share of a LOD range over which the density falls (0.05 = nearly a step).
+    float farHeightFade = 0.15f; // Share of lod2Distance over which blades shrink to nothing.
 
     float windBend = 1.0f;
     float flutterSpeed = 9.0f;   // rad/s.
@@ -219,6 +238,10 @@ struct GrassSettings {
     float translucency = 0.6f;
     float rootAo = 0.35f;
     float tintVariation = 0.5f;
+    float terrainTint = 0.6f;       // How far blades take the colour of the terrain under them (0 = own colours).
+    float farTerrainBlend = 0.8f;   // Far blades converge to the terrain colour so the field melts into the ground.
+    float groundNormalBlend = 0.5f; // Share of the ground normal in the blade normal.
+    float selfShadow = 0.7f;        // Sun fades on ground facing away from the sun.
     float colorRoot[3] = {0.025f, 0.06f, 0.012f};
     float colorTip[3] = {0.17f, 0.30f, 0.05f};
 
@@ -234,8 +257,30 @@ struct GrassSettings {
     float sunVisibility = 1.0f;   // Flat multiplier on the sun term (no shadows reach grass yet).
 };
 
-// Height tile the editor layer submits: terrain height and a submerged flag per texel on a regular grid.
-// Texel (i, j) sits at world (originX + i * texelSize, originZ + j * texelSize); data index (j * size + i) * 2.
+// Named starting points for the settings. They only change density, distances and buffer sizes.
+enum class GrassPreset : std::uint32_t { Lean = 0, Default, Big, Huge, Count };
+
+// Terrain colour of a tile texel: linear 0..1 per channel in 8 bits each (r lowest).
+inline std::uint32_t GrassPackTerrainColor(float r, float g, float b) noexcept
+{
+    const auto byte = [](float v) {
+        return static_cast<std::uint32_t>(v <= 0.0f ? 0.0f : (v >= 1.0f ? 255.0f : v * 255.0f + 0.5f));
+    };
+    return byte(r) | (byte(g) << 8) | (byte(b) << 16);
+}
+
+// Second tile float of a texel as raw bits: bit 24 = submerged, bits 0..23 = terrain colour (GrassPackTerrainColor).
+inline float GrassTileFlagsColor(bool submerged, std::uint32_t colorBits) noexcept
+{
+    return std::bit_cast<float>((submerged ? 0x01000000u : 0u) | (colorBits & 0x00FFFFFFu));
+}
+inline bool GrassTileSubmerged(float flagsColor) noexcept
+{
+    return (std::bit_cast<std::uint32_t>(flagsColor) & 0x01000000u) != 0u;
+}
+
+// Height tile the editor layer submits: terrain height, a submerged flag and the terrain colour per texel on a regular grid.
+// Texel (i, j) sits at world (originX + i * texelSize, originZ + j * texelSize); data index (j * size + i) * kGrassTileStride.
 struct GrassHeightTile {
     std::uint32_t size = 0;      // Texels per side.
     float texelSize = 1.0f;      // Metres.
@@ -243,11 +288,11 @@ struct GrassHeightTile {
     double originZ = 0.0;
     float seaLevel = 0.0f;       // World Y of the ocean (the shader also drops grass below it).
     std::uint64_t revision = 0;  // Change it whenever the contents change.
-    std::vector<float> data;     // 2 floats per texel: height, submerged flag (0 or 1).
+    std::vector<float> data;     // kGrassTileStride floats per texel: height, then GrassTileFlagsColor() (submerged + colour bits).
 
     bool Valid() const noexcept
     {
-        return size >= 2 && texelSize > 0.0f && data.size() == static_cast<std::size_t>(size) * size * 2u;
+        return size >= 2 && texelSize > 0.0f && data.size() == static_cast<std::size_t>(size) * size * kGrassTileStride;
     }
 };
 

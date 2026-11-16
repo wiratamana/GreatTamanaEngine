@@ -1,12 +1,16 @@
 // Shared by every grass shader: params block, instance record, hash and noise.
-// NOTE: the params block must match GrassParamsGpu in GrassTypes.h (608 bytes, std430 = std140 here).
+// NOTE: the params block must match GrassParamsGpu in GrassTypes.h (656 bytes, std430 = std140 here).
 #ifndef GRASS_COMMON_GLSL
 #define GRASS_COMMON_GLSL
 
-// 32 bytes, written by GrassCull.comp and read by Grass.vert.
+// 32 bytes, written by GrassCull.comp and read by Grass.vert. NOTE: must match GrassInstanceGpu in GrassTypes.h.
 struct GrassInstance {
-    vec4 posRot; // xyz = root, eye-relative metres. w = yaw (rad).
-    vec4 shape;  // x = height, y = width, z = rest lean (rad), w = random 0..1.
+    vec3 root;    // Eye-relative root, metres.
+    uint heightWidth; // 2 x half: height, width.
+    uint frame;   // 4 x snorm8: sin(yaw), cos(yaw), bend direction x, bend direction z.
+    uint ground;  // 4 x unorm8: ground normal x, z (* 0.5 + 0.5), sin(tip angle), spare.
+    uint flutter; // 2 x half: tip flutter along the blade side, along the bend.
+    uint colorRnd; // Terrain colour r, g, b in bits 24..31, 16..23, 8..15; blade random in bits 0..7.
 };
 
 // All space is eye-relative except where a name says "grid" (grid-relative, small floats) or "world".
@@ -22,7 +26,7 @@ layout(std430, binding = 0) readonly buffer GrassParamsBlock {
     vec4 density;             // xyz = blades per m^2 per LOD, w = patchiness 0..1.
     vec4 slope;               // x = max slope (deg), y = slope fade (deg), z = patch noise scale (m), w = bare threshold.
     vec4 blade;               // x = height, y = width, z = taper 0..1, w = height variation 0..1.
-    vec4 bladeB;              // x = lean (rad), y = LOD1 width scale, z = LOD2 width scale, w = max bend (rad).
+    vec4 bladeB;              // x = lean (rad), y = width compensation exponent, z = max width scale, w = max bend (rad).
     vec4 wind0;               // xy = wind direction (unit xz, where air goes), z = speed (m/s), w = total time (s).
     vec4 wind1;               // x = gust strength, yz = wind pattern offset xz (m), w = wind bend strength.
     vec4 wind2;               // x = flutter speed (rad/s), y = flutter strength, z = wave length (m), w = gust length (m).
@@ -38,10 +42,12 @@ layout(std430, binding = 0) readonly buffer GrassParamsBlock {
     uvec4 misc;               // x = debug mode (0 normal, 1 LOD colour, 2 sway), y = placement seed.
     vec4 hiz;                 // xy = atlas size, zw = level 0 size (same as ClusterCull).
     vec4 depthMap;            // x = k, y = b of d = k + b / w, z = pyramid level count.
+    vec4 look;                // x = terrain tint strength, y = ground normal blend, z = self shadow strength, w = LOD0 segments.
+    vec4 extra;               // x = density blend share, y = far height fade share, z = far terrain colour blend, w = groups per chunk.
+    vec4 densityLog;          // xyz = ln of the three densities, w = 1 when the LOD0 density is above 0.
 } params;
 
 const uint kGrassFlagHiz = 1u;           // Hi-Z pyramid is valid and bound.
-const uint kGrassFlagTriangleList = 2u;  // Draw topology is a triangle list, not a strip.
 const uint kGrassFlagStats = 4u;         // Count rejections into the stats words.
 
 const uint kGrassLodCount = 3u;
@@ -73,11 +79,7 @@ const uint kStatSlot0 = 21u; // Slot reservation counters: required, not optiona
 const uint kStatSlot1 = 22u;
 const uint kStatSlot2 = 23u;
 
-// Blade strip: LOD0 5 segments = 12 vertices, LOD1 2 segments = 6, LOD2 one triangle = 3.
-const uint kGrassVertsStrip0 = 12u;
-const uint kGrassVertsStrip1 = 6u;
-const uint kGrassVertsStrip2 = 3u;
-const uint kGrassVertsList0 = 30u;
+// Blade triangle lists: LOD0 look.w quads (6 vertices each), LOD1 two quads, LOD2 one triangle.
 const uint kGrassVertsList1 = 12u;
 const uint kGrassVertsList2 = 3u;
 
@@ -120,6 +122,25 @@ float GrassValueNoise(vec2 x)
     float d = GrassCellHash(c + ivec2(0, 1));
     float e = GrassCellHash(c + ivec2(1, 1));
     return mix(mix(a, b, u.x), mix(d, e, u.x), u.y);
+}
+
+// Blades per m^2 at a distance (as a natural log): densityLod0 up close, falling (geometrically, smoothly) to densityLod1
+// at the LOD0 distance and to densityLod2 at the LOD1 distance. A blade is present when its index is below the candidate count.
+float GrassLogDensityAt(float dist)
+{
+    float blend = params.extra.x;
+    float e0 = params.lodDist.x;
+    float e1 = params.lodDist.y;
+    float s0 = e0 * (1.0 - blend);
+    float s1 = max(e0, e1 * (1.0 - blend));
+    float t0 = smoothstep(s0, e0, dist);
+    float t1 = smoothstep(s1, e1, dist);
+    return mix(mix(params.densityLog.x, params.densityLog.y, t0), params.densityLog.z, t1);
+}
+
+float GrassDensityAt(float dist)
+{
+    return params.densityLog.w > 0.5 ? exp(GrassLogDensityAt(dist)) : 0.0;
 }
 
 #endif

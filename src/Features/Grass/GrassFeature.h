@@ -34,9 +34,13 @@ public:
     const char* Name() const override { return kGrassFeatureName; }
     void Setup(fx::FeatureSetup& setup) override;
 
+    // What the shaders use: the user's values after ordering and range rules.
     const GrassSettings& Settings() const noexcept { return m_settings; }
 
-    // Sanitizes `candidate` and stores it. Main thread only.
+    // What the user asked for (each value only range-clamped); edit this, so a temporary conflict loses nothing.
+    const GrassSettings& UserSettings() const noexcept { return m_user; }
+
+    // Stores `candidate` as the user's values and derives Settings() from it. Main thread only.
     void ApplySettings(const GrassSettings& candidate);
 
     // The last state of `scope`'s view; NotRendered when that view has not rendered for a few frames.
@@ -73,6 +77,7 @@ private:
     void UpdateSyntheticTile(const fx::View& view);
     void FillEnvironment(fx::PostOpaqueFrame& f, GrassFrameInputs& in, GrassViewSnapshot& snap);
 
+    GrassSettings m_user;
     GrassSettings m_settings;
     std::shared_ptr<const GrassHeightTile> m_tile;
     bool m_syntheticOn = false;

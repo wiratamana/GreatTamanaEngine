@@ -15,6 +15,7 @@ layout(push_constant) uniform GrassPush {
 layout(location = 0) in vec3 inNormal;
 layout(location = 1) in vec4 inInfo;
 layout(location = 2) in vec3 inPosRel;
+layout(location = 3) flat in vec4 inGround; // rgb = terrain colour, a = ground normal . sun.
 
 layout(location = 0) out vec4 outColor;
 
@@ -35,13 +36,17 @@ void main()
     vec3 albedo = mix(params.colorRoot.rgb, params.colorTip.rgb, smoothstep(0.0, 1.0, t));
     albedo *= 1.0 + tint * (rnd * 2.0 - 1.0) * 0.6;
     albedo = mix(albedo, albedo * vec3(1.35, 1.1, 0.55), tint * smoothstep(0.6, 1.0, rnd));
+    // Roots take the terrain colour; tips keep more of the blade colour.
+    float distanceM = length(inPosRel);
+    float farBlend = params.extra.z * smoothstep(0.2 * params.lodDist.z, 0.9 * params.lodDist.z, distanceM);
+    albedo = mix(albedo, inGround.rgb, max(params.look.x * mix(0.9, 0.4, t), farBlend));
 
     uint debugMode = params.misc.x;
     if (debugMode == 1u) {
         vec3 lodColor = pc.lod == 0u ? vec3(0.0, 1.0, 0.0) : (pc.lod == 1u ? vec3(1.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0));
         albedo = lodColor * 0.5;
     } else if (debugMode == 2u) {
-        albedo = mix(vec3(0.0, 0.2, 1.0), vec3(1.0, 0.1, 0.0), clamp(inInfo.z / 0.7, 0.0, 1.0)) * 0.5;
+        albedo = mix(vec3(0.0, 0.2, 1.0), vec3(1.0, 0.1, 0.0), clamp(inInfo.z / 0.9, 0.0, 1.0)) * 0.5;
     } else if (debugMode == 3u) {
         // Chunk checker with bright borders, from the world position of the fragment.
         vec2 chunk = (params.cameraWorld.xy + inPosRel.xz) / params.camRel.w;
@@ -55,7 +60,9 @@ void main()
     float ao = mix(params.colorRoot.w, 1.0, smoothstep(0.0, 0.45, t));
     vec3 sunDir = normalize(params.sunDir.xyz);
     float sunUp = smoothstep(-0.05, 0.1, sunDir.y);
-    vec3 sun = params.sunRadiance.rgb * (kDirectScale * params.sunRadiance.w * sunUp);
+    // Ground facing away from the sun gets no direct light (no real shadow map reaches grass).
+    float groundLit = mix(1.0, smoothstep(-0.1, 0.3, inGround.a), params.look.z);
+    vec3 sun = params.sunRadiance.rgb * (kDirectScale * params.sunRadiance.w * sunUp * groundLit);
 
     float wrap = clamp((dot(normal, sunDir) + 0.35) / 1.35, 0.0, 1.0);
     vec3 ambient = mix(params.groundAmbient.rgb, params.skyAmbient.rgb, normal.y * 0.5 + 0.5);

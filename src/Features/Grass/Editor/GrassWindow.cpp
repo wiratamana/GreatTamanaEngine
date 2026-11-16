@@ -13,7 +13,7 @@ namespace gte {
 
 void GrassWindow::OnGui(EditorFrame& /*frame*/)
 {
-    GrassSettings edit = m_feature.Settings();
+    GrassSettings edit = m_feature.UserSettings();
     if (BuildGrassPanel(edit, m_feature.Snapshot(rg::ViewScope::Primary), m_feature.Snapshot(rg::ViewScope::Secondary))) {
         m_feature.ApplySettings(edit);
     }

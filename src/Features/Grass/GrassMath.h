@@ -8,7 +8,18 @@
 namespace gte {
 
 // Clamps every value, orders the LOD distances, makes the densities non-increasing and sizes the grid.
-GrassSettings SanitizeGrassSettings(const GrassSettings& in) noexcept;
+// With enforceOrder false only each value on its own is clamped, so the user's numbers survive a temporary conflict.
+GrassSettings SanitizeGrassSettings(const GrassSettings& in, bool enforceOrder = true) noexcept;
+
+// Densities, distances and buffer sizes of a named preset; everything else is the default.
+GrassSettings MakeGrassPreset(GrassPreset preset) noexcept;
+
+// Blades per m^2 at a distance from the camera; the CPU twin of GrassDensityAt() in GrassCommon.glsl.
+float GrassDensityAtDistance(const GrassSettings& settings, float distance) noexcept;
+
+// Copies only the preset's densities, distances and capacities into `target`; the look and wind stay as they are.
+void ApplyGrassPreset(GrassSettings& target, GrassPreset preset) noexcept;
+const char* GrassPresetName(GrassPreset preset) noexcept;
 
 // Fewest chunks per side whose grid reaches `lod2Distance` from the camera in every direction.
 std::uint32_t MinGrassGridCells(float lod2Distance) noexcept;
@@ -55,6 +66,9 @@ struct GrassFrameInputs {
     float hizDepthB = 0.0f;
     float hizLevels = 0.0f;
 };
+
+// Workgroups that share one chunk: dense chunks have thousands of candidates, so one group per chunk would leave the GPU idle.
+std::uint32_t GrassSlicesPerChunk(float densityLod0) noexcept;
 
 // Fills the params block; `settings` must be sanitized. Instance regions follow each other: LOD0, LOD1, LOD2.
 GrassParamsGpu MakeGrassParams(const GrassSettings& settings, const GrassFrameInputs& in) noexcept;

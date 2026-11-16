@@ -1,6 +1,7 @@
 #include "GrassTileBuilder.h"
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cmath>
 
@@ -49,7 +50,7 @@ GrassTileBuild BuildGrassTile(const GrassTileJob& job)
     tile->originZ = job.originZ;
     tile->seaLevel = GrassOceanLevel(job.water.get());
     tile->revision = job.revision;
-    tile->data.resize(static_cast<std::size_t>(job.size) * job.size * 2u);
+    tile->data.assign(static_cast<std::size_t>(job.size) * job.size * kGrassTileStride, 0.0f);
 
     const double reach2 = job.reach * job.reach;
     std::uint64_t inReach = 0;
@@ -69,9 +70,9 @@ GrassTileBuild BuildGrassTile(const GrassTileJob& job)
                     flag = 1.0f;
                 }
             }
-            const std::size_t index = (static_cast<std::size_t>(j) * job.size + i) * 2u;
+            const std::size_t index = (static_cast<std::size_t>(j) * job.size + i) * kGrassTileStride;
             tile->data[index] = hit.height;
-            tile->data[index + 1] = flag;
+            tile->data[index + 1] = GrassTileFlagsColor(flag > 0.5f, hit.color);
             submerged += flag > 0.5f ? 1u : 0u;
             const double dx = x - job.centerX;
             const double dz = z - job.centerZ;

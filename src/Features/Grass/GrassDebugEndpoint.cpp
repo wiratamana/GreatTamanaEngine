@@ -41,8 +41,9 @@ constexpr std::array kSettingKeys{
     SettingKey{ "heightVariation", &GrassSettings::heightVariation },
     SettingKey{ "lean", &GrassSettings::lean },
     SettingKey{ "maxBend", &GrassSettings::maxBend },
-    SettingKey{ "lod1WidthScale", &GrassSettings::lod1WidthScale },
-    SettingKey{ "lod2WidthScale", &GrassSettings::lod2WidthScale },
+    SettingKey{ "widthCompensation", &GrassSettings::widthCompensation },
+    SettingKey{ "maxWidthScale", &GrassSettings::maxWidthScale },
+    SettingKey{ "lod0Segments", &GrassSettings::lod0Segments },
     SettingKey{ "maxSlopeDeg", &GrassSettings::maxSlopeDeg },
     SettingKey{ "slopeFadeDeg", &GrassSettings::slopeFadeDeg },
     SettingKey{ "waterMargin", &GrassSettings::waterMargin },
@@ -54,6 +55,8 @@ constexpr std::array kSettingKeys{
     SettingKey{ "lod1Distance", &GrassSettings::lod1Distance },
     SettingKey{ "lod2Distance", &GrassSettings::lod2Distance },
     SettingKey{ "edgeFade", &GrassSettings::edgeFade },
+    SettingKey{ "densityBlend", &GrassSettings::densityBlend },
+    SettingKey{ "farHeightFade", &GrassSettings::farHeightFade },
     SettingKey{ "windBend", &GrassSettings::windBend },
     SettingKey{ "flutterSpeed", &GrassSettings::flutterSpeed },
     SettingKey{ "flutterStrength", &GrassSettings::flutterStrength },
@@ -66,6 +69,10 @@ constexpr std::array kSettingKeys{
     SettingKey{ "translucency", &GrassSettings::translucency },
     SettingKey{ "rootAo", &GrassSettings::rootAo },
     SettingKey{ "tintVariation", &GrassSettings::tintVariation },
+    SettingKey{ "terrainTint", &GrassSettings::terrainTint },
+    SettingKey{ "farTerrainBlend", &GrassSettings::farTerrainBlend },
+    SettingKey{ "groundNormalBlend", &GrassSettings::groundNormalBlend },
+    SettingKey{ "selfShadow", &GrassSettings::selfShadow },
     SettingKey{ "sunVisibility", &GrassSettings::sunVisibility },
     SettingKey{ "gridCells", &GrassSettings::gridCells },
     SettingKey{ "heightTileTexels", &GrassSettings::heightTileTexels },
@@ -76,6 +83,8 @@ constexpr std::array kSettingKeys{
     SettingKey{ "seed", &GrassSettings::seed },
 };
 
+constexpr std::string_view kPresetKey = "preset";
+constexpr std::array<std::string_view, 4> kPresetNames{ "Lean", "Default", "Big", "Huge" };
 constexpr std::string_view kDebugViewKey = "debugView";
 constexpr std::string_view kColorRootKey = "colorRoot";
 constexpr std::string_view kColorTipKey = "colorTip";
@@ -320,7 +329,17 @@ void AddProbe(fx::FeatureDebugResult& out, const std::string& prefix, const Gras
 fx::FeatureDebugResult GrassDebugEndpoint::GetState() const
 {
     fx::FeatureDebugResult out;
-    AddSettings(out, m_feature.Settings());
+    AddSettings(out, m_feature.UserSettings());
+    const GrassSettings& effective = m_feature.Settings();
+    Add(out, "effective.lod0Distance", Shown(effective.lod0Distance));
+    Add(out, "effective.lod1Distance", Shown(effective.lod1Distance));
+    Add(out, "effective.lod2Distance", Shown(effective.lod2Distance));
+    Add(out, "effective.densityLod1", Shown(effective.densityLod1));
+    Add(out, "effective.densityLod2", Shown(effective.densityLod2));
+    Add(out, "effective.gridCells", static_cast<std::int64_t>(effective.gridCells));
+    Add(out, "effective.heightTileTexels", static_cast<std::int64_t>(effective.heightTileTexels));
+    Add(out, "effective.heightTileTexelSize", Shown(effective.heightTileTexelSize));
+    Add(out, "instanceMiB", Shown(static_cast<float>(static_cast<double>(GrassInstanceBytes(effective)) / (1024.0 * 1024.0))));
     Add(out, "synthetic.enabled", m_feature.SyntheticTileEnabled());
     const std::shared_ptr<const GrassHeightTile> tile = m_feature.HeightTile();
     Add(out, "tile.present", tile != nullptr);
@@ -347,8 +366,17 @@ fx::FeatureDebugResult GrassDebugEndpoint::GetState() const
 
 fx::FeatureDebugResult GrassDebugEndpoint::Set(std::span<const fx::FeatureDebugArg> args)
 {
-    GrassSettings candidate = m_feature.Settings();
+    GrassSettings candidate = m_feature.UserSettings();
     for (const fx::FeatureDebugArg& arg : args) {
+        if (arg.key == kPresetKey) {
+            const auto found = std::find_if(kPresetNames.begin(), kPresetNames.end(),
+                [&](std::string_view name) { return name == arg.value; });
+            if (found == kPresetNames.end()) {
+                return Fail(arg.key, "preset must be one of Lean, Default, Big, Huge");
+            }
+            ApplyGrassPreset(candidate, static_cast<GrassPreset>(found - kPresetNames.begin()));
+            continue;
+        }
         if (arg.key == kDebugViewKey) {
             const auto found = std::find(kDebugViewNames.begin(), kDebugViewNames.end(), std::string_view(arg.value));
             if (found == kDebugViewNames.end()) {

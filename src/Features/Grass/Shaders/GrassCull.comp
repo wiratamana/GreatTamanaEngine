@@ -2,7 +2,8 @@
 
 // One 64-thread group per 16 m grass chunk. The group tests the chunk (distance, tile data, water, frustum, Hi-Z),
 // then every thread places candidate blades, filters them and appends the survivors to the per-LOD instance region.
-// Dispatch: groupCount = gridCells * gridCells, i.e. Extent2D{gridCells * gridCells * 64, 1}. Run GrassInit.comp first.
+// Dispatch: groupCount = gridCells * gridCells * extra.w groups; extra.w groups share a chunk and split its candidates.
+// Run GrassInit.comp first.
 // NOTE: bindings must match README_shaders.md; Hi-Z test mirrors ClusterCull.comp.
 #include "GrassCommon.glsl"
 #include "ClusterCullConstants.glsl"
@@ -10,9 +11,10 @@
 
 layout(local_size_x = 64) in;
 
-// Height tile: one vec2 per texel = (terrain height, submerged flag 0/1), row-major, tile.w texels per side.
+// Height tile: one uvec2 per texel = (float bits of the terrain height, bit 24 submerged | terrain colour r | g << 8 | b << 16);
+// row-major, tile.w texels per side. NOTE: must match kGrassTileStride in GrassTypes.h.
 layout(std430, binding = 1) readonly buffer GrassHeightTileBlock {
-    vec2 texels[];
+    uvec2 texels[];
 } heightTile;
 
 layout(std430, binding = 2) writeonly buffer GrassInstancesBlock {
@@ -56,10 +58,11 @@ bool HasFlag(uint flag)
     return (uint(params.grid.w) & flag) != 0u;
 }
 
-uint CandidateCount(uint lod)
+// Candidates of a chunk at a density; a tiny density counts as none.
+uint CandidateCount(float density)
 {
     float cs = params.camRel.w;
-    return uint(ceil(params.density[lod] * cs * cs));
+    return uint(max(ceil(density * cs * cs - 0.05), 0.0));
 }
 
 struct TileSample {
@@ -67,6 +70,11 @@ struct TileSample {
     float flag;
     vec2 gradient; // d height / dx, d height / dz.
 };
+
+vec3 UnpackTileColor(uint bits)
+{
+    return vec3(float(bits & 255u), float((bits >> 8u) & 255u), float((bits >> 16u) & 255u)) * (1.0 / 255.0);
+}
 
 // Bilinear height, submerged flag (max of the 4 texels) and the exact bilinear gradient. False outside the tile.
 bool SampleTile(vec2 gridXz, out TileSample s)
@@ -83,15 +91,34 @@ bool SampleTile(vec2 gridXz, out TileSample s)
     ivec2 i0 = ivec2(floor(q));
     vec2 f = q - vec2(i0);
     int index = i0.y * n + i0.x;
-    vec2 a = heightTile.texels[index];
-    vec2 b = heightTile.texels[index + 1];
-    vec2 c = heightTile.texels[index + n];
-    vec2 d = heightTile.texels[index + n + 1];
-    s.height = mix(mix(a.x, b.x, f.x), mix(c.x, d.x, f.x), f.y);
-    s.flag = max(max(a.y, b.y), max(c.y, d.y));
-    s.gradient.x = mix(b.x - a.x, d.x - c.x, f.y) / ts;
-    s.gradient.y = mix(c.x - a.x, d.x - b.x, f.x) / ts;
+    uvec2 a = heightTile.texels[index];
+    uvec2 b = heightTile.texels[index + 1];
+    uvec2 c = heightTile.texels[index + n];
+    uvec2 d = heightTile.texels[index + n + 1];
+    float ha = uintBitsToFloat(a.x);
+    float hb = uintBitsToFloat(b.x);
+    float hc = uintBitsToFloat(c.x);
+    float hd = uintBitsToFloat(d.x);
+    s.height = mix(mix(ha, hb, f.x), mix(hc, hd, f.x), f.y);
+    s.flag = float(((a.y | b.y | c.y | d.y) >> 24u) & 1u);
+    s.gradient.x = mix(hb - ha, hd - hc, f.y) / ts;
+    s.gradient.y = mix(hc - ha, hd - hb, f.x) / ts;
     return true;
+}
+
+// Terrain colour at a point inside the tile (call it for accepted blades only).
+vec3 SampleTileColor(vec2 gridXz)
+{
+    int n = int(params.tile.w);
+    vec2 q = (gridXz - params.tile.xy) / params.tile.z;
+    ivec2 i0 = clamp(ivec2(floor(q)), ivec2(0), ivec2(n - 2));
+    vec2 f = clamp(q - vec2(i0), vec2(0.0), vec2(1.0));
+    int index = i0.y * n + i0.x;
+    vec3 a = UnpackTileColor(heightTile.texels[index].y);
+    vec3 b = UnpackTileColor(heightTile.texels[index + 1].y);
+    vec3 c = UnpackTileColor(heightTile.texels[index + n].y);
+    vec3 d = UnpackTileColor(heightTile.texels[index + n + 1].y);
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
 // True when the box (nearest view distance, nearest depth) lies behind the farthest depth of the pyramid texel.
@@ -180,7 +207,7 @@ bool BoxOutsideFrustum(vec3 boxMin, vec3 boxMax)
 uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
 {
     lod = 3u;
-    result = GrassInstance(vec4(0.0), vec4(0.0));
+    result = GrassInstance(vec3(0.0), 0u, 0u, 0u, 0u, 0u);
     uint hb = GrassHash2(gSeed, idx);
 
     // R2 low-discrepancy sequence in 32-bit fixed point: every prefix covers the chunk evenly.
@@ -198,7 +225,9 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
         return kRejectLod;
     }
     lod = dist < params.lodDist.x ? 0u : (dist < params.lodDist.y ? 1u : 2u);
-    if (idx >= CandidateCount(lod)) {
+    float logDensity = GrassLogDensityAt(dist);
+    float localDensity = params.densityLog.w > 0.5 ? exp(logDensity) : 0.0;
+    if (idx >= CandidateCount(localDensity)) {
         lod = 3u;
         return kRejectLod;
     }
@@ -237,11 +266,44 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
     float r3 = GrassUnit(GrassHash2(hb, 3u));
     float r4 = GrassUnit(GrassHash2(hb, 4u));
     float r5 = GrassUnit(GrassHash2(hb, 5u));
-    float height = params.blade.x * (1.0 + params.blade.w * (2.0 * r1 - 1.0)) * (0.85 + 0.3 * nz);
-    float widthScale = lod == 0u ? 1.0 : (lod == 1u ? params.bladeB.y : params.bladeB.z);
+    float farShrink = 1.0 - smoothstep(params.lodDist.z * (1.0 - params.extra.y), params.lodDist.z, dist);
+    float height = params.blade.x * (1.0 + params.blade.w * (2.0 * r1 - 1.0)) * (0.85 + 0.3 * nz) * farShrink;
+    // Thinned blades widen so the cover stays even.
+    float widthScale = min(exp(params.bladeB.y * max(params.densityLog.x - logDensity, 0.0)), params.bladeB.z);
     float width = params.blade.y * (0.8 + 0.4 * r2) * widthScale;
     float lean = params.bladeB.x * (0.3 + 0.7 * r4);
-    result = GrassInstance(vec4(eye, r3 * 6.2831853), vec4(height, width, lean, r5));
+
+    // Wind: slow wave plus gusts at a pattern position that drifts with the shared wind offset.
+    float yaw = r3 * 6.2831853;
+    vec2 faceXz = vec2(sin(yaw), cos(yaw));
+    vec2 pattern = params.cameraWorld.xy + eye.xz + params.wind1.yz;
+    vec2 windDir = params.wind0.xy;
+    float speedFactor = 1.0 - exp(-0.25 * params.wind0.z);
+    float wave = 0.5 + 0.5 * sin(dot(pattern, windDir) * (6.2831853 / max(params.wind2.z, 1.0)));
+    float gust = params.wind1.x * GrassValueNoise(pattern / max(params.wind2.w, 1.0));
+    float windAngle = 0.6 * params.wind1.w * speedFactor * (0.25 + 0.5 * wave + 0.9 * gust);
+
+    // Rest lean along the blade face plus the wind push: the sum sets the tip angle and the bend direction.
+    vec2 bend = faceXz * lean + windDir * windAngle;
+    float bendLength = length(bend);
+    float angle = min(bendLength, params.bladeB.w);
+    vec2 bendDir = bendLength > 1e-4 ? bend / bendLength : faceXz;
+
+    // Tip flutter: fast and small; the vertex shader scales it by t^2.
+    float phase = r5 * 43.9823;
+    float flutterTime = params.wind0.w * params.wind2.x;
+    float flutterA = sin(flutterTime + phase + dot(pattern, vec2(0.9, 0.7)));
+    float flutterB = sin(flutterTime * 1.37 + phase * 1.7);
+    float flutterAmp = params.wind2.y * height * (0.04 + 0.12 * speedFactor * (0.5 + gust));
+
+    uvec3 rgb = uvec3(clamp(SampleTileColor(pg) * 255.0 + 0.5, vec3(0.0), vec3(255.0)));
+    uint rnd8 = uint(clamp(r5 * 255.0 + 0.5, 0.0, 255.0));
+    result.root = eye;
+    result.heightWidth = packHalf2x16(vec2(height, width));
+    result.frame = packSnorm4x8(vec4(faceXz.x, faceXz.y, bendDir.x, bendDir.y));
+    result.ground = packUnorm4x8(vec4(normal.x * 0.5 + 0.5, normal.z * 0.5 + 0.5, sin(angle), 0.0));
+    result.flutter = packHalf2x16(vec2(flutterA * flutterAmp, flutterB * 0.6 * flutterAmp));
+    result.colorRnd = (rgb.x << 24u) | (rgb.y << 16u) | (rgb.z << 8u) | rnd8;
     return kRejectNone;
 }
 
@@ -249,14 +311,17 @@ void main()
 {
     uint lid = gl_LocalInvocationID.x;
     int dim = max(params.grid.z, 1);
-    uint chunkId = gl_WorkGroupID.x;
+    uint slices = max(uint(params.extra.w), 1u);
+    uint chunkId = gl_WorkGroupID.x / slices;
+    uint slice = gl_WorkGroupID.x % slices;
     if (chunkId >= uint(dim * dim)) {
         return;
     }
     bool collect = HasFlag(kGrassFlagStats);
+    bool counter = collect && lid == 0u && slice == 0u; // The chunk-level counters count once per chunk.
     ivec2 cell = ivec2(int(chunkId) % dim, int(chunkId) / dim);
     float cs = params.camRel.w;
-    if (collect && lid == 0u) {
+    if (counter) {
         atomicAdd(stats.words[kStatChunksInGrid], 1u);
     }
 
@@ -264,7 +329,12 @@ void main()
     vec2 lo2 = vec2(cell) * cs - params.camRel.xz;
     vec2 nearXz = max(max(lo2, -(lo2 + cs)), vec2(0.0));
     if (length(nearXz) >= params.lodDist.z) {
-        if (collect && lid == 0u) { atomicAdd(stats.words[kStatChunksCulledDistance], 1u); }
+        if (counter) { atomicAdd(stats.words[kStatChunksCulledDistance], 1u); }
+        return;
+    }
+
+    // Groups past the chunk's candidates have nothing to do (the horizontal distance gives a density that is never too low).
+    if (slice * 256u >= CandidateCount(GrassDensityAt(length(nearXz)))) {
         return;
     }
 
@@ -275,7 +345,7 @@ void main()
     vec2 q0 = (gridLo - params.tile.xy) / ts;
     vec2 q1 = (gridLo + cs - params.tile.xy) / ts;
     if (n < 2 || q1.x < 0.0 || q1.y < 0.0 || q0.x > float(n - 1) || q0.y > float(n - 1)) {
-        if (collect && lid == 0u) { atomicAdd(stats.words[kStatChunksCulledNoData], 1u); }
+        if (counter) { atomicAdd(stats.words[kStatChunksCulledNoData], 1u); }
         return;
     }
 
@@ -290,10 +360,11 @@ void main()
     float mx = -1e30;
     float land = -1e30;
     for (int k = int(lid); k < total; k += 64) {
-        vec2 t = heightTile.texels[(z0 + k / countX) * n + x0 + k % countX];
-        mn = min(mn, t.x);
-        mx = max(mx, t.x);
-        land = t.y < 0.5 ? max(land, t.x) : land;
+        uvec2 t = heightTile.texels[(z0 + k / countX) * n + x0 + k % countX];
+        float th = uintBitsToFloat(t.x);
+        mn = min(mn, th);
+        mx = max(mx, th);
+        land = (t.y & 0x01000000u) == 0u ? max(land, th) : land;
     }
     sMin[lid] = mn;
     sMax[lid] = mx;
@@ -313,7 +384,7 @@ void main()
 
     // 4. Water: no dry texel above the waterline means no grass here.
     if (hLand <= params.water.x + params.water.y) {
-        if (collect && lid == 0u) { atomicAdd(stats.words[kStatChunksCulledWater], 1u); }
+        if (counter) { atomicAdd(stats.words[kStatChunksCulledWater], 1u); }
         return;
     }
 
@@ -323,24 +394,25 @@ void main()
     vec3 boxMax = vec3(lo2.x + cs, hMax + maxBladeHeight - params.camRel.y, lo2.y + cs);
     float dist = length(max(max(boxMin, -boxMax), vec3(0.0)));
     if (dist >= params.lodDist.z) {
-        if (collect && lid == 0u) { atomicAdd(stats.words[kStatChunksCulledDistance], 1u); }
+        if (counter) { atomicAdd(stats.words[kStatChunksCulledDistance], 1u); }
         return;
     }
     uint lodMin = dist < params.lodDist.x ? 0u : (dist < params.lodDist.y ? 1u : 2u);
+    float chunkDensity = GrassDensityAt(dist);
 
     // 6. Frustum and Hi-Z with the box padded for blade lean and wind.
     float pad = 0.9 * maxBladeHeight;
     vec3 padMin = boxMin - vec3(pad, 0.0, pad);
     vec3 padMax = boxMax + vec3(pad, 0.0, pad);
     if (BoxOutsideFrustum(padMin, padMax)) {
-        if (collect && lid == 0u) { atomicAdd(stats.words[kStatChunksCulledFrustum], 1u); }
+        if (counter) { atomicAdd(stats.words[kStatChunksCulledFrustum], 1u); }
         return;
     }
     if (HasFlag(kGrassFlagHiz) && BoxOccluded(padMin, padMax)) {
-        if (collect && lid == 0u) { atomicAdd(stats.words[kStatChunksCulledHiz], 1u); }
+        if (counter) { atomicAdd(stats.words[kStatChunksCulledHiz], 1u); }
         return;
     }
-    if (collect && lid == 0u) {
+    if (counter) {
         atomicAdd(stats.words[kStatChunksLod0 + lodMin], 1u);
     }
 
@@ -352,12 +424,12 @@ void main()
     gOffX = GrassPcg(gSeed ^ 0xA511E9B3u);
     gOffY = GrassPcg(gSeed ^ 0x63D83595u);
 
-    uint candidates = CandidateCount(lodMin);
+    uint candidates = CandidateCount(chunkDensity);
     uint rejected[6] = uint[6](0u, 0u, 0u, 0u, 0u, 0u);
     uint accepted[3] = uint[3](0u, 0u, 0u);
 
     // 256 candidates per round (4 per thread); one slot reservation per LOD per round.
-    for (uint base = 0u; base < candidates; base += 256u) {
+    for (uint base = slice * 256u; base < candidates; base += 256u * slices) {
         if (lid < 3u) {
             sCount[lid] = 0u;
         }
@@ -369,7 +441,7 @@ void main()
         for (uint j = 0u; j < 4u; ++j) {
             lodOf[j] = 3u;
             localSlot[j] = 0u;
-            made[j] = GrassInstance(vec4(0.0), vec4(0.0));
+            made[j] = GrassInstance(vec3(0.0), 0u, 0u, 0u, 0u, 0u);
             uint idx = base + lid + 64u * j;
             if (idx < candidates) {
                 uint lod;

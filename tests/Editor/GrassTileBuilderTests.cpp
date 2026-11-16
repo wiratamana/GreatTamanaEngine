@@ -71,7 +71,7 @@ TEST(GrassTileBuilderTest, SamplesTheResidentNodes)
     const GrassTileBuild build = BuildGrassTile(MakeJob(25.0f, true));
     ASSERT_NE(build.tile, nullptr);
     EXPECT_TRUE(build.tile->Valid());
-    for (std::size_t i = 0; i < build.tile->data.size(); i += 2) {
+    for (std::size_t i = 0; i < build.tile->data.size(); i += kGrassTileStride) {
         EXPECT_FLOAT_EQ(build.tile->data[i], 25.0f);
     }
     EXPECT_FLOAT_EQ(build.coverageLevel0, 1.0f);
@@ -143,7 +143,9 @@ TEST(GrassTileBuilderTest, SampleGrassTileIsBilinearAndBounded)
     tile.texelSize = 2.0f;
     tile.originX = 10.0;
     tile.originZ = 20.0;
-    tile.data = { 0.0f, 0.0f, 4.0f, 1.0f, 8.0f, 0.0f, 12.0f, 1.0f }; // (0,0) (1,0) (0,1) (1,1)
+    const float dry = GrassTileFlagsColor(false, 0);
+    const float wet = GrassTileFlagsColor(true, 0);
+    tile.data = { 0.0f, dry, 4.0f, wet, 8.0f, dry, 12.0f, wet }; // (0,0) (1,0) (0,1) (1,1)
     ASSERT_TRUE(tile.Valid());
     float h = 0.0f;
     float f = 0.0f;

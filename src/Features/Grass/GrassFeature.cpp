@@ -15,7 +15,7 @@ constexpr std::int32_t kFrameStampPriority = 38;
 // After the terrain (Opaque stage), before the shadow mask (0), the water (25) and the sky (100).
 constexpr std::int32_t kDrawPriority = -20;
 constexpr std::uint64_t kCommandBytes = kGrassCommandStride * kGrassLodCount;
-constexpr std::uint64_t kTileBytes = std::uint64_t{ kGrassMaxTileTexels } * kGrassMaxTileTexels * 2u * sizeof(float);
+constexpr std::uint64_t kTileBytes = std::uint64_t{ kGrassMaxTileTexels } * kGrassMaxTileTexels * kGrassTileStride * sizeof(float);
 constexpr double kDegreesToRadians = 3.14159265358979323846 / 180.0;
 
 // Sky and ground ambient of the scene lighting defaults (colour x intensity).
@@ -49,7 +49,8 @@ void GrassFeature::Setup(fx::FeatureSetup& s)
 
 void GrassFeature::ApplySettings(const GrassSettings& candidate)
 {
-    m_settings = SanitizeGrassSettings(candidate);
+    m_user = SanitizeGrassSettings(candidate, /*enforceOrder=*/false);
+    m_settings = SanitizeGrassSettings(m_user);
 }
 
 GrassViewSnapshot GrassFeature::Snapshot(rg::ViewScope scope) const
@@ -220,7 +221,7 @@ void GrassFeature::DrawPass(fx::PostOpaqueFrame& f)
     const std::size_t slot = f.OffscreenTicket().slot % view.slotRevision.size();
     const std::uint64_t generation = m_heights.Generation(f);
     if (view.slotRevision[slot] != m_tileRevision || view.slotGeneration[slot] != generation) {
-        const std::uint64_t bytes = std::uint64_t{ tile->size } * tile->size * 2u * sizeof(float);
+        const std::uint64_t bytes = std::uint64_t{ tile->size } * tile->size * kGrassTileStride * sizeof(float);
         if (!m_heights.Upload(f, tile->data.data(), bytes)) {
             bail(GrassFrameStatus::TargetFailed);
             return;
@@ -279,7 +280,7 @@ void GrassFeature::DrawPass(fx::PostOpaqueFrame& f)
                             .BindBuffer("commands", commands)
                             .BindOutput("stats", m_stats)
                             .Bind("hizAtlas", hizAtlas.IsValid() ? hizAtlas : f.SceneColor())
-                            .Dispatch(Extent2D{ chunkCount * kGrassCullGroupSize, 1 });
+                            .Dispatch(Extent2D{ chunkCount * static_cast<std::uint32_t>(params.extra[3]) * kGrassCullGroupSize, 1 });
     if (!culled) {
         f.ReportOnce("Grass.Cull was refused");
         bail(GrassFrameStatus::ShadersNotReady);

@@ -1,5 +1,6 @@
 #include "GrassPanel.h"
 
+#include "../GrassMath.h"
 #include "../GrassTypes.h"
 
 #include <imgui.h>
@@ -82,10 +83,24 @@ bool BuildGrassPanel(GrassSettings& edit, const GrassViewSnapshot& game, const G
         changed = true;
     }
 
+    if (ImGui::CollapsingHeader("Presets", ImGuiTreeNodeFlags_DefaultOpen)) {
+        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(GrassPreset::Count); ++i) {
+            const auto preset = static_cast<GrassPreset>(i);
+            if (i > 0) {
+                ImGui::SameLine();
+            }
+            if (ImGui::Button(GrassPresetName(preset))) {
+                ApplyGrassPreset(edit, preset);
+                changed = true;
+            }
+        }
+        ImGui::TextDisabled("Sets density, distances and buffer sizes. Big and Huge need a strong GPU.");
+    }
     if (ImGui::CollapsingHeader("Density", ImGuiTreeNodeFlags_DefaultOpen)) {
         changed |= ImGui::SliderFloat("Blades / m2, LOD0", &edit.densityLod0, 0.0f, 120.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
         changed |= ImGui::SliderFloat("Blades / m2, LOD1", &edit.densityLod1, 0.0f, 40.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
         changed |= ImGui::SliderFloat("Blades / m2, LOD2", &edit.densityLod2, 0.0f, 10.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+        changed |= ImGui::SliderFloat("Density fall share", &edit.densityBlend, 0.05f, 1.0f);
         changed |= ImGui::SliderFloat("Patchiness", &edit.patchiness, 0.0f, 1.0f);
         changed |= ImGui::SliderFloat("Patch size (m)", &edit.patchScaleM, 5.0f, 300.0f);
         changed |= ImGui::SliderFloat("Bare threshold", &edit.bareThreshold, 0.0f, 1.0f);
@@ -97,8 +112,13 @@ bool BuildGrassPanel(GrassSettings& edit, const GrassViewSnapshot& game, const G
         changed |= ImGui::SliderFloat("Height variation", &edit.heightVariation, 0.0f, 0.9f);
         changed |= ImGui::SliderFloat("Rest lean (rad)", &edit.lean, 0.0f, 1.2f);
         changed |= ImGui::SliderFloat("Largest bend (rad)", &edit.maxBend, 0.1f, 1.5f);
-        changed |= ImGui::SliderFloat("LOD1 width x", &edit.lod1WidthScale, 1.0f, 6.0f);
-        changed |= ImGui::SliderFloat("LOD2 width x", &edit.lod2WidthScale, 1.0f, 12.0f);
+        changed |= ImGui::SliderFloat("Widening with distance", &edit.widthCompensation, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Largest widening x", &edit.maxWidthScale, 1.0f, 12.0f);
+        int segments = static_cast<int>(edit.lod0Segments);
+        if (ImGui::SliderInt("Near blade segments", &segments, static_cast<int>(kGrassMinLod0Segments), static_cast<int>(kGrassMaxLod0Segments))) {
+            edit.lod0Segments = static_cast<std::uint32_t>(segments);
+            changed = true;
+        }
     }
     if (ImGui::CollapsingHeader("Where grass grows", ImGuiTreeNodeFlags_DefaultOpen)) {
         changed |= ImGui::SliderFloat("Max slope (deg)", &edit.maxSlopeDeg, 1.0f, 89.0f);
@@ -113,7 +133,8 @@ bool BuildGrassPanel(GrassSettings& edit, const GrassViewSnapshot& game, const G
         changed |= ImGui::SliderFloat("LOD0 to (m)", &edit.lod0Distance, 5.0f, 120.0f);
         changed |= ImGui::SliderFloat("LOD1 to (m)", &edit.lod1Distance, 10.0f, 250.0f);
         changed |= ImGui::SliderFloat("LOD2 / cull (m)", &edit.lod2Distance, 20.0f, 360.0f);
-        changed |= ImGui::SliderFloat("Far edge fade", &edit.edgeFade, 0.02f, 1.0f);
+        changed |= ImGui::SliderFloat("Far edge thinning", &edit.edgeFade, 0.02f, 1.0f);
+        changed |= ImGui::SliderFloat("Far edge shrink", &edit.farHeightFade, 0.0f, 0.6f);
     }
     if (ImGui::CollapsingHeader("Wind")) {
         changed |= ImGui::Checkbox("Follow the cloud wind", &edit.followCloudWind);
@@ -133,10 +154,15 @@ bool BuildGrassPanel(GrassSettings& edit, const GrassViewSnapshot& game, const G
         changed |= ImGui::ColorEdit3("Tip colour", edit.colorTip, ImGuiColorEditFlags_Float);
         changed |= ImGui::SliderFloat("Tint variation", &edit.tintVariation, 0.0f, 1.0f);
         changed |= ImGui::SliderFloat("Root darkening", &edit.rootAo, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Terrain colour tint", &edit.terrainTint, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Far terrain colour blend", &edit.farTerrainBlend, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Ground normal blend", &edit.groundNormalBlend, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Ground self shadow", &edit.selfShadow, 0.0f, 1.0f);
         changed |= ImGui::SliderFloat("Translucency", &edit.translucency, 0.0f, 3.0f);
         changed |= ImGui::SliderFloat("Sun visibility", &edit.sunVisibility, 0.0f, 1.5f);
     }
     if (ImGui::CollapsingHeader("Budget")) {
+        ImGui::TextDisabled("Grass memory: %.1f MiB of instances.", static_cast<double>(GrassInstanceBytes(SanitizeGrassSettings(edit))) / (1024.0 * 1024.0));
         int cells = static_cast<int>(edit.gridCells);
         if (ImGui::SliderInt("Chunk grid (per side)", &cells, 8, static_cast<int>(kGrassMaxGridCells))) {
             edit.gridCells = static_cast<std::uint32_t>(cells);
