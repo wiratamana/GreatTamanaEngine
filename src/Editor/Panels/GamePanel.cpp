@@ -4,6 +4,7 @@
 #include "../EditorFrame.h"
 #include "OverlayLabel.h"
 #include "../Terrain/TerrainViewOverlay.h"
+#include "../Water/WaterGizmoOverlay.h"
 
 #include <imgui.h>
 
@@ -29,10 +30,13 @@ void GamePanel::OnGui(EditorFrame& frame)
         ImGui::Image(static_cast<ImTextureID>(static_cast<std::uint64_t>(ctx.gameViewDescriptor)), avail);
         const ImVec2 imageMin = ImGui::GetItemRectMin();
         const ImVec2 imageSize = ImGui::GetItemRectSize();
-        GatherTerrainCameraInput(ctx.terrainUi, ImGui::IsItemHovered());
+        const bool imageHovered = ImGui::IsItemHovered();
+        GatherTerrainCameraInput(ctx.terrainUi, imageHovered && !ctx.waterUi.handleHot);
         if (ctx.terrainUi.snapshot.hasViewProjection) {
-            DrawTerrainBoundsOverlay(ctx.terrainUi, ctx.terrainUi.snapshot.viewProjection, Vec2(imageMin.x, imageMin.y),
-                Vec2(imageMin.x + imageSize.x, imageMin.y + imageSize.y));
+            const Vec2 rectMin(imageMin.x, imageMin.y);
+            const Vec2 rectMax(imageMin.x + imageSize.x, imageMin.y + imageSize.y);
+            DrawTerrainBoundsOverlay(ctx.terrainUi, ctx.terrainUi.snapshot.viewProjection, rectMin, rectMax);
+            DrawWaterGizmos(ctx.waterUi, ctx.terrainUi.snapshot.viewProjection, rectMin, rectMax, imageHovered);
         }
         if (ctx.hizDemo.active && ctx.hizDemo.geometryOnly) {
             DrawViewOverlayLabel(ImGui::GetItemRectMin(), ImGui::GetItemRectSize(), kHizDemoOverlayLabel, 0);

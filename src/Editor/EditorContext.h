@@ -13,6 +13,7 @@
 #include "../Core/UiTextureHandle.h"
 #include "TransformGizmo.h"
 #include "Terrain/TerrainUiBridge.h"
+#include "Water/WaterUiBridge.h"
 #include "../Math/Mat4.h"
 #include "../Math/Vec2.h"
 #include "RenderGraphRegimeChoice.h"
@@ -152,6 +153,9 @@ struct EditorContext {
 
     // Terrain panel <-> terrain world mailbox, plus the state the view overlays read.
     TerrainUiBridge terrainUi;
+
+    // Water panel state and the handles of the view gizmos.
+    WaterUiBridge waterUi;
 };
 
 } // namespace gte

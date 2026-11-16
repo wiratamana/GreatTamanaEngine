@@ -10,6 +10,7 @@
 #include "../SceneOverlay.h"
 #include "../TransformGizmo.h"
 #include "../Terrain/TerrainViewOverlay.h"
+#include "../Water/WaterGizmoOverlay.h"
 #include "../../ECS/Components/Camera.h"
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"
@@ -208,6 +209,7 @@ void ScenePanel::OnGui(EditorFrame& frame)
     BuildCameraOverlay(registry, ctx, camera, imageMin, imageSize, hovered);
     if (ctx.sceneCamera.rendered) {
         DrawTerrainBoundsOverlay(ctx.terrainUi, ctx.sceneCamera.viewProjection, ctx.sceneCamera.rectMin, ctx.sceneCamera.rectMax);
+        DrawWaterGizmos(ctx.waterUi, ctx.sceneCamera.viewProjection, ctx.sceneCamera.rectMin, ctx.sceneCamera.rectMax, hovered);
     }
 
     // Transform gizmo of the selected entity, drawn with the Scene camera.

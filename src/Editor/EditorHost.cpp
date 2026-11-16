@@ -3,6 +3,7 @@
 #include "Logger.h"
 #include "Terrain/TerrainCommands.h"
 #include "Water/WaterCommands.h"
+#include "Water/WaterUiBridge.h"
 #include "Terrain/TerrainUiBridge.h"
 #include "../Game/RenderSystem.h"
 #include "EditorSceneIOCapability.h"
@@ -830,6 +831,9 @@ int EditorHost::Run()
         }
         if (terrainUi != nullptr) {
             PublishTerrainSnapshot(m_terrainWorld, *terrainUi, terrainViewProjection ? &*terrainViewProjection : nullptr);
+        }
+        if (WaterUiBridge* const waterUi = m_editorLayer->WaterUi()) {
+            waterUi->world = &m_waterWorld;
         }
         m_waterWorld.Tick(static_cast<double>(nowTicksNs) / 1.0e9);
 

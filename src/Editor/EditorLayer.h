@@ -37,6 +37,7 @@ class Window;
 class Renderer;
 class Game;
 struct TerrainUiBridge;
+struct WaterUiBridge;
 
 namespace rg {
 class RenderGraph;
@@ -388,6 +389,9 @@ public:
 
     // Mailbox of the Terrain panel (see Terrain/TerrainUiBridge.h). nullptr for NullEditorLayer.
     virtual TerrainUiBridge* TerrainUi() noexcept { return nullptr; }
+
+    // State of the Water panel and gizmos (see Water/WaterUiBridge.h). nullptr for NullEditorLayer.
+    virtual WaterUiBridge* WaterUi() noexcept { return nullptr; }
 };
 
 // Creates the real ImGui-backed editor layer (defined in src/Editor/ImGuiEditorLayer.cpp).
