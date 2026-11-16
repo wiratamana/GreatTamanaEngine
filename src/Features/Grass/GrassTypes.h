@@ -166,15 +166,14 @@ inline std::uint32_t GrassCandidatesPerChunk(float bladesPerM2) noexcept
 }
 
 // Debug view of the blade colour.
-enum class GrassDebugView : std::uint32_t { Normal = 0, LodColor = 1, Sway = 2 };
+enum class GrassDebugView : std::uint32_t { Normal = 0, LodColor = 1, Sway = 2, ChunkBounds = 3 };
 
 // User-facing settings. Lives in the feature object; the panel and the HTTP endpoint edit it.
 struct GrassSettings {
     bool enabled = true;
     bool hizCulling = true;
     bool collectStats = true;
-    GrassDebugView debugView = GrassDebugView::Normal; // LodColor: LOD0 green, LOD1 yellow, LOD2 red.
-    bool showChunkBounds = false;                      // Editor overlay only; the shaders do not draw boxes.
+    GrassDebugView debugView = GrassDebugView::Normal; // LodColor: LOD0 green, LOD1 yellow, LOD2 red. ChunkBounds: 16 m chunk checker and borders.
 
     // Density in blades per m^2. LOD1 and LOD2 are index prefixes of LOD0, so they thin out the same blades.
     float densityLod0 = 32.0f;

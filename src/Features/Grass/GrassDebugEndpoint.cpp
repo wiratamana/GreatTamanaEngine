@@ -29,7 +29,6 @@ constexpr std::array kSettingKeys{
     SettingKey{ "enabled", &GrassSettings::enabled },
     SettingKey{ "hizCulling", &GrassSettings::hizCulling },
     SettingKey{ "collectStats", &GrassSettings::collectStats },
-    SettingKey{ "showChunkBounds", &GrassSettings::showChunkBounds },
     SettingKey{ "densityLod0", &GrassSettings::densityLod0 },
     SettingKey{ "densityLod1", &GrassSettings::densityLod1 },
     SettingKey{ "densityLod2", &GrassSettings::densityLod2 },
@@ -77,7 +76,7 @@ constexpr std::array kSettingKeys{
 constexpr std::string_view kDebugViewKey = "debugView";
 constexpr std::string_view kColorRootKey = "colorRoot";
 constexpr std::string_view kColorTipKey = "colorTip";
-constexpr std::array<std::string_view, 3> kDebugViewNames{ "Normal", "LodColor", "Sway" };
+constexpr std::array<std::string_view, 4> kDebugViewNames{ "Normal", "LodColor", "Sway", "ChunkBounds" };
 
 struct ScopeName {
     rg::ViewScope scope;
@@ -304,7 +303,7 @@ fx::FeatureDebugResult GrassDebugEndpoint::Set(std::span<const fx::FeatureDebugA
         if (arg.key == kDebugViewKey) {
             const auto found = std::find(kDebugViewNames.begin(), kDebugViewNames.end(), std::string_view(arg.value));
             if (found == kDebugViewNames.end()) {
-                return Fail(arg.key, "debugView must be one of Normal, LodColor, Sway");
+                return Fail(arg.key, "debugView must be one of Normal, LodColor, Sway, ChunkBounds");
             }
             candidate.debugView = static_cast<GrassDebugView>(found - kDebugViewNames.begin());
             continue;

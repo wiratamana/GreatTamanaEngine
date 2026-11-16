@@ -42,6 +42,14 @@ void main()
         albedo = lodColor * 0.5;
     } else if (debugMode == 2u) {
         albedo = mix(vec3(0.0, 0.2, 1.0), vec3(1.0, 0.1, 0.0), clamp(inInfo.z / 0.7, 0.0, 1.0)) * 0.5;
+    } else if (debugMode == 3u) {
+        // Chunk checker with bright borders, from the world position of the fragment.
+        vec2 chunk = (params.cameraWorld.xy + inPosRel.xz) / params.camRel.w;
+        vec2 cell = floor(chunk);
+        vec2 edge = min(fract(chunk), 1.0 - fract(chunk));
+        float border = 1.0 - step(0.03, min(edge.x, edge.y));
+        float checker = mod(cell.x + cell.y, 2.0);
+        albedo = mix(mix(vec3(0.05, 0.25, 0.6), vec3(0.6, 0.3, 0.05), checker), vec3(1.0), border) * 0.5;
     }
 
     float ao = mix(params.colorRoot.w, 1.0, smoothstep(0.0, 0.45, t));

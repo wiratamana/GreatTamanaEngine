@@ -56,7 +56,7 @@ GrassSettings SanitizeGrassSettings(const GrassSettings& in) noexcept
     const GrassSettings d{};
     GrassSettings s = in;
 
-    s.debugView = static_cast<GrassDebugView>(std::min<std::uint32_t>(static_cast<std::uint32_t>(in.debugView), 2u));
+    s.debugView = static_cast<GrassDebugView>(std::min<std::uint32_t>(static_cast<std::uint32_t>(in.debugView), 3u));
 
     s.densityLod0 = Clamp(in.densityLod0, d.densityLod0, 0.0f, 200.0f);
     s.densityLod1 = std::min(Clamp(in.densityLod1, d.densityLod1, 0.0f, 200.0f), s.densityLod0);
