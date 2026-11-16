@@ -97,6 +97,23 @@ public:
         lastPose = pose;
         return {};
     }
+    terrain::TerrainResult SetCarve(std::shared_ptr<const terrain::ITerrainCarve> carve, std::span<const terrain::Rect2> dirty) override
+    {
+        lastCarve = std::move(carve);
+        lastDirty.assign(dirty.begin(), dirty.end());
+        ++carveCalls;
+        return {};
+    }
+    std::optional<terrain::TerrainHeightProbe> ProbeHeight(double x, double z) const override
+    {
+        if (!open) {
+            return std::nullopt;
+        }
+        const double base = 100.0 + 0.01 * x + 0.02 * z;
+        return terrain::TerrainHeightProbe{ base, lastCarve ? lastCarve->Apply(x, z, static_cast<float>(base), 2.0) : base };
+    }
+    void SetOceanQuadVisible(bool visible) override { oceanQuad = visible; }
+    bool OceanQuadVisible() const override { return oceanQuad; }
 
     terrain::TerrainSettings settings;
     terrain::TerrainRuntimeOptions runtime;
@@ -114,6 +131,10 @@ public:
     int settingsCalls = 0;
     int feedCalls = 0;
     int queuedFrames = 0;
+    int carveCalls = 0;
+    std::shared_ptr<const terrain::ITerrainCarve> lastCarve;
+    std::vector<terrain::Rect2> lastDirty;
+    bool oceanQuad = true;
     bool open = false;
     bool preview = false;
     bool aabb = false;

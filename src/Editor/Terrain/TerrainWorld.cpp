@@ -280,6 +280,42 @@ std::pair<double, double> TerrainWorld::FindLandSpot() const
     return hillyDistance < 1.0e30 ? hilly : land;
 }
 
+terrain::TerrainResult TerrainWorld::SetCarve(std::shared_ptr<const terrain::ITerrainCarve> carve, std::span<const terrain::Rect2> dirty)
+{
+    m_carve = std::move(carve);
+    if (!m_streamer) {
+        return Success("carve stored for the next open");
+    }
+    const int invalidated = m_streamer->SetCarve(m_carve, dirty);
+    if (m_livePreview) {
+        m_previewDirty = true;
+    }
+    return Success("carve applied; " + std::to_string(invalidated) + " nodes rebuild");
+}
+
+std::optional<terrain::TerrainHeightProbe> TerrainWorld::ProbeHeight(double x, double z) const
+{
+    if (!m_streamer) {
+        return std::nullopt;
+    }
+    const terrain::TerrainHeightField& field = m_streamer->Field();
+    return terrain::TerrainHeightProbe{ field.BaseHeight(x, z, 2.0), field.Height(x, z, 2.0) };
+}
+
+void TerrainWorld::SetOceanQuadVisible(bool visible)
+{
+    m_oceanQuadVisible = visible;
+    const TerrainWorldServices svc = m_servicesFn();
+    if (!m_open || svc.game == nullptr || m_entities.water == kInvalidEntity || !m_aux) {
+        return;
+    }
+    if (visible) {
+        SetMeshRenderer(*svc.game, m_entities.water, m_aux->WaterRenderer());
+    } else {
+        RemoveMeshRenderer(*svc.game, m_entities.water);
+    }
+}
+
 void TerrainWorld::PickPreviewCenter()
 {
     if (!m_streamer) {
@@ -373,6 +409,9 @@ terrain::TerrainResult TerrainWorld::OpenImpl(const terrain::TerrainOpenOptions&
     if (m_baked) {
         m_streamer->SetNodeProvider(terrain::MakeBakedNodeProvider(m_baked));
     }
+    if (m_carve) {
+        m_streamer->SetCarve(m_carve, {});
+    }
     ApplySelectorBudget();
     ApplyStreamerConfig();
 
@@ -416,7 +455,9 @@ terrain::TerrainResult TerrainWorld::OpenImpl(const terrain::TerrainOpenOptions&
         entities.water = registry.CreateEntity();
         created.Add(entities.water);
         registry.AddComponent<Transform>(entities.water);
-        registry.AddComponent<MeshRenderer>(entities.water, m_aux->WaterRenderer());
+        if (m_oceanQuadVisible) {
+            registry.AddComponent<MeshRenderer>(entities.water, m_aux->WaterRenderer());
+        }
         SetEntityName(registry, entities.water, "Terrain Water");
     }
 
@@ -442,6 +483,7 @@ terrain::TerrainResult TerrainWorld::OpenImpl(const terrain::TerrainOpenOptions&
     m_materialDirty = false;
     m_savedCamera.reset();
     m_pending.clear();
+    m_pendingReplace.clear();
     m_slotOfKey.clear();
     m_keyOfSlot.assign(layout->slotCount, std::nullopt);
     m_wantEnabled.assign(layout->slotCount, 0);
@@ -478,6 +520,7 @@ terrain::TerrainResult TerrainWorld::CloseImpl(const char* reason)
     m_streamer.reset();
     m_selector.reset();
     m_pending.clear();
+    m_pendingReplace.clear();
     m_slotOfKey.clear();
     m_keyOfSlot.clear();
 
@@ -921,6 +964,19 @@ void TerrainWorld::TickStreaming(const TerrainTickContext& context, Game& game, 
             m_slotOfKey.erase(it);
         }
         std::erase_if(m_pending, [&key](const std::shared_ptr<const terrain::NodeMesh>& n) { return n->key == key; });
+        std::erase_if(m_pendingReplace, [&key](const std::shared_ptr<const terrain::NodeMesh>& n) { return n->key == key; });
+    }
+    // New geometry for a node the pool already holds goes to a fresh slot; the old one is released once that is written.
+    for (const std::shared_ptr<const terrain::NodeMesh>& node : m_update.rebuilt) {
+        m_selector->SetNodeHeightRange(node->key, node->boundsMin.y, node->boundsMax.y);
+        auto& queue = m_slotOfKey.contains(node->key) ? m_pendingReplace : m_pending;
+        const auto same = std::find_if(queue.begin(), queue.end(),
+            [&node](const std::shared_ptr<const terrain::NodeMesh>& p) { return p->key == node->key; });
+        if (same != queue.end()) {
+            *same = node;
+        } else {
+            queue.push_back(node);
+        }
     }
     for (const std::shared_ptr<const terrain::NodeMesh>& node : m_update.ready) {
         m_selector->SetNodeHeightRange(node->key, node->boundsMin.y, node->boundsMax.y);
@@ -967,6 +1023,25 @@ void TerrainWorld::TickStreaming(const TerrainTickContext& context, Game& game, 
         }
         m_pending.erase(m_pending.begin(), m_pending.begin() + static_cast<std::ptrdiff_t>(used));
     }
+    std::size_t replaced = 0;
+    while (replaced < m_pendingReplace.size() && written < m_runtime.maxUploadsPerTick) {
+        const terrain::NodeMesh& node = *m_pendingReplace[replaced];
+        const std::optional<std::uint32_t> slot = m_pool->WriteNode(node, frame);
+        if (!slot.has_value()) {
+            break;
+        }
+        if (const auto old = m_slotOfKey.find(node.key); old != m_slotOfKey.end()) {
+            m_pool->Release(old->second, frame);
+            m_keyOfSlot[old->second].reset();
+            old->second = *slot;
+        } else {
+            m_slotOfKey[node.key] = *slot;
+        }
+        m_keyOfSlot[*slot] = node.key;
+        ++replaced;
+        ++written;
+    }
+    m_pendingReplace.erase(m_pendingReplace.begin(), m_pendingReplace.begin() + static_cast<std::ptrdiff_t>(replaced));
 
     // Which slots the cull may draw: the draw list, holes filled by ready parents or children.
     m_streamer->BuildDrawList(m_wanted, m_drawList);
@@ -1005,7 +1080,12 @@ void TerrainWorld::TickStreaming(const TerrainTickContext& context, Game& game, 
     m_stats.nodesInView = selection.inView;
     m_stats.nodesResident = streamer.resident;
     m_stats.nodesPending = streamer.pending;
-    m_stats.uploadQueue = static_cast<int>(m_pending.size());
+    m_stats.uploadQueue = static_cast<int>(m_pending.size() + m_pendingReplace.size());
+    m_stats.nodesRebuilding = streamer.rebuilding;
+    m_stats.carveDirtyNodes = streamer.carveLastDirtyNodes;
+    m_stats.carveRebuildMs = streamer.carveRebuildMs;
+    m_stats.carveHash = m_streamer->CarveHash();
+    m_stats.oceanQuadVisible = m_oceanQuadVisible;
     m_stats.nodesWrittenThisTick = written;
     m_stats.builtTotal = streamer.builtTotal;
     m_stats.evictedTotal = streamer.evictedTotal;

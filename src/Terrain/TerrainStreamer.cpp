@@ -30,6 +30,19 @@ ITerrainExecutor& DefaultExecutor()
     return executor;
 }
 
+Rect2 NodeRect(const TerrainLayout& layout, const NodeKey& key) noexcept
+{
+    const NodeGeometry g = NodeGeometryOf(layout, key);
+    return { g.originX - g.spacing, g.originZ - g.spacing, g.originX + g.size + g.spacing, g.originZ + g.size + g.spacing };
+}
+
+// Baked nodes know nothing about the carve, so a node it can change is generated instead.
+bool CarveTouchesNode(const TerrainHeightField& field, const NodeKey& key) noexcept
+{
+    const ITerrainCarve* carve = field.Carve();
+    return carve != nullptr && carve->Affects(NodeRect(field.Layout(), key), NodeGeometryOf(field.Layout(), key).spacing);
+}
+
 } // namespace
 
 // Owned by the cache entry until the job is collected, so the job never outlives its data.
@@ -48,7 +61,8 @@ struct TerrainStreamer::Job {
 struct TerrainStreamer::Entry {
     enum class State : std::uint8_t { Queued, Running, Ready, Failed };
     State state = State::Queued;
-    std::shared_ptr<const NodeMesh> mesh;
+    std::shared_ptr<const NodeMesh> mesh; // Published mesh; kept while a carve rebuild runs.
+    bool rebuilding = false;
     std::unique_ptr<Job> job;
     std::uint64_t lastWanted = 0;
     double distance = 0.0;
@@ -64,7 +78,7 @@ void TerrainStreamer::RunNodeJob(void* raw)
         if (!job.cancel.load(std::memory_order_relaxed)) {
             const auto start = std::chrono::steady_clock::now();
             std::optional<NodeMesh> provided;
-            if (job.provider) {
+            if (job.provider && !CarveTouchesNode(*job.field, job.key)) {
                 provided = (*job.provider)(job.field->Settings(), job.key);
             }
             job.result = provided ? std::make_shared<NodeMesh>(std::move(*provided))
@@ -101,7 +115,7 @@ SettingsChange TerrainStreamer::SetSettings(const TerrainSettings& requested)
     if (change == SettingsChange::None) {
         return change;
     }
-    m_field = std::make_shared<const TerrainHeightField>(next);
+    m_field = std::make_shared<const TerrainHeightField>(next, m_field->CarveShared());
 
     if (HasChange(change, SettingsChange::Height)) {
         ++m_generation;
@@ -109,6 +123,7 @@ SettingsChange TerrainStreamer::SetSettings(const TerrainSettings& requested)
         for (auto& [key, entry] : m_entries) {
             if (entry->state == Entry::State::Running) {
                 entry->job->cancel.store(true, std::memory_order_relaxed);
+                DropMesh(*entry, key);
             } else {
                 doomed.push_back(key);
             }
@@ -118,7 +133,7 @@ SettingsChange TerrainStreamer::SetSettings(const TerrainSettings& requested)
         }
     } else if (HasChange(change, SettingsChange::Material)) {
         for (auto& [key, entry] : m_entries) {
-            if (entry->state == Entry::State::Ready) {
+            if (entry->mesh) {
                 auto copy = std::make_shared<NodeMesh>(*entry->mesh);
                 RecolorNode(*copy, next);
                 entry->mesh = copy;
@@ -136,6 +151,7 @@ void TerrainStreamer::Clear()
     for (auto& [key, entry] : m_entries) {
         if (entry->state == Entry::State::Running) {
             entry->job->cancel.store(true, std::memory_order_relaxed);
+            DropMesh(*entry, key);
         } else {
             doomed.push_back(key);
         }
@@ -143,6 +159,60 @@ void TerrainStreamer::Clear()
     for (const NodeKey& key : doomed) {
         EvictEntry(key);
     }
+}
+
+int TerrainStreamer::SetCarve(std::shared_ptr<const ITerrainCarve> carve, std::span<const Rect2> dirty)
+{
+    const std::uint64_t nextHash = carve ? carve->Hash() : 0;
+    if (nextHash == m_field->CarveHash() && static_cast<bool>(carve) == (m_field->Carve() != nullptr)) {
+        return 0;
+    }
+    const std::shared_ptr<const ITerrainCarve> previous = m_field->CarveShared();
+    m_field = std::make_shared<const TerrainHeightField>(m_field->Settings(), std::move(carve));
+    const ITerrainCarve* next = m_field->Carve();
+    int invalidated = 0;
+    for (auto& [key, entryPtr] : m_entries) {
+        Entry& entry = *entryPtr;
+        if (entry.state == Entry::State::Queued && !entry.mesh) {
+            continue; // Not started yet: it will use the new field.
+        }
+        const NodeGeometry geometry = NodeGeometryOf(m_field->Layout(), key);
+        const Rect2 rect = NodeRect(m_field->Layout(), key);
+        if (std::none_of(dirty.begin(), dirty.end(), [&rect](const Rect2& d) { return d.Overlaps(rect); })) {
+            continue;
+        }
+        // Either carve must be able to move a vertex of this node, else its mesh is already right.
+        const bool touched = (previous && previous->Affects(rect, geometry.spacing)) || (next && next->Affects(rect, geometry.spacing));
+        if (!touched) {
+            continue;
+        }
+        ++invalidated;
+        if (entry.state == Entry::State::Running) {
+            entry.job->cancel.store(true, std::memory_order_relaxed);
+        } else {
+            entry.state = Entry::State::Queued;
+        }
+        entry.rebuilding = entry.mesh != nullptr;
+    }
+    m_stats.carveLastDirtyNodes = invalidated;
+    m_stats.carveInvalidatedTotal += static_cast<std::uint64_t>(invalidated);
+    if (invalidated > 0) {
+        m_carveStart = std::chrono::steady_clock::now();
+        m_carveTiming = true;
+    }
+    return invalidated;
+}
+
+void TerrainStreamer::DropMesh(Entry& entry, const NodeKey& key)
+{
+    if (!entry.mesh) {
+        return;
+    }
+    m_bytes -= std::min(m_bytes, entry.mesh->ByteSize());
+    m_pendingEvictions.push_back(key);
+    ++m_stats.evictedTotal;
+    entry.mesh.reset();
+    entry.rebuilding = false;
 }
 
 void TerrainStreamer::SetNodeProvider(NodeProvider provider)
@@ -157,7 +227,7 @@ void TerrainStreamer::EvictEntry(const NodeKey& key)
     if (it == m_entries.end()) {
         return;
     }
-    if (it->second->state == Entry::State::Ready) {
+    if (it->second->mesh) {
         m_bytes -= std::min(m_bytes, it->second->mesh->ByteSize());
         m_pendingEvictions.push_back(key);
         ++m_stats.evictedTotal;
@@ -175,7 +245,8 @@ void TerrainStreamer::CollectFinished(double nowSeconds)
         Job& job = *entry.job;
         const bool stale = job.generation != m_generation || job.cancel.load(std::memory_order_relaxed);
         if (job.failed) {
-            entry.state = Entry::State::Failed;
+            entry.state = entry.mesh ? Entry::State::Ready : Entry::State::Failed;
+            entry.rebuilding = false;
             entry.job.reset();
         } else if (stale || !job.result) {
             entry.state = Entry::State::Queued;
@@ -190,11 +261,16 @@ void TerrainStreamer::CollectFinished(double nowSeconds)
             }
             m_completionTimes.push_back(nowSeconds);
             ++m_stats.builtTotal;
+            const bool replacing = entry.mesh != nullptr;
+            if (replacing) {
+                m_bytes -= std::min(m_bytes, entry.mesh->ByteSize());
+            }
             entry.mesh = std::move(job.result);
             entry.state = Entry::State::Ready;
+            entry.rebuilding = false;
             entry.job.reset();
             m_bytes += entry.mesh->ByteSize();
-            m_pendingReady.push_back(entry.mesh);
+            (replacing ? m_pendingRebuilt : m_pendingReady).push_back(entry.mesh);
         }
     }
 }
@@ -222,7 +298,7 @@ void TerrainStreamer::StartJobs(std::uint64_t frame)
         }
     }
     for (const NodeKey& key : unwantedQueued) {
-        m_entries.erase(key);
+        EvictEntry(key);
     }
     const int free = m_config.maxInFlight - running;
     if (free <= 0 || candidates.empty()) {
@@ -269,7 +345,7 @@ void TerrainStreamer::Evict(std::uint64_t frame)
     // Over budget: drop the nodes unwanted the longest. Wanted nodes stay.
     std::vector<std::pair<std::uint64_t, NodeKey>> order;
     for (auto& [key, entryPtr] : m_entries) {
-        if (entryPtr->state == Entry::State::Ready && entryPtr->lastWanted != frame) {
+        if (entryPtr->state != Entry::State::Running && entryPtr->mesh && entryPtr->lastWanted != frame) {
             order.emplace_back(entryPtr->lastWanted, key);
         }
     }
@@ -301,6 +377,8 @@ void TerrainStreamer::Update(const std::vector<WantedNode>& wanted, std::uint64_
 
     out.ready.insert(out.ready.end(), std::make_move_iterator(m_pendingReady.begin()), std::make_move_iterator(m_pendingReady.end()));
     m_pendingReady.clear();
+    out.rebuilt.insert(out.rebuilt.end(), std::make_move_iterator(m_pendingRebuilt.begin()), std::make_move_iterator(m_pendingRebuilt.end()));
+    m_pendingRebuilt.clear();
     out.evicted.insert(out.evicted.end(), m_pendingEvictions.begin(), m_pendingEvictions.end());
     m_pendingEvictions.clear();
 
@@ -310,12 +388,19 @@ void TerrainStreamer::Update(const std::vector<WantedNode>& wanted, std::uint64_
     int resident = 0;
     int pending = 0;
     int running = 0;
+    int rebuilding = 0;
     for (const auto& [key, entry] : m_entries) {
-        resident += entry->state == Entry::State::Ready ? 1 : 0;
+        resident += entry->mesh ? 1 : 0;
+        rebuilding += entry->rebuilding ? 1 : 0;
         pending += (entry->state == Entry::State::Queued || entry->state == Entry::State::Running) ? 1 : 0;
         running += entry->state == Entry::State::Running ? 1 : 0;
     }
     m_stats.resident = resident;
+    m_stats.rebuilding = rebuilding;
+    if (m_carveTiming && rebuilding == 0) {
+        m_stats.carveRebuildMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - m_carveStart).count();
+        m_carveTiming = false;
+    }
     m_stats.pending = pending;
     m_stats.running = running;
     m_stats.bytesResident = m_bytes;
@@ -333,10 +418,7 @@ void TerrainStreamer::Update(const std::vector<WantedNode>& wanted, std::uint64_
 std::shared_ptr<const NodeMesh> TerrainStreamer::Find(const NodeKey& key) const
 {
     const auto it = m_entries.find(key);
-    if (it == m_entries.end() || it->second->state != Entry::State::Ready) {
-        return nullptr;
-    }
-    return it->second->mesh;
+    return it == m_entries.end() ? nullptr : it->second->mesh;
 }
 
 void TerrainStreamer::CollectDescendants(const NodeKey& key, std::vector<DrawNode>& out) const

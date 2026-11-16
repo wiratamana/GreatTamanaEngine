@@ -4,13 +4,16 @@
 // the GPU details stay behind it. Every call is made on the main thread.
 
 #include "TerrainCameraRig.h"
+#include "TerrainCarve.h"
 #include "TerrainFlight.h"
 #include "TerrainSettings.h"
 #include "TerrainTypes.h"
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -148,7 +151,20 @@ struct TerrainStats {
     double assetElapsedMs = 0.0;
     std::string assetResult;
 
+    // Water carve and the old flat ocean quad.
+    std::uint64_t carveHash = 0;       // 0 = no carve.
+    int nodesRebuilding = 0;           // Nodes showing an old mesh while the carve rebuild runs.
+    int carveDirtyNodes = 0;           // Nodes the last carve change invalidated.
+    double carveRebuildMs = 0.0;       // Wall time of the last finished carve rebuild.
+    bool oceanQuadVisible = true;
+
     std::string lastError;
+};
+
+// Terrain height at one world position, before and after the carve (metres).
+struct TerrainHeightProbe {
+    double baseHeight = 0.0;
+    double carvedHeight = 0.0;
 };
 
 // Slot count used when TerrainOpenOptions::poolSlots is 0: room for the visible cap, its prefetch ring and fallbacks.
@@ -200,6 +216,14 @@ public:
     virtual void FeedCameraInput(const CameraInput& input) = 0;
     virtual TerrainResult QueueCameraInput(const CameraInput& perFrame, int frames) = 0; // Scripted input for tests.
     virtual TerrainResult SetCameraPose(const TerrainCameraPose& pose) = 0;
+
+    // --- Water integration ---
+    // Swaps the carve; only nodes touching `dirty` are rebuilt, and their old mesh draws until the new one is ready.
+    virtual TerrainResult SetCarve(std::shared_ptr<const ITerrainCarve> carve, std::span<const Rect2> dirty) = 0;
+    // Height from the noise field (no erosion). Empty when the world is not open.
+    virtual std::optional<TerrainHeightProbe> ProbeHeight(double x, double z) const = 0;
+    virtual void SetOceanQuadVisible(bool visible) = 0;
+    virtual bool OceanQuadVisible() const = 0;
 };
 
 // Stats as one JSON object (numbers and strings only), for the HTTP routes.

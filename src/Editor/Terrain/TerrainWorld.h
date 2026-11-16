@@ -23,6 +23,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -90,6 +91,10 @@ public:
     void FeedCameraInput(const terrain::CameraInput& input) override { terrain::AccumulateInput(m_pendingInput, input); }
     terrain::TerrainResult QueueCameraInput(const terrain::CameraInput& perFrame, int frames) override;
     terrain::TerrainResult SetCameraPose(const terrain::TerrainCameraPose& pose) override;
+    terrain::TerrainResult SetCarve(std::shared_ptr<const terrain::ITerrainCarve> carve, std::span<const terrain::Rect2> dirty) override;
+    std::optional<terrain::TerrainHeightProbe> ProbeHeight(double x, double z) const override;
+    void SetOceanQuadVisible(bool visible) override;
+    bool OceanQuadVisible() const override { return m_oceanQuadVisible; }
 
 private:
     struct SceneEntities {
@@ -140,6 +145,8 @@ private:
 
     ServicesFn m_servicesFn;
     std::shared_ptr<const terrain::BakedTerrain> m_baked; // Serves nodes inside the loaded asset region.
+    std::shared_ptr<const terrain::ITerrainCarve> m_carve; // Survives reopen; applied to every new streamer.
+    bool m_oceanQuadVisible = true;
 
     terrain::TerrainSettings m_settings = terrain::Sanitize(terrain::TerrainSettings{});
     terrain::TerrainRuntimeOptions m_runtime;
@@ -171,6 +178,7 @@ private:
     std::vector<terrain::DrawNode> m_drawList;
     terrain::StreamerUpdate m_update;
     std::vector<std::shared_ptr<const terrain::NodeMesh>> m_pending; // Ready on the CPU, not yet in a slot.
+    std::vector<std::shared_ptr<const terrain::NodeMesh>> m_pendingReplace; // Rebuilt geometry waiting for a free slot.
     std::unordered_map<terrain::NodeKey, std::uint32_t, terrain::NodeKeyHash> m_slotOfKey;
     std::vector<std::optional<terrain::NodeKey>> m_keyOfSlot;
     std::vector<std::uint8_t> m_wantEnabled;

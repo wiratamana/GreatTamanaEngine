@@ -130,6 +130,12 @@ std::string TerrainStatsToJson(const TerrainStats& s)
     AddNumber(out, "assetElapsedMs", s.assetElapsedMs);
     AddText(out, "assetResult", s.assetResult);
 
+    AddInt(out, "carveHash", s.carveHash);
+    AddInt(out, "nodesRebuilding", s.nodesRebuilding);
+    AddInt(out, "carveDirtyNodes", s.carveDirtyNodes);
+    AddNumber(out, "carveRebuildMs", s.carveRebuildMs);
+    AddBool(out, "oceanQuadVisible", s.oceanQuadVisible);
+
     AddText(out, "lastError", s.lastError);
     out += '}';
     return out;

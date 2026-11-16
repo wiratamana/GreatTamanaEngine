@@ -10,11 +10,13 @@
 
 #include "../Jobs/JobTypes.h"
 
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -53,10 +55,15 @@ struct StreamerStats {
     double buildMsMax = 0.0;
     std::uint64_t builtTotal = 0;
     std::uint64_t evictedTotal = 0;
+    int rebuilding = 0;                       // Nodes still showing their old mesh while a carve rebuild runs.
+    int carveLastDirtyNodes = 0;              // Nodes the last carve change invalidated.
+    std::uint64_t carveInvalidatedTotal = 0;
+    double carveRebuildMs = 0.0;              // Wall time of the last finished carve rebuild.
 };
 
 struct StreamerUpdate {
     std::vector<std::shared_ptr<const NodeMesh>> ready; // New nodes, or recoloured copies of an existing key.
+    std::vector<std::shared_ptr<const NodeMesh>> rebuilt; // New geometry for a key whose old mesh was already published.
     std::vector<NodeKey> evicted;                       // Nodes the render side must release.
 };
 
@@ -79,6 +86,11 @@ public:
 
     // Applies new settings; returns what kind of rebuild it caused. Evictions land in the next Update().
     SettingsChange SetSettings(const TerrainSettings& settings);
+
+    // Swaps the terrain carve. Nodes touching a `dirty` rectangle are rebuilt; their old mesh keeps drawing until the
+    // new one is ready (reported in StreamerUpdate::rebuilt). Returns how many nodes were invalidated.
+    int SetCarve(std::shared_ptr<const ITerrainCarve> carve, std::span<const Rect2> dirty);
+    std::uint64_t CarveHash() const noexcept { return m_field->CarveHash(); }
 
     // Sets (or with an empty function removes) the node provider. Resident nodes are dropped and rebuilt.
     void SetNodeProvider(NodeProvider provider);
@@ -104,6 +116,7 @@ private:
     void CollectFinished(double nowSeconds);
     void Evict(std::uint64_t frame);
     void EvictEntry(const NodeKey& key);
+    void DropMesh(Entry& entry, const NodeKey& key);
     void CollectDescendants(const NodeKey& key, std::vector<DrawNode>& out) const;
 
     StreamerConfig m_config;
@@ -115,6 +128,9 @@ private:
     std::size_t m_bytes = 0;
     std::vector<NodeKey> m_pendingEvictions;
     std::vector<std::shared_ptr<const NodeMesh>> m_pendingReady;
+    std::vector<std::shared_ptr<const NodeMesh>> m_pendingRebuilt;
+    std::chrono::steady_clock::time_point m_carveStart{};
+    bool m_carveTiming = false;
     std::deque<double> m_completionTimes;
     std::deque<double> m_recentBuildMs;
     StreamerStats m_stats;
