@@ -121,8 +121,9 @@ std::optional<GrassTileReason> DecideGrassTileRebuild(const GrassTileView& view,
     if (view.now < view.settleUntil && now.streamRevision != last.streamRevision) {
         return GrassTileReason::Stream;
     }
-    for (const terrain::NodeKey& key : now.fineKeys) {
-        if (!last.fineKeys.contains(key)) {
+    for (const auto& [key, mesh] : now.fineNodes) {
+        const auto before = last.fineNodes.find(key);
+        if (before == last.fineNodes.end() || before->second != mesh) {
             return GrassTileReason::Stream;
         }
     }

@@ -198,7 +198,8 @@ void GrassTileProvider::Tick(double nowSeconds, double cameraX, double cameraZ)
     seen.rebuilding = surface.rebuilding;
     for (const std::shared_ptr<const terrain::NodeMesh>& node : surface.nodes) {
         if (node->key.level <= 1) {
-            seen.fineKeys.insert(node->key);
+            seen.fineNodes.emplace(node->key, node.get());
+            seen.pinned.push_back(node);
         }
     }
 

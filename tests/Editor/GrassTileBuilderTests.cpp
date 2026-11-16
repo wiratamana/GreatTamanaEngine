@@ -173,6 +173,10 @@ GrassTileView ViewWithTile()
     return v;
 }
 
+const terrain::NodeMesh kMeshA;
+const terrain::NodeMesh kMeshB;
+const terrain::NodeMesh kMeshC;
+
 GrassTileSeen Seen()
 {
     GrassTileSeen s;
@@ -181,7 +185,7 @@ GrassTileSeen Seen()
     s.carveHash = 3;
     s.terrainHash = 4;
     s.streamRevision = 5;
-    s.fineKeys = { terrain::NodeKey{ 0, 0, 0 }, terrain::NodeKey{ 1, 0, 0 } };
+    s.fineNodes = { { terrain::NodeKey{ 0, 0, 0 }, &kMeshA }, { terrain::NodeKey{ 1, 0, 0 }, &kMeshB } };
     return s;
 }
 
@@ -250,10 +254,18 @@ TEST(GrassTilePolicyTest, OnlyNewFineNodesTriggerAStreamRebuild)
     const GrassTileView v = ViewWithTile();
     GrassTileSeen now = Seen();
     now.streamRevision = 99; // Churn far away: nodes built and evicted, nothing new inside.
-    now.fineKeys.erase(terrain::NodeKey{ 1, 0, 0 });
+    now.fineNodes.erase(terrain::NodeKey{ 1, 0, 0 });
     EXPECT_FALSE(DecideGrassTileRebuild(v, Seen(), now).has_value());
-    now.fineKeys.insert(terrain::NodeKey{ 5, 5, 0 });
+    now.fineNodes.emplace(terrain::NodeKey{ 5, 5, 0 }, &kMeshC);
     EXPECT_EQ(DecideGrassTileRebuild(v, Seen(), now), GrassTileReason::Stream);
+}
+
+TEST(GrassTilePolicyTest, AReplacedMeshUnderTheSameKeyRebuilds)
+{
+    // A carve or terrain edit swaps the mesh of a node; the tile must follow even when no key is new.
+    GrassTileSeen now = Seen();
+    now.fineNodes[terrain::NodeKey{ 0, 0, 0 }] = &kMeshC;
+    EXPECT_EQ(DecideGrassTileRebuild(ViewWithTile(), Seen(), now), GrassTileReason::Stream);
 }
 
 TEST(GrassTilePolicyTest, SettlingAfterATerrainEditRebuildsOnAnyRebuiltNode)

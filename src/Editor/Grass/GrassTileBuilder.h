@@ -10,7 +10,8 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <unordered_set>
+#include <unordered_map>
+#include <vector>
 
 namespace gte {
 
@@ -52,7 +53,9 @@ struct GrassTileSeen {
     std::uint64_t terrainHash = 0;
     std::uint64_t streamRevision = 0;
     int rebuilding = 0;
-    std::unordered_set<terrain::NodeKey, terrain::NodeKeyHash> fineKeys; // Resident level 0 and 1 nodes.
+    // Resident level 0 and 1 nodes and which mesh each key held; a replaced mesh (same key) has new content.
+    std::unordered_map<terrain::NodeKey, const terrain::NodeMesh*, terrain::NodeKeyHash> fineNodes;
+    std::vector<std::shared_ptr<const terrain::NodeMesh>> pinned; // Keeps the addresses above from being reused.
 };
 
 // The submitted tile against the camera.
