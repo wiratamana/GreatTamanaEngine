@@ -47,7 +47,7 @@ struct TerrainUiSnapshot {
     bool debugAabb = false;
     std::string message;      // Outcome of the last action.
     bool messageIsError = false;
-    std::string busy;         // Not empty while a long action is waiting to run (the panel shows it).
+    std::string busy;         // Not empty while a background save or load runs (the panel shows it).
     bool hasViewProjection = false;
     Mat4 viewProjection = Mat4::Identity(); // Game camera, flipY, absolute world space.
     std::vector<terrain::TerrainNodeInfo> nodes; // Filled while the bounding-box overlay is on.
@@ -61,9 +61,8 @@ struct TerrainUiBridge {
     bool overlayColorByState = true; // Node boxes: by draw state (true) or by LOD level (false).
     bool lookCaptured = false;       // A camera drag started over the Game image and is still held.
 
-    // Host side: a save or load that was accepted and runs on the next frame, so the panel can show "busy" first.
-    std::optional<std::string> pendingSave;
-    std::optional<std::string> pendingLoad;
+    // Last finished background save/load text that was already shown in the snapshot message.
+    std::string lastAssetResult;
 };
 
 // Applies the pending request to the world (main thread, once per frame, before the world's Tick).

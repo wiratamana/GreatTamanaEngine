@@ -124,6 +124,11 @@ std::string TerrainStatsToJson(const TerrainStats& s)
     AddNumber(out, "cameraSpeed", s.cameraSpeed);
     AddNumber(out, "cameraFovDegrees", s.cameraFovDegrees);
     AddNumber(out, "cameraAspect", s.cameraAspect);
+    AddBool(out, "assetBusy", s.assetBusy);
+    AddText(out, "assetKind", s.assetKind);
+    AddNumber(out, "assetProgress", s.assetProgress);
+    AddNumber(out, "assetElapsedMs", s.assetElapsedMs);
+    AddText(out, "assetResult", s.assetResult);
 
     AddText(out, "lastError", s.lastError);
     out += '}';

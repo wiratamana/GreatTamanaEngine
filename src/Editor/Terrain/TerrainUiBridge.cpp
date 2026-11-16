@@ -19,21 +19,6 @@ void Note(TerrainUiSnapshot& snapshot, const terrain::TerrainResult& result)
 void ApplyTerrainUiRequest(terrain::ITerrainWorld& world, TerrainUiBridge& bridge)
 {
     TerrainUiSnapshot& snapshot = bridge.snapshot;
-
-    // A queued save or load runs now: the panel showed the busy text during the last frame.
-    if (bridge.pendingSave) {
-        const std::string path = std::move(*bridge.pendingSave);
-        bridge.pendingSave.reset();
-        Note(snapshot, world.SaveAsset(path));
-        snapshot.busy.clear();
-    }
-    if (bridge.pendingLoad) {
-        const std::string path = std::move(*bridge.pendingLoad);
-        bridge.pendingLoad.reset();
-        Note(snapshot, world.LoadAsset(path));
-        snapshot.busy.clear();
-    }
-
     TerrainUiRequest request = std::move(bridge.request);
     bridge.request = TerrainUiRequest{};
     if (request.Empty()) {
@@ -70,13 +55,12 @@ void ApplyTerrainUiRequest(terrain::ITerrainWorld& world, TerrainUiBridge& bridg
     if (request.hasCameraInput) {
         world.FeedCameraInput(request.cameraInput);
     }
+    // Save and load run in the background: the call returns at once and the stats carry the progress.
     if (request.savePath) {
-        bridge.pendingSave = std::move(request.savePath);
-        snapshot.busy = "Baking and saving " + *bridge.pendingSave + " ...";
+        Note(snapshot, world.SaveAsset(*request.savePath));
     }
     if (request.loadPath) {
-        bridge.pendingLoad = std::move(request.loadPath);
-        snapshot.busy = "Loading " + *bridge.pendingLoad + " ...";
+        Note(snapshot, world.LoadAsset(*request.loadPath));
     }
 }
 
@@ -89,6 +73,16 @@ void PublishTerrainSnapshot(terrain::ITerrainWorld& world, TerrainUiBridge& brid
     snapshot.settings = world.Settings();
     snapshot.runtime = world.RuntimeOptions();
     snapshot.cameraMode = world.GetCameraMode();
+    snapshot.busy.clear();
+    if (snapshot.stats.assetBusy) {
+        snapshot.busy = std::string(snapshot.stats.assetKind == "load" ? "Loading" : "Baking and saving") + " ... "
+            + std::to_string(static_cast<int>(snapshot.stats.assetProgress * 100.0)) + "%";
+    } else if (!snapshot.stats.assetResult.empty() && snapshot.stats.assetResult != bridge.lastAssetResult) {
+        // A finished background task: show its text once.
+        bridge.lastAssetResult = snapshot.stats.assetResult;
+        snapshot.message = bridge.lastAssetResult;
+        snapshot.messageIsError = bridge.lastAssetResult.rfind("saved", 0) != 0 && bridge.lastAssetResult.rfind("loaded", 0) != 0;
+    }
     snapshot.livePreview = world.LivePreview();
     snapshot.debugAabb = world.DebugAabb();
     snapshot.hasViewProjection = gameViewProjection != nullptr;

@@ -116,10 +116,10 @@ ChunkBounds ComputeChunkBounds(const BakedChunk& chunk, const TerrainSettings& s
 using BakeProgress = std::function<void(std::uint32_t done, std::uint32_t total)>;
 
 // Bakes countX * countZ finest-level nodes on the job system. Progress runs on the calling thread.
-// Returns nullopt for bad arguments or when `cancel` was raised.
+// maxWorkers 0 = every worker. Returns nullopt for bad arguments or when `cancel` was raised.
 std::optional<BakedTerrain> BakeRegion(const TerrainSettings& settings, std::int32_t firstX, std::int32_t firstZ,
     std::uint32_t countX, std::uint32_t countZ, const BakeProgress& progress = {},
-    const std::atomic<bool>* cancel = nullptr, ITerrainExecutor* executor = nullptr);
+    const std::atomic<bool>* cancel = nullptr, ITerrainExecutor* executor = nullptr, std::size_t maxWorkers = 0);
 
 // ---- File ----
 

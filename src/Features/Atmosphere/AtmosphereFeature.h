@@ -26,7 +26,7 @@ struct AtmosphereAerialResult {
 };
 
 // Size of the per-view aerial perspective volume in texels. The shaft delta image shares its X and Y.
-inline constexpr fx::VolumeSize kAerialVolumeSize{ 128, 128, 32 };
+inline constexpr fx::VolumeSize kAerialVolumeSize{ 96, 54, 32 };
 
 // Per-view resources and state. Each pass owns its own parameter block.
 struct AtmosphereViewState {

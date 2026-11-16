@@ -82,17 +82,24 @@ TEST(TerrainUiBridgeTest, CameraInputIsFedOnceAndSummed)
     EXPECT_EQ(world.feedCalls, 1);
 }
 
-TEST(TerrainUiBridgeTest, SaveShowsBusyFirstAndRunsOnTheNextFrame)
+TEST(TerrainUiBridgeTest, SaveStartsAtOnceAndBusyComesFromTheStats)
 {
     FakeTerrainWorld world;
     TerrainUiBridge bridge;
     bridge.request.savePath = std::string("C:/x/world.gta");
     ApplyTerrainUiRequest(world, bridge);
-    EXPECT_TRUE(world.savedPath.empty());
-    EXPECT_FALSE(bridge.snapshot.busy.empty());
-    ApplyTerrainUiRequest(world, bridge);
     EXPECT_EQ(world.savedPath, "C:/x/world.gta");
+    world.stats.assetBusy = true;
+    world.stats.assetKind = "save";
+    world.stats.assetProgress = 0.5;
+    PublishTerrainSnapshot(world, bridge, nullptr);
+    EXPECT_NE(bridge.snapshot.busy.find("50%"), std::string::npos);
+    world.stats.assetBusy = false;
+    world.stats.assetResult = "saved 4 nodes to C:/x/world.gta";
+    PublishTerrainSnapshot(world, bridge, nullptr);
     EXPECT_TRUE(bridge.snapshot.busy.empty());
+    EXPECT_FALSE(bridge.snapshot.messageIsError);
+    EXPECT_EQ(bridge.snapshot.message, world.stats.assetResult);
 }
 
 TEST(TerrainUiBridgeTest, FailedLoadReportsAnError)
@@ -101,11 +108,15 @@ TEST(TerrainUiBridgeTest, FailedLoadReportsAnError)
     TerrainUiBridge bridge;
     bridge.request.loadPath = std::string("C:/missing.gta");
     ApplyTerrainUiRequest(world, bridge);
-    EXPECT_FALSE(bridge.snapshot.busy.empty());
-    ApplyTerrainUiRequest(world, bridge);
-    EXPECT_TRUE(bridge.snapshot.busy.empty());
     EXPECT_TRUE(bridge.snapshot.messageIsError);
     EXPECT_EQ(bridge.snapshot.message, "no such file");
+    world.stats.assetResult = "cannot open the file";
+    PublishTerrainSnapshot(world, bridge, nullptr);
+    EXPECT_TRUE(bridge.snapshot.messageIsError);
+    EXPECT_EQ(bridge.snapshot.message, "cannot open the file");
+    bridge.snapshot.message = "later action";
+    PublishTerrainSnapshot(world, bridge, nullptr);
+    EXPECT_EQ(bridge.snapshot.message, "later action"); // A finished result is shown once only.
 }
 
 TEST(TerrainUiBridgeTest, PublishCopiesTheWorldAndNodesOnlyWhileTheBoxFlagIsOn)

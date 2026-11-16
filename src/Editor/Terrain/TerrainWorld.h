@@ -12,6 +12,7 @@
 #include "../../ECS/Entity.h"
 #include "../../Renderer/OffscreenFrameTicket.h"
 #include "../../Terrain/TerrainAsset.h"
+#include "../../Terrain/TerrainAssetTask.h"
 #include "../../Terrain/TerrainControl.h"
 #include "../../Terrain/TerrainFlight.h"
 #include "../../Terrain/TerrainLod.h"
@@ -129,6 +130,7 @@ private:
     terrain::RigPose CameraPoseNow(Game& game) const;
     void WriteCameraPose(Game& game, const terrain::RigPose& pose) const;
     void RefreshGpuCounters();
+    void PollAssetTask();
 
     void SetMeshRenderer(Game& game, Entity entity, const MeshRenderer& renderer) const;
     void RemoveMeshRenderer(Game& game, Entity entity) const;
@@ -180,6 +182,8 @@ private:
 
     terrain::TerrainStats m_stats;
     std::string m_lastError;
+    std::string m_assetResult;
+    terrain::TerrainAssetTask m_assetTask; // Last member: its thread is joined first.
 };
 
 } // namespace gte

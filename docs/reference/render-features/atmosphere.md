@@ -17,7 +17,7 @@
 | `AtmosphereSharedLut` | PreOpaqueShared, -10 | Transmittance LUT 256x256 RGBA8. Multi-scattering LUT 64x64 RGBA16F. Shared by all views | `AtmosphereTransmittanceLutPass`, `AtmosphereMultiScatteringLutPass` |
 | `AtmosphereViewLut` | PreOpaque, 0 | Sky-view LUT 200x100 RGBA16F per view | `AtmosphereSkyViewLutPass` |
 | `Atmosphere.SunLight` | PreOpaque, 5 | Publishes `SunLightModulation` per view | none (`Always`) |
-| `AtmosphereAerialVolume` | PostOpaque, 20 | Aerial volume 128x128x32 RGBA16F. Shaft delta image 128x128 RGBA16F when cascades exist | `AtmosphereAerialPerspectiveVolumePass` |
+| `AtmosphereAerialVolume` | PostOpaque, 20 | Aerial volume 96x54x32 RGBA16F (was 128x128x32: 3.1 ms to 1.2 ms on Iris Xe at 719x360). Shaft delta image 96x54 RGBA16F when cascades exist | `AtmosphereAerialPerspectiveVolumePass` |
 | `DrawSkyBackground` | PostOpaque, 100 | Fullscreen sky where depth is still the clear value | `DrawSkyBackground` |
 | `AtmosphereComposite` | PostComposite, -1000, `AlphaOver` | Applies the volume to the scene. Blits to the private target | `AtmosphereAerialPerspectiveCompositePass`, `AtmosphereComposite.CopyToPrivateTarget` |
 

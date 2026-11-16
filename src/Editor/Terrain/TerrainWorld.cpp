@@ -774,6 +774,12 @@ void TerrainWorld::TickCamera(const TerrainTickContext& context, Game& game)
 
 void TerrainWorld::Tick(const TerrainTickContext& context)
 {
+    try {
+        PollAssetTask();
+    } catch (const std::exception& e) {
+        m_assetResult = e.what();
+        m_assetTask.Reset();
+    }
     if (!m_open) {
         return;
     }
@@ -1066,6 +1072,14 @@ terrain::TerrainStats TerrainWorld::Stats() const
     stats.flightActive = m_flight.Active();
     stats.debugAabb = m_debugAabb;
     stats.lastError = m_lastError;
+    {
+        const terrain::AssetTaskStatus asset = m_assetTask.Status();
+        stats.assetBusy = asset.state == terrain::AssetTaskState::Running;
+        stats.assetKind = asset.kind == terrain::AssetTaskKind::Save ? "save" : asset.kind == terrain::AssetTaskKind::Load ? "load" : "";
+        stats.assetProgress = static_cast<double>(asset.progress);
+        stats.assetElapsedMs = asset.elapsedMs;
+        stats.assetResult = m_assetResult;
+    }
     stats.gpuCullValid = m_gpu.valid;
     stats.gpuPathActive = m_gpu.pathActive;
     stats.gpuCullMode = m_gpu.mode;
@@ -1118,40 +1132,53 @@ terrain::TerrainResult TerrainWorld::SaveAsset(const std::filesystem::path& path
     const std::int32_t half = static_cast<std::int32_t>(layout.worldHalfExtent / layout.nodeSizeLevel0);
     const std::int32_t cx = static_cast<std::int32_t>(std::floor(m_stats.cameraX / layout.nodeSizeLevel0));
     const std::int32_t cz = static_cast<std::int32_t>(std::floor(m_stats.cameraZ / layout.nodeSizeLevel0));
-    const std::int32_t firstX = std::clamp(cx - side / 2, -half, half - side);
-    const std::int32_t firstZ = std::clamp(cz - side / 2, -half, half - side);
-    const Clock::time_point start = Clock::now();
-    const std::optional<terrain::BakedTerrain> baked = terrain::BakeRegion(
-        m_settings, firstX, firstZ, static_cast<std::uint32_t>(side), static_cast<std::uint32_t>(side));
-    if (!baked.has_value()) {
-        return Failure("baking failed (bad region)");
+    terrain::SaveRegion region;
+    region.firstX = std::clamp(cx - side / 2, -half, half - side);
+    region.firstZ = std::clamp(cz - side / 2, -half, half - side);
+    region.countX = static_cast<std::uint32_t>(side);
+    region.countZ = static_cast<std::uint32_t>(side);
+    if (!m_assetTask.StartSave(m_settings, region, path)) {
+        return Failure("another save or load is still running");
     }
-    std::string error;
-    if (!terrain::SaveTerrainAsset(path, *baked, &error)) {
-        return Failure(error.empty() ? "saving failed" : error);
-    }
-    return Success("saved " + std::to_string(side * side) + " nodes (" + std::to_string(static_cast<int>(MsSince(start)))
-        + " ms) to " + path.string());
+    return Success("saving " + std::to_string(side * side) + " nodes to " + path.string() + " in the background");
 }
 
 terrain::TerrainResult TerrainWorld::LoadAsset(const std::filesystem::path& path)
 {
-    std::string error;
-    std::optional<terrain::BakedTerrain> loaded = terrain::LoadTerrainAsset(path, &error);
-    if (!loaded.has_value()) {
-        return Failure(error.empty() ? "loading failed" : error);
+    if (!m_assetTask.StartLoad(path)) {
+        return Failure("another save or load is still running");
     }
-    const terrain::TerrainSettings settings = loaded->settings;
-    const std::int32_t countX = static_cast<std::int32_t>(loaded->countX);
-    m_baked = std::make_shared<const terrain::BakedTerrain>(std::move(*loaded));
-    terrain::TerrainResult result = SetSettings(settings);
-    if (m_streamer) {
-        m_streamer->SetNodeProvider(terrain::MakeBakedNodeProvider(m_baked));
+    return Success("loading " + path.string() + " in the background");
+}
+
+void TerrainWorld::PollAssetTask()
+{
+    if (m_assetTask.Busy()) {
+        return;
     }
-    if (result.ok) {
-        result.message = "loaded " + path.string() + " (" + std::to_string(countX) + " nodes wide)";
+    const terrain::AssetTaskStatus status = m_assetTask.Status();
+    if (status.state == terrain::AssetTaskState::Idle) {
+        return;
     }
-    return result;
+    char timing[48];
+    std::snprintf(timing, sizeof(timing), " (%.0f ms)", status.elapsedMs);
+    if (status.state == terrain::AssetTaskState::Done && status.kind == terrain::AssetTaskKind::Load) {
+        std::optional<terrain::BakedTerrain> loaded = m_assetTask.TakeLoaded();
+        if (loaded.has_value()) {
+            const terrain::TerrainSettings settings = loaded->settings;
+            const std::uint32_t countX = loaded->countX;
+            m_baked = std::make_shared<const terrain::BakedTerrain>(std::move(*loaded));
+            const terrain::TerrainResult applied = SetSettings(settings);
+            if (m_streamer) {
+                m_streamer->SetNodeProvider(terrain::MakeBakedNodeProvider(m_baked));
+            }
+            m_assetResult = applied.ok ? "loaded " + status.path + " (" + std::to_string(countX) + " nodes wide)" + timing
+                                       : applied.message;
+            return;
+        }
+    }
+    m_assetResult = status.message + (status.state == terrain::AssetTaskState::Done ? timing : "");
+    m_assetTask.Reset();
 }
 
 } // namespace gte

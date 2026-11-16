@@ -386,6 +386,56 @@ TEST(TerrainBench, DISABLED_HeightStatistics)
         steepSum / static_cast<float>(land.size()) * 57.2958f);
 }
 
+// Height step a viewer sees when a parent node is replaced by its four children (the LOD pop), in metres and pixels.
+TEST(TerrainBench, DISABLED_LodPopError)
+{
+    const TerrainSettings s = Sanitize(TerrainSettings{});
+    const TerrainHeightField f(s);
+    const int q = f.Layout().quads;
+    const double focalPx = 360.0 / std::tan(30.0 * 3.14159265358979 / 180.0); // 720p, 60 degrees vertical.
+    std::printf("\n[TerrainBench] LOD pop: child vs parent surface at the split distance (factor %.1f), 720p\n", s.lodDistanceFactor);
+    std::printf("%-6s %10s %10s %10s %10s %10s\n", "level", "meanErr m", "p99 m", "maxErr m", "split dist", "max px");
+    for (int level = 0; level + 1 < s.lodLevelCount; ++level) {
+        const std::vector<NodeKey> parents = LandNodes(f, level + 1, 6);
+        std::vector<double> errs;
+        for (const NodeKey& pk : parents) {
+            const NodeMesh parent = BuildNode(f, pk);
+            for (int c = 0; c < 4; ++c) {
+                const NodeMesh child = BuildNode(f, pk.Child(c));
+                for (int iz = 0; iz <= q; ++iz) {
+                    for (int ix = 0; ix <= q; ++ix) {
+                        const double wx = child.originX + ix * child.spacing;
+                        const double wz = child.originZ + iz * child.spacing;
+                        const double u = std::clamp((wx - parent.originX) / parent.spacing, 0.0, static_cast<double>(q));
+                        const double v = std::clamp((wz - parent.originZ) / parent.spacing, 0.0, static_cast<double>(q));
+                        const int u0 = std::min(static_cast<int>(u), q - 1);
+                        const int v0 = std::min(static_cast<int>(v), q - 1);
+                        const double fu = u - u0;
+                        const double fv = v - v0;
+                        const auto h = [&](int a, int b) { return static_cast<double>(parent.vertices[static_cast<std::size_t>(b) * (q + 1) + a].position[1]); };
+                        const double top = h(u0, v0) * (1 - fu) + h(u0 + 1, v0) * fu;
+                        const double bot = h(u0, v0 + 1) * (1 - fu) + h(u0 + 1, v0 + 1) * fu;
+                        const double yParent = top * (1 - fv) + bot * fv;
+                        errs.push_back(std::fabs(yParent - child.vertices[static_cast<std::size_t>(iz) * (q + 1) + ix].position[1]));
+                    }
+                }
+            }
+        }
+        if (errs.empty()) {
+            continue;
+        }
+        std::sort(errs.begin(), errs.end());
+        double mean = 0.0;
+        for (const double e : errs) {
+            mean += e;
+        }
+        mean /= static_cast<double>(errs.size());
+        const double split = s.lodDistanceFactor * NodeSize(f.Layout(), level + 1);
+        const double p99 = errs[static_cast<std::size_t>(0.99 * static_cast<double>(errs.size() - 1))];
+        std::printf("%-6d %10.3f %10.3f %10.3f %10.0f %10.2f\n", level, mean, p99, errs.back(), split, errs.back() * focalPx / split);
+    }
+}
+
 TEST(TerrainBench, DISABLED_Dump)
 {
     const char* dir = std::getenv("GTE_TERRAIN_DUMP_DIR");

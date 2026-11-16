@@ -23,8 +23,8 @@ All routes are `GET`. Routes that change something refuse browser requests (`403
 | `/terrain/set?k=v&k=v` | Applies settings, runtime options and flags in one call. Unknown key or bad value: `400`, nothing changes. |
 | `/terrain/flight?kind=orbit\|line&x=&z=&heading=&radius=&speed=&alt=&minAlt=&lookDown=&fixedStep=&duration=` | Scripted camera. `alt` is metres above ground. `speed` 0.5 is a fixed spot. Positive `lookDown` looks toward the ground. |
 | `/terrain/stop_flight` | Stops the flight. The camera stays. |
-| `/terrain/save?path=C:/x/world.gta` | Bakes `bakeNodesPerSide` squared finest nodes around the camera and writes the `.gta`. |
-| `/terrain/load?path=...` | Reads a baked file, applies its settings, serves nodes inside its region from the file. |
+| `/terrain/save?path=C:/x/world.gta` | Starts a background bake of `bakeNodesPerSide` squared finest nodes around the camera and writes the `.gta`. Returns at once. Watch `assetBusy`, `assetProgress` and `assetResult` in `/terrain/state`. |
+| `/terrain/load?path=...` | Starts a background read of a baked file. When it finishes, the file's settings are applied and nodes inside its region come from the file. Same `asset*` state keys. |
 | `/terrain/map?size=768&range=&mode=lod\|state&frustum=true` | PNG top-down map of the resident nodes, the camera and its view wedge. See [Map picture](#map-picture). |
 | `/terrain/cam?mode=script\|free\|orbit&x=&y=&alt=&z=&yaw=&pitch=&tx=&tz=&dist=` | Camera mode and placement (`alt` is metres above ground, `yaw` 0 looks along +Z, `pitch` positive looks down). See [Camera](#camera). |
 | `/terrain/cam_input?fwd=&right=&up=&lookx=&looky=&wheel=&boost=&look=&frames=` | Repeats one frame of mouse and key input for `frames` frames (free or orbit mode). |
@@ -62,7 +62,7 @@ A dockable window (closed by default) with every setting as a slider, grouped li
 - **Live preview mode**: one 129x129 chunk is rebuilt on every slider move (about 20 ms). The big world is not rebuilt while it is on.
 - Without the preview, a height or erosion change reaches the streamed world when the slider is released or has rested 0.35 s. A geometry change (`chunkQuads`, spacing, levels, half world) reopens the scene and waits for the release. Material and optimization changes apply at once.
 - **Randomize seed**, **Reset defaults**, streaming sliders (visible cap, uploads per frame, jobs).
-- **Save Terrain Asset** and **Load Terrain Asset** with a path field (default `<exe dir>/Project/terrain_world.gta`). Save bakes `Bake nodes per side` squared nodes (256 nodes: about 200 ms, 10.8 MB). The panel shows a busy line for one frame, then the editor blocks while it bakes.
+- **Save Terrain Asset** and **Load Terrain Asset** with a path field (default `<exe dir>/Project/terrain_world.gta`). Both run on a background thread: the panel shows `Baking and saving ... NN%` and the editor keeps drawing. Save bakes `Bake nodes per side` squared nodes (256 nodes: 10.8 MB; 1024 nodes: 43 MB in 1.4 s, a bit slower frames while it runs). Load of 1024 nodes takes 117 ms. A second save or load is refused while one runs. The whole file is read into memory (no lazy chunk streaming).
 - **Show chunk bounding boxes** draws the 12 edges of every resident node over the Game and Scene views. Colour by state (green drawn, red outside the view, grey hidden by a finer or coarser node) or by LOD level.
 - Stats: nodes resident, pending, wanted and in view, pool slots, triangles, GPU cull counters (drawn, frustum culled, Hi-Z culled), memory, generation time, tick time, preview time, camera.
 - The panel talks to the world only through `TerrainUiBridge` (`src/Editor/Terrain/TerrainUiBridge.h`). The host applies its request at the start of the next frame, so GPU buffers are never touched while the frame is being drawn.
@@ -121,7 +121,7 @@ A moving benchmark: `GET /terrain/flight?kind=line&speed=400&alt=250&fixedStep=0
 ## Known limits
 - Hi-Z saves triangles only when mountains hide other mountains (57 of 375 nodes in the best test) and it does not help the shadow passes. It costs about 0.3 ms. Frustum culling is the real saver.
 - The shadow passes cost more than the terrain colour pass. The `budget` option lowers them. See [Terrain performance notes](#cost-summary).
-- No water waves, no shore blend, no triplanar texturing, no LOD morphing (levels pop). Erosion strength above 2 shows a grid at node borders.
+- No water waves, no shore blend, no triplanar texturing, no LOD morphing (levels pop). Erosion strength above 2 shows a grid at node borders. The pop is small: at the split distance the p99 height step between a parent and its children is 1 to 2.7 px at 720p, the worst vertex 4 to 10 px (aliased peaks). A real fix is vertex morphing, which needs a new cluster shader (about 2 days, medium risk). Run `TerrainBench.DISABLED_LodPopError` to measure it.
 - No in-world wireframe boxes: the engine has no scene line pipeline. The boxes are an ImGui overlay (Game and Scene views, not in `/get_game_view`; `/get_swapchain` shows them). Use `/terrain/map` for a capture that always works.
 
 ## Cost summary
@@ -134,6 +134,19 @@ Measured on this iGPU with `--frames-in-flight=1` (serial), lean profile with bu
 
 Terrain alone (`geometry_only`): 7.4 ms frame at 719x359, 12 ms at 1280x720.
 Cost grows linearly with triangles, about 3 ms per million (draw plus shadow). View distance 4 km to 20 km only adds about 0.4 M triangles.
+
+## Recommended settings for an Intel iGPU
+Measured A/B (3 launches each, 1280x720 window, Game view 719x360, overlap on). Before = shadow `maxDistance` 1500 and aerial volume 128x128x32. After = 800 and 96x54x32.
+
+| View | Frame before | Frame after | GPU before | GPU after |
+|---|---|---|---|---|
+| high (400 m, look down) | 13.8 ms | 12.9 ms | 10.8 ms | 9.8 ms |
+| low (40 m) | 14.1 ms | 11.8 ms | 10.9 ms | 8.8 ms |
+
+- Open with `profile=lean&budget=true` (2 cascades, 1024 map, shadow distance 800, 4 aerial samples), `lodDistanceFactor` 2.0, `maxVisibleNodes` 384.
+- What still costs most (GPU ms, 719x360): aerial volume 1.2, atmosphere LUTs 1.6, terrain colour pass 1.9, shadow cascades 2.0, TAA 0.5.
+- Tried and not worth it: `cascadeCount` 1 (saves 1.2 to 1.7 ms but the near shadows get coarse), Bloom off (0.3 ms), 512 shadow map (0.4 ms, within noise), a 32x32 multi-scattering LUT (slower: 3.1 ms against 1.2 ms).
+- The memory type of the pool vertex buffer was not measured. On this shared-memory GPU the host-visible and device-local heaps are the same RAM, so no gain is expected from a device-local copy.
 
 ## Related
 - [HTTP routes (debug)](http-routes-debug.md), [HTTP cheat sheet](http-cheat-sheet.md), [Profiling](profiling.md)

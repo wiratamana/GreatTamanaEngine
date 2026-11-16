@@ -103,7 +103,7 @@ void StoreVertex(NodeMesh& mesh, const TerrainSettings& color, int verts, int ix
 
 std::optional<BakedTerrain> BakeRegion(const TerrainSettings& requested, std::int32_t firstX, std::int32_t firstZ,
     std::uint32_t countX, std::uint32_t countZ, const BakeProgress& progress, const std::atomic<bool>* cancel,
-    ITerrainExecutor* executor)
+    ITerrainExecutor* executor, std::size_t maxWorkers)
 {
     if (countX == 0 || countZ == 0 || countX > kTerrainAssetMaxAxisChunks || countZ > kTerrainAssetMaxAxisChunks ||
         static_cast<std::uint64_t>(countX) * countZ > kTerrainAssetMaxChunks ||
@@ -129,7 +129,10 @@ std::optional<BakedTerrain> BakeRegion(const TerrainSettings& requested, std::in
 
     // The state outlives every job: this function does not return before the handle is complete.
     Jobs::JobHandle handle;
-    const std::size_t workers = executor != nullptr ? 1 : Jobs::JobSystem::Instance().WorkerCount();
+    std::size_t workers = executor != nullptr ? 1 : Jobs::JobSystem::Instance().WorkerCount();
+    if (maxWorkers > 0) {
+        workers = std::min(workers, maxWorkers);
+    }
     for (std::size_t w = 0; w < workers; ++w) {
         if (executor != nullptr) {
             executor->Run(&BakeWorker, &state, handle);

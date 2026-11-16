@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [Terrain on the iGPU: cheaper aerial volume, background save and load](#terrain-on-the-igpu-cheaper-aerial-volume-background-save-and-load-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
 | [CPU-GPU overlap is the default](#cpu-gpu-overlap-is-the-default-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
 | [Frames in flight for the offscreen graph](#frames-in-flight-for-the-offscreen-graph-branch-featuretoon-shading-impl-2026-11-09) | `feature/toon-shading-impl` | 2026-11-09 |
 | [Shadow caster sweep, slot fix](#shadow-caster-sweep-slot-fix-branch-featuretoon-shading-impl-2026-11-09) | `feature/toon-shading-impl` | 2026-11-09 |
@@ -45,6 +46,12 @@
 | [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+
+## Terrain on the iGPU: cheaper aerial volume, background save and load (branch `feature/precural-landscape`, 2026-11-16)
+
+- **Aerial perspective volume 128x128x32 to 96x54x32** (`kAerialVolumeSize`). The pass went from 3.1 to 1.2 ms on Iris Xe (719x360). The haze is a little softer at silhouettes. A 32x32 multi-scattering LUT was tried and is slower (3.1 ms against 1.2 ms: too few threads), so it stays 64x64.
+- **Terrain render budget**: shadow `maxDistance` 1500 to 800 (about 0.5 ms).
+- **Terrain asset save and load run on a background thread** (`TerrainAssetTask`): the editor no longer blocks while it bakes. `/terrain/save` and `/terrain/load` return at once; progress and the result are in `GET /terrain/state` (`assetBusy`, `assetProgress`, `assetResult`).
 
 ## CPU-GPU overlap is the default (branch `feature/precural-landscape`, 2026-11-16)
 

@@ -35,7 +35,7 @@ struct BudgetEntry {
     std::size_t count;
 };
 constexpr std::array<BudgetEntry, 2> kRenderBudget{ {
-    { "Shadow", { { { "cascadeCount", "2" }, { "maxMapResolution", "1024" }, { "maxDistance", "1500" } } }, 3 },
+    { "Shadow", { { { "cascadeCount", "2" }, { "maxMapResolution", "1024" }, { "maxDistance", "800" } } }, 3 },
     { "Atmosphere", { { { "aerialPerspectiveSamplesPerSlice", "4" }, { "", "" }, { "", "" } } }, 1 },
 } };
 
