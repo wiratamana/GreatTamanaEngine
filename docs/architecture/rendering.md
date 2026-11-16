@@ -29,7 +29,7 @@ Frame flow, as run by `EditorHost` and `Core`:
 
 1. `Core::Update()` first takes the offscreen frame slot (overlap mode waits for it here), then advances time and runs game logic. Before it, `EditorHost` drains HTTP command bridges.
 2. `Renderer::BeginFrame()` clears the queued CPU `Submit()` draws.
-3. `Core::BuildFrame()` runs the offscreen graph. In the default mode it waits for the GPU, so the Game view is safe to read after it. In overlap mode it does not. See "Frames in flight".
+3. `Core::BuildFrame()` runs the offscreen graph. In the default (overlap) mode it submits and returns without waiting. With `--frames-in-flight=1` it waits for the GPU, so the Game view is safe to read after it. A capture frame always drains first and runs serial. See "Frames in flight".
 4. `IEditorLayer::BuildUI()` builds ImGui. The Render Graph panel and `/render_graph` get their data.
 5. `Core::Present()` runs the present graph. Its GPU timing is read back later (pipelined).
 
@@ -39,7 +39,7 @@ Inside `BuildFrame()`:
 2. `Render.Prepare`: free unused GPU meshes and materials, pick the view targets.
 3. Declare the offscreen graph: GPU skinning, cluster candidates, then all providers.
 4. If a Frame Debugger capture is pending, add the replay passes.
-5. Compile and record. Finalize the view textures for sampling. Submit. In the default mode `BuildFrame()` then waits for the GPU. In overlap mode it does not.
+5. Compile and record. Finalize the view textures for sampling. Submit. By default `BuildFrame()` does not wait. With `--frames-in-flight=1` it waits for the GPU.
 
 Providers are declared in two phases: `Before` and `After` the deferred passes. In each phase, `Once` providers go first.
 Deferred descriptions are sorted by `RenderPassEvent`. Feature providers draw straight into the builder.
@@ -60,7 +60,7 @@ The present graph has two providers: `PresentPrimaryView` and `Present`. See [Re
 
 ## Frames in flight
 - The offscreen graph has a ring of `kGpuFramesInFlight` (2) frame slots. A slot owns a command buffer, a fence, a GPU timestamp region and one copy of every host-written buffer.
-- `--frames-in-flight=<1|2>` picks the mode. The default is `1` (`kDefaultOffscreenFramesInFlight`, `src/Renderer/OffscreenFramesInFlight.h`). It is the old serial path: one command buffer, `BuildFrame()` waits for the fence after the submit.
+- `--frames-in-flight=<1|2>` picks the mode. The default is `2` (`kDefaultOffscreenFramesInFlight`, `src/Renderer/OffscreenFramesInFlight.h`). `1` is the old serial path and stays as the escape hatch: one command buffer, `BuildFrame()` waits for the fence after the submit.
 - With `2`, `BuildFrame()` submits and returns. The CPU builds frame N+1 while the GPU still runs frame N.
 - `Core::Update()` waits first for the slot it will reuse (the frame submitted two frames ago). That wait comes before `Game::Update()`, so every CPU write into GPU-visible memory targets a copy that no running frame reads.
 - Every offscreen and present command buffer starts with one global barrier, in both modes. It orders the frame after everything submitted before it. That is why GPU-only resources stay single copy. It needs one graphics queue.
@@ -150,7 +150,7 @@ Details: [PBR materials](../conventions/pbr-materials.md).
 5. Disabled passes must not run or leave side effects. See [Render honesty](../conventions/render-honesty.md).
 
 ## Gotchas
-- A host-written buffer that a pass reads (a plugin's own `rg::GpuBuffer` with `HostWrite`) must have one copy per frame slot. With `--frames-in-flight=2` the GPU may still read the old copy. See "Frames in flight".
+- A host-written buffer that a pass reads (a plugin's own `rg::GpuBuffer` with `HostWrite`) must have one copy per frame slot. In the default overlap mode (`--frames-in-flight=2`) the GPU may still read the old copy. See "Frames in flight".
 - In overlap mode the per-pass GPU rows come from an older frame. Read medians, not single frames.
 - A pass whose output nobody reads is culled with no error.
 - A provider that reads a deferred pass's texture must run in the `After` phase. Otherwise the writer is culled.

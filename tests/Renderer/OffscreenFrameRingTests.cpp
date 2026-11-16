@@ -91,9 +91,10 @@ TEST(OffscreenFramesInFlightTest, ParsesOnlyValidCounts)
     EXPECT_FALSE(ParseOffscreenFramesInFlight("x").has_value());
 }
 
-TEST(OffscreenFramesInFlightTest, DefaultKeepsTheSerialPath)
+TEST(OffscreenFramesInFlightTest, DefaultOverlapsCpuAndGpu)
 {
-    EXPECT_EQ(kDefaultOffscreenFramesInFlight, 1u);
+    EXPECT_EQ(kDefaultOffscreenFramesInFlight, 2u);
+    EXPECT_LE(kDefaultOffscreenFramesInFlight, kGpuFramesInFlight);
 }
 
 } // namespace

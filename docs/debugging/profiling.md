@@ -189,7 +189,7 @@ Panel layout, top to bottom. The first screen is the summary and the graph.
 - Barrier time exists only in the fine stamp mode. The coarse mode reads `null`.
 - A graph with timing disabled writes no stamps and reads `Inactive`. Capture off reads `Absent`.
 - GPU bars are not aligned to CPU time. No calibrated timestamp extension is enabled, so `timeline.aligned` is `false`.
-- With `--frames-in-flight=2` the offscreen GPU rows arrive late. The stamps of a frame are read at the top of a later frame (1 to 2 frames), and the newest resolved frame fills the pass rows and `gpu_span`. Use medians. `GpuWait(PreviousOffscreen:offscreen slot)` is the CPU waiting for the GPU. `GpuWait(Offscreen:offscreen submit)` exists only in the default serial mode. Judge speed by `frame`, not by `cpu_busy` or `gpu_span`.
+- With the default `--frames-in-flight=2` the offscreen GPU rows arrive late. The stamps of a frame are read at the top of a later frame (1 to 2 frames), and the newest resolved frame fills the pass rows and `gpu_span`. Use medians. For a strict serial A/B start the editor with `--frames-in-flight=1`. `GpuWait(PreviousOffscreen:offscreen slot)` is the CPU waiting for the GPU. `GpuWait(Offscreen:offscreen submit)` exists only in serial mode (`--frames-in-flight=1`). Judge speed by `frame`, not by `cpu_busy` or `gpu_span`.
 - A cluster count is never shown as triangles. Cluster counts come from `GET /feature_debug/state`.
 
 ## Switches

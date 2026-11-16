@@ -42,7 +42,7 @@ main.cpp
 | `--reimport <source> <dest.gta>` | Headless import. No window. Exit code 0 or 1. |
 | `--vulkan-validation` | Vulkan validation on, in any build type. |
 | `--no-vsync` | Uncapped present. For benchmarks only. |
-| `--frames-in-flight=<1\|2>` | Offscreen frames in flight. `1` (default) waits for the GPU after each submit. `2` lets the CPU build the next frame meanwhile. See [Rendering](rendering.md). |
+| `--frames-in-flight=<1\|2>` | Offscreen frames in flight. `2` (default) lets the CPU build the next frame while the GPU draws the last one. `1` is the serial escape hatch: it waits for the GPU after each submit. See [Rendering](rendering.md). |
 
 ### One frame
 `EditorHost::Run()` repeats these steps:

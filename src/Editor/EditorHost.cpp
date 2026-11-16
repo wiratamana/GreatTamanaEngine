@@ -1092,7 +1092,7 @@ int EditorHost::Run()
         // Builds the frame's render graph.
         m_core.BuildFrame();
 
-        // Game View capture: host-level automation, safe after BuildFrame() because it already fence-waited.
+        // Game View capture: its copy is queued after the frame's submit and waited on, so it works while frames overlap.
         RenderTexture* gameTargetThisFrame = m_core.GetPrimaryViewTargetThisFrame();
         if (gameTargetThisFrame == nullptr && m_captureBridge.IsCaptureRequested(FrameCaptureKind::GameView)) {
             m_captureBridge.FailPendingRequest(FrameCaptureKind::GameView, FrameCaptureFailureReason::TargetNotAvailable);

@@ -74,6 +74,13 @@ A moving benchmark: `GET /terrain/flight?kind=line&speed=400&alt=250&fixedStep=0
 - Use interleaved A/B runs and medians of profiler rows. This GPU swings by 1 to 3 ms between runs.
 - `NoCull` draws stale slots, so its numbers are not a real baseline.
 
+## CPU-GPU overlap (the default)
+- The editor runs with `--frames-in-flight=2` by default: the CPU builds frame N+1 while the GPU draws frame N. The terrain pool is written only into slots that no frame in flight reads, and the cluster table is swapped (not patched) while frames overlap.
+- Serial A/B: start the editor once with `--frames-in-flight=1` and once without the flag. The mode is a process flag, so alternate launches (at least 3 per mode) and compare medians of `GET /profiler/frames`.
+- Judge speed by the `cpu` (frame) metric. With overlap the per-pass GPU rows and `gpu_span` describe an older frame, and `cpu_busy` is not reliable in GPU-bound scenes.
+- The state counters `gpu*` in `GET /terrain/state` are two or more frames old in both modes.
+- Expect more frame-time spread with overlap (short frame, long frame, short frame). The mean and median get better when the CPU and GPU parts are both large. A scene that is fully GPU-bound gains nothing.
+
 ## Known limits
 - Hi-Z saves triangles only when mountains hide other mountains (57 of 375 nodes in the best test) and it does not help the shadow passes. It costs about 0.3 ms. Frustum culling is the real saver.
 - The shadow passes cost more than the terrain colour pass. The `budget` option lowers them. See [Terrain performance notes](#cost-summary).
@@ -81,7 +88,7 @@ A moving benchmark: `GET /terrain/flight?kind=line&speed=400&alt=250&fixedStep=0
 - `/terrain/map` (top-down image) does not exist yet. Use `/get_game_view`.
 
 ## Cost summary
-Measured on this iGPU, lean profile with budget, `lodDistanceFactor` 2.0, about 0.9 M triangles in view:
+Measured on this iGPU with `--frames-in-flight=1` (serial), lean profile with budget, `lodDistanceFactor` 2.0, about 0.9 M triangles in view. The default overlap mode removes most of the CPU part of the frame: in a 1280x720 window (Game view 719x360, Scene panel hidden) the fixed view went from 17.6 to 15.3 ms mean frame time and the flight from 19.1 to 16.3 ms. The GPU part is unchanged, so it is the floor.
 
 | View size | Frame | GPU (Game view) | Terrain colour pass | Shadow passes | Atmosphere |
 |---|---|---|---|---|---|

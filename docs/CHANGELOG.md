@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [CPU-GPU overlap is the default](#cpu-gpu-overlap-is-the-default-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
 | [Frames in flight for the offscreen graph](#frames-in-flight-for-the-offscreen-graph-branch-featuretoon-shading-impl-2026-11-09) | `feature/toon-shading-impl` | 2026-11-09 |
 | [Shadow caster sweep, slot fix](#shadow-caster-sweep-slot-fix-branch-featuretoon-shading-impl-2026-11-09) | `feature/toon-shading-impl` | 2026-11-09 |
 | [Shadow lanes share buffers, write-after-read edges](#shadow-lanes-share-buffers-write-after-read-edges-branch-featuretoon-shading-impl-2026-11-09) | `feature/toon-shading-impl` | 2026-11-09 |
@@ -45,9 +46,17 @@
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 
+## CPU-GPU overlap is the default (branch `feature/precural-landscape`, 2026-11-16)
+
+- **Default flipped.** `kDefaultOffscreenFramesInFlight` is now `2`. The CPU builds frame N+1 while the GPU draws frame N. `--frames-in-flight=1` is the serial escape hatch.
+- **Measured** (Iris Xe, 1280x720 window, Game view 719x360, `--no-vsync`, 3 to 8 launches per mode, mean frame time): terrain `lean`+budget fixed view 17.6 to 15.3 ms, terrain flight 19.1 to 16.3 ms, terrain `geometry_only` 8.8 to 6.3 ms, empty scene 17.7 to 14.0 ms. The 10000-instance Hi-Z demo is GPU-bound and stays at 29 ms.
+- **Cost.** Frame time has more spread: p95 rises from about 22 to 28 ms in the terrain scenes. In the terrain and Hi-Z scenes the GPU part also runs 5 to 10 percent slower while the CPU is busy (the CPU and GPU share one power budget on this laptop).
+- **Checked.** Vulkan synchronization validation shows the same message set in both modes. The streamed terrain (mass rebuild, live preview, close and reopen, capture while flying) shows no new message and no leaked slot.
+- **Not covered by validation.** Host writes into mapped memory. The terrain pool relies on its serial gate, which has unit tests.
+
 ## Frames in flight for the offscreen graph (branch `feature/toon-shading-impl`, 2026-11-09)
 
-- **Overlap switch.** `--frames-in-flight=<1|2>`. With `2` the CPU no longer waits on a fence after the offscreen submit, so frame N+1 is built while the GPU runs frame N. The default is `1`, the old serial path (`kDefaultOffscreenFramesInFlight`). Flipping it is a human decision.
+- **Overlap switch.** `--frames-in-flight=<1|2>`. With `2` the CPU no longer waits on a fence after the offscreen submit, so frame N+1 is built while the GPU runs frame N. The default was `1` (serial). It became `2` on branch `feature/precural-landscape` (2026-11-16, human decision); `1` stays as the escape hatch (`kDefaultOffscreenFramesInFlight`).
 - **Slots.** The offscreen graph has a ring of `kGpuFramesInFlight` slots with their own command buffer, fence and timestamp region. `Core::Update()` waits for its slot before `Game::Update()`.
 - **Frame boundary barrier.** Every offscreen and present command buffer starts with one global barrier. GPU-only resources stay single copy. It also removes an old swapchain write-after-read hazard.
 - **Host-written buffers per slot.** GPU params, the lighting uniform per view, compute descriptor sets, the cluster instance buffer, the CPU-skinned vertex buffer and the bone matrices keep one copy per slot. A write into a copy that a frame in flight reads is refused.
