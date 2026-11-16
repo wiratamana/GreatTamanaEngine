@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace gte {
 
@@ -71,7 +72,7 @@ WaterSettings SanitizeWaterSettings(const WaterSettings& settings) noexcept
     s.shoreWidth = f(settings.shoreWidth, 0.1f, 30.0f, d.shoreWidth);
 
     s.ssrSteps = std::clamp<std::uint32_t>(settings.ssrSteps, 4u, 48u);
-    s.ssrMaxDistance = f(settings.ssrMaxDistance, 10.0f, 5000.0f, d.ssrMaxDistance);
+    s.ssrMaxDistance = f(settings.ssrMaxDistance, 10.0f, 20000.0f, d.ssrMaxDistance);
 
     s.wetBand = f(settings.wetBand, 0.1f, 20.0f, d.wetBand);
     s.wetStrength = f(settings.wetStrength, 0.0f, 1.0f, d.wetStrength);
@@ -202,6 +203,253 @@ WaterShadeParamsGpu MakeWaterShadeParams(const WaterSettings& safe, const WaterF
         p.waves[i] = waves[i];
     }
     return p;
+}
+
+bool WaterPointInPolygon(std::span<const WaterBodyPoint> polygon, Vec2 p) noexcept
+{
+    if (polygon.size() < 3) {
+        return false;
+    }
+    bool inside = false;
+    Vec2 prev = polygon.back().xz;
+    for (const WaterBodyPoint& point : polygon) {
+        const Vec2 cur = point.xz;
+        if ((cur.y > p.y) != (prev.y > p.y)
+            && p.x < (prev.x - cur.x) * (p.y - cur.y) / (prev.y - cur.y) + cur.x) {
+            inside = !inside;
+        }
+        prev = cur;
+    }
+    return inside;
+}
+
+float WaterRiverQuery(std::span<const WaterBodyPoint> line, Vec2 p, float& level, float& halfWidth, Vec2& tangent) noexcept
+{
+    float best = std::numeric_limits<float>::max();
+    level = 0.0f;
+    halfWidth = 0.0f;
+    tangent = Vec2(1.0f, 0.0f);
+    for (std::size_t i = 0; i + 1 < line.size(); ++i) {
+        const WaterBodyPoint& a = line[i];
+        const WaterBodyPoint& b = line[i + 1];
+        const Vec2 ab = b.xz - a.xz;
+        const float l2 = Dot(ab, ab);
+        const float u = l2 > 1e-6f ? std::clamp(Dot(p - a.xz, ab) / l2, 0.0f, 1.0f) : 0.0f;
+        const Vec2 closest = a.xz + ab * u;
+        const float width = a.halfWidth + (b.halfWidth - a.halfWidth) * u;
+        const float signedDistance = Length(p - closest) - width;
+        if (signedDistance < best) {
+            best = signedDistance;
+            level = a.level + (b.level - a.level) * u;
+            halfWidth = width;
+            tangent = l2 > 1e-6f ? ab * (1.0f / std::sqrt(l2)) : Vec2(1.0f, 0.0f);
+        }
+    }
+    return best;
+}
+
+std::vector<WaterBodyPoint> WaterSampleSpline(std::span<const WaterBodyPoint> control, std::uint32_t perSegment)
+{
+    std::vector<WaterBodyPoint> out;
+    if (control.size() < 2) {
+        return out;
+    }
+    const std::uint32_t steps = std::max(perSegment, 1u);
+    const auto at = [&](std::ptrdiff_t i) {
+        return control[static_cast<std::size_t>(std::clamp<std::ptrdiff_t>(i, 0, static_cast<std::ptrdiff_t>(control.size()) - 1))];
+    };
+    const auto blend = [](float p0, float p1, float p2, float p3, float t) {
+        const float t2 = t * t;
+        const float t3 = t2 * t;
+        return 0.5f * ((2.0f * p1) + (-p0 + p2) * t + (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t2
+                          + (-p0 + 3.0f * p1 - 3.0f * p2 + p3) * t3);
+    };
+    for (std::size_t i = 0; i + 1 < control.size(); ++i) {
+        const WaterBodyPoint p0 = at(static_cast<std::ptrdiff_t>(i) - 1);
+        const WaterBodyPoint p1 = at(static_cast<std::ptrdiff_t>(i));
+        const WaterBodyPoint p2 = at(static_cast<std::ptrdiff_t>(i) + 1);
+        const WaterBodyPoint p3 = at(static_cast<std::ptrdiff_t>(i) + 2);
+        for (std::uint32_t k = 0; k < steps; ++k) {
+            const float t = static_cast<float>(k) / static_cast<float>(steps);
+            WaterBodyPoint s;
+            s.xz = Vec2(blend(p0.xz.x, p1.xz.x, p2.xz.x, p3.xz.x, t), blend(p0.xz.y, p1.xz.y, p2.xz.y, p3.xz.y, t));
+            s.level = blend(p0.level, p1.level, p2.level, p3.level, t);
+            s.halfWidth = std::max(blend(p0.halfWidth, p1.halfWidth, p2.halfWidth, p3.halfWidth, t), 0.0f);
+            out.push_back(s);
+        }
+    }
+    out.push_back(control.back());
+    if (out.size() > kWaterMaxRiverPoints) {
+        // Too many samples: keep an even subset, always including both ends.
+        std::vector<WaterBodyPoint> reduced;
+        reduced.reserve(kWaterMaxRiverPoints);
+        for (std::uint32_t i = 0; i < kWaterMaxRiverPoints; ++i) {
+            const std::size_t index = static_cast<std::size_t>(
+                static_cast<double>(i) * static_cast<double>(out.size() - 1) / static_cast<double>(kWaterMaxRiverPoints - 1) + 0.5);
+            reduced.push_back(out[std::min(index, out.size() - 1)]);
+        }
+        out = std::move(reduced);
+    }
+    return out;
+}
+
+WaterBodiesGpu PackWaterBodies(std::span<const WaterBodyDesc> bodies, float seaLevel, std::uint32_t& packedBodies) noexcept
+{
+    WaterBodiesGpu out;
+    std::uint32_t bodyCount = 0;
+    std::uint32_t pointCount = 0;
+    const auto finite = [](float v) { return std::isfinite(v); };
+
+    for (const WaterBodyDesc& body : bodies) {
+        if (bodyCount >= kWaterMaxBodies || !finite(body.level) || !finite(body.waveScale) || !finite(body.flowSpeed)) {
+            continue;
+        }
+        WaterBodyHeaderGpu header;
+        header.info[0] = static_cast<float>(static_cast<std::uint8_t>(body.kind));
+        header.info[1] = body.level;
+        header.info[2] = std::clamp(body.waveScale, 0.0f, 2.0f);
+        header.info[3] = static_cast<float>(bodyCount);
+        header.shape[0] = std::clamp(body.flowSpeed, -20.0f, 20.0f);
+        header.shape[1] = header.shape[2] = body.level;
+
+        const auto copyPoints = [&](std::uint32_t minCount, std::uint32_t maxCount) -> bool {
+            const std::uint32_t count = std::min<std::uint32_t>(static_cast<std::uint32_t>(body.points.size()), maxCount);
+            if (count < minCount || pointCount + count > kWaterMaxPoints) {
+                return false;
+            }
+            Vec2 lo(std::numeric_limits<float>::max(), std::numeric_limits<float>::max());
+            Vec2 hi(std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest());
+            float margin = 0.0f;
+            float levelLo = std::numeric_limits<float>::max();
+            float levelHi = std::numeric_limits<float>::lowest();
+            for (std::uint32_t i = 0; i < count; ++i) {
+                const WaterBodyPoint& p = body.points[i];
+                if (!finite(p.xz.x) || !finite(p.xz.y) || !finite(p.level) || !finite(p.halfWidth)) {
+                    return false;
+                }
+                float* dst = out.points[pointCount + i];
+                dst[0] = p.xz.x;
+                dst[1] = p.xz.y;
+                dst[2] = p.level;
+                dst[3] = std::max(p.halfWidth, 0.0f);
+                lo = Vec2(std::min(lo.x, p.xz.x), std::min(lo.y, p.xz.y));
+                hi = Vec2(std::max(hi.x, p.xz.x), std::max(hi.y, p.xz.y));
+                margin = std::max(margin, dst[3]);
+                levelLo = std::min(levelLo, p.level);
+                levelHi = std::max(levelHi, p.level);
+            }
+            header.bounds[0] = lo.x - margin;
+            header.bounds[1] = lo.y - margin;
+            header.bounds[2] = hi.x + margin;
+            header.bounds[3] = hi.y + margin;
+            header.range[0] = pointCount;
+            header.range[1] = count;
+            header.shape[1] = levelLo;
+            header.shape[2] = levelHi;
+            pointCount += count;
+            return true;
+        };
+
+        bool ok = true;
+        switch (body.kind) {
+        case WaterBodyKind::Ocean:
+            header.bounds[0] = header.bounds[1] = std::numeric_limits<float>::lowest();
+            header.bounds[2] = header.bounds[3] = std::numeric_limits<float>::max();
+            break;
+        case WaterBodyKind::LakeBox:
+            ok = finite(body.boxMin.x) && finite(body.boxMin.y) && finite(body.boxMax.x) && finite(body.boxMax.y)
+                && body.boxMax.x > body.boxMin.x && body.boxMax.y > body.boxMin.y;
+            header.bounds[0] = body.boxMin.x;
+            header.bounds[1] = body.boxMin.y;
+            header.bounds[2] = body.boxMax.x;
+            header.bounds[3] = body.boxMax.y;
+            break;
+        case WaterBodyKind::LakePolygon:
+            ok = copyPoints(3, kWaterMaxLakePoints);
+            break;
+        case WaterBodyKind::River:
+            ok = copyPoints(2, kWaterMaxRiverPoints);
+            break;
+        }
+        if (ok) {
+            out.headers[bodyCount++] = header;
+        }
+    }
+
+    if (bodyCount == 0 && bodies.empty()) {
+        WaterBodyHeaderGpu ocean;
+        ocean.info[0] = static_cast<float>(static_cast<std::uint8_t>(WaterBodyKind::Ocean));
+        ocean.info[1] = seaLevel;
+        ocean.info[2] = 1.0f;
+        ocean.bounds[0] = ocean.bounds[1] = std::numeric_limits<float>::lowest();
+        ocean.bounds[2] = ocean.bounds[3] = std::numeric_limits<float>::max();
+        out.headers[bodyCount++] = ocean;
+    }
+    out.counts[0] = bodyCount;
+    packedBodies = bodyCount;
+    return out;
+}
+
+WaterProbe WaterProbePoint(std::span<const WaterBodyDesc> bodies, const WaterSettings& safe, double timeSeconds, Vec2 xz) noexcept
+{
+    WaterProbe probe;
+    float bestLevel = std::numeric_limits<float>::lowest();
+    const auto consider = [&](int index, float level, float scale) {
+        if (level > bestLevel) {
+            bestLevel = level;
+            probe.body = index;
+            probe.level = level;
+            probe.waveScale = scale;
+        }
+    };
+    if (bodies.empty()) {
+        consider(0, safe.seaLevel, 1.0f);
+    }
+    for (std::size_t i = 0; i < bodies.size(); ++i) {
+        const WaterBodyDesc& b = bodies[i];
+        const int index = static_cast<int>(i);
+        switch (b.kind) {
+        case WaterBodyKind::Ocean:
+            consider(index, b.level, b.waveScale);
+            break;
+        case WaterBodyKind::LakeBox:
+            if (xz.x >= b.boxMin.x && xz.x <= b.boxMax.x && xz.y >= b.boxMin.y && xz.y <= b.boxMax.y) {
+                consider(index, b.level, b.waveScale);
+            }
+            break;
+        case WaterBodyKind::LakePolygon:
+            if (WaterPointInPolygon(b.points, xz)) {
+                consider(index, b.level, b.waveScale);
+            }
+            break;
+        case WaterBodyKind::River: {
+            float level = 0.0f;
+            float halfWidth = 0.0f;
+            Vec2 tangent;
+            if (WaterRiverQuery(b.points, xz, level, halfWidth, tangent) <= 0.0f) {
+                consider(index, level, b.waveScale);
+            }
+            break;
+        }
+        }
+    }
+    probe.inWater = probe.body >= 0;
+    if (probe.inWater) {
+        const WaterWaveTable waves = BuildWaterWaves(safe, 0.0, 0.0, timeSeconds);
+        probe.waveHeight = WaterWaveHeight(waves, safe.waveCount, xz.x, xz.y) * probe.waveScale;
+        probe.surfaceY = probe.level + probe.waveHeight;
+    }
+    return probe;
+}
+
+bool WaterAnyBodyBelowEye(const WaterBodiesGpu& packed, float eyeY) noexcept
+{
+    for (std::uint32_t i = 0; i < std::min(packed.counts[0], kWaterMaxBodies); ++i) {
+        if (packed.headers[i].info[1] < eyeY - 0.05f) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace gte

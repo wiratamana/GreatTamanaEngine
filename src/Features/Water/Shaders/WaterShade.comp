@@ -31,6 +31,20 @@ layout(std430, binding = 0) readonly buffer WaterShadeParams {
     WaterWave waves[8];
 } params;
 
+struct WaterBodyHeader {
+    vec4 info;   // x kind (0 ocean, 1 box, 2 polygon, 3 river), y level, z wave scale, w id.
+    vec4 bounds; // xz min, xz max in world metres.
+    uvec4 range; // x first point, y point count.
+    vec4 shape;  // x flow speed, y lowest level, z highest level.
+};
+
+// Member names and order match WaterBodiesGpu.
+layout(std430, binding = 6) readonly buffer WaterBodyTable {
+    uvec4 counts; // x body count.
+    WaterBodyHeader headers[16];
+    vec4 points[256]; // xz world position, z river level, w river half width.
+} bodies;
+
 layout(binding = 1) uniform sampler2D sceneDepth;
 layout(binding = 2) uniform sampler2D sceneColor;
 layout(binding = 3) uniform sampler2D skyViewLut;
@@ -76,22 +90,22 @@ vec3 ValueNoiseD(vec2 x, float period)
 }
 
 // Wave height at eye-relative xz. `footprint` is the world size of a pixel there; fine waves fade out below it.
-float WaveHeight(vec2 rel, float footprint)
+float WaveHeight(vec2 rel, float footprint, float scale)
 {
     float h = 0.0;
     uint n = min(params.counts.x, 8u);
     for (uint i = 0u; i < n; ++i) {
         WaterWave w = params.waves[i];
-        float fade = smoothstep(2.0, 6.0, (6.2831853 / w.dirAndK.z) / (footprint * params.rippleInfo.y));
+        float fade = smoothstep(4.0, 14.0, (6.2831853 / w.dirAndK.z) / (footprint * params.rippleInfo.y));
         float theta = w.dirAndK.z * dot(w.dirAndK.xy, rel) + w.ampPhase.z;
         float s = 0.5 + 0.5 * sin(theta);
-        h += w.ampPhase.x * fade * (pow(max(s, 1e-5), w.dirAndK.w) - w.ampPhase.w);
+        h += scale * w.ampPhase.x * fade * (pow(max(s, 1e-5), w.dirAndK.w) - w.ampPhase.w);
     }
     return h;
 }
 
 // Height, slope (d/dx, d/dz) and the sum of the faded amplitudes.
-void WaveSurface(vec2 rel, float footprint, out float h, out vec2 slope, out float ampSum)
+void WaveSurface(vec2 rel, float footprint, float scale, out float h, out vec2 slope, out float ampSum)
 {
     h = 0.0;
     slope = vec2(0.0);
@@ -99,7 +113,7 @@ void WaveSurface(vec2 rel, float footprint, out float h, out vec2 slope, out flo
     uint n = min(params.counts.x, 8u);
     for (uint i = 0u; i < n; ++i) {
         WaterWave w = params.waves[i];
-        float amp = w.ampPhase.x * smoothstep(2.0, 6.0, (6.2831853 / w.dirAndK.z) / (footprint * params.rippleInfo.y));
+        float amp = scale * w.ampPhase.x * smoothstep(4.0, 14.0, (6.2831853 / w.dirAndK.z) / (footprint * params.rippleInfo.y));
         float theta = w.dirAndK.z * dot(w.dirAndK.xy, rel) + w.ampPhase.z;
         float sn = sin(theta);
         float s = 0.5 + 0.5 * sn;
@@ -112,16 +126,168 @@ void WaveSurface(vec2 rel, float footprint, out float h, out vec2 slope, out flo
 }
 
 // Small drifting ripples: slope and a foam noise value. Fades out when a ripple is smaller than a pixel.
-vec2 RippleSlope(vec2 rel, float footprint, out float foamNoise)
+vec2 RippleSlope(vec2 rel, float footprint, vec2 flow, out float foamNoise)
 {
     vec4 l0 = params.ripple[0];
     vec4 l1 = params.ripple[1];
-    vec3 n0 = ValueNoiseD(rel * l0.x + l0.yz, l0.w);
-    vec3 n1 = ValueNoiseD(rel * l1.x + l1.yz, l1.w);
+    vec2 moved = rel - flow * params.eyeTime.w;
+    vec3 n0 = ValueNoiseD(moved * l0.x + l0.yz, l0.w);
+    vec3 n1 = ValueNoiseD(moved * l1.x + l1.yz, l1.w);
     float f0 = 1.0 - smoothstep(0.1, 0.5, footprint * l0.x);
     float f1 = 1.0 - smoothstep(0.1, 0.5, footprint * l1.x);
     foamNoise = n0.x * 0.6 + n1.x * 0.4;
     return params.rippleInfo.x * (0.15 * l0.x * f0 * n0.yz + 0.07 * l1.x * f1 * n1.yz);
+}
+
+bool PolygonContains(WaterBodyHeader h, vec2 pw)
+{
+    bool inside = false;
+    uint first = h.range.x;
+    uint n = h.range.y;
+    vec2 prev = bodies.points[first + n - 1u].xy;
+    for (uint i = 0u; i < n; ++i) {
+        vec2 cur = bodies.points[first + i].xy;
+        if ((cur.y > pw.y) != (prev.y > pw.y) && pw.x < (prev.x - cur.x) * (pw.y - cur.y) / (prev.y - cur.y) + cur.x) {
+            inside = !inside;
+        }
+        prev = cur;
+    }
+    return inside;
+}
+
+// Distance to the river centre line minus the half width there (negative = inside), with level and flow direction.
+// Only segments first..last are tested; `segment` returns the nearest one.
+float RiverQuery(WaterBodyHeader h, vec2 pw, uint firstSegment, uint lastSegment, out float level, out vec2 tangent,
+    out uint segment)
+{
+    float best = 1e30;
+    level = h.info.y;
+    tangent = vec2(1.0, 0.0);
+    segment = firstSegment;
+    uint first = h.range.x;
+    for (uint i = firstSegment; i <= lastSegment; ++i) {
+        vec4 a = bodies.points[first + i];
+        vec4 b = bodies.points[first + i + 1u];
+        vec2 ab = b.xy - a.xy;
+        float l2 = dot(ab, ab);
+        float u = l2 > 1e-6 ? clamp(dot(pw - a.xy, ab) / l2, 0.0, 1.0) : 0.0;
+        float d = length(pw - (a.xy + ab * u)) - mix(a.w, b.w, u);
+        if (d < best) {
+            best = d;
+            level = mix(a.z, b.z, u);
+            tangent = l2 > 1e-6 ? ab * inversesqrt(l2) : vec2(1.0, 0.0);
+            segment = i;
+        }
+    }
+    return best;
+}
+
+struct BodyHit {
+    bool valid;
+    float t;
+    float level;
+    float waveScale;
+    vec2 flow;
+    uint id;
+};
+
+// Nearest water surface along the ray among all bodies the eye looks down on.
+BodyHit PickBody(vec3 origin, vec3 dir, float tScene)
+{
+    BodyHit best;
+    best.valid = false;
+    best.t = 1e30;
+    best.level = 0.0;
+    best.waveScale = 1.0;
+    best.flow = vec2(0.0);
+    best.id = 0u;
+    if (dir.y > -1e-5) {
+        return best;
+    }
+    vec2 eyeXZ = params.eyeTime.xz;
+    float limit = min(tScene, params.rippleInfo.w);
+    uint n = min(bodies.counts.x, 16u);
+    for (uint i = 0u; i < n; ++i) {
+        WaterBodyHeader h = bodies.headers[i];
+        float level = h.info.y;
+        float levelRel = level - params.eyeTime.y;
+        if (levelRel >= origin.y - 0.05) {
+            continue; // The eye is not above this body.
+        }
+        float t = (levelRel - origin.y) / dir.y;
+        if (t <= 0.0 || t >= min(best.t, limit)) {
+            continue;
+        }
+        vec2 pw = eyeXZ + origin.xz + dir.xz * t;
+        uint kind = uint(h.info.x + 0.5);
+        vec2 flow = vec2(0.0);
+        if (kind != 0u && (any(lessThan(pw, h.bounds.xy)) || any(greaterThan(pw, h.bounds.zw)))) {
+            continue;
+        }
+        if (kind == 2u && !PolygonContains(h, pw)) {
+            continue;
+        }
+        if (kind == 3u) {
+            // The river surface follows its centre line, so test again at the hit of the local level.
+            vec2 tangent;
+            float lv;
+            uint segment;
+            uint last = h.range.y - 2u;
+            if (RiverQuery(h, pw, 0u, last, lv, tangent, segment) > 0.0) {
+                continue;
+            }
+            t = (lv - params.eyeTime.y - origin.y) / dir.y;
+            if (t <= 0.0 || t >= min(best.t, limit)) {
+                continue;
+            }
+            pw = eyeXZ + origin.xz + dir.xz * t;
+            if (RiverQuery(h, pw, segment == 0u ? 0u : segment - 1u, min(segment + 1u, last), lv, tangent, segment) > 0.0) {
+                continue;
+            }
+            level = lv;
+            flow = tangent * h.shape.x;
+        }
+        best.valid = true;
+        best.t = t;
+        best.level = level;
+        best.waveScale = h.info.z;
+        best.flow = flow;
+        best.id = i;
+    }
+    return best;
+}
+
+// Darkening of dry ground close above a body's surface; `pos` is eye-relative.
+float WetAmount(vec3 pos, float dist)
+{
+    float band = params.wetInfo.x;
+    vec2 pw = params.eyeTime.xz + pos.xz;
+    float amount = 0.0;
+    uint n = min(bodies.counts.x, 16u);
+    for (uint i = 0u; i < n; ++i) {
+        WaterBodyHeader h = bodies.headers[i];
+        float level = h.info.y;
+        uint kind = uint(h.info.x + 0.5);
+        if (kind == 3u) {
+            vec2 tangent;
+            float lv;
+            uint segment;
+            float y = pos.y + params.eyeTime.y;
+            if (y < h.shape.y - 0.5 || y > h.shape.z + band
+                || RiverQuery(h, pw, 0u, h.range.y - 2u, lv, tangent, segment) >= 30.0) {
+                continue;
+            }
+            level = lv;
+        } else if (kind != 0u && (any(lessThan(pw, h.bounds.xy - 30.0)) || any(greaterThan(pw, h.bounds.zw + 30.0)))) {
+            continue;
+        }
+        float above = pos.y + params.eyeTime.y - level;
+        if (above > -0.5 && above < band) {
+            amount = max(amount, 1.0 - smoothstep(0.0, band, max(above, 0.0)));
+        }
+    }
+    float distFade = 1.0 - smoothstep(0.5 * params.wetInfo.z, params.wetInfo.z, dist);
+    return amount * params.wetInfo.y * distFade;
 }
 
 vec3 SkyRadiance(vec3 dir)
@@ -136,6 +302,60 @@ vec3 SkyRadiance(vec3 dir)
     float horizonBlend = 1.0 - smoothstep(0.0, 0.2, dir.y);
     float luma = dot(radiance, vec3(0.2126, 0.7152, 0.0722));
     return mix(radiance, vec3(luma) * vec3(0.93, 0.98, 1.07), 0.6 * horizonBlend);
+}
+
+// Screen-space march of the reflected ray over the scene depth. Returns the hit colour (rgb) and weight (a).
+vec4 TraceScreen(vec3 start, vec3 rdir, ivec2 size, float jitter)
+{
+    int steps = int(params.counts.z);
+    float maxDist = params.wetInfo.w;
+    vec2 sizeF = vec2(size);
+    for (int i = 0; i < steps; ++i) {
+        float s = (float(i) + jitter + 0.5) / float(steps);
+        float d = maxDist * s * s + 0.5;
+        vec3 pos = start + rdir * d;
+        vec4 c = params.viewProjection * vec4(pos, 1.0);
+        if (c.w <= 1e-3) {
+            break;
+        }
+        vec3 ndc = c.xyz / c.w;
+        vec2 uv = (ndc.xy + params.viewInfo.yz) * 0.5 + 0.5;
+        if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
+            break;
+        }
+        ivec2 q = ivec2(uv * sizeF);
+        float sd = FetchDepth(sceneDepth, q);
+        if (sd >= kClearDepthThreshold) {
+            continue;
+        }
+        vec2 qndc = (vec2(q) + 0.5) / sizeF * 2.0 - 1.0 - params.viewInfo.yz;
+        float invW = params.invViewProjection[0][3] * qndc.x + params.invViewProjection[1][3] * qndc.y
+            + params.invViewProjection[2][3] * sd + params.invViewProjection[3][3];
+        float sceneW = 1.0 / invW;
+        float diff = c.w - sceneW;
+        float thick = max(1.5, c.w * 0.04);
+        if (diff > 0.0 && diff < thick) {
+            vec2 edge = min(uv, 1.0 - uv);
+            float fade = smoothstep(0.0, 0.08, min(edge.x, edge.y)) * (1.0 - smoothstep(0.85, 1.0, s));
+            return vec4(texelFetch(sceneColor, q, 0).rgb, fade);
+        }
+    }
+    return vec4(0.0);
+}
+
+// Sky (and optionally screen-space) radiance seen along the mirrored view ray; `weight` is the reflectance.
+vec3 ReflectionColor(vec3 hit, vec3 dir, vec3 normal, ivec2 p, ivec2 size, float weight)
+{
+    vec3 reflected = reflect(dir, normal);
+    reflected.y = max(reflected.y, 0.02);
+    reflected = normalize(reflected);
+    vec3 sky = SkyRadiance(reflected);
+    if ((params.counts.w & kFlagSsr) != 0u && weight > 0.03) {
+        float jitter = InterleavedGradientNoise(vec2(p) + vec2(37.0 * fract(params.eyeTime.w * 7.0)));
+        vec4 screenHit = TraceScreen(hit, reflected, size, jitter);
+        return mix(sky, screenHit.rgb, screenHit.a);
+    }
+    return sky;
 }
 
 float DistributionGgx(float nDotH, float alpha)
@@ -176,24 +396,16 @@ void main()
     vec3 origin = nearH.xyz / nearH.w;
     vec3 dir = normalize(farH.xyz / farH.w - origin);
     float tScene = hasScene ? length(scenePos - origin) : 1e30;
-    float levelRel = params.viewInfo.w - params.eyeTime.y;
-
-    float tWater = -1.0;
-    if (dir.y < -1e-5) {
-        tWater = (levelRel - origin.y) / dir.y;
-    }
-    bool candidate = tWater > 0.0 && tWater < tScene && tWater <= params.rippleInfo.w;
+    BodyHit body = PickBody(origin, dir, tScene);
+    float tWater = body.t;
+    float levelRel = body.level - params.eyeTime.y;
+    bool candidate = body.valid;
 
     if (!candidate) {
         // Not water: optionally darken the dry terrain just above the water line.
         float wet = 0.0;
         if (hasScene && (params.counts.w & kFlagWet) != 0u) {
-            float above = scenePos.y - levelRel;
-            float band = params.wetInfo.x;
-            if (above > -0.5 && above < band) {
-                float distFade = 1.0 - smoothstep(0.5 * params.wetInfo.z, params.wetInfo.z, tScene);
-                wet = (1.0 - smoothstep(0.0, band, max(above, 0.0))) * params.wetInfo.y * distFade;
-            }
+            wet = WetAmount(scenePos, tScene);
         }
         if (debugging) {
             vec3 neutral = vec3(0.0);
@@ -221,7 +433,7 @@ void main()
     if (params.counts.x > 0u) {
         for (int i = 0; i < 3; ++i) {
             vec3 q = origin + dir * t;
-            float h = WaveHeight(q.xz, footprint);
+            float h = WaveHeight(q.xz, footprint, body.waveScale);
             float tNext = (levelRel + h - origin.y) / dir.y;
             t = clamp(tNext, tWater * 0.5, tWater * 1.5 + 2.0);
         }
@@ -236,9 +448,9 @@ void main()
     float h;
     vec2 waveSlope;
     float ampSum;
-    WaveSurface(hit.xz, footprint, h, waveSlope, ampSum);
+    WaveSurface(hit.xz, footprint, body.waveScale, h, waveSlope, ampSum);
     float foamNoise;
-    vec2 slope = waveSlope + RippleSlope(hit.xz, footprint, foamNoise);
+    vec2 slope = waveSlope + RippleSlope(hit.xz, footprint, body.flow, foamNoise);
     vec3 normal = normalize(vec3(-slope.x, 1.0, -slope.y));
 
     vec3 viewDir = -dir;
@@ -258,7 +470,10 @@ void main()
 
     // Foam: wave crests (height against the amplitude sum) and a breaking band at the shore.
     float crestMetric = h / max(ampSum, 1e-3);
-    float crestFoam = smoothstep(0.28, 0.5, crestMetric) * params.foamColor.w * (0.4 + 0.9 * foamNoise);
+    float steep = smoothstep(0.05, 0.22, length(waveSlope));
+    float breakup = smoothstep(0.42, 0.75, foamNoise);
+    float crestFoam = smoothstep(0.34, 0.58, crestMetric) * (0.35 + 0.65 * steep) * breakup * params.foamColor.w
+        * (1.0 - smoothstep(0.6, 3.0, footprint));
     float shoreLine = shoreMask * (0.35 + 0.65 * smoothstep(0.3, 0.8, foamNoise + 0.25 * sin(verticalDepth * 6.0 - params.eyeTime.w * 1.6)));
     float foam = clamp(crestFoam + shoreLine * params.surfaceInfo.x, 0.0, 1.0);
 
@@ -277,9 +492,9 @@ void main()
         } else if (debugView == 6u) {
             d = vec3(clamp(0.5 + h / max(2.0 * ampSum, 1e-3), 0.0, 1.0));
         } else if (debugView == 7u) {
-            d = SkyRadiance(reflect(dir, normal)) * fresnel;
+            d = ReflectionColor(hit, dir, normal, p, size, fresnel) * fresnel;
         } else if (debugView == 8u) {
-            d = vec3(1.0, 0.0, 0.0);
+            d = vec3(Hash21(vec2(float(body.id), 3.0)), Hash21(vec2(float(body.id), 11.0)), Hash21(vec2(float(body.id), 29.0)));
         }
         Store(p, vec4(d, 1.0), windowDepth);
         return;
@@ -303,15 +518,14 @@ void main()
     vec3 sigma = params.rippleInfo.z / clarity * vec3(1.9, 0.75, 0.55);
     vec3 transmit = hasScene ? exp(-sigma * rayDepth) : vec3(0.0);
     float deepMix = 1.0 - exp(-verticalDepth / clarity);
-    vec3 body = mix(params.shallowColor.rgb, params.deepColor.rgb, deepMix) * bodyLight;
-    vec3 under = seabed * transmit + body * (1.0 - transmit);
+    vec3 bodyColor = mix(params.shallowColor.rgb, params.deepColor.rgb, deepMix) * bodyLight;
+    vec3 under = seabed * transmit + bodyColor * (1.0 - transmit);
 
-    // Reflection: sky from the look-up table; below-horizon directions are mirrored up.
-    vec3 reflected = reflect(dir, normal);
-    reflected.y = max(reflected.y, 0.02);
-    vec3 sky = SkyRadiance(normalize(reflected));
+    // Reflection: sky from the look-up table, screen-space hits when enabled.
     float shoreFresnel = smoothstep(0.0, 0.35, verticalDepth);
-    vec3 color = mix(under, sky * params.surfaceInfo.w, fresnel * shoreFresnel);
+    float reflectWeight = fresnel * shoreFresnel;
+    vec3 reflection = ReflectionColor(hit, dir, normal, p, size, reflectWeight);
+    vec3 color = mix(under, reflection * params.surfaceInfo.w, reflectWeight);
 
     // Sun glint.
     vec3 sunDir = params.sunDirection.xyz;

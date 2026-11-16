@@ -1,12 +1,16 @@
 #pragma once
 
+#include "WaterBodySource.h"
 #include "WaterDebugEndpoint.h"
+#include "WaterMath.h"
 #include "WaterTypes.h"
 #include "../../Core/FeatureKit/FeatureKit.h"
 #include "../../Game/Lighting/AtmosphereSkyLuts.h"
 #include "../../Game/Lighting/SunLightModulation.h"
 
 #include <cstdint>
+#include <memory>
+#include <vector>
 
 namespace gte {
 
@@ -15,6 +19,7 @@ struct WaterViewState {
     fx::PersistentTarget color{ "Water.Color" }; // rgb radiance, a coverage.
     fx::PersistentTarget depth{ "Water.Depth" }; // Window depth of the surface.
     fx::GpuParams<WaterShadeParamsGpu> shadeParams;
+    fx::GpuParams<WaterBodiesGpu> bodyParams;
     WaterViewSnapshot snapshot;
 };
 
@@ -35,6 +40,18 @@ public:
     // The last state of `scope`'s view; NotRendered when that view has not rendered for a few frames.
     WaterViewSnapshot Snapshot(rg::ViewScope scope) const;
 
+    // Bodies from the editor layer; null clears. The feature shares ownership. Main thread only.
+    void SetBodySource(std::shared_ptr<const IWaterBodySource> source);
+
+    // Bodies added by the debug endpoint. With no local body and no source one ocean at the sea level is drawn.
+    const std::vector<WaterBodyDesc>& LocalBodies() const noexcept { return m_localBodies; }
+    bool AddLocalBody(WaterBodyDesc body);
+    bool RemoveLocalBody(std::size_t index);
+    void ClearLocalBodies();
+
+    // CPU answer for one world point (body, level, wave height now), using the same bodies the shader gets.
+    WaterProbe Probe(Vec2 xz);
+
     fx::IFeatureDebugEndpoint* DebugEndpoint() noexcept override { return &m_debugEndpoint; }
 
 private:
@@ -42,6 +59,9 @@ private:
     void AdvanceClock(const fx::Frame& f);
 
     WaterSettings m_settings;
+    std::vector<WaterBodyDesc> m_localBodies;
+    std::shared_ptr<const IWaterBodySource> m_bodySource;
+    std::vector<WaterBodyDesc> m_frameBodies; // Scratch for the merged list.
     double m_time = 0.0;
     std::uint64_t m_clockFrame = ~std::uint64_t{ 0 };
     std::uint64_t m_newestFrame = 0;

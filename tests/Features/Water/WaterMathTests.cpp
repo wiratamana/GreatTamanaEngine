@@ -90,6 +90,7 @@ TEST(WaterMathTest, HeightHasNearZeroMeanOverAnAreaOfLargeWaves)
     s.waveCount = 1;
     s.waveHeight = 2.0f;
     s.baseWavelength = 50.0f;
+    s.windDirectionDeg = 0.0f; // Waves travel along +X, so 50 m of X is one whole period.
     s.choppiness = 0.8f;
     const WaterWaveTable table = BuildWaterWaves(SanitizeWaterSettings(s), 0.0, 0.0, 0.0);
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "WaterBodySource.h"
 #include "../../Core/Extent.h"
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
@@ -38,6 +39,7 @@ enum class WaterFrameStatus : std::uint8_t {
     PassDisabled,
     Disabled,
     CameraUnderwater,
+    NoBodies,
 };
 
 // Water tunables. Stored only through SanitizeWaterSettings().
@@ -79,7 +81,7 @@ struct WaterSettings {
     // Screen-space reflection.
     bool ssr = false;
     std::uint32_t ssrSteps = 16;         // 4..48.
-    float ssrMaxDistance = 400.0f;       // 10..5000, metres.
+    float ssrMaxDistance = 400.0f;       // 10..20000, metres.
 
     // Wet shoreline on the terrain.
     bool wetShore = true;
@@ -140,6 +142,24 @@ struct WaterShadeParamsGpu {
 };
 static_assert(sizeof(WaterShadeParamsGpu) == 128 + 16 * 11 + 16 + 32 + 32 * kWaterMaxWaves);
 static_assert(std::is_trivially_copyable_v<WaterShadeParamsGpu>);
+
+// One body of the shade table; four vec4 so the std430 array stride is 64 bytes.
+struct WaterBodyHeaderGpu {
+    float info[4] = {};             // x kind, y level, z wave scale, w body id.
+    float bounds[4] = {};           // xz min, xz max of the body in world metres.
+    std::uint32_t range[4] = {};    // x first point, y point count.
+    float shape[4] = {};            // x flow speed, y lowest surface level, z highest surface level.
+};
+static_assert(sizeof(WaterBodyHeaderGpu) == 64);
+
+// std430 block "bodies" of WaterShade.comp.
+struct WaterBodiesGpu {
+    std::uint32_t counts[4] = {};   // x body count.
+    WaterBodyHeaderGpu headers[kWaterMaxBodies];
+    float points[kWaterMaxPoints][4] = {}; // xz world position, z river level, w river half width.
+};
+static_assert(sizeof(WaterBodiesGpu) == 16 + 64 * kWaterMaxBodies + 16 * kWaterMaxPoints);
+static_assert(std::is_trivially_copyable_v<WaterBodiesGpu>);
 
 inline constexpr std::uint32_t kWaterFlagSsr = 1u;
 inline constexpr std::uint32_t kWaterFlagWet = 2u;

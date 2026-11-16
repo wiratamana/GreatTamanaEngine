@@ -51,6 +51,43 @@ WaterViewSnapshot WaterFeature::Snapshot(rg::ViewScope scope) const
     return snapshot;
 }
 
+void WaterFeature::SetBodySource(std::shared_ptr<const IWaterBodySource> source)
+{
+    m_bodySource = std::move(source);
+}
+
+bool WaterFeature::AddLocalBody(WaterBodyDesc body)
+{
+    if (m_localBodies.size() >= kWaterMaxBodies) {
+        return false;
+    }
+    m_localBodies.push_back(std::move(body));
+    return true;
+}
+
+bool WaterFeature::RemoveLocalBody(std::size_t index)
+{
+    if (index >= m_localBodies.size()) {
+        return false;
+    }
+    m_localBodies.erase(m_localBodies.begin() + static_cast<std::ptrdiff_t>(index));
+    return true;
+}
+
+void WaterFeature::ClearLocalBodies()
+{
+    m_localBodies.clear();
+}
+
+WaterProbe WaterFeature::Probe(Vec2 xz)
+{
+    m_frameBodies = m_localBodies;
+    if (m_bodySource) {
+        m_bodySource->Collect(m_frameBodies);
+    }
+    return WaterProbePoint(m_frameBodies, m_settings, m_time, xz);
+}
+
 void WaterFeature::AdvanceClock(const fx::Frame& f)
 {
     // Both views call this in one frame; the clock moves once.
@@ -92,8 +129,15 @@ void WaterFeature::SurfacePass(fx::PostOpaqueFrame& f)
         bail(WaterFrameStatus::PassDisabled);
         return;
     }
-    if (v.eye.y <= cfg.seaLevel + 0.05f) {
-        bail(WaterFrameStatus::CameraUnderwater);
+    m_frameBodies = m_localBodies;
+    if (m_bodySource) {
+        m_bodySource->Collect(m_frameBodies);
+    }
+    std::uint32_t bodyCount = 0;
+    const WaterBodiesGpu bodies = PackWaterBodies(m_frameBodies, cfg.seaLevel, bodyCount);
+    snap.bodyCount = bodyCount;
+    if (!WaterAnyBodyBelowEye(bodies, v.eye.y)) {
+        bail(bodyCount == 0 ? WaterFrameStatus::NoBodies : WaterFrameStatus::CameraUnderwater);
         return;
     }
     if (!f.ShaderReady(m_shadeShader)) {
@@ -135,6 +179,7 @@ void WaterFeature::SurfacePass(fx::PostOpaqueFrame& f)
     // A sampler needs a valid image even when the sky is missing (the flag skips the read).
     const bool shaded = f.Compute(m_shadeShader, "Water.Shade.Dispatch")
                             .Params(view.shadeParams, MakeWaterShadeParams(cfg, in))
+                            .Params("bodies", view.bodyParams, bodies)
                             .Bind("sceneDepth", fx::Depth(f.SceneDepth()))
                             .Bind("sceneColor", f.SceneColor())
                             .Bind("skyViewLut", skyValid ? luts->skyView : f.SceneColor())

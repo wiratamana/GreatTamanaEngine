@@ -7,6 +7,8 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
+#include <vector>
 
 namespace gte {
 
@@ -40,5 +42,37 @@ WaterShadeParamsGpu MakeWaterShadeParams(const WaterSettings& safe, const WaterF
 
 // CPU reference of the shader's wave sum: height above the water level at eye-relative (x, z), no distance fade.
 float WaterWaveHeight(const WaterWaveTable& waves, std::uint32_t count, float relX, float relZ) noexcept;
+
+
+// CPU twin of the shader's point-in-polygon test (even-odd rule). False for fewer than 3 points.
+bool WaterPointInPolygon(std::span<const WaterBodyPoint> polygon, Vec2 p) noexcept;
+
+// Nearest point of a river polyline to `p`: returns distance minus the half width there (negative = inside).
+// `level` and `halfWidth` are interpolated at that point and `tangent` is the unit direction of the segment.
+float WaterRiverQuery(std::span<const WaterBodyPoint> line, Vec2 p, float& level, float& halfWidth, Vec2& tangent) noexcept;
+
+// Catmull-Rom samples through `control` (2 or more points), `perSegment` samples per span, ends included.
+// Level and half width are interpolated with the same weights. The result is capped at kWaterMaxRiverPoints.
+std::vector<WaterBodyPoint> WaterSampleSpline(std::span<const WaterBodyPoint> control, std::uint32_t perSegment);
+
+// Packs the bodies for the shader: drops invalid ones, caps counts, computes bounds. An empty list gives
+// one implicit ocean at `seaLevel`. `packedBodies` receives the number of bodies written.
+WaterBodiesGpu PackWaterBodies(std::span<const WaterBodyDesc> bodies, float seaLevel, std::uint32_t& packedBodies) noexcept;
+
+// What the CPU says about one world point: the visible body, its level and the wave height without distance fade.
+struct WaterProbe {
+    bool inWater = false;
+    int body = -1; // Index into the list; -1 when no body covers the point.
+    float level = 0.0f;
+    float waveScale = 1.0f;
+    float waveHeight = 0.0f;
+    float surfaceY = 0.0f;
+};
+
+// Highest body covering `xz` wins. An empty list means one ocean at `safe.seaLevel`.
+WaterProbe WaterProbePoint(std::span<const WaterBodyDesc> bodies, const WaterSettings& safe, double timeSeconds, Vec2 xz) noexcept;
+
+// True when at least one packed body has its surface below `eyeY`.
+bool WaterAnyBodyBelowEye(const WaterBodiesGpu& packed, float eyeY) noexcept;
 
 } // namespace gte
