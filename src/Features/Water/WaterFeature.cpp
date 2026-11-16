@@ -146,8 +146,10 @@ void WaterFeature::SurfacePass(fx::PostOpaqueFrame& f)
     }
 
     // Half-res shading: the shade pass runs on a quarter of the pixels; the composite looks each full pixel up by uv.
+    constexpr std::uint64_t kAutoHalfPixels = 600000;
+    const bool half = cfg.halfRes || (cfg.halfResAuto && std::uint64_t{ v.extent.width } * v.extent.height >= kAutoHalfPixels);
     Extent2D shadeExtent = v.extent;
-    if (cfg.halfRes) {
+    if (half) {
         shadeExtent.width = (v.extent.width + 1) / 2;
         shadeExtent.height = (v.extent.height + 1) / 2;
     }
@@ -202,7 +204,7 @@ void WaterFeature::SurfacePass(fx::PostOpaqueFrame& f)
                            .Bind("waterColor", color)
                            .Bind("waterDepth", depth)
                            .Target(f.SceneColor())
-                           .DepthTest(f.SceneDepth(), cfg.halfRes ? fx::DepthCompare::LessEqual : fx::DepthCompare::Always, /*write=*/true)
+                           .DepthTest(f.SceneDepth(), half ? fx::DepthCompare::LessEqual : fx::DepthCompare::Always, /*write=*/true)
                            .Draw();
     if (!drawn) {
         f.ReportOnce("Water.Composite.Draw was refused");

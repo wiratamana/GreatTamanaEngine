@@ -63,6 +63,7 @@ constexpr std::array kSettingKeys{
     SettingKey{ "wetFadeDistance", &WaterSettings::wetFadeDistance },
     SettingKey{ "maxDistance", &WaterSettings::maxDistance },
     SettingKey{ "halfRes", &WaterSettings::halfRes },
+    SettingKey{ "halfResAuto", &WaterSettings::halfResAuto },
 };
 
 constexpr std::string_view kDebugViewKey = "debugView";

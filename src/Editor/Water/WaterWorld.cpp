@@ -209,6 +209,7 @@ water::WaterProbeResult WaterWorld::Probe(double x, double z) const
     out.carvedHeight = ground->carvedHeight;
     const bool wetHere = out.water.hasWater && (out.water.kind != water::WaterBodyKind::Ocean || ground->carvedHeight < out.water.surfaceY);
     out.depth = wetHere ? static_cast<double>(out.water.surfaceY) - ground->carvedHeight : 0.0;
+    out.submerged = wetHere && out.depth > 0.0;
 
     const auto wetAt = [this](double px, double pz) {
         const water::WaterSample s = m_set->SampleAt(px, pz);

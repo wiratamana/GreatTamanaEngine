@@ -116,7 +116,7 @@ TEST(TerrainCarveStreamerTests, OnlyTouchedNodesRebuildAndTheOldMeshKeepsDrawing
     const auto dirty = Dirty(nullptr, &lake);
     const int invalidated = streamer.SetCarve(lake.carve, dirty);
     EXPECT_GE(invalidated, 1);
-    EXPECT_LE(invalidated, 2) << "a 60 m lake touches at most two 128 m nodes";
+    EXPECT_LE(invalidated, 3) << "a 60 m lake with its 60 m bank touches at most three 128 m nodes";
     EXPECT_EQ(streamer.Stats().resident, 10) << "old meshes stay resident";
     for (std::size_t i = 0; i < wanted.size(); ++i) {
         EXPECT_EQ(streamer.Find(wanted[i].key), before[i]) << "old mesh still drawn at once";

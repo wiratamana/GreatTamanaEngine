@@ -398,7 +398,7 @@ TerrainCommandResult ProbeCommand(water::IWaterWorld& world, const Pairs& params
         body += ",\"bodyId\":" + std::to_string(p.water.bodyId) + ",\"kind\":\"" + water::WaterBodyKindName(p.water.kind)
             + "\",\"surfaceY\":" + std::to_string(p.water.surfaceY) + ",\"edgeDistance\":" + std::to_string(p.water.edgeDistance);
     }
-    body += ",\"depth\":" + std::to_string(p.depth);
+    body += ",\"depth\":" + std::to_string(p.depth) + std::string(",\"submerged\":") + (p.submerged ? "true" : "false");
     body += p.shoreDistance ? ",\"shoreDistance\":" + std::to_string(*p.shoreDistance) : std::string(",\"shoreDistance\":null");
     body += "}";
     return Json(body);

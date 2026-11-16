@@ -44,6 +44,7 @@ struct WaterProbeResult {
     double carvedHeight = 0.0;
     WaterSample water;
     double depth = 0.0;                 // Water surface minus carved ground; positive = under water.
+    bool submerged = false;             // The ground here really is under the surface (an ocean does not count inland).
     std::optional<double> shoreDistance; // Metres to where the ground meets the surface, within the search range.
 };
 

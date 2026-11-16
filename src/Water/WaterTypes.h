@@ -52,9 +52,9 @@ struct WaterBody {
     WaterBodyKind kind = WaterBodyKind::Lake;
     float level = 0.0f;       // Lake and ocean surface height in metres.
     float depth = 6.0f;       // Carve depth below the surface (lake: deepest point, river: channel centre).
-    float shoreWidth = 12.0f; // Lake: distance from the edge to full depth.
-    float bankWidth = 24.0f;  // Distance outside the edge over which the land is pulled down to the water.
-    float rimHeight = 0.6f;   // Lake dam height above the surface where land is lower than the water.
+    float shoreWidth = 20.0f; // Lake: distance from the edge to full depth.
+    float bankWidth = 60.0f;  // Distance outside the edge over which the land is pulled down to the water (soft bank).
+    float rimHeight = 0.4f;   // Lake dam height above the surface where land is lower than the water.
     bool carveTerrain = true;
     bool sealRim = true;
     std::vector<Point2> polygon;     // Lake outline, 3..32 corners.
