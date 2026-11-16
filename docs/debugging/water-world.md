@@ -19,6 +19,15 @@
 - A baked `.gta` node is skipped (generated instead) when the carve touches it.
 - The old flat "Terrain Water" quad is hidden while the Water feature is connected (`hideOceanQuad`). `/terrain/ocean_quad?visible=true` brings it back.
 
+## Deep seabed skip
+- Setting `cullDeepSeabed` (default true) and `seabedCullDepth` (60 m). While the Water feature draws the ocean, the terrain does not draw nodes whose top is below `seaLevel - max(seabedCullDepth, 2 x clarity)`. Deep water hides them anyway.
+- Reason: the old flat quad hid the seabed behind opaque depth and so saved terrain and shadow work. A post-process water cannot do that. This setting brings the saving back (open ocean view: terrain draw 1.9 -> 0.8 ms, shadow cluster 1.05 -> 0.13 ms at 719x360).
+- `GET /terrain/state` shows `seabedCulledNodes`. Set `cullDeepSeabed=false` with `/water/set` to compare.
+- Only the ocean counts. Lakes and rivers never cause a skip.
+
+## Half-resolution water
+`/water/set?halfRes=true` (or quality `low`) shades the water on a half-size target. The Water feature also switches it on by itself when the view has 600000 pixels or more (`halfResAuto`, set on the feature with `/feature_debug/set?name=Water&halfResAuto=false`). See [Water feature](../reference/render-features/water.md#cost-intel-iris-xe-lean-profile-ssr-off-overlap-mode-medians-of-2-rounds).
+
 ## Measured (Iris Xe, 128 m nodes, 2 m spacing, debounce 0.3 s)
 | Edit | Nodes rebuilt | Wall time to all new meshes |
 |---|---|---|
@@ -40,7 +49,7 @@ Read-only: `state`, `list`, `settings`, `probe`, `map`, `leaks`.
 | `/water/set_body?id=&level=&depth=&shoreWidth=&bankWidth=&rimHeight=&carve=&seal=&waveScale=&name=` | body parameters |
 | `/water/move_point?id=&index=&x=&z=[&y=&w=]`, `/water/add_point?id=&index=&x=&z=`, `/water/remove_point?id=&index=` | the same code path as the view gizmos |
 | `/water/flush` | hand the pending carve to the terrain now |
-| `/water/probe?x=&z=` | base and carved height, body, surface, depth, shore distance |
+| `/water/probe?x=&z=` | base and carved height, body, surface, depth, `submerged` (ground really under the surface), shore distance |
 | `/water/map?size=512&range=1000&cx=&cz=` | top-down PNG of the carved ground, water, outlines and control points (about 250 ms at 512) |
 | `/water/leaks?id=` | how many outline samples of a lake lie below its level, and a suggested level |
 | `/water/save?path=`, `/water/load?path=` | JSON |
@@ -60,4 +69,7 @@ Water look is also readable through `/feature_debug/state?name=Water` and `debug
 ## Known limits
 - Rivers and lakes are carved with the raw noise height; erosion on LOD 0/1 can differ by metres, so use scene depth (the shader does) for the exact shoreline.
 - River surface in the shader uses the same Catmull-Rom as the CPU but a 64-point cap, so very long rivers are resampled.
-- Lakes sit on one flat level; a lake on a steep slope needs the rim or it will look like a raised pool.
+- Lakes sit on one flat level; a lake on a steep slope needs the rim or it will look like a raised pool. The defaults are now a soft bank (`bankWidth` 60 m, `shoreWidth` 20 m, `rimHeight` 0.4 m). A box lake on a slope still looks like a flat pool.
+- Rivers have no levee and no carved delta. Where a river meets the sea it just ends in the ocean. `auto_level` gives the river source a level above the lake level if the ground there is higher.
+- Rivers use `x,y,z,w` points (y = surface level). Three numbers mean `x,y,z`, not `x,z,w`.
+- The Water feature `probe` action does not know the terrain. Use `/water/probe` and read `submerged`.

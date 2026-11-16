@@ -78,6 +78,7 @@ Sanitized on write (`SanitizeWaterSettings`). NaN and infinity become the defaul
 | `ssr` / `ssrSteps` / `ssrMaxDistance` | false / 16 / 400 | bool / 4..48 / 10..20000 | Screen-space reflection |
 | `wetShore` / `wetBand` / `wetStrength` / `wetFadeDistance` | true / 1.5 / 0.45 / 3000 | bool / 0.1..20 / 0..1 / 100..50000 | Wet ground |
 | `maxDistance` | 100000 | 100..1e6 | Longest water ray, metres |
+| `halfRes` / `halfResAuto` | false / true | bool / bool | Shade at half resolution always / when the view has 600000 pixels or more |
 | `shadowStrength` | 0 | 0..1 | Reserved. Sun shadow on water is not bound |
 | `debugView` | `Off` | see below | Show a mask instead of the picture |
 
@@ -94,7 +95,7 @@ Name for `/feature_debug`: `Water`. Every setting above is writable with `/featu
 | `clear_bodies`, `dump_bodies` | none |
 | `probe` | `x`, `z` world metres. CPU answer: `probe.body`, `probe.level`, `probe.waveHeight`, `probe.surfaceY` |
 
-`probe` knows the bodies, not the terrain. An infinite ocean always reports water, even far inland.
+`probe` knows the bodies, not the terrain. An infinite ocean always reports water, even far inland. Use `/water/probe` for the real answer: its `submerged` field also checks the carved ground height.
 
 | Read-only key (prefix `game.` or `scene.`) | Meaning |
 |---|---|
@@ -120,22 +121,31 @@ curl.exe "http://127.0.0.1:8080/profiler/table?view=flat&lane=gpu&limit=256"
 ```
 Rows: `Water.Shade.Dispatch`, `Water.Composite.Draw`.
 
-## Cost (Intel Iris Xe, lean profile, SSR off, medians)
-| Game view | View | Shade | Composite | Frame without water -> with |
-|---|---|---|---|---|
-| 719x360 | coast / high / open ocean | 0.33 / 0.38 / 0.55 ms | 0.045 ms | 8.4 -> 8.3, 7.6 -> 8.1, 7.6 -> 7.9 ms |
-| 1264x629 | coast / high / open ocean | 1.0 / 1.2 / 1.7 ms | 0.18 / 0.21 / 0.39 ms | 12.4 -> 14.6, 12.3 -> 14.2, 12.5 -> 15.6 ms |
+## Cost (Intel Iris Xe, lean profile, SSR off, overlap mode, medians of 2 rounds)
+Frame ms. `none` = Water off, no flat quad. `quad` = the old flat quad. `water` = default (deep seabed skipped; half resolution automatic on big views).
 
-- SSR with 32 steps adds about 0.75 ms at 719x360.
-- Three bodies (river + lake + ocean) cost 0.7 to 1.05 ms at 719x360.
-- `waveCount` 4 saves about 0.3 ms at 1264x629. The cost floor is memory traffic: 12 bytes written by the shade pass, 12 read and 12 written by the composite.
-- The water gives a tighter shadow depth range over open sea, so the first shadow cascade got 0.5 ms cheaper there.
+| Game view | View | none | quad | water | water rows |
+|---|---|---|---|---|---|
+| 719x360 | coast | 8.5 | 8.2 | 8.8 | 0.37 |
+| 719x360 | high | 7.8 | 7.9 | 7.6 | 0.40 |
+| 719x360 | open ocean | 7.7 | 8.0 | 6.1 | 0.53 |
+| 1264x629 | coast | 13.2 | 13.1 | 13.2 | 0.39 |
+| 1264x629 | high | 12.0 | 12.2 | 12.5 | 0.45 |
+| 1264x629 | open ocean | 12.1 | 12.2 | 10.0 | 0.56 |
+
+- Full-resolution shading at 1264x629 costs 0.8 to 1.7 ms (`halfResAuto=false`). Half resolution cuts the shade pass by about 70 % and the composite by about 45 %.
+- Open ocean gets faster than no water at all: the skipped seabed saves 1.1 ms of terrain draw and 1.4 ms of shadow at 719x360.
+- SSR with 16 steps adds 0.2 to 0.5 ms at 719x360 and 0.6 to 1.4 ms at 1264x629 (full resolution). Keep it off on this iGPU.
+- A lake and a river add 0.4 to 0.9 ms at 719x360. At 1264x629 full resolution they add 1.0 to 2.9 ms; with half resolution 0.4 to 0.9 ms.
+- Flight at 300 m/s over the coast: frame median 12.3 ms (none) and 12.8 ms (water), p95 14.2 and 14.8 ms at 1264x629; no stutter from streaming or carve.
+- The cost floor is memory traffic: 12 bytes written by the shade pass, 12 read and 12 written by the composite.
 
 ## Limits
 - Flat silhouettes: waves change normals, not the outline.
 - No camera under water. The body is skipped when the eye is below its level.
-- Ocean is drawn past the camera far plane. Land beyond the far plane is not in the depth buffer, so water can cover it.
-- Seabed is shaded fully. The old flat quad was an occluder that saved seabed work. This does not.
+- Ocean is drawn past the camera far plane. Land beyond the far plane is not in the depth buffer, and the terrain draws none there either, so the water does not hide any drawn land. It only fills the band between the far plane and the true horizon.
+- Deep seabed is skipped by the terrain (`cullDeepSeabed`, see [Water world](../../debugging/water-world.md)). That brings back the saving the old flat quad gave. A node counts as hidden when its top is below the ocean by `max(seabedCullDepth, 2 x clarity)` metres. Very clear water with a low `clarity` still shows the seabed above that depth.
+- Half resolution (`halfRes`, or automatic from 600000 view pixels) shades one pixel per 2x2 block. The land edge stays exact (depth test in the composite), but foam lines on long beaches show small steps and ripples are a little softer.
 - No sun shadow on water. No cloud reflection. The sky table has no sun disk, so the glint is analytic.
 - Water has no motion vectors. Moving waves can ghost slightly under TAA.
 - Shallow water over a very wide area is bandwidth bound at 720p and above.

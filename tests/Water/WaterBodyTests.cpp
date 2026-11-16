@@ -101,6 +101,32 @@ TEST(WaterSettingsTests, JsonRoundTripAndKeyNames)
     EXPECT_FALSE(ParseSettingsJson("not json", t, error));
 }
 
+TEST(WaterSettingsTests, SeabedSkipAndHalfResAreSavedHashedAndFollowThePreset)
+{
+    const WaterSettings d;
+    EXPECT_TRUE(d.cullDeepSeabed);
+    EXPECT_FALSE(d.halfRes);
+    EXPECT_TRUE(ApplyQuality(d, WaterQuality::Low).halfRes);
+    EXPECT_FALSE(ApplyQuality(d, WaterQuality::Medium).halfRes);
+
+    WaterSettings s = d;
+    s.cullDeepSeabed = false;
+    s.halfRes = true;
+    s.seabedCullDepth = 90.0f;
+    EXPECT_NE(Hash(d), Hash(s));
+    EXPECT_FALSE(d == s);
+    WaterSettings back;
+    std::string error;
+    ASSERT_TRUE(ParseSettingsJson(SettingsToJson(s), back, error)) << error;
+    EXPECT_TRUE(s == back);
+    EXPECT_TRUE(SetSettingByName(back, "halfRes", "false", error));
+    EXPECT_FALSE(back.halfRes);
+
+    WaterSettings wild = d;
+    wild.seabedCullDepth = 1.0e9f;
+    EXPECT_EQ(Sanitize(wild).seabedCullDepth, 500.0f);
+}
+
 TEST(WaterPolygonTests, BoxSignedDistanceAndConcaveShape)
 {
     const auto box = MakeBoxPolygon(0.0, 0.0, 100.0, 60.0);

@@ -55,8 +55,11 @@
 - **Shading.** Sharpened-sine waves with analytic slopes (not true Gerstner), drifting ripple noise without textures, Fresnel, sky reflection from the Atmosphere sky-view table, GGX sun glint, per-channel absorption, depth-aware shore foam, crest foam, refraction by the slope, wet ground above the water line. Optional screen-space reflection (off by default).
 - **Bodies.** Up to 16 bodies (ocean, box lake, polygon lake up to 32 points, river polyline up to 64 points with per-point level and width). The editor layer feeds them through `IWaterBodySource`; `/feature_debug/invoke` can add them for tests.
 - **HTTP.** `/feature_debug/*` name `Water`: every setting, actions `add_ocean`, `add_lake`, `add_river`, `remove_body`, `clear_bodies`, `dump_bodies`, `probe`, and `debugView` masks that show in `/get_game_view`.
-- **Cost (Iris Xe).** 0.4 to 0.6 ms at 719x360, 1.2 to 2.2 ms at 1264x629. The pass is bandwidth bound.
-- **Not done.** No camera under water, no sun shadow or cloud reflection on water, flat silhouettes, no half-resolution mode.
+- **Cost (Iris Xe).** 0.4 to 0.6 ms at 719x360. At 1264x629 half resolution switches on by itself (600000 pixels or more) and the pass costs 0.4 to 0.6 ms; full resolution was 0.8 to 1.7 ms. The pass is bandwidth bound.
+- **Half-resolution shading** (`halfRes`, `halfResAuto`). The shade pass runs on a half-size target; the composite uses a depth test so the land edge stays exact.
+- **Deep seabed skip** (`cullDeepSeabed`, `seabedCullDepth`). The terrain does not draw nodes far below the ocean. It replaces the occluder effect of the old flat quad: open-ocean frames got 1.5 to 2 ms cheaper. `seabedCulledNodes` is in `/terrain/state`.
+- **Water world.** Lakes and rivers carve the terrain, an editor panel with view gizmos edits them, `/water/*` routes drive it all. Soft bank defaults (`bankWidth` 60 m). `/water/probe` has a `submerged` flag. See [Water world](debugging/water-world.md).
+- **Not done.** No camera under water, no sun shadow or cloud reflection on water, flat silhouettes, no river levee, foam lines step a little at half resolution.
 
 ## Terrain on the iGPU: cheaper aerial volume, background save and load (branch `feature/precural-landscape`, 2026-11-16)
 

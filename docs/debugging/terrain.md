@@ -121,7 +121,7 @@ A moving benchmark: `GET /terrain/flight?kind=line&speed=400&alt=250&fixedStep=0
 ## Known limits
 - Hi-Z saves triangles only when mountains hide other mountains (57 of 375 nodes in the best test) and it does not help the shadow passes. It costs about 0.3 ms. Frustum culling is the real saver.
 - The shadow passes cost more than the terrain colour pass. The `budget` option lowers them. See [Terrain performance notes](#cost-summary).
-- No water waves, no shore blend, no triplanar texturing, no LOD morphing (levels pop). Erosion strength above 2 shows a grid at node borders. The pop is small: at the split distance the p99 height step between a parent and its children is 1 to 2.7 px at 720p, the worst vertex 4 to 10 px (aliased peaks). A real fix is vertex morphing, which needs a new cluster shader (about 2 days, medium risk). Run `TerrainBench.DISABLED_LodPopError` to measure it.
+- Water has its own feature now (waves, shore, bodies, carve; see [Water world](water-world.md)). Still missing: triplanar texturing and LOD morphing (levels pop). Erosion strength above 2 shows a grid at node borders. The pop is small: at the split distance the p99 height step between a parent and its children is 1 to 2.7 px at 720p, the worst vertex 4 to 10 px (aliased peaks). A real fix is vertex morphing, which needs a new cluster shader (about 2 days, medium risk). Run `TerrainBench.DISABLED_LodPopError` to measure it.
 - No in-world wireframe boxes: the engine has no scene line pipeline. The boxes are an ImGui overlay (Game and Scene views, not in `/get_game_view`; `/get_swapchain` shows them). Use `/terrain/map` for a capture that always works.
 
 ## Cost summary
@@ -147,6 +147,7 @@ Measured A/B (3 launches each, 1280x720 window, Game view 719x360, overlap on). 
 - What still costs most (GPU ms, 719x360): aerial volume 1.2, atmosphere LUTs 1.6, terrain colour pass 1.9, shadow cascades 2.0, TAA 0.5.
 - Tried and not worth it: `cascadeCount` 1 (saves 1.2 to 1.7 ms but the near shadows get coarse), Bloom off (0.3 ms), 512 shadow map (0.4 ms, within noise), a 32x32 multi-scattering LUT (slower: 3.1 ms against 1.2 ms).
 - The memory type of the pool vertex buffer was not measured. On this shared-memory GPU the host-visible and device-local heaps are the same RAM, so no gain is expected from a device-local copy.
+- Water: open with `water=false` (the flat quad is an occluder trick that the Water feature replaces). Keep `cullDeepSeabed` on, keep SSR off, and let half resolution switch on by itself above 600000 view pixels. Cost: 0.3 to 1.2 ms on top of the terrain, and open-ocean views get cheaper. See [Water world](water-world.md).
 
 ## Related
 - [HTTP routes (debug)](http-routes-debug.md), [HTTP cheat sheet](http-cheat-sheet.md), [Profiling](profiling.md)
