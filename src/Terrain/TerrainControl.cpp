@@ -118,6 +118,13 @@ std::string TerrainStatsToJson(const TerrainStats& s)
     AddInt(out, "gpuHiZCulledNodes", s.gpuHiZCulledNodes);
     AddInt(out, "gpuTrianglesDrawn", s.gpuTrianglesDrawn);
 
+    AddText(out, "cameraMode", s.cameraMode);
+    AddNumber(out, "cameraYawDegrees", s.cameraYawDegrees);
+    AddNumber(out, "cameraPitchDownDegrees", s.cameraPitchDownDegrees);
+    AddNumber(out, "cameraSpeed", s.cameraSpeed);
+    AddNumber(out, "cameraFovDegrees", s.cameraFovDegrees);
+    AddNumber(out, "cameraAspect", s.cameraAspect);
+
     AddText(out, "lastError", s.lastError);
     out += '}';
     return out;

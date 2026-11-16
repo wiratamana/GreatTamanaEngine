@@ -7,7 +7,8 @@
 - Open it with `GET /terrain/open`. It replaces the current scene. Close it with `GET /terrain/close`.
 - All settings change live with `GET /terrain/set?key=value&...`. Height changes rebuild every node.
 - Read everything with `GET /terrain/state`. Look at the world with `GET /get_game_view` after `GET /activate_tab?name=Game`.
-- Move the camera with `GET /terrain/flight` (repeatable) or `POST /set_entity_trs` with `"name":"Terrain Camera"`.
+- Move the camera with the free-fly or orbit mode (`GET /terrain/cam`), `GET /terrain/flight` (repeatable) or `POST /set_entity_trs` with `"name":"Terrain Camera"`.
+- Everything is also a panel: Window > Terrain (sliders, live preview, save and load, bounding boxes, stats). See [Terrain panel](#terrain-panel-window--terrain).
 - Code: `src/Terrain/` (pure CPU), `src/Editor/Terrain/` (GPU pool, world, commands), `src/Network/NetworkTerrainRoutes.*`.
 
 ## Routes
@@ -24,6 +25,9 @@ All routes are `GET`. Routes that change something refuse browser requests (`403
 | `/terrain/stop_flight` | Stops the flight. The camera stays. |
 | `/terrain/save?path=C:/x/world.gta` | Bakes `bakeNodesPerSide` squared finest nodes around the camera and writes the `.gta`. |
 | `/terrain/load?path=...` | Reads a baked file, applies its settings, serves nodes inside its region from the file. |
+| `/terrain/map?size=768&range=&mode=lod\|state&frustum=true` | PNG top-down map of the resident nodes, the camera and its view wedge. See [Map picture](#map-picture). |
+| `/terrain/cam?mode=script\|free\|orbit&x=&y=&alt=&z=&yaw=&pitch=&tx=&tz=&dist=` | Camera mode and placement (`alt` is metres above ground, `yaw` 0 looks along +Z, `pitch` positive looks down). See [Camera](#camera). |
+| `/terrain/cam_input?fwd=&right=&up=&lookx=&looky=&wheel=&boost=&look=&frames=` | Repeats one frame of mouse and key input for `frames` frames (free or orbit mode). |
 
 Errors: `400` bad key or value, `404` unknown action, `409` the world refused (for example "open the terrain before saving it"), `503` another terrain command is running, `504` main thread too slow.
 
@@ -51,6 +55,39 @@ GPU culling (about two frames old): `gpuCullMode`, `gpuOcclusion`, `gpuDrawnNode
 `lastError` is empty when all is well.
 
 `nodesResident` is larger than `nodesWanted`: nodes stay `unloadDelayFrames` frames after the camera leaves them.
+
+## Terrain panel (Window > Terrain)
+A dockable window (closed by default) with every setting as a slider, grouped like the generator: seed, height and frequency, domain warp, octaves, gain and lacunarity, continentalness, peaks and valleys, detail, erosion, materials, geometry and LOD, optimization (frustum culling, Hi-Z culling, max view distance).
+- **Open terrain world** builds the scene from the sliders and switches the camera to free-fly. **Close** removes it.
+- **Live preview mode**: one 129x129 chunk is rebuilt on every slider move (about 20 ms). The big world is not rebuilt while it is on.
+- Without the preview, a height or erosion change reaches the streamed world when the slider is released or has rested 0.35 s. A geometry change (`chunkQuads`, spacing, levels, half world) reopens the scene and waits for the release. Material and optimization changes apply at once.
+- **Randomize seed**, **Reset defaults**, streaming sliders (visible cap, uploads per frame, jobs).
+- **Save Terrain Asset** and **Load Terrain Asset** with a path field (default `<exe dir>/Project/terrain_world.gta`). Save bakes `Bake nodes per side` squared nodes (256 nodes: about 200 ms, 10.8 MB). The panel shows a busy line for one frame, then the editor blocks while it bakes.
+- **Show chunk bounding boxes** draws the 12 edges of every resident node over the Game and Scene views. Colour by state (green drawn, red outside the view, grey hidden by a finer or coarser node) or by LOD level.
+- Stats: nodes resident, pending, wanted and in view, pool slots, triangles, GPU cull counters (drawn, frustum culled, Hi-Z culled), memory, generation time, tick time, preview time, camera.
+- The panel talks to the world only through `TerrainUiBridge` (`src/Editor/Terrain/TerrainUiBridge.h`). The host applies its request at the start of the next frame, so GPU buffers are never touched while the frame is being drawn.
+
+## Camera
+Three modes, set in the panel or with `GET /terrain/cam?mode=script|free|orbit`.
+| Mode | Control in the Game view |
+|---|---|
+| `script` | The scripted flight (`/terrain/flight`) or a fixed camera. |
+| `free` | Hold the right mouse button and drag to look. W A S D move, E up, Q down, Shift boost, wheel changes the speed. The speed follows the height above ground (0.8 per second of height, 6 to 3500 m/s). The camera never goes below 3 m above the land or the sea. |
+| `orbit` | Drag with the left or right button to rotate, wheel to zoom, W A S D move the centre over the ground. |
+Input only counts while the cursor is over the Game image (or a drag that started there is held). The Scene view camera is not touched.
+
+Scripted test input goes through the same code as the mouse and keys:
+```text
+GET /terrain/cam?mode=free&x=-1000&z=-1500&alt=400&yaw=40&pitch=12     place the camera (alt = metres above ground)
+GET /terrain/cam_input?fwd=1&boost=true&frames=90                       hold W and Shift for 90 frames
+GET /terrain/cam_input?lookx=10&frames=40                               drag the mouse 10 px per frame for 40 frames
+```
+
+## Map picture
+`GET /terrain/map?size=768&mode=state` returns a PNG (no text, colours carry the meaning). +X is right, +Z is up, the camera is the red dot in the middle and the white lines are its view wedge (left edge, right edge, heading).
+- `mode=lod`: one colour per LOD level (top-left strip: level 0 to 11). Darker means lower ground.
+- `mode=state`: green drawn and in view, amber resident but outside the view, grey hidden by another node.
+- `range` is the half side in metres (default 1.15 times the view distance). The bar at the bottom left is 1 km.
 
 ## Recipes
 Fixed viewpoint and a picture:
@@ -85,7 +122,7 @@ A moving benchmark: `GET /terrain/flight?kind=line&speed=400&alt=250&fixedStep=0
 - Hi-Z saves triangles only when mountains hide other mountains (57 of 375 nodes in the best test) and it does not help the shadow passes. It costs about 0.3 ms. Frustum culling is the real saver.
 - The shadow passes cost more than the terrain colour pass. The `budget` option lowers them. See [Terrain performance notes](#cost-summary).
 - No water waves, no shore blend, no triplanar texturing, no LOD morphing (levels pop). Erosion strength above 2 shows a grid at node borders.
-- `/terrain/map` (top-down image) does not exist yet. Use `/get_game_view`.
+- No in-world wireframe boxes: the engine has no scene line pipeline. The boxes are an ImGui overlay (Game and Scene views, not in `/get_game_view`; `/get_swapchain` shows them). Use `/terrain/map` for a capture that always works.
 
 ## Cost summary
 Measured on this iGPU with `--frames-in-flight=1` (serial), lean profile with budget, `lodDistanceFactor` 2.0, about 0.9 M triangles in view. The default overlap mode removes most of the CPU part of the frame: in a 1280x720 window (Game view 719x360, Scene panel hidden) the fixed view went from 17.6 to 15.3 ms mean frame time and the flight from 19.1 to 16.3 ms. The GPU part is unchanged, so it is the floor.

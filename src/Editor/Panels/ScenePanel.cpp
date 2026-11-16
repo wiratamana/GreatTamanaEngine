@@ -9,6 +9,7 @@
 #include "../SceneCameraFrustum.h"
 #include "../SceneOverlay.h"
 #include "../TransformGizmo.h"
+#include "../Terrain/TerrainViewOverlay.h"
 #include "../../ECS/Components/Camera.h"
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"
@@ -205,6 +206,9 @@ void ScenePanel::OnGui(EditorFrame& frame)
         camera.ToggleProjectionMode();
     }
     BuildCameraOverlay(registry, ctx, camera, imageMin, imageSize, hovered);
+    if (ctx.sceneCamera.rendered) {
+        DrawTerrainBoundsOverlay(ctx.terrainUi, ctx.sceneCamera.viewProjection, ctx.sceneCamera.rectMin, ctx.sceneCamera.rectMax);
+    }
 
     // Transform gizmo of the selected entity, drawn with the Scene camera.
     const Entity selectedEntity = ctx.selection.SelectedEntity();

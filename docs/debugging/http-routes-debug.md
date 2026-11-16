@@ -494,6 +494,9 @@ Open, change, fly over and measure the streamed procedural world. Full guide, ke
 | `GET /terrain/flight` | `kind=orbit\|line`, `x`, `z`, `heading`, `radius`, `speed`, `alt`, `minAlt`, `lookDown`, `fixedStep`, `duration` | same |
 | `GET /terrain/stop_flight` | none | same |
 | `GET /terrain/save`, `GET /terrain/load` | `path` | same |
+| `GET /terrain/map` | `size` (64..2048), `range` (half side, m), `mode=lod\|state`, `frustum`, `heightMin`, `heightMax` | `image/png`: top-down map of the resident nodes, camera and view wedge |
+| `GET /terrain/cam` | `mode=script\|free\|orbit`, `x`, `y`, `alt`, `z`, `yaw`, `pitch`, `tx`, `tz`, `dist` | `{"success":true,"message":"camera placed"}` |
+| `GET /terrain/cam_input` | `fwd`, `right`, `up`, `lookx`, `looky`, `wheel`, `boost`, `look`, `frames` | Queues the same input a mouse and keys make, for `frames` frames |
 
 - Errors: `400` bad key or value, `404` unknown action, `409` world refused, `503` busy, `504` main thread too slow.
 

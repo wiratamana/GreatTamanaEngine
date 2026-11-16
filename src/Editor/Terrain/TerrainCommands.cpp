@@ -1,9 +1,13 @@
 #include "TerrainCommands.h"
 
+#include "../../Encoding/PngEncoder.h"
+#include "../../Terrain/Debug/TerrainMapImage.h"
 #include "../../Terrain/TerrainSettingsKeys.h"
 
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -306,6 +310,172 @@ TerrainCommandResult PathCommand(terrain::ITerrainWorld& world, const Pairs& par
     return Done(save ? world.SaveAsset(path) : world.LoadAsset(path));
 }
 
+// Top-down PNG of the resident nodes, the camera and its view wedge (colours explained in docs/debugging/terrain.md).
+TerrainCommandResult MapCommand(terrain::ITerrainWorld& world, const Pairs& params)
+{
+    terrain::MapOptions options;
+    for (const auto& [key, value] : params) {
+        double number = 0.0;
+        bool flag = false;
+        std::string error;
+        if (key == "mode") {
+            if (value == "lod") {
+                options.mode = terrain::MapColorMode::Lod;
+            } else if (value == "state") {
+                options.mode = terrain::MapColorMode::State;
+            } else {
+                return Fail(400, "mode must be lod or state");
+            }
+        } else if (key == "frustum") {
+            if (!ParseFlag(value, flag)) {
+                return Fail(400, "bad bool for frustum");
+            }
+            options.drawFrustum = flag;
+        } else if (key == "size" || key == "range" || key == "heightMin" || key == "heightMax") {
+            if (!NumberOption(key, value, number, error)) {
+                return Fail(400, error);
+            }
+            if (key == "size") {
+                options.size = static_cast<int>(number);
+            } else if (key == "range") {
+                options.range = number;
+            } else if (key == "heightMin") {
+                options.heightMin = number;
+            } else {
+                options.heightMax = number;
+            }
+        } else {
+            return Fail(400, "unknown map option: " + key);
+        }
+    }
+    if (!world.IsOpen()) {
+        return Fail(409, "open the terrain first");
+    }
+    // The node list is only collected while the box flag is on: switch it on for this one call.
+    const bool hadBoxes = world.DebugAabb();
+    world.SetDebugAabb(true);
+    std::vector<terrain::TerrainNodeInfo> nodes;
+    world.CollectNodes(nodes);
+    world.SetDebugAabb(hadBoxes);
+
+    const terrain::TerrainStats stats = world.Stats();
+    terrain::MapCamera camera;
+    camera.x = stats.cameraX;
+    camera.z = stats.cameraZ;
+    camera.yawRadians = stats.cameraYawDegrees * 3.14159265358979323846 / 180.0;
+    camera.fovYDegrees = stats.cameraFovDegrees;
+    camera.aspect = stats.cameraAspect;
+    camera.viewDistance = world.Settings().maxViewDistance;
+    try {
+        const terrain::MapImage image = terrain::RenderTerrainMap(nodes, camera, options);
+        const std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(image.rgba.data(), image.width, image.height);
+        TerrainCommandResult result;
+        result.contentType = "image/png";
+        result.body.assign(reinterpret_cast<const char*>(png.data()), png.size());
+        return result;
+    } catch (const std::exception& e) {
+        return Fail(500, std::string("map failed: ") + e.what());
+    }
+}
+
+TerrainCommandResult CameraCommand(terrain::ITerrainWorld& world, const Pairs& params)
+{
+    terrain::TerrainCameraPose pose;
+    std::optional<terrain::CameraMode> mode;
+    bool anyPose = false;
+    for (const auto& [key, value] : params) {
+        double number = 0.0;
+        std::string error;
+        if (key == "mode") {
+            terrain::CameraMode parsed = terrain::CameraMode::Script;
+            if (!terrain::TryParseCameraMode(value, parsed)) {
+                return Fail(400, "mode must be script, free or orbit");
+            }
+            mode = parsed;
+            continue;
+        }
+        if (!NumberOption(key, value, number, error)) {
+            return Fail(400, error);
+        }
+        anyPose = true;
+        if (key == "x") {
+            pose.x = number;
+        } else if (key == "y") {
+            pose.y = number;
+        } else if (key == "alt") {
+            pose.y = number;
+            pose.heightAboveGround = true;
+        } else if (key == "z") {
+            pose.z = number;
+        } else if (key == "yaw") {
+            pose.yawDegrees = number;
+        } else if (key == "pitch") {
+            pose.pitchDownDegrees = number;
+        } else if (key == "tx") {
+            pose.targetX = number;
+        } else if (key == "tz") {
+            pose.targetZ = number;
+        } else if (key == "dist") {
+            pose.orbitDistance = number;
+        } else {
+            return Fail(400, "unknown camera option: " + key);
+        }
+    }
+    if (mode.has_value()) {
+        const terrain::TerrainResult outcome = world.SetCameraMode(*mode);
+        if (!outcome.ok) {
+            return Done(outcome);
+        }
+    }
+    if (anyPose) {
+        return Done(world.SetCameraPose(pose));
+    }
+    return Done(terrain::TerrainResult{ true, mode.has_value() ? "camera mode set" : "nothing to change", terrain::SettingsChange::None });
+}
+
+// Scripted input for tests: the same CameraInput the mouse and keys make, repeated for `frames` frames.
+TerrainCommandResult CameraInputCommand(terrain::ITerrainWorld& world, const Pairs& params)
+{
+    terrain::CameraInput input;
+    int frames = 1;
+    for (const auto& [key, value] : params) {
+        double number = 0.0;
+        bool flag = false;
+        std::string error;
+        if (key == "boost" || key == "look") {
+            if (!ParseFlag(value, flag)) {
+                return Fail(400, "bad bool for " + key);
+            }
+            (key == "boost" ? input.boost : input.look) = flag;
+            continue;
+        }
+        if (!NumberOption(key, value, number, error)) {
+            return Fail(400, error);
+        }
+        const float f = static_cast<float>(number);
+        if (key == "fwd") {
+            input.moveForward = f;
+        } else if (key == "right") {
+            input.moveRight = f;
+        } else if (key == "up") {
+            input.moveUp = f;
+        } else if (key == "lookx") {
+            input.lookDeltaX = f;
+            input.look = true;
+        } else if (key == "looky") {
+            input.lookDeltaY = f;
+            input.look = true;
+        } else if (key == "wheel") {
+            input.wheel = f;
+        } else if (key == "frames") {
+            frames = static_cast<int>(number);
+        } else {
+            return Fail(400, "unknown input option: " + key);
+        }
+    }
+    return Done(world.QueueCameraInput(input, frames));
+}
+
 } // namespace
 
 TerrainCommandResult ExecuteTerrainCommand(terrain::ITerrainWorld& world, const TerrainCommandRequest& request)
@@ -334,6 +504,15 @@ TerrainCommandResult ExecuteTerrainCommand(terrain::ITerrainWorld& world, const 
     if (action == "stop_flight") {
         world.StopFlight();
         return Done(terrain::TerrainResult{});
+    }
+    if (action == "map") {
+        return MapCommand(world, request.params);
+    }
+    if (action == "cam") {
+        return CameraCommand(world, request.params);
+    }
+    if (action == "cam_input") {
+        return CameraInputCommand(world, request.params);
     }
     if (action == "save") {
         return PathCommand(world, request.params, true);

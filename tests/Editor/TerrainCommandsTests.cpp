@@ -1,5 +1,7 @@
 #include "Editor/Terrain/TerrainCommands.h"
 
+#include "FakeTerrainWorld.h"
+
 #include <gtest/gtest.h>
 
 #include <string>
@@ -8,76 +10,7 @@ namespace gte {
 
 namespace {
 
-class FakeWorld final : public terrain::ITerrainWorld {
-public:
-    const terrain::TerrainSettings& Settings() const override { return settings; }
-    terrain::TerrainResult SetSettings(const terrain::TerrainSettings& s) override
-    {
-        settings = s;
-        ++settingsCalls;
-        return {};
-    }
-    const terrain::TerrainRuntimeOptions& RuntimeOptions() const override { return runtime; }
-    terrain::TerrainResult SetRuntimeOptions(const terrain::TerrainRuntimeOptions& o) override
-    {
-        runtime = o;
-        return {};
-    }
-    bool IsOpen() const override { return open; }
-    terrain::TerrainResult Open(const terrain::TerrainOpenOptions& o) override
-    {
-        open = true;
-        lastOpen = o;
-        return { true, "opened", terrain::SettingsChange::None };
-    }
-    terrain::TerrainResult Close() override
-    {
-        open = false;
-        return { true, "closed", terrain::SettingsChange::None };
-    }
-    terrain::TerrainResult SetLivePreview(bool enabled) override
-    {
-        preview = enabled;
-        return {};
-    }
-    bool LivePreview() const override { return preview; }
-    terrain::TerrainResult SetPreviewWindow(const terrain::TerrainPreviewWindow& w) override
-    {
-        window = w;
-        return {};
-    }
-    terrain::TerrainPreviewWindow PreviewWindow() const override { return window; }
-    void SetDebugAabb(bool enabled) override { aabb = enabled; }
-    bool DebugAabb() const override { return aabb; }
-    void CollectNodes(std::vector<terrain::TerrainNodeInfo>&) const override {}
-    terrain::TerrainStats Stats() const override { return {}; }
-    terrain::TerrainResult SaveAsset(const std::filesystem::path& p) override
-    {
-        savedPath = p.string();
-        return {};
-    }
-    terrain::TerrainResult LoadAsset(const std::filesystem::path&) override { return { false, "no such file", {} }; }
-    terrain::TerrainResult StartFlight(const terrain::FlightSpec& s) override
-    {
-        flight = s;
-        flying = true;
-        return {};
-    }
-    void StopFlight() override { flying = false; }
-    bool FlightActive() const override { return flying; }
-
-    terrain::TerrainSettings settings;
-    terrain::TerrainRuntimeOptions runtime;
-    terrain::TerrainOpenOptions lastOpen;
-    terrain::TerrainPreviewWindow window;
-    terrain::FlightSpec flight;
-    std::string savedPath;
-    int settingsCalls = 0;
-    bool open = false;
-    bool preview = false;
-    bool aabb = false;
-    bool flying = false;
-};
+using FakeWorld = FakeTerrainWorld;
 
 TerrainCommandResult Exec(FakeWorld& world, const std::string& action,
     std::vector<std::pair<std::string, std::string>> params = {})
@@ -171,4 +104,55 @@ TEST(TerrainCommandsTest, UnknownActionIs404)
     EXPECT_EQ(Exec(world, "teleport").httpStatus, 404);
 }
 
+TEST(TerrainCommandsTest, MapIsAPngAndNeedsAnOpenWorld)
+{
+    FakeWorld world;
+    EXPECT_EQ(Exec(world, "map").httpStatus, 409);
+    world.open = true;
+    world.nodes.push_back({});
+    world.nodes.back().key = terrain::NodeKey{ 0, 0, 2 };
+    world.nodes.back().minX = -100.0;
+    world.nodes.back().maxX = 100.0;
+    world.nodes.back().minZ = -100.0;
+    world.nodes.back().maxZ = 100.0;
+    const TerrainCommandResult result = Exec(world, "map", { { "size", "128" }, { "mode", "state" } });
+    ASSERT_EQ(result.httpStatus, 200);
+    EXPECT_EQ(result.contentType, "image/png");
+    ASSERT_GT(result.body.size(), 8u);
+    EXPECT_EQ(result.body.substr(1, 3), "PNG");
+    EXPECT_FALSE(world.aabb); // The box flag is put back.
+    EXPECT_EQ(Exec(world, "map", { { "mode", "rainbow" } }).httpStatus, 400);
+    EXPECT_EQ(Exec(world, "map", { { "size", "big" } }).httpStatus, 400);
+}
+
+TEST(TerrainCommandsTest, CameraSetsModeAndPose)
+{
+    FakeWorld world;
+    const TerrainCommandResult result =
+        Exec(world, "cam", { { "mode", "orbit" }, { "x", "100" }, { "alt", "250" }, { "yaw", "45" }, { "pitch", "20" }, { "dist", "800" } });
+    EXPECT_EQ(result.httpStatus, 200);
+    EXPECT_EQ(world.cameraMode, terrain::CameraMode::Orbit);
+    ASSERT_TRUE(world.lastPose.x.has_value());
+    EXPECT_DOUBLE_EQ(*world.lastPose.x, 100.0);
+    EXPECT_TRUE(world.lastPose.heightAboveGround);
+    EXPECT_DOUBLE_EQ(*world.lastPose.y, 250.0);
+    EXPECT_DOUBLE_EQ(*world.lastPose.yawDegrees, 45.0);
+    EXPECT_DOUBLE_EQ(*world.lastPose.orbitDistance, 800.0);
+    EXPECT_EQ(Exec(world, "cam", { { "mode", "fly" } }).httpStatus, 400);
+    EXPECT_EQ(Exec(world, "cam", { { "bogus", "1" } }).httpStatus, 400);
+}
+
+TEST(TerrainCommandsTest, CameraInputQueuesFramesOfInput)
+{
+    FakeWorld world;
+    const TerrainCommandResult result =
+        Exec(world, "cam_input", { { "fwd", "1" }, { "boost", "true" }, { "lookx", "12" }, { "frames", "30" } });
+    EXPECT_EQ(result.httpStatus, 200);
+    EXPECT_FLOAT_EQ(world.queued.moveForward, 1.0f);
+    EXPECT_TRUE(world.queued.boost);
+    EXPECT_TRUE(world.queued.look);
+    EXPECT_FLOAT_EQ(world.queued.lookDeltaX, 12.0f);
+    EXPECT_EQ(world.queuedFrames, 30);
+    EXPECT_EQ(Exec(world, "cam_input", { { "fwd", "x" } }).httpStatus, 400);
+}
 } // namespace gte

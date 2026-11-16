@@ -2,6 +2,8 @@
 
 #include "Logger.h"
 #include "Terrain/TerrainCommands.h"
+#include "Terrain/TerrainUiBridge.h"
+#include "../Game/RenderSystem.h"
 #include "EditorSceneIOCapability.h"
 #include "EditorLogQueryCapability.h"
 #include "EditorHotReloadDebugCapability.h"
@@ -747,6 +749,11 @@ int EditorHost::Run()
             FulfillOrLogDrop(m_physicsDebugCommandBridge, pdPending->id, pdResult, "PhysicsDebug");
         }
 
+        // The Terrain panel's edits are applied first, so an HTTP command of the same frame sees them.
+        if (TerrainUiBridge* const panelBridge = m_editorLayer->TerrainUi()) {
+            ApplyTerrainUiRequest(m_terrainWorld, *panelBridge);
+        }
+
         // Terrain commands run on the main thread, at most one per frame.
         if (const auto terrainPending = m_terrainCommandBridge.TryPeekPendingCommand()) {
             GTE_PROFILE_SCOPE("EditorHost::ExecuteTerrainCommand");
@@ -792,6 +799,8 @@ int EditorHost::Run()
         gte::Logger::SetCurrentFrame(m_engineContext.time.FrameCount());
 
         // Streams the terrain world (when open) right after the game update, before this frame's draw is built.
+        TerrainUiBridge* const terrainUi = m_editorLayer->TerrainUi();
+        std::optional<Mat4> terrainViewProjection;
         if (m_terrainWorld.IsOpen()) {
             TerrainTickContext terrainTick;
             if (const std::optional<fx::View> primary = m_core.PrimaryCameraView(terrainTick.aspect);
@@ -803,6 +812,12 @@ int EditorHost::Run()
             terrainTick.deltaSeconds = deltaSeconds;
             terrainTick.frameIndex = m_engineContext.time.FrameCount();
             m_terrainWorld.Tick(terrainTick);
+            if (terrainUi != nullptr && m_terrainWorld.IsOpen()) {
+                terrainViewProjection = RenderSystem::ResolveActiveCameraViewProjection(m_game.GetRegistry(), terrainTick.aspect);
+            }
+        }
+        if (terrainUi != nullptr) {
+            PublishTerrainSnapshot(m_terrainWorld, *terrainUi, terrainViewProjection ? &*terrainViewProjection : nullptr);
         }
 
         m_editorLayer->NewFrame();

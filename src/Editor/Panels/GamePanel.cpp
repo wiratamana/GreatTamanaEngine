@@ -3,6 +3,7 @@
 #include "../EditorContext.h"
 #include "../EditorFrame.h"
 #include "OverlayLabel.h"
+#include "../Terrain/TerrainViewOverlay.h"
 
 #include <imgui.h>
 
@@ -26,6 +27,13 @@ void GamePanel::OnGui(EditorFrame& frame)
 
         // Draw at the panel's available size, not the texture's (possibly stale) extent: free aspect, no gaps.
         ImGui::Image(static_cast<ImTextureID>(static_cast<std::uint64_t>(ctx.gameViewDescriptor)), avail);
+        const ImVec2 imageMin = ImGui::GetItemRectMin();
+        const ImVec2 imageSize = ImGui::GetItemRectSize();
+        GatherTerrainCameraInput(ctx.terrainUi, ImGui::IsItemHovered());
+        if (ctx.terrainUi.snapshot.hasViewProjection) {
+            DrawTerrainBoundsOverlay(ctx.terrainUi, ctx.terrainUi.snapshot.viewProjection, Vec2(imageMin.x, imageMin.y),
+                Vec2(imageMin.x + imageSize.x, imageMin.y + imageSize.y));
+        }
         if (ctx.hizDemo.active && ctx.hizDemo.geometryOnly) {
             DrawViewOverlayLabel(ImGui::GetItemRectMin(), ImGui::GetItemRectSize(), kHizDemoOverlayLabel, 0);
         }

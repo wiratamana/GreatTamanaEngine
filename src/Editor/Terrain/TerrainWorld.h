@@ -84,6 +84,11 @@ public:
     terrain::TerrainResult StartFlight(const terrain::FlightSpec& spec) override;
     void StopFlight() override { m_flight.Stop(); }
     bool FlightActive() const override { return m_flight.Active(); }
+    terrain::TerrainResult SetCameraMode(terrain::CameraMode mode) override;
+    terrain::CameraMode GetCameraMode() const override { return m_rig.Mode(); }
+    void FeedCameraInput(const terrain::CameraInput& input) override { terrain::AccumulateInput(m_pendingInput, input); }
+    terrain::TerrainResult QueueCameraInput(const terrain::CameraInput& perFrame, int frames) override;
+    terrain::TerrainResult SetCameraPose(const terrain::TerrainCameraPose& pose) override;
 
 private:
     struct SceneEntities {
@@ -119,6 +124,10 @@ private:
     void TickPreview(const TerrainTickContext& context, Game& game, const OffscreenFrameTicket& ticket);
     void TickMaterial(const TerrainTickContext& context, Game& game);
     void TickFlight(const TerrainTickContext& context, Game& game);
+    void TickCamera(const TerrainTickContext& context, Game& game);
+    terrain::GroundHeightFn GroundFn() const;
+    terrain::RigPose CameraPoseNow(Game& game) const;
+    void WriteCameraPose(Game& game, const terrain::RigPose& pose) const;
     void RefreshGpuCounters();
 
     void SetMeshRenderer(Game& game, Entity entity, const MeshRenderer& renderer) const;
@@ -146,6 +155,10 @@ private:
     SceneEntities m_entities;
     TerrainFeatureState m_features;
     terrain::FlightController m_flight;
+    terrain::CameraRig m_rig;
+    terrain::CameraInput m_pendingInput;  // Summed since the last Tick.
+    terrain::CameraInput m_scriptedInput; // Repeated every frame while m_scriptedFrames > 0.
+    int m_scriptedFrames = 0;
     std::unique_ptr<TerrainGpuPool> m_pool;
     std::unique_ptr<TerrainAuxMeshes> m_aux;
     std::unique_ptr<terrain::LodSelector> m_selector;

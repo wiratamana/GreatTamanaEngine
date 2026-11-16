@@ -469,6 +469,9 @@ terrain::TerrainResult TerrainWorld::CloseImpl(const char* reason)
     }
     m_open = false;
     m_flight.Stop();
+    m_rig = terrain::CameraRig{};
+    m_pendingInput = terrain::CameraInput{};
+    m_scriptedFrames = 0;
     const TerrainWorldServices svc = m_servicesFn();
 
     // Jobs first: they must not outlive the pool the results would go to.
@@ -518,6 +521,7 @@ terrain::TerrainResult TerrainWorld::ReopenKeepingCamera()
         }
     }
     const bool wasPreview = m_livePreview;
+    const terrain::CameraMode cameraMode = m_rig.Mode();
     const terrain::TerrainOpenOptions options = m_openOptions;
     CloseImpl("geometry changed");
     terrain::TerrainResult result = OpenImpl(options);
@@ -525,6 +529,9 @@ terrain::TerrainResult TerrainWorld::ReopenKeepingCamera()
         if (Transform* t = svc.game->GetRegistry().TryGetComponent<Transform>(m_entities.camera)) {
             t->position = pose->first;
             t->rotation = pose->second;
+        }
+        if (cameraMode != terrain::CameraMode::Script) {
+            SetCameraMode(cameraMode);
         }
         if (wasPreview) {
             SetLivePreview(true);
@@ -625,6 +632,7 @@ terrain::TerrainResult TerrainWorld::StartFlight(const terrain::FlightSpec& spec
     if (m_livePreview) {
         return Failure("turn the live preview off to fly");
     }
+    m_rig.Begin(terrain::CameraMode::Script, m_rig.Pose(), {});
     m_flight.Start(spec);
     return Success("flight started");
 }
@@ -642,6 +650,124 @@ void TerrainWorld::TickFlight(const TerrainTickContext& context, Game& game)
         t->position = Vec3(static_cast<float>(pose.x), static_cast<float>(pose.y), static_cast<float>(pose.z));
         t->rotation = terrain::FlightRotation(pose);
     }
+}
+
+// --- Interactive camera --------------------------------------------------------------------------------------
+
+terrain::GroundHeightFn TerrainWorld::GroundFn() const
+{
+    if (!m_streamer) {
+        return {};
+    }
+    const terrain::TerrainHeightField* field = &m_streamer->Field();
+    return [field](double x, double z) { return static_cast<double>(field->Height(x, z, 16.0)); };
+}
+
+terrain::RigPose TerrainWorld::CameraPoseNow(Game& game) const
+{
+    const Transform* t = game.GetRegistry().TryGetComponent<Transform>(m_entities.camera);
+    if (t == nullptr) {
+        return m_rig.Pose();
+    }
+    const Vec3 forward = t->rotation.RotateVector(Vec3::Forward());
+    return terrain::PoseFromForward(t->position.x, t->position.y, t->position.z, forward.x, forward.y, forward.z);
+}
+
+void TerrainWorld::WriteCameraPose(Game& game, const terrain::RigPose& pose) const
+{
+    Transform* t = game.GetRegistry().TryGetComponent<Transform>(m_entities.camera);
+    if (t == nullptr) {
+        return;
+    }
+    t->position = Vec3(static_cast<float>(pose.x), static_cast<float>(pose.y), static_cast<float>(pose.z));
+    terrain::FlightPose rotation;
+    rotation.yawRadians = static_cast<float>(pose.yaw);
+    rotation.pitchDownRadians = static_cast<float>(pose.pitchDown);
+    t->rotation = terrain::FlightRotation(rotation);
+}
+
+terrain::TerrainResult TerrainWorld::SetCameraMode(terrain::CameraMode mode)
+{
+    if (!m_open) {
+        return Failure("open the terrain first");
+    }
+    const TerrainWorldServices svc = m_servicesFn();
+    if (svc.game == nullptr) {
+        return Failure("no game");
+    }
+    if (mode != terrain::CameraMode::Script) {
+        m_flight.Stop(); // The scripted flight and a hand-driven camera cannot share the transform.
+    }
+    m_rig.Begin(mode, CameraPoseNow(*svc.game), GroundFn());
+    m_pendingInput = terrain::CameraInput{};
+    return Success(std::string("camera mode ") + terrain::CameraModeName(mode));
+}
+
+terrain::TerrainResult TerrainWorld::QueueCameraInput(const terrain::CameraInput& perFrame, int frames)
+{
+    if (!m_open) {
+        return Failure("open the terrain first");
+    }
+    if (m_rig.Mode() == terrain::CameraMode::Script) {
+        return Failure("set the camera mode to free or orbit first");
+    }
+    m_scriptedInput = perFrame;
+    m_scriptedFrames = std::clamp(frames, 1, 3600);
+    return Success("input queued for " + std::to_string(m_scriptedFrames) + " frames");
+}
+
+terrain::TerrainResult TerrainWorld::SetCameraPose(const terrain::TerrainCameraPose& request)
+{
+    if (!m_open) {
+        return Failure("open the terrain first");
+    }
+    const TerrainWorldServices svc = m_servicesFn();
+    if (svc.game == nullptr) {
+        return Failure("no game");
+    }
+    constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
+    const terrain::GroundHeightFn ground = GroundFn();
+    terrain::RigPose pose = CameraPoseNow(*svc.game);
+    pose.x = request.x.value_or(pose.x);
+    pose.z = request.z.value_or(pose.z);
+    if (request.y.has_value()) {
+        pose.y = request.heightAboveGround ? std::max(ground ? ground(pose.x, pose.z) : 0.0, 0.0) + *request.y : *request.y;
+    }
+    if (request.yawDegrees.has_value()) {
+        pose.yaw = *request.yawDegrees * kDegToRad;
+    }
+    if (request.pitchDownDegrees.has_value()) {
+        pose.pitchDown = std::clamp(*request.pitchDownDegrees, -89.0, 89.0) * kDegToRad;
+    }
+    m_flight.Stop();
+    m_rig.Begin(m_rig.Mode(), pose, ground);
+    if (m_rig.Mode() == terrain::CameraMode::Orbit && (request.targetX || request.targetZ || request.orbitDistance)) {
+        m_rig.SetOrbitTarget(request.targetX.value_or(m_rig.TargetX()), request.targetZ.value_or(m_rig.TargetZ()),
+            request.orbitDistance.value_or(m_rig.OrbitDistance()), ground);
+    }
+    WriteCameraPose(*svc.game, m_rig.Pose());
+    return Success("camera placed");
+}
+
+void TerrainWorld::TickCamera(const TerrainTickContext& context, Game& game)
+{
+    terrain::CameraInput input = m_pendingInput;
+    m_pendingInput = terrain::CameraInput{};
+    if (m_scriptedFrames > 0) {
+        --m_scriptedFrames;
+        terrain::AccumulateInput(input, m_scriptedInput);
+    }
+    if (m_rig.Mode() == terrain::CameraMode::Script || m_flight.Active()) {
+        return;
+    }
+    const terrain::GroundHeightFn ground = GroundFn();
+    // Something else moved the camera (an Inspector edit, the preview framing): continue from there.
+    const terrain::RigPose now = CameraPoseNow(game);
+    const terrain::RigPose& mine = m_rig.Pose();
+    if (std::abs(now.x - mine.x) + std::abs(now.y - mine.y) + std::abs(now.z - mine.z) > 0.5) {
+        m_rig.Begin(m_rig.Mode(), now, ground);
+    }
+    WriteCameraPose(game, m_rig.Advance(input, context.deltaSeconds, ground));
 }
 
 // --- Per-frame work -----------------------------------------------------------------------------------------
@@ -664,6 +790,19 @@ void TerrainWorld::Tick(const TerrainTickContext& context)
         }
         m_stats.frame = context.frameIndex;
         TickFlight(context, *svc.game);
+        TickCamera(context, *svc.game);
+        {
+            const terrain::RigPose pose = CameraPoseNow(*svc.game);
+            m_stats.cameraYawDegrees = pose.yaw * 180.0 / 3.14159265358979323846;
+            m_stats.cameraPitchDownDegrees = pose.pitchDown * 180.0 / 3.14159265358979323846;
+            m_stats.cameraX = pose.x;
+            m_stats.cameraY = pose.y;
+            m_stats.cameraZ = pose.z;
+            m_stats.cameraAspect = static_cast<double>(context.aspect);
+            if (const Camera* camera = svc.game->GetRegistry().TryGetComponent<Camera>(m_entities.camera)) {
+                m_stats.cameraFovDegrees = static_cast<double>(camera->fovYDegrees);
+            }
+        }
         TickMaterial(context, *svc.game);
         if (context.gpuFrame.has_value()) {
             if (m_livePreview) {
@@ -937,6 +1076,8 @@ terrain::TerrainStats TerrainWorld::Stats() const
     const std::uint64_t idle = stats.slotsTotal > stats.slotsEnabled ? static_cast<std::uint64_t>(stats.slotsTotal - stats.slotsEnabled) : 0;
     stats.gpuFrustumCulledNodes = m_gpu.frustum > idle ? m_gpu.frustum - idle : 0;
     stats.gpuHiZCulledNodes = m_gpu.pyramid;
+    stats.cameraMode = terrain::CameraModeName(m_rig.Mode());
+    stats.cameraSpeed = m_rig.Mode() == terrain::CameraMode::Script ? (m_flight.Active() ? m_flight.Spec().speed : 0.0) : m_rig.Speed();
     if (m_pool && m_pool->Built()) {
         stats.gpuTrianglesDrawn = m_gpu.visible * (m_pool->Layout().indicesPerSlot / 3);
     }

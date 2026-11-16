@@ -36,6 +36,7 @@ namespace gte {
 class Window;
 class Renderer;
 class Game;
+struct TerrainUiBridge;
 
 namespace rg {
 class RenderGraph;
@@ -384,6 +385,9 @@ public:
 
     // Editor state the Hi-Z demo works on. All null for NullEditorLayer.
     virtual HizDemoEditorHandles HizDemoHandles() noexcept = 0;
+
+    // Mailbox of the Terrain panel (see Terrain/TerrainUiBridge.h). nullptr for NullEditorLayer.
+    virtual TerrainUiBridge* TerrainUi() noexcept { return nullptr; }
 };
 
 // Creates the real ImGui-backed editor layer (defined in src/Editor/ImGuiEditorLayer.cpp).

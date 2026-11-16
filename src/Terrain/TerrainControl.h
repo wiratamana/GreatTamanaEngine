@@ -3,12 +3,14 @@
 // Control surface of the live terrain world. The HTTP bridge and the editor panel talk only to this interface;
 // the GPU details stay behind it. Every call is made on the main thread.
 
+#include "TerrainCameraRig.h"
 #include "TerrainFlight.h"
 #include "TerrainSettings.h"
 #include "TerrainTypes.h"
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -65,6 +67,19 @@ struct TerrainNodeInfo {
     bool inView = false;  // Wanted by the LOD selector this frame and inside the camera frustum.
 };
 
+// Camera placement request; every field is optional. `y` is metres above ground when heightAboveGround is set.
+struct TerrainCameraPose {
+    std::optional<double> x;
+    std::optional<double> y;
+    std::optional<double> z;
+    std::optional<double> yawDegrees;       // 0 looks along +Z, 90 along +X.
+    std::optional<double> pitchDownDegrees; // Positive looks toward the ground.
+    std::optional<double> targetX;          // Orbit centre.
+    std::optional<double> targetZ;
+    std::optional<double> orbitDistance;
+    bool heightAboveGround = false;
+};
+
 struct TerrainStats {
     bool open = false;
     bool livePreview = false;
@@ -118,6 +133,14 @@ struct TerrainStats {
     std::uint64_t gpuHiZCulledNodes = 0;
     std::uint64_t gpuTrianglesDrawn = 0;
 
+    // Interactive camera (CameraMode name: script, free or orbit).
+    std::string cameraMode = "script";
+    double cameraYawDegrees = 0.0;
+    double cameraPitchDownDegrees = 0.0;
+    double cameraSpeed = 0.0;          // Metres per second of the last frame.
+    double cameraFovDegrees = 60.0;    // Vertical field of view of the camera.
+    double cameraAspect = 16.0 / 9.0;  // Width over height of the Game view.
+
     std::string lastError;
 };
 
@@ -163,6 +186,13 @@ public:
     virtual TerrainResult StartFlight(const FlightSpec& spec) = 0;
     virtual void StopFlight() = 0;
     virtual bool FlightActive() const = 0;
+
+    // --- Interactive camera: free-fly or orbit. Input is summed per frame and used by the next Tick. ---
+    virtual TerrainResult SetCameraMode(CameraMode mode) = 0;
+    virtual CameraMode GetCameraMode() const = 0;
+    virtual void FeedCameraInput(const CameraInput& input) = 0;
+    virtual TerrainResult QueueCameraInput(const CameraInput& perFrame, int frames) = 0; // Scripted input for tests.
+    virtual TerrainResult SetCameraPose(const TerrainCameraPose& pose) = 0;
 };
 
 // Stats as one JSON object (numbers and strings only), for the HTTP routes.
