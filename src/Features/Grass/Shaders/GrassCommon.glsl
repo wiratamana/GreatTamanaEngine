@@ -48,7 +48,7 @@ layout(std430, binding = 0) readonly buffer GrassParamsBlock {
     vec4 variety;             // x = clump strength, y = min patch density, z = weed share, w = dry share.
     vec4 variety2;            // x = flower share, y = modern shading blend, z = jitter strength, w = patch tint.
     vec4 shapeWind;           // x = min pixel width, y = blade shape blend, z = wind detail, w = wind shade.
-    vec4 lodFar;              // x = LOD cross-fade band (m), y = far flatten start (m), z = far luminance, w = spare.
+    vec4 lodFar;              // x = LOD cross-fade band (m), y = far flatten start (m), z = far luminance, w = min blade width per metre of distance.
 } params;
 
 // Low nibble of GrassInstance::colorRnd: 0..12 = meadow/tuft tint, 13..15 = special blade kinds.

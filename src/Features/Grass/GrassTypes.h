@@ -165,7 +165,7 @@ struct GrassParamsGpu {
     float variety[4];             // 656  x = clump strength, y = min patch density, z = weed share, w = dry share.
     float variety2[4];            // 672  x = flower share, y = modern shading blend, z = jitter strength, w = patch tint.
     float shapeWind[4];           // 688  x = min pixel width, y = blade shape blend, z = wind detail, w = wind shade.
-    float lodFar[4];              // 704  x = LOD cross-fade band (m), y = far flatten start (m), z = far luminance, w = spare.
+    float lodFar[4];              // 704  x = LOD cross-fade band (m), y = far flatten start (m), z = far luminance, w = min blade width per metre of distance (draw pass).
 };
 static_assert(sizeof(GrassParamsGpu) == 720);
 static_assert(std::is_trivially_copyable_v<GrassParamsGpu>);
@@ -314,7 +314,7 @@ struct GrassSettings {
     float minPatchDensity = 0.22f;  // Minimum density floor in poor meadow patches, paired with shorter grass (0 = bare patches).
     float patchTint = 1.0f;         // Meadow and tuft hue shift toward olive (0 = uniform palette).
     float weedShare = 0.06f;        // Share of broadleaf rosette weeds (0 = off).
-    float dryShare = 0.08f;         // Base share of dry straw blades, weighted toward poor patches (0 = off).
+    float dryShare = 0.12f;         // Base share of dry straw blades, weighted toward poor patches (0 = off).
     float flowerShare = 0.004f;     // Share of rare wildflowers in near LOD0 grass (0 = off).
     float lookModern = 1.0f;        // Blend from legacy shading (0) to two-sided translucent + sheen + distance flatten (1).
     float farFlatten = 25.0f;       // Distance in metres where root-to-tip gradient and root AO flattening starts.

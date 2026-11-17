@@ -89,20 +89,26 @@ void main()
     bool isWeed = (inPatch == kGrassKindWeed);
     float pt = (inPatch <= kGrassPatchMax) ? (float(inPatch) * (1.0 / float(kGrassPatchMax))) : 0.5;
     float oliveMix = smoothstep(0.25, 0.80, pt) * params.variety2.w;
+    float lushMix = (1.0 - smoothstep(0.0, 0.35, pt)) * params.variety2.w;
 
     vec3 baseRoot = params.colorRoot.rgb;
     vec3 baseTip = params.colorTip.rgb;
-    vec3 oliveScale = vec3(1.60, 1.00, 1.43);
-    vec3 rootCol = mix(baseRoot, baseRoot * oliveScale, oliveMix);
-    vec3 tipCol = mix(baseTip, baseTip * oliveScale, oliveMix);
+    // Patch palette: lush deep green at low patch values, yellow-olive meadow at high values.
+    vec3 oliveScale = vec3(2.1, 1.0, 1.6);
+    vec3 lushScale = vec3(0.7, 1.08, 0.8);
+    vec3 rootCol = mix(mix(baseRoot, baseRoot * lushScale, lushMix), baseRoot * oliveScale, oliveMix);
+    vec3 tipCol = mix(mix(baseTip, baseTip * lushScale, lushMix), baseTip * oliveScale, oliveMix);
 
     if (isWeed) {
         rootCol = baseRoot * vec3(0.85, 0.92, 1.15);
         tipCol = baseTip * vec3(0.72, 0.88, 1.25);
     } else if (isDry) {
+        // Straw blades fade back to the meadow colour with distance so they do not read as orange specks.
+        float dryFar = smoothstep(50.0, 140.0, distanceM);
         float tipLuma = max(dot(baseTip, vec3(0.2126, 0.7152, 0.0722)) / 0.1668, 0.25);
-        tipCol = vec3(0.30, 0.22, 0.070) * tipLuma;
-        rootCol = tipCol * vec3(0.32, 0.34, 0.30);
+        vec3 dryTip = vec3(0.30, 0.22, 0.070) * tipLuma;
+        tipCol = mix(dryTip, tipCol, dryFar);
+        rootCol = mix(dryTip * vec3(0.32, 0.34, 0.30), rootCol, dryFar);
     }
 
     float tint = params.colorTip.w;

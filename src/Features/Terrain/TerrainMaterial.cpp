@@ -28,8 +28,8 @@ inline Rgb Mix(const Rgb& a, const Rgb& b, float t) noexcept
 
 constexpr Rgb kSeabed{ 0.30f, 0.29f, 0.24f };
 constexpr Rgb kSand{ 0.72f, 0.66f, 0.46f };
-constexpr Rgb kGrassLow{ 0.17f, 0.29f, 0.10f };
-constexpr Rgb kGrassHigh{ 0.30f, 0.31f, 0.16f };
+constexpr Rgb kGrassLow{ 0.19f, 0.325f, 0.11f };
+constexpr Rgb kGrassHigh{ 0.31f, 0.335f, 0.17f };
 constexpr Rgb kRock{ 0.40f, 0.36f, 0.32f };
 constexpr Rgb kSnow{ 0.94f, 0.95f, 0.97f };
 

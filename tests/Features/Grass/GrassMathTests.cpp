@@ -79,7 +79,7 @@ TEST(GrassMathTest, DefaultsSurviveSanitizing)
     EXPECT_FLOAT_EQ(d.minPatchDensity, 0.22f);
     EXPECT_FLOAT_EQ(d.patchTint, 1.0f);
     EXPECT_FLOAT_EQ(d.weedShare, 0.06f);
-    EXPECT_FLOAT_EQ(d.dryShare, 0.08f);
+    EXPECT_FLOAT_EQ(d.dryShare, 0.12f);
     EXPECT_FLOAT_EQ(d.flowerShare, 0.004f);
     EXPECT_FLOAT_EQ(d.lookModern, 1.0f);
     EXPECT_FLOAT_EQ(d.minPixelWidth, 1.1f);
@@ -1046,7 +1046,7 @@ TEST(GrassEndpointTest, ExposesAndAbsRealismLookAndVarietySettings)
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "minPatchDensity")->value), 0.22);
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "patchTint")->value), 1.0);
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "weedShare")->value), 0.06);
-    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "dryShare")->value), 0.08);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "dryShare")->value), 0.12);
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "flowerShare")->value), 0.004);
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "lookModern")->value), 1.0);
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "minPixelWidth")->value), 1.1);

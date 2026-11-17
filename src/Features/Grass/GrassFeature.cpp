@@ -410,6 +410,12 @@ void GrassFeature::DrawPass(fx::PostOpaqueFrame& f)
     GrassParamsGpu params = view.preparedParams;
     const Mat4 jitteredVp = fx::ApplyClipJitter(v.relative.viewProjection, v.jitterNdc);
     std::memcpy(params.drawViewProjection, jitteredVp.Data(), sizeof(params.drawViewProjection));
+    // Metres of blade width per metre of distance that equal minPixelWidth pixels (0 = off).
+    const Mat4& vp = v.relative.viewProjection;
+    const float projY = std::sqrt(vp(1, 0) * vp(1, 0) + vp(1, 1) * vp(1, 1) + vp(1, 2) * vp(1, 2));
+    const float viewportH = static_cast<float>(v.extent.height);
+    params.lodFar[3] = (params.shapeWind[0] > 0.0f && projY > 1e-4f && viewportH > 0.0f)
+        ? params.shapeWind[0] * 2.0f / (projY * viewportH) : 0.0f;
 
     bool drawn = true;
     const std::uint32_t viewportHeightBits = std::bit_cast<std::uint32_t>(static_cast<float>(v.extent.height));

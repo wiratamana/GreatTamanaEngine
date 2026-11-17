@@ -152,7 +152,7 @@ Sanitized on write (`SanitizeGrassSettings`). NaN and infinity become the defaul
 | `farFlatten` | 25 | 0..360 | Distance (m) where root-to-tip gradient and root AO flattening starts |
 | `farLuminance` | 1.15 | 0.2..4 | Multiplier applied to lit grass colour beyond 100 m to match terrain luminance (`1` = off) |
 | `patchTint` | 1.0 | 0..1 | Meadow and tuft hue shift toward olive (`0` = uniform palette) |
-| `weedShare` / `dryShare` / `flowerShare` | 0.06 / 0.08 / 0.004 | 0..0.5 / 0..0.5 / 0..0.1 | Shares of broadleaf weeds, dry straw blades and LOD0 wildflowers (`0` = off) |
+| `weedShare` / `dryShare` / `flowerShare` | 0.06 / 0.12 / 0.004 | 0..0.5 / 0..0.5 / 0..0.1 | Shares of broadleaf weeds, dry straw blades and LOD0 wildflowers (`0` = off) |
 | `colorRoot` / `colorTip` | `0.022,0.06,0.009` / `0.1,0.2,0.035` | `r,g,b` 0..2 | De-neoned linear root and tip albedo |
 | `gridCells` | 41 | 2..48 | Chunks per side. Raised on its own to cover `lod2Distance`; it never shrinks by itself |
 | `heightTileTexels` / `heightTileTexelSize` | 512 / 2.0 | 64..512 / 0.5..4 | Tile the editor layer should build |

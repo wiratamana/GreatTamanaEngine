@@ -59,15 +59,8 @@ void main()
     vec3 tangent;
     vec3 spine = GrassBladeSpine(inst, height, ground, t, rnd, twistStrength, sideAxis, tangent);
 
-    // Clamp blade width to at least minPixelWidth screen pixels so distant blades do not shimmer.
-    float vpHeight = uintBitsToFloat(pc.viewportHeight);
-    if (params.shapeWind.x > 0.0 && vpHeight > 0.0) {
-        float projY = length(vec3(params.viewProjection[0].y, params.viewProjection[1].y, params.viewProjection[2].y));
-        float clipW = (params.drawViewProjection * vec4(spine, 1.0)).w;
-        if (clipW > 0.0 && projY > 1e-4) {
-            widthAtT = max(widthAtT, params.shapeWind.x * (2.0 * clipW) / (projY * vpHeight));
-        }
-    }
+    // Clamp blade width to at least minPixelWidth screen pixels (lodFar.w = metres per metre of distance) so distant blades do not shimmer.
+    widthAtT = max(widthAtT, params.lodFar.w * dRoot);
     if (pc.lod == 2u && v == 2u) {
         side = 0.0;
     }
