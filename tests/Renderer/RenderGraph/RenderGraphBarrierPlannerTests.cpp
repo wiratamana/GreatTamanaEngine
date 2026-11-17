@@ -1,5 +1,5 @@
 // Tier-1 tests for the pure barrier decision logic in RenderGraphBarrierPlanner.h (no live Vulkan device).
-// The Regression* tests pin the planner's output to FrameRecorder.cpp's hand-written barriers field for field.
+// The entry/present/shader-read tests pin the planner's stages and layouts; attachment access carries READ and WRITE.
 
 #include "Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 
@@ -364,12 +364,12 @@ TEST(RenderGraphBarrierPlannerTest, BuildBufferMemoryBarrier2PopulatesEveryField
     EXPECT_EQ(barrier.dstQueueFamilyIndex, static_cast<std::uint32_t>(VK_QUEUE_FAMILY_IGNORED));
 }
 
-// --- Regression: field-for-field match against the hand-written barriers in FrameRecorder.cpp ---
-// Every field asserted below is copied from FrameRecorder.cpp's toColorAttachment/toDepthAttachment/toFinal.
+// --- Planner barrier fields for the entry, present and shader-read transitions ---
+// FrameRecorder.cpp's frame-entry barriers use the same stages and layouts but WRITE-only access (the first use clears).
 
-TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersOwnColorAttachmentEntryBarrier)
+TEST(RenderGraphBarrierPlannerTest, ColorAttachmentEntryBarrierFields)
 {
-    // Color attachment transition: TOP_OF_PIPE/NONE -> COLOR_ATTACHMENT_OUTPUT/COLOR_ATTACHMENT_WRITE.
+    // Color attachment transition: TOP_OF_PIPE/NONE -> COLOR_ATTACHMENT_OUTPUT/COLOR_ATTACHMENT_READ|WRITE.
     const ResourceState previous{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE };
     const ResourceState next = RequiredStateFor(ResourceAccess::ColorAttachmentWrite, false);
 
@@ -384,7 +384,7 @@ TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersOwnColorAttac
     EXPECT_EQ(barrier.newLayout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 }
 
-TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersOwnDepthAttachmentEntryBarrier)
+TEST(RenderGraphBarrierPlannerTest, DepthAttachmentEntryBarrierFields)
 {
     // Depth attachment transition (the planner always uses the combined depth+stencil layout).
     const ResourceState previous{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE };
@@ -403,7 +403,7 @@ TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersOwnDepthAttac
     EXPECT_EQ(barrier.newLayout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 }
 
-TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersPresentPathFieldForField)
+TEST(RenderGraphBarrierPlannerTest, PresentTransitionFieldsAfterColorWrite)
 {
     // Final PRESENT_SRC transition: no ResourceAccess models presentation, so the state is hand-built.
     const ResourceState afterColorWrite = RequiredStateFor(ResourceAccess::ColorAttachmentWrite, false);
@@ -421,7 +421,7 @@ TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersPresentPathFi
     EXPECT_EQ(barrier.newLayout, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 }
 
-TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersRenderOffscreenPathFieldForField)
+TEST(RenderGraphBarrierPlannerTest, ShaderReadTransitionFieldsAfterColorWrite)
 {
     // Final SHADER_READ_ONLY transition: comes straight from RequiredStateFor(ShaderRead).
     const ResourceState afterColorWrite = RequiredStateFor(ResourceAccess::ColorAttachmentWrite, false);
