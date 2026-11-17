@@ -150,6 +150,7 @@ Every window below derives from `EditorWindow`. Open any of them from the Window
 A feature that owns live editor objects (a world, a worker thread, a panel mailbox) derives from `IEditorFeatureModule` (`src/Editor/EditorFeatureModule.h`) in its own `Editor/` folder. `EditorHost` does not know the feature. It only loops over the modules.
 - Register with `GTE_REGISTER_BUILTIN_FEATURE_MODULE("Name", &Factory)`. The factory gets `Core&`. The name must differ from the render feature name (`TerrainWorld`, `WaterWorld`, `GrassTiles`). A window registered with `GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL` uses the module name as its key.
 - Hooks (all optional, main thread): `TickOrder()`, `OnAttach()`, `OnUiRequests()` (before `Game::Update`), `OnFrameTick()` (after `Game::Update`, before the frame is built), `CommandPrefix()` and `OnCommand()` (one HTTP command per frame), `OnShutdown()`.
+- A hook that throws does not stop the frame. `EditorModuleSet` logs the first throw of each hook once and goes on. A throwing `OnCommand` answers HTTP 500 with the message.
 - Modules find each other with `IEditorModuleDirectory` (`Find<T>("Name")`, `FindEndpoint("Feature")`). Resolve on every use. Never cache the result.
 - UI state shared between a module and its windows lives in `EditorContext::extensions` (`Get<T>()`, one slot per type).
 - `EditorModuleSet` calls `OnShutdown()` in reverse tick order after the HTTP server and the GPU idle guard, while every module and `Core` are still alive. Release your world there.
