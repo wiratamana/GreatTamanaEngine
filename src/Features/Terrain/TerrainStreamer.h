@@ -29,12 +29,6 @@ public:
     virtual void Run(Jobs::JobFunction fn, void* payload, Jobs::JobHandle& handle) = 0;
 };
 
-// Runs every job immediately on the calling thread.
-class InlineTerrainExecutor final : public ITerrainExecutor {
-public:
-    void Run(Jobs::JobFunction fn, void* payload, Jobs::JobHandle&) override { fn(payload); }
-};
-
 // Optional source of ready-made nodes (for example baked data). Runs on worker threads, so it must be
 // thread safe. Returning nullopt makes the streamer generate the node itself.
 using NodeProvider = std::function<std::optional<NodeMesh>(const TerrainSettings& current, const NodeKey& key)>;
@@ -57,7 +51,6 @@ struct StreamerStats {
     std::uint64_t evictedTotal = 0;
     int rebuilding = 0;                       // Nodes still showing their old mesh while a carve rebuild runs.
     int carveLastDirtyNodes = 0;              // Nodes the last carve change invalidated.
-    std::uint64_t carveInvalidatedTotal = 0;
     double carveRebuildMs = 0.0;              // Wall time of the last finished carve rebuild.
 };
 
@@ -136,7 +129,6 @@ private:
     std::deque<double> m_completionTimes;
     std::deque<double> m_recentBuildMs;
     StreamerStats m_stats;
-    std::uint64_t m_lastFrame = 0;
 };
 
 } // namespace gte::terrain

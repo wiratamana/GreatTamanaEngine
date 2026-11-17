@@ -35,9 +35,6 @@ public:
     // Slope angle in radians (0 flat) from central differences over one `spacing`.
     float Slope(double x, double z, double spacing) const;
 
-    // LOD level whose vertex spacing matches `spacing` (clamped to the configured levels).
-    int LevelForSpacing(double spacing) const noexcept;
-
 private:
     struct Impl;
     TerrainSettings m_settings;

@@ -40,13 +40,9 @@ struct TerrainPoolStats {
     std::uint32_t slots = 0;
     std::uint32_t used = 0;     // Slots holding a node.
     std::uint32_t enabled = 0;  // Slots whose cluster is live.
-    std::uint32_t retiring = 0;
     std::uint64_t vertexBytes = 0;
     std::uint64_t indexBytes = 0;
     std::uint64_t tableBytes = 0;
-    std::uint64_t slotWrites = 0;       // Total node writes since the pool was built.
-    std::uint64_t tableFlushes = 0;
-    std::uint64_t tableReplacements = 0; // Overlap mode only.
 };
 
 class TerrainGpuPool {

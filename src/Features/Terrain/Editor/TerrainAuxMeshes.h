@@ -37,7 +37,6 @@ public:
     bool Reset();
 
     bool Built() const noexcept { return m_game != nullptr; }
-    std::uint32_t PreviewVertexCount() const noexcept { return m_previewVertices; }
 
     MeshRenderer PreviewRenderer() const noexcept;
     MeshRenderer WaterRenderer() const noexcept;

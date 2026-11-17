@@ -1,5 +1,6 @@
 // Tier 1: streamer rebuilds only the nodes a carve change touches and keeps old meshes drawing meanwhile.
 
+#include "InlineTerrainExecutor.h"
 #include "Features/Terrain/TerrainStreamer.h"
 #include "Features/Water/World/WaterCarve.h"
 

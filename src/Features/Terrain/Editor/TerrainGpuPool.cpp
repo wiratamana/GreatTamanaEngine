@@ -205,7 +205,6 @@ std::optional<std::uint32_t> TerrainGpuPool::WriteNode(const terrain::NodeMesh& 
         return std::nullopt;
     }
     m_slots->MarkWritten(*slot);
-    ++m_stats.slotWrites;
     return slot;
 }
 
@@ -275,7 +274,6 @@ bool TerrainGpuPool::ReplaceWholeTable(std::string* error)
             // A frame in flight may still read the old table.
             m_renderer->Retire(std::move(*old));
         }
-        ++m_stats.tableReplacements;
         return true;
     } catch (const std::exception& e) {
         if (error != nullptr) {
@@ -307,7 +305,6 @@ bool TerrainGpuPool::Flush(const terrain::gpu::SlotFrame& frame)
         GTE_LOG_WARNING(kLogCategory, "cluster table update failed" + (why.empty() ? std::string() : ": " + why));
         return false;
     }
-    ++m_stats.tableFlushes;
     return true;
 }
 
@@ -343,7 +340,6 @@ TerrainPoolStats TerrainGpuPool::Stats() const noexcept
     TerrainPoolStats stats = m_stats;
     if (Built()) {
         stats.used = m_slots->UsedCount();
-        stats.retiring = m_slots->RetiringCount();
         stats.enabled = m_table->LiveCount();
     }
     return stats;

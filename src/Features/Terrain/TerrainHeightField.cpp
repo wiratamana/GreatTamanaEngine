@@ -182,15 +182,6 @@ TerrainHeightField::TerrainHeightField(const TerrainSettings& settings, std::sha
 
 TerrainHeightField::~TerrainHeightField() = default;
 
-int TerrainHeightField::LevelForSpacing(double spacing) const noexcept
-{
-    int level = 0;
-    if (spacing > m_layout.spacingLevel0) {
-        level = static_cast<int>(std::lround(std::log2(spacing / m_layout.spacingLevel0)));
-    }
-    return std::clamp(level, 0, static_cast<int>(m_impl->levels.size()) - 1);
-}
-
 float TerrainHeightField::BaseHeight(double x, double z, double sampleSpacing) const
 {
     return m_impl->Sample(m_impl->LevelFor(sampleSpacing), static_cast<float>(x), static_cast<float>(z));

@@ -195,7 +195,6 @@ int TerrainStreamer::SetCarve(std::shared_ptr<const ITerrainCarve> carve, std::s
         entry.rebuilding = entry.mesh != nullptr;
     }
     m_stats.carveLastDirtyNodes = invalidated;
-    m_stats.carveInvalidatedTotal += static_cast<std::uint64_t>(invalidated);
     if (invalidated > 0) {
         m_carveStart = std::chrono::steady_clock::now();
         m_carveTiming = true;
@@ -360,7 +359,6 @@ void TerrainStreamer::Evict(std::uint64_t frame)
 
 void TerrainStreamer::Update(const std::vector<WantedNode>& wanted, std::uint64_t frame, double nowSeconds, StreamerUpdate& out)
 {
-    m_lastFrame = frame;
     for (const WantedNode& w : wanted) {
         auto [it, inserted] = m_entries.try_emplace(w.key);
         if (inserted) {

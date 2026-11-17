@@ -174,3 +174,10 @@ NetworkTerrainRoutes
 TerrainBrowserRefusal
 m_terrainCommandBridge
 terrainCommandBridge
+ClearHeightRanges
+LevelForSpacing
+PreviewVertexCount
+carveInvalidatedTotal
+tableFlushes
+tableReplacements
+slotWrites

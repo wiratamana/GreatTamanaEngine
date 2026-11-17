@@ -191,7 +191,6 @@ private:
 
     GpuCounters m_gpu;
     std::uint64_t m_lastGpuCounterFrame = 0;
-    std::uint64_t m_lastTick = 0;
 
     terrain::TerrainStats m_stats;
     std::string m_lastError;

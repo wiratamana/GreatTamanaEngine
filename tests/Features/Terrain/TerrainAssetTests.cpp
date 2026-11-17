@@ -1,5 +1,6 @@
 // Tier 1: baked world asset (codec pieces, bake, .gta file, seek reader, corrupt files, streamer provider).
 
+#include "InlineTerrainExecutor.h"
 #include "Features/Terrain/TerrainAsset.h"
 
 #include "Assets/AssetDatabase.h"
@@ -12,7 +13,6 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -23,10 +23,6 @@
 namespace gte::terrain {
 
 namespace {
-
-using Clock = std::chrono::steady_clock;
-
-double MsSince(Clock::time_point t) { return std::chrono::duration<double, std::milli>(Clock::now() - t).count(); }
 
 constexpr double kRadToDeg = 57.29577951308232;
 
@@ -810,100 +806,6 @@ TEST(TerrainAssetTests, StreamerServesBakedNodesAndFallsBackToTheGenerator)
     // Removing the provider also works and drops resident nodes.
     streamer.SetNodeProvider({});
     EXPECT_EQ(streamer.Find(inside), nullptr);
-}
-
-// ---- manual benchmark ----
-
-TEST(TerrainAssetBench, DISABLED_Bake32x32SaveAndLoad)
-{
-    TerrainSettings s = TestSettings();
-    const std::uint32_t count = 32;
-    const TempDir dir;
-
-    // Cost depends on the region: ocean nodes skip erosion and detail, mountains pay for every layer.
-    const std::int32_t origins[3][2] = { { 0, 0 }, { -96, 32 }, { 40, -80 } };
-    for (const auto& o : origins) {
-        const auto t0 = Clock::now();
-        const auto b = BakeRegion(s, o[0], o[1], count, count);
-        const double ms = MsSince(t0);
-        ASSERT_TRUE(b.has_value());
-        int ocean = 0;
-        float hi = -1e30f;
-        for (const BakedChunk& c : b->chunks) {
-            ocean += c.heightMax < 0.0f ? 1 : 0;
-            hi = std::max(hi, c.heightMax);
-        }
-        std::printf("[bench] bake 32x32 at (%d,%d), job system: %.1f ms total, %.3f ms per node, %d ocean-only nodes, highest %.0f m\n",
-            o[0], o[1], ms, ms / (count * count), ocean, hi);
-    }
-
-    auto t = Clock::now();
-    std::uint32_t last = 0;
-    const auto baked = BakeRegion(s, -96, 32, count, count, [&](std::uint32_t done, std::uint32_t) { last = done; });
-    const double bakeMs = MsSince(t);
-    ASSERT_TRUE(baked.has_value());
-    std::printf("[bench] bake again for the file tests: %.1f ms, progress ended at %u\n", bakeMs, last);
-
-    const auto path = dir.path / "world.gta";
-    std::string error;
-    t = Clock::now();
-    ASSERT_TRUE(SaveTerrainAsset(path, *baked, &error)) << error;
-    const double saveMs = MsSince(t);
-    const auto size = std::filesystem::file_size(path);
-    std::printf("[bench] save: %.1f ms, file %.2f MB (%.1f KB per node)\n", saveMs, static_cast<double>(size) / 1048576.0,
-        static_cast<double>(size) / (count * count) / 1024.0);
-
-    t = Clock::now();
-    auto reader = TerrainAssetReader::Open(path, &error);
-    ASSERT_TRUE(reader.has_value()) << error;
-    std::printf("[bench] open (header, bounds table, chunk table, CRCs): %.3f ms\n", MsSince(t));
-
-    t = Clock::now();
-    BakedChunk one;
-    for (std::uint32_t i = 0; i < 64; ++i) {
-        ASSERT_TRUE(reader->ReadChunk(i * 16 % (count * count), one, &error)) << error;
-    }
-    std::printf("[bench] seek-read one chunk: %.3f ms average over 64\n", MsSince(t) / 64.0);
-
-    t = Clock::now();
-    const auto loaded = LoadTerrainAsset(path, &error);
-    ASSERT_TRUE(loaded.has_value()) << error;
-    std::printf("[bench] full load with all CRCs: %.1f ms\n", MsSince(t));
-
-    const std::int32_t fx = loaded->firstX;
-    const std::int32_t fz = loaded->firstZ;
-    t = Clock::now();
-    NodeMesh keep;
-    for (std::uint32_t i = 0; i < 256; ++i) {
-        keep = *BuildNodeFromBaked(*loaded, NodeKey{ fx + static_cast<std::int32_t>(i % count), fz + static_cast<std::int32_t>(i / count), 0 });
-    }
-    std::printf("[bench] BuildNodeFromBaked level 0: %.3f ms per node\n", MsSince(t) / 256.0);
-    t = Clock::now();
-    for (int i = 0; i < 16; ++i) {
-        keep = *BuildNodeFromBaked(*loaded, NodeKey{ fx / 4 + i % 8, fz / 4 + i / 8, 2 });
-    }
-    std::printf("[bench] BuildNodeFromBaked level 2: %.3f ms per node\n", MsSince(t) / 16.0);
-
-    const TerrainHeightField field(loaded->settings);
-    t = Clock::now();
-    for (std::uint32_t i = 0; i < 64; ++i) {
-        keep = BuildNode(field, NodeKey{ fx + static_cast<std::int32_t>(i % count), fz + static_cast<std::int32_t>(i / count), 0 });
-    }
-    std::printf("[bench] BuildNode level 0 (generator, one thread): %.3f ms per node\n", MsSince(t) / 64.0);
-
-    std::vector<std::byte> blob(64u << 20);
-    for (std::size_t i = 0; i < blob.size(); i += 4099) {
-        blob[i] = static_cast<std::byte>(i);
-    }
-    t = Clock::now();
-    const std::uint32_t fast = FastCrc32(blob);
-    const double fastMs = MsSince(t);
-    t = Clock::now();
-    const std::uint32_t slow = Crc32(std::span<const std::byte>(blob.data(), 8u << 20));
-    const double slowMs = MsSince(t) * 8.0;
-    const std::uint32_t fastPart = FastCrc32(std::span<const std::byte>(blob.data(), 8u << 20));
-    std::printf("[bench] CRC-32 of 64 MB: FastCrc32 %.1f ms (%.0f MB/s), gte::Crc32 about %.1f ms (%.0f MB/s), match=%d (%08x)\n",
-        fastMs, 64000.0 / fastMs, slowMs, 64000.0 / slowMs, slow == fastPart ? 1 : 0, fast);
 }
 
 } // namespace gte::terrain
