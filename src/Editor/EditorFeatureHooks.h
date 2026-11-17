@@ -73,6 +73,8 @@ public:
     // Called from the menu: the action runs later in RunQueuedMenuActions.
     void QueueMenuAction(std::size_t index);
 
+    bool HasQueuedMenuActions() const noexcept { return !m_queued.empty(); }
+
     // Runs the queued actions in click order. A throwing action becomes an error status.
     void RunQueuedMenuActions();
 

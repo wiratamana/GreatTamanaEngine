@@ -67,6 +67,7 @@ private:
 
     // Runs the Hi-Z demo action a menu click left in the editor state, on the main thread.
     void ServiceHizDemoMenuAction();
+    void ServiceModuleMenuActions();
 
     // RAII guard for SDL_Init()/SDL_Quit(). Declared first so SDL outlives every SDL-owning member.
     struct SdlContext {

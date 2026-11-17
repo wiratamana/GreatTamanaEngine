@@ -1,6 +1,8 @@
 #include "EditorHost.h"
 
 #include "Logger.h"
+#include "EditorExtensions.h"
+#include "EditorFeatureHooks.h"
 #include "../Game/RenderSystem.h"
 #include "EditorSceneIOCapability.h"
 #include "EditorLogQueryCapability.h"
@@ -641,6 +643,20 @@ void EditorHost::ServiceHizDemoMenuAction()
     }
 }
 
+void EditorHost::ServiceModuleMenuActions()
+{
+    EditorExtensions* const extensions = m_editorLayer->Extensions();
+    if (extensions == nullptr) {
+        return;
+    }
+    EditorFeatureHooks& hooks = extensions->Get<EditorFeatureHooks>();
+    if (!hooks.HasQueuedMenuActions()) {
+        return;
+    }
+    GTE_PROFILE_SCOPE("EditorHost::ExecuteModuleMenuAction");
+    hooks.RunQueuedMenuActions();
+}
+
 int EditorHost::Run()
 {
     bool running = true;
@@ -739,6 +755,7 @@ int EditorHost::Run()
         }
 
         ServiceHizDemoMenuAction();
+        ServiceModuleMenuActions();
 
         // Hot reload: at most once per frame, and it blocks this thread until done (a deliberate hard freeze).
         if (const std::optional<std::string> requestedProject = m_hotReloadCommandBridge.TryPeekPendingProjectName()) {

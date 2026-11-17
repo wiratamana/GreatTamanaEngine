@@ -1,5 +1,6 @@
 #include "DockLayout.h"
 #include "EditorContext.h"
+#include "EditorFeatureHooks.h"
 #include "EditorWindow.h"
 #include "../Core/EditorPanelRegistry.h"
 #include "PlaybackControls.h"
@@ -91,6 +92,12 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
         ctx.hizDemoMenuResult.fresh = false;
     }
 
+    // Outcome of a menu item a feature module added; the host ran it last frame.
+    EditorFeatureHooks& featureHooks = ctx.extensions.Get<EditorFeatureHooks>();
+    if (const EditorMenuStatus menuStatus = featureHooks.TakeMenuStatus(); menuStatus.fresh) {
+        reportStatus(!menuStatus.isError, menuStatus.message, menuStatus.message);
+    }
+
     if (ImGui::BeginMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("Save Scene", "Ctrl+S")) {
@@ -115,6 +122,14 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
             }
             if (ImGui::MenuItem("Close Hi-Z Demo", nullptr, false, ctx.hizDemo.active)) {
                 ctx.hizDemoMenuAction = HizDemoMenuAction::Close;
+            }
+            // Items a feature module added; the host runs a clicked one next frame.
+            const std::vector<EditorMenuItem>& moduleItems = featureHooks.MenuItems();
+            for (std::size_t i = 0; i < moduleItems.size(); ++i) {
+                if (moduleItems[i].menu == "File"
+                    && ImGui::MenuItem(moduleItems[i].label.c_str(), nullptr, false, featureHooks.MenuItemEnabled(i))) {
+                    featureHooks.QueueMenuAction(i);
+                }
             }
             ImGui::Separator();
             // Sets a flag instead of calling exit() so shutdown goes through the normal RAII teardown.
