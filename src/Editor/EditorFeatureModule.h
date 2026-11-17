@@ -90,7 +90,7 @@ public:
     void ApplyUiRequests();
     void FrameTick(const EditorFrameTick& tick);
 
-    // The answer of the module that owns the action, or a 404 when none does.
+    // The answer of the module that owns the action, a 404 when none does, or a 500 when the module threw.
     ModuleCommandResult RunCommand(const ModuleCommandRequest& request);
 
     IEngineFeatureModule* FindModule(std::string_view moduleName) const override;
@@ -99,10 +99,14 @@ public:
     std::size_t EditorModuleCount() const noexcept { return m_ordered.size(); }
 
 private:
+    // Logs the first throw of each hook of a module; later throws of that hook stay silent.
+    void ReportThrow(std::size_t index, unsigned hookBit, const char* hook, const char* what);
+
     const std::vector<std::unique_ptr<IEngineFeatureModule>>* m_all = nullptr;
     std::vector<IEditorFeatureModule*> m_ordered;
     std::vector<Profiling::NameId> m_uiRequestScopes; // Parallel to m_ordered.
     std::vector<Profiling::NameId> m_frameTickScopes;
+    std::vector<unsigned> m_reportedHooks;            // Parallel to m_ordered, one bit per hook.
 };
 
 } // namespace gte

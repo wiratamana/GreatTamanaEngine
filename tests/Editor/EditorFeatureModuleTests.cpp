@@ -4,7 +4,10 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <optional>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace gte {
@@ -185,6 +188,88 @@ TEST(EditorFeatureModuleTest, ADeclinedCommandFallsThroughAndAnUnclaimedOneIsA40
 
 struct SlotA { int value = 1; };
 struct SlotB { int value = 2; };
+
+class ThrowingModule final : public IEditorFeatureModule {
+public:
+    ThrowingModule(int order, Log& log) : m_order(order), m_log(log) {}
+
+    const char* ModuleName() const override { return "Thrower"; }
+    int TickOrder() const noexcept override { return m_order; }
+    void OnUiRequests() override
+    {
+        ++uiCalls;
+        throw std::runtime_error("ui boom");
+    }
+    void OnFrameTick(const EditorFrameTick&) override
+    {
+        ++tickCalls;
+        throw 42; // Not a std::exception.
+    }
+    std::string_view CommandPrefix() const noexcept override { return "boom."; }
+    std::optional<ModuleCommandResult> OnCommand(const ModuleCommandRequest&) override
+    {
+        ++commandCalls;
+        throw std::runtime_error("cmd \"boom\"");
+    }
+
+    int uiCalls = 0;
+    int tickCalls = 0;
+    int commandCalls = 0;
+
+private:
+    int m_order;
+    Log& m_log;
+};
+
+TEST(EditorFeatureModuleTest, AThrowingHookDoesNotStopTheFrameOrTheOtherModules)
+{
+    Log log;
+    Modules modules;
+    auto thrower = std::make_unique<ThrowingModule>(5, log);
+    ThrowingModule* const throwerPtr = thrower.get();
+    modules.push_back(std::make_unique<FakeModule>("A", 0, log));
+    modules.push_back(std::move(thrower));
+    modules.push_back(std::make_unique<FakeModule>("C", 10, log));
+    EditorModuleSet set;
+    set.Attach(modules, nullptr);
+    log.clear();
+
+    for (int frame = 0; frame < 3; ++frame) {
+        set.ApplyUiRequests();
+        set.FrameTick({});
+    }
+    EXPECT_EQ(throwerPtr->uiCalls, 3);   // Still called every frame; only the log is rate limited.
+    EXPECT_EQ(throwerPtr->tickCalls, 3);
+    ASSERT_EQ(log.size(), 12u);
+    EXPECT_EQ(log[0], "ui A");
+    EXPECT_EQ(log[1], "ui C");
+    EXPECT_EQ(log[2], "tick A");
+    EXPECT_EQ(log[3], "tick C");
+}
+
+TEST(EditorFeatureModuleTest, AThrowingCommandBecomesAnHttp500WithAnEscapedMessage)
+{
+    Log log;
+    Modules modules;
+    auto thrower = std::make_unique<ThrowingModule>(0, log);
+    ThrowingModule* const throwerPtr = thrower.get();
+    modules.push_back(std::move(thrower));
+    modules.push_back(std::make_unique<FakeModule>("Other", 5, log));
+    EditorModuleSet set;
+    set.Attach(modules, nullptr);
+
+    const ModuleCommandResult result = set.RunCommand({ "boom.go", {} });
+    EXPECT_EQ(result.httpStatus, 500);
+    EXPECT_EQ(result.contentType, "application/json");
+    EXPECT_NE(result.body.find("\"success\":false"), std::string::npos);
+    EXPECT_NE(result.body.find("module 'Thrower' threw: cmd \\\"boom\\\""), std::string::npos);
+    EXPECT_EQ(throwerPtr->commandCalls, 1);
+
+    // The next command is still served: a throw does not poison the set.
+    EXPECT_EQ(set.RunCommand({ "other", {} }).body, "Other:other");
+    EXPECT_EQ(set.RunCommand({ "boom.again", {} }).httpStatus, 500);
+    EXPECT_EQ(throwerPtr->commandCalls, 2);
+}
 
 TEST(EditorExtensionsTest, EachTypeGetsItsOwnStableSlot)
 {

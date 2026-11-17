@@ -9,8 +9,41 @@
 #include <algorithm>
 #include <exception>
 #include <string>
+#include <string_view>
 
 namespace gte {
+
+namespace {
+
+constexpr unsigned kHookUiRequests = 1u;
+constexpr unsigned kHookFrameTick = 2u;
+constexpr unsigned kHookCommand = 4u;
+
+std::string JsonEscape(std::string_view text)
+{
+    std::string out;
+    for (const char c : text) {
+        if (c == '"' || c == '\\') {
+            out += '\\';
+            out += c;
+        } else if (static_cast<unsigned char>(c) < 0x20u) {
+            out += ' ';
+        } else {
+            out += c;
+        }
+    }
+    return out;
+}
+
+ModuleCommandResult FailedCommandResult(std::string_view moduleName, std::string_view what)
+{
+    ModuleCommandResult failed;
+    failed.httpStatus = 500;
+    failed.body = "{\"success\":false,\"error\":\"module '" + JsonEscape(moduleName) + "' threw: " + JsonEscape(what) + "\"}";
+    return failed;
+}
+
+} // namespace
 
 fx::IFeatureDebugEndpoint* IEditorModuleDirectory::FindEndpoint(std::string_view featureName) const
 {
@@ -44,6 +77,7 @@ void EditorModuleSet::Attach(const std::vector<std::unique_ptr<IEngineFeatureMod
         [](const IEditorFeatureModule* a, const IEditorFeatureModule* b) { return a->TickOrder() < b->TickOrder(); });
     m_uiRequestScopes.clear();
     m_frameTickScopes.clear();
+    m_reportedHooks.assign(m_ordered.size(), 0u);
     for (const IEditorFeatureModule* module : m_ordered) {
         const std::string name = std::string("EditorModule.") + std::string(module->ModuleName());
         m_uiRequestScopes.push_back(Profiling::InternName((name + ".UiRequests").c_str()));
@@ -55,11 +89,27 @@ void EditorModuleSet::Attach(const std::vector<std::unique_ptr<IEngineFeatureMod
     }
 }
 
+void EditorModuleSet::ReportThrow(std::size_t index, unsigned hookBit, const char* hook, const char* what)
+{
+    if ((m_reportedHooks[index] & hookBit) != 0u) {
+        return;
+    }
+    m_reportedHooks[index] |= hookBit;
+    GTE_LOG_ERROR("EditorModuleSet", std::string(hook) + " of '" + m_ordered[index]->ModuleName() + "' threw: " + what
+        + " (reported once, the frame continues)");
+}
+
 void EditorModuleSet::ApplyUiRequests()
 {
     for (std::size_t i = 0; i < m_ordered.size(); ++i) {
         GTE_PROFILE_SCOPE_ID(m_uiRequestScopes[i]);
-        m_ordered[i]->OnUiRequests();
+        try {
+            m_ordered[i]->OnUiRequests();
+        } catch (const std::exception& e) {
+            ReportThrow(i, kHookUiRequests, "OnUiRequests", e.what());
+        } catch (...) {
+            ReportThrow(i, kHookUiRequests, "OnUiRequests", "unknown exception");
+        }
     }
 }
 
@@ -67,7 +117,13 @@ void EditorModuleSet::FrameTick(const EditorFrameTick& tick)
 {
     for (std::size_t i = 0; i < m_ordered.size(); ++i) {
         GTE_PROFILE_SCOPE_ID(m_frameTickScopes[i]);
-        m_ordered[i]->OnFrameTick(tick);
+        try {
+            m_ordered[i]->OnFrameTick(tick);
+        } catch (const std::exception& e) {
+            ReportThrow(i, kHookFrameTick, "OnFrameTick", e.what());
+        } catch (...) {
+            ReportThrow(i, kHookFrameTick, "OnFrameTick", "unknown exception");
+        }
     }
 }
 
@@ -75,13 +131,22 @@ ModuleCommandResult EditorModuleSet::RunCommand(const ModuleCommandRequest& requ
 {
     // Modules with a matching prefix first, then the ones without a prefix.
     for (const bool prefixed : { true, false }) {
-        for (IEditorFeatureModule* module : m_ordered) {
+        for (std::size_t i = 0; i < m_ordered.size(); ++i) {
+            IEditorFeatureModule* const module = m_ordered[i];
             const std::string_view prefix = module->CommandPrefix();
             if (prefixed ? (prefix.empty() || request.action.compare(0, prefix.size(), prefix) != 0) : !prefix.empty()) {
                 continue;
             }
-            if (std::optional<ModuleCommandResult> result = module->OnCommand(request)) {
-                return std::move(*result);
+            try {
+                if (std::optional<ModuleCommandResult> result = module->OnCommand(request)) {
+                    return std::move(*result);
+                }
+            } catch (const std::exception& e) {
+                ReportThrow(i, kHookCommand, "OnCommand", e.what());
+                return FailedCommandResult(module->ModuleName(), e.what());
+            } catch (...) {
+                ReportThrow(i, kHookCommand, "OnCommand", "unknown exception");
+                return FailedCommandResult(module->ModuleName(), "unknown exception");
             }
         }
     }
