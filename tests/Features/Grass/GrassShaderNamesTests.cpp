@@ -127,7 +127,9 @@ TEST(GrassShaderNamesTest, DrawShadersFitTheFullscreenRules)
     ExpectStorage(result, "instances", ReflectedAccess::ReadOnly);
     EXPECT_EQ(result.descriptorBindings.size(), 2u);
     ASSERT_TRUE(result.hasPushConstantRange);
+    EXPECT_EQ(result.pushConstantRange.offset, 0u);
     EXPECT_EQ(result.pushConstantRange.size, sizeof(GrassPushGpu));
+    EXPECT_EQ(offsetof(GrassPushGpu, viewportHeight), 8u);
     EXPECT_FALSE(rg::ValidateFullscreenReflection(result).has_value());
 }
 
@@ -192,8 +194,14 @@ TEST(GrassShaderNamesTest, ShaderTextCarriesTheSharedConstants)
     EXPECT_EQ(GrassVertexCount(2, 5), 3u);
     EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::Slot0), 21u);
     EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::Dropped0), 18u);
+    EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::ShadowSlot0), 24u);
+    EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::ShadowSlot1), 25u);
+    EXPECT_NE(text.find("const uint kStatShadowSlot0 = 24u;"), std::string::npos);
+    EXPECT_NE(text.find("const uint kStatShadowSlot1 = 25u;"), std::string::npos);
 
     const std::string bladeText = ReadText(GTE_TEST_GRASS_BLADE_GLSL_PATH);
+    EXPECT_NE(bladeText.find("float GrassBladeWidth("), std::string::npos);
+    EXPECT_NE(bladeText.find("vec3 GrassBladeSpine("), std::string::npos);
     EXPECT_NE(bladeText.find("vec3 GrassBladePosition("), std::string::npos);
 
     // The params block keeps its member order: the first and the last members.
@@ -206,6 +214,10 @@ TEST(GrassShaderNamesTest, ShaderTextCarriesTheSharedConstants)
     EXPECT_LT(text.find("vec4 extra;", block), text.find("vec4 densityLog;", block));
     EXPECT_LT(text.find("vec4 densityLog;", block), text.find("vec4 variety;", block));
     EXPECT_LT(text.find("vec4 variety;", block), text.find("vec4 variety2;", block));
+    EXPECT_LT(text.find("vec4 variety2;", block), text.find("vec4 shapeWind;", block));
+    EXPECT_LT(text.find("vec4 shapeWind;", block), text.find("vec4 lodFar;", block));
+    EXPECT_NE(text.find("(720 bytes"), std::string::npos);
+    EXPECT_EQ(sizeof(GrassParamsGpu), 720u);
     EXPECT_NE(text.find("const uint kGrassPatchMax = 12u;"), std::string::npos);
     EXPECT_NE(text.find("const uint kGrassKindFlower = 13u;"), std::string::npos);
     EXPECT_NE(text.find("const uint kGrassKindDry = 14u;"), std::string::npos);

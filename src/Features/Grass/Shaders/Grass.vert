@@ -7,21 +7,21 @@ layout(std430, binding = 1) readonly buffer GrassInstancesBlock {
     GrassInstance items[];
 } instances;
 
-// NOTE: must match the block in Grass.frag.
+// NOTE: must match GrassPushGpu in GrassTypes.h and GrassPush in Grass.frag (16 bytes).
 layout(push_constant) uniform GrassPush {
     uint lod;
     uint instanceBase;
-    uint reserved0;
+    uint viewportHeight;
     uint reserved1;
 } pc;
 
-layout(location = 0) out vec3 outNormal;       // Eye-relative world axes, not yet facing the viewer.
-layout(location = 1) out vec4 outInfo;         // x = t root..tip, y = per-blade random, z = sin(tip angle), w = side -1..1.
-layout(location = 2) out vec3 outPosRel;       // Eye-relative position.
-layout(location = 3) flat out vec4 outGround;  // rgb = terrain colour, a = ground normal . sun.
-layout(location = 4) flat out float outSunVis; // Per-blade sun visibility (cascades and cloud shadow).
-layout(location = 5) out vec3 outTangent;      // Blade spine tangent for anisotropic Kajiya-Kay sheen.
-layout(location = 6) flat out uint outPatch;   // Low nibble of colorRnd: 0..12 meadow/tuft tint, 13..15 blade kind.
+layout(location = 0) out vec3 outNormal;          // Eye-relative world axes, not yet facing the viewer.
+layout(location = 1) out vec4 outInfo;            // x = t root..tip, y = per-blade random, z = sin(tip angle), w = side -1..1.
+layout(location = 2) out vec3 outPosRel;          // Eye-relative position.
+layout(location = 3) flat out vec4 outGround;     // rgb = terrain colour, a = ground normal . sun.
+layout(location = 4) flat out vec2 outSunVisDist; // x = per-blade sun visibility, y = eye-relative root distance (m).
+layout(location = 5) out vec3 outTangent;         // Blade spine tangent for anisotropic Kajiya-Kay sheen.
+layout(location = 6) flat out uint outPatch;      // Low nibble of colorRnd: 0..12 meadow/tuft tint, 13..15 blade kind.
 
 void main()
 {
@@ -41,9 +41,10 @@ void main()
     float t = min(float(v >> 1u) / float(segments), 1.0);
     float side = float(v & 1u) * 2.0 - 1.0;
 
-    // Width tapers toward the tip; LOD2 tapers to a point; near wildflowers thin the stalk and flare the blossom head x3.
+    // Base-heavy width profile tapers toward the tip; near wildflowers thin the stalk and flare the blossom head x3.
     float taper = pc.lod == 2u ? 1.0 : params.blade.z;
-    float widthAtT = width * (1.0 - taper * pow(t, 1.5));
+    float shapeBlend = params.shapeWind.y;
+    float widthAtT = GrassBladeWidth(width, taper, t, shapeBlend);
     float dRoot = length(inst.root);
     if (patchNibble == kGrassKindFlower && pc.lod == 0u) {
         float flowerVis = 1.0 - smoothstep(0.65 * params.lodDist.x, 0.95 * params.lodDist.x, dRoot);
@@ -51,11 +52,28 @@ void main()
         float flowerW = mix(stalkW, stalkW * 3.0, smoothstep(0.85, 1.0, t));
         widthAtT = mix(widthAtT, flowerW, flowerVis);
     }
+
+    // Evaluate twisted spine (twist on LOD0 and LOD1 only to keep distant vertex ALU minimal).
+    float twistStrength = pc.lod < 2u ? shapeBlend : 0.0;
     vec3 sideAxis;
     vec3 tangent;
-    vec3 position = GrassBladeSample(inst, height, ground, t, side, widthAtT, sideAxis, tangent);
+    vec3 spine = GrassBladeSpine(inst, height, ground, t, rnd, twistStrength, sideAxis, tangent);
 
-    // Normal: rounded across the blade width, leaned toward up, then blended toward ground normal (stronger with distance).
+    // Clamp blade width to at least minPixelWidth screen pixels so distant blades do not shimmer.
+    float vpHeight = uintBitsToFloat(pc.viewportHeight);
+    if (params.shapeWind.x > 0.0 && vpHeight > 0.0) {
+        float projY = length(vec3(params.viewProjection[0].y, params.viewProjection[1].y, params.viewProjection[2].y));
+        float clipW = (params.drawViewProjection * vec4(spine, 1.0)).w;
+        if (clipW > 0.0 && projY > 1e-4) {
+            widthAtT = max(widthAtT, params.shapeWind.x * (2.0 * clipW) / (projY * vpHeight));
+        }
+    }
+    if (pc.lod == 2u && v == 2u) {
+        side = 0.0;
+    }
+    vec3 position = spine + sideAxis * (side * 0.5 * widthAtT);
+
+    // Normal: rounded across the twisted blade width, leaned toward up, then blended toward ground normal with distance.
     vec3 normal = normalize(cross(sideAxis, tangent));
     normal = normalize(normal + sideAxis * (side * 0.35) + vec3(0.0, 0.5, 0.0));
     vec2 gxz = ground.xy * 2.0 - 1.0;
@@ -67,7 +85,7 @@ void main()
     outInfo = vec4(t, rnd, ground.z, side);
     outPosRel = position;
     outGround = vec4(terrainColor, dot(groundNormal, normalize(params.sunDir.xyz)));
-    outSunVis = ground.w;
+    outSunVisDist = vec2(ground.w, dRoot);
     outTangent = tangent;
     outPatch = patchNibble;
     gl_Position = params.drawViewProjection * vec4(position, 1.0);

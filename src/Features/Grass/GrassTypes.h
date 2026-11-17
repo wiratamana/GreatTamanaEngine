@@ -68,6 +68,8 @@ enum class GrassStatsWord : std::uint32_t {
     Slot0,
     Slot1,
     Slot2,
+    ShadowSlot0,
+    ShadowSlot1,
     Count,
 };
 static_assert(static_cast<std::uint32_t>(GrassStatsWord::Count) <= kGrassStatsWords);
@@ -105,10 +107,11 @@ static_assert(sizeof(GrassInstanceGpu) == kGrassInstanceBytes);
 struct GrassPushGpu {
     std::uint32_t lod;
     std::uint32_t instanceBase;
-    std::uint32_t reserved0;
+    std::uint32_t viewportHeight; // Viewport height in pixels as float bits.
     std::uint32_t reserved1;
 };
 static_assert(sizeof(GrassPushGpu) == 16);
+static_assert(offsetof(GrassPushGpu, viewportHeight) == 8);
 
 // Push constants of GrassShadow.vert (one depth-only draw per cascade and LOD).
 // NOTE: must match GrassShadowPush in Shaders/GrassShadow.vert (80 bytes).
@@ -161,8 +164,10 @@ struct GrassParamsGpu {
     float densityLog[4];          // 640  xyz = ln of the three densities (floored at 1e-4), w = 1 when LOD0 density is above 0.
     float variety[4];             // 656  x = clump strength, y = min patch density, z = weed share, w = dry share.
     float variety2[4];            // 672  x = flower share, y = modern shading blend, z = jitter strength, w = patch tint.
+    float shapeWind[4];           // 688  x = min pixel width, y = blade shape blend, z = wind detail, w = wind shade.
+    float lodFar[4];              // 704  x = LOD cross-fade band (m), y = far flatten start (m), z = far luminance, w = spare.
 };
-static_assert(sizeof(GrassParamsGpu) == 688);
+static_assert(sizeof(GrassParamsGpu) == 720);
 static_assert(std::is_trivially_copyable_v<GrassParamsGpu>);
 static_assert(offsetof(GrassParamsGpu, drawViewProjection) == 64);
 static_assert(offsetof(GrassParamsGpu, planes) == 128);
@@ -195,6 +200,8 @@ static_assert(offsetof(GrassParamsGpu, extra) == 624);
 static_assert(offsetof(GrassParamsGpu, densityLog) == 640);
 static_assert(offsetof(GrassParamsGpu, variety) == 656);
 static_assert(offsetof(GrassParamsGpu, variety2) == 672);
+static_assert(offsetof(GrassParamsGpu, shapeWind) == 688);
+static_assert(offsetof(GrassParamsGpu, lodFar) == 704);
 
 // Number of candidate blades per chunk for a density. Same rounding as CandidateCount() in GrassCull.comp.
 inline std::uint32_t GrassCandidatesPerChunk(float bladesPerM2) noexcept
@@ -263,6 +270,8 @@ struct GrassSettings {
     float widthCompensation = 0.45f; // Thinned blades widen by (full density / local density) to this power.
     float maxWidthScale = 5.0f;      // Largest widening.
     std::uint32_t lod0Segments = 4;  // Quads along a near blade (3..6); 6 list vertices each.
+    float minPixelWidth = 1.1f;      // Minimum screen-space blade width in pixels (0 = off).
+    float bladeShape = 1.0f;         // Blend from flat ribbon (0) to twist, droop-by-height and base-heavy width (1).
 
     float maxSlopeDeg = 50.0f;
     float slopeFadeDeg = 12.0f;
@@ -278,6 +287,7 @@ struct GrassSettings {
     float edgeFade = 0.2f;       // Share of the last LOD where blades thin out.
     float densityBlend = 0.5f;   // Share of a LOD range over which the density falls (0.05 = nearly a step).
     float farHeightFade = 0.15f; // Share of lod2Distance over which blades shrink to nothing.
+    float lodFadeBand = 6.0f;    // Dithered cross-fade band width around lod0Distance and lod1Distance in metres (0 = off).
 
     float windBend = 1.0f;
     float flutterSpeed = 9.0f;   // rad/s.
@@ -285,6 +295,8 @@ struct GrassSettings {
     float gustStrength = 0.5f;
     float windWaveLengthM = 28.0f;
     float windGustLengthM = 14.0f;
+    float windDetail = 0.7f;     // Blend of fine 3.5 m gust octave and per-blade stiffness (0 = uniform wind).
+    float windShade = 0.25f;     // Brightness wave from tip angle in modern shading (0 = off).
     float windSpeedFallback = 4.0f;       // Used when no shared wind is published.
     float windDirectionDegFallback = 45.0f; // 0 = +X, 90 = +Z (same as the cloud setting).
 
@@ -305,6 +317,8 @@ struct GrassSettings {
     float dryShare = 0.08f;         // Base share of dry straw blades, weighted toward poor patches (0 = off).
     float flowerShare = 0.004f;     // Share of rare wildflowers in near LOD0 grass (0 = off).
     float lookModern = 1.0f;        // Blend from legacy shading (0) to two-sided translucent + sheen + distance flatten (1).
+    float farFlatten = 25.0f;       // Distance in metres where root-to-tip gradient and root AO flattening starts.
+    float farLuminance = 1.15f;     // Multiplier on lit grass colour beyond 100 m to match terrain luminance (1 = off).
 
     std::uint32_t gridCells = 41;        // Chunks per side (at most kGrassMaxGridCells); must cover 2 x (lod2 + 16 m).
     std::uint32_t heightTileTexels = 512; // Texels per side of the height tile the editor layer should build (at most 512).

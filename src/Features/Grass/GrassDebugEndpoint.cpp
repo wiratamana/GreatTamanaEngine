@@ -44,6 +44,8 @@ constexpr std::array kSettingKeys{
     SettingKey{ "widthCompensation", &GrassSettings::widthCompensation },
     SettingKey{ "maxWidthScale", &GrassSettings::maxWidthScale },
     SettingKey{ "lod0Segments", &GrassSettings::lod0Segments },
+    SettingKey{ "minPixelWidth", &GrassSettings::minPixelWidth },
+    SettingKey{ "bladeShape", &GrassSettings::bladeShape },
     SettingKey{ "maxSlopeDeg", &GrassSettings::maxSlopeDeg },
     SettingKey{ "slopeFadeDeg", &GrassSettings::slopeFadeDeg },
     SettingKey{ "waterMargin", &GrassSettings::waterMargin },
@@ -57,12 +59,15 @@ constexpr std::array kSettingKeys{
     SettingKey{ "edgeFade", &GrassSettings::edgeFade },
     SettingKey{ "densityBlend", &GrassSettings::densityBlend },
     SettingKey{ "farHeightFade", &GrassSettings::farHeightFade },
+    SettingKey{ "lodFadeBand", &GrassSettings::lodFadeBand },
     SettingKey{ "windBend", &GrassSettings::windBend },
     SettingKey{ "flutterSpeed", &GrassSettings::flutterSpeed },
     SettingKey{ "flutterStrength", &GrassSettings::flutterStrength },
     SettingKey{ "gustStrength", &GrassSettings::gustStrength },
     SettingKey{ "windWaveLengthM", &GrassSettings::windWaveLengthM },
     SettingKey{ "windGustLengthM", &GrassSettings::windGustLengthM },
+    SettingKey{ "windDetail", &GrassSettings::windDetail },
+    SettingKey{ "windShade", &GrassSettings::windShade },
     SettingKey{ "windSpeedFallback", &GrassSettings::windSpeedFallback },
     SettingKey{ "windDirectionDegFallback", &GrassSettings::windDirectionDegFallback },
     SettingKey{ "followCloudWind", &GrassSettings::followCloudWind },
@@ -81,6 +86,8 @@ constexpr std::array kSettingKeys{
     SettingKey{ "dryShare", &GrassSettings::dryShare },
     SettingKey{ "flowerShare", &GrassSettings::flowerShare },
     SettingKey{ "lookModern", &GrassSettings::lookModern },
+    SettingKey{ "farFlatten", &GrassSettings::farFlatten },
+    SettingKey{ "farLuminance", &GrassSettings::farLuminance },
     SettingKey{ "sunVisibility", &GrassSettings::sunVisibility },
     SettingKey{ "receiveSunShadow", &GrassSettings::receiveSunShadow },
     SettingKey{ "receiveCloudShadow", &GrassSettings::receiveCloudShadow },
@@ -135,7 +142,7 @@ constexpr std::array<std::string_view, static_cast<std::size_t>(GrassStatsWord::
     "chunksCulledDistance", "chunksCulledNoData", "chunksCulledWater", "chunksCulledFrustum", "chunksCulledHiz",
     "chunksLod0", "chunksLod1", "chunksLod2", "candidates", "accepted0", "accepted1", "accepted2", "rejectNoData",
     "rejectLodStep", "rejectWater", "rejectSlope", "rejectNoise", "dropped0", "dropped1", "dropped2", "slot0", "slot1",
-    "slot2" };
+    "slot2", "shadowSlot0", "shadowSlot1" };
 
 // A float shown with 6 significant digits, so 0.85f reads 0.85 and not 0.8500000238.
 double Shown(float value) noexcept

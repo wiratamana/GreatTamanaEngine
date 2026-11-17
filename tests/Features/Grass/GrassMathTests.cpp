@@ -22,10 +22,12 @@ namespace {
 
 TEST(GrassMathTest, ParamsBlockLayoutIsPinned)
 {
-    EXPECT_EQ(sizeof(GrassParamsGpu), 688u);
+    EXPECT_EQ(sizeof(GrassParamsGpu), 720u);
     EXPECT_EQ(offsetof(GrassParamsGpu, densityLog), 640u);
     EXPECT_EQ(offsetof(GrassParamsGpu, variety), 656u);
     EXPECT_EQ(offsetof(GrassParamsGpu, variety2), 672u);
+    EXPECT_EQ(offsetof(GrassParamsGpu, shapeWind), 688u);
+    EXPECT_EQ(offsetof(GrassParamsGpu, lodFar), 704u);
     EXPECT_EQ(offsetof(GrassParamsGpu, look), 608u);
     EXPECT_EQ(offsetof(GrassParamsGpu, extra), 624u);
     EXPECT_EQ(offsetof(GrassParamsGpu, planes), 128u);
@@ -33,6 +35,10 @@ TEST(GrassMathTest, ParamsBlockLayoutIsPinned)
     EXPECT_EQ(offsetof(GrassParamsGpu, depthMap), 592u);
     EXPECT_EQ(sizeof(GrassInstanceGpu), 32u);
     EXPECT_EQ(sizeof(GrassPushGpu), 16u);
+    EXPECT_EQ(offsetof(GrassPushGpu, lod), 0u);
+    EXPECT_EQ(offsetof(GrassPushGpu, instanceBase), 4u);
+    EXPECT_EQ(offsetof(GrassPushGpu, viewportHeight), 8u);
+    EXPECT_EQ(offsetof(GrassPushGpu, reserved1), 12u);
     EXPECT_EQ(sizeof(GrassShadowPushGpu), 80u);
     EXPECT_EQ(offsetof(GrassShadowPushGpu, cascadeVpRel), 0u);
     EXPECT_EQ(offsetof(GrassShadowPushGpu, lod), 64u);
@@ -76,6 +82,13 @@ TEST(GrassMathTest, DefaultsSurviveSanitizing)
     EXPECT_FLOAT_EQ(d.dryShare, 0.08f);
     EXPECT_FLOAT_EQ(d.flowerShare, 0.004f);
     EXPECT_FLOAT_EQ(d.lookModern, 1.0f);
+    EXPECT_FLOAT_EQ(d.minPixelWidth, 1.1f);
+    EXPECT_FLOAT_EQ(d.bladeShape, 1.0f);
+    EXPECT_FLOAT_EQ(d.windDetail, 0.7f);
+    EXPECT_FLOAT_EQ(d.windShade, 0.25f);
+    EXPECT_FLOAT_EQ(d.lodFadeBand, 6.0f);
+    EXPECT_FLOAT_EQ(d.farFlatten, 25.0f);
+    EXPECT_FLOAT_EQ(d.farLuminance, 1.15f);
 
     const GrassSettings s = SanitizeGrassSettings(d);
     EXPECT_EQ(s.hizCulling, d.hizCulling);
@@ -103,6 +116,13 @@ TEST(GrassMathTest, DefaultsSurviveSanitizing)
     EXPECT_FLOAT_EQ(s.dryShare, d.dryShare);
     EXPECT_FLOAT_EQ(s.flowerShare, d.flowerShare);
     EXPECT_FLOAT_EQ(s.lookModern, d.lookModern);
+    EXPECT_FLOAT_EQ(s.minPixelWidth, d.minPixelWidth);
+    EXPECT_FLOAT_EQ(s.bladeShape, d.bladeShape);
+    EXPECT_FLOAT_EQ(s.windDetail, d.windDetail);
+    EXPECT_FLOAT_EQ(s.windShade, d.windShade);
+    EXPECT_FLOAT_EQ(s.lodFadeBand, d.lodFadeBand);
+    EXPECT_FLOAT_EQ(s.farFlatten, d.farFlatten);
+    EXPECT_FLOAT_EQ(s.farLuminance, d.farLuminance);
     EXPECT_FLOAT_EQ(MakeGrassParams(s, GrassFrameInputs{}).skyAmbient[3], d.cloudFill);
     GrassSettings debug = d;
     debug.debugView = GrassDebugView::SunVis;
@@ -151,6 +171,13 @@ TEST(GrassMathTest, NonFiniteValuesFallBackToDefaults)
     in.dryShare = std::numeric_limits<float>::infinity();
     in.flowerShare = std::numeric_limits<float>::quiet_NaN();
     in.lookModern = -std::numeric_limits<float>::infinity();
+    in.minPixelWidth = std::numeric_limits<float>::quiet_NaN();
+    in.bladeShape = std::numeric_limits<float>::infinity();
+    in.windDetail = -std::numeric_limits<float>::infinity();
+    in.windShade = std::numeric_limits<float>::quiet_NaN();
+    in.lodFadeBand = std::numeric_limits<float>::infinity();
+    in.farFlatten = std::numeric_limits<float>::quiet_NaN();
+    in.farLuminance = -std::numeric_limits<float>::infinity();
     const GrassSettings d;
     const GrassSettings s = SanitizeGrassSettings(in);
     EXPECT_FLOAT_EQ(s.bladeHeight, d.bladeHeight);
@@ -168,6 +195,13 @@ TEST(GrassMathTest, NonFiniteValuesFallBackToDefaults)
     EXPECT_FLOAT_EQ(s.dryShare, d.dryShare);
     EXPECT_FLOAT_EQ(s.flowerShare, d.flowerShare);
     EXPECT_FLOAT_EQ(s.lookModern, d.lookModern);
+    EXPECT_FLOAT_EQ(s.minPixelWidth, d.minPixelWidth);
+    EXPECT_FLOAT_EQ(s.bladeShape, d.bladeShape);
+    EXPECT_FLOAT_EQ(s.windDetail, d.windDetail);
+    EXPECT_FLOAT_EQ(s.windShade, d.windShade);
+    EXPECT_FLOAT_EQ(s.lodFadeBand, d.lodFadeBand);
+    EXPECT_FLOAT_EQ(s.farFlatten, d.farFlatten);
+    EXPECT_FLOAT_EQ(s.farLuminance, d.farLuminance);
 }
 
 TEST(GrassMathTest, ShadowCastSettingsClampToBounds)
@@ -259,6 +293,79 @@ TEST(GrassMathTest, RealismVarietySettingsClampAndPackIntoParams)
     EXPECT_FLOAT_EQ(custom.lookModern, 0.4f);
     EXPECT_FLOAT_EQ(custom.jitterStrength, 0.9f);
     EXPECT_FLOAT_EQ(custom.patchTint, 0.65f);
+}
+
+TEST(GrassMathTest, GeometryWindAndLodFadeSettingsClampAndPackIntoParams)
+{
+    GrassSettings low;
+    low.minPixelWidth = -2.0f;
+    low.bladeShape = -1.0f;
+    low.windDetail = -1.0f;
+    low.windShade = -1.0f;
+    low.lodFadeBand = -5.0f;
+    low.farFlatten = -10.0f;
+    low.farLuminance = 0.0f;
+    const GrassSettings sLow = SanitizeGrassSettings(low);
+    EXPECT_FLOAT_EQ(sLow.minPixelWidth, 0.0f);
+    EXPECT_FLOAT_EQ(sLow.bladeShape, 0.0f);
+    EXPECT_FLOAT_EQ(sLow.windDetail, 0.0f);
+    EXPECT_FLOAT_EQ(sLow.windShade, 0.0f);
+    EXPECT_FLOAT_EQ(sLow.lodFadeBand, 0.0f);
+    EXPECT_FLOAT_EQ(sLow.farFlatten, 0.0f);
+    EXPECT_FLOAT_EQ(sLow.farLuminance, 0.2f);
+
+    GrassSettings high;
+    high.minPixelWidth = 50.0f;
+    high.bladeShape = 5.0f;
+    high.windDetail = 5.0f;
+    high.windShade = 5.0f;
+    high.lodFadeBand = 99.0f;
+    high.farFlatten = 999.0f;
+    high.farLuminance = 99.0f;
+    const GrassSettings sHigh = SanitizeGrassSettings(high);
+    EXPECT_FLOAT_EQ(sHigh.minPixelWidth, 4.0f);
+    EXPECT_FLOAT_EQ(sHigh.bladeShape, 1.0f);
+    EXPECT_FLOAT_EQ(sHigh.windDetail, 1.0f);
+    EXPECT_FLOAT_EQ(sHigh.windShade, 1.0f);
+    EXPECT_FLOAT_EQ(sHigh.lodFadeBand, 30.0f);
+    EXPECT_FLOAT_EQ(sHigh.farFlatten, 360.0f);
+    EXPECT_FLOAT_EQ(sHigh.farLuminance, 4.0f);
+
+    GrassSettings custom;
+    custom.minPixelWidth = 1.4f;
+    custom.bladeShape = 0.8f;
+    custom.windDetail = 0.55f;
+    custom.windShade = 0.35f;
+    custom.lodFadeBand = 8.0f;
+    custom.farFlatten = 32.0f;
+    custom.farLuminance = 1.25f;
+    const GrassParamsGpu p = MakeGrassParams(SanitizeGrassSettings(custom), GrassFrameInputs{});
+    EXPECT_FLOAT_EQ(p.shapeWind[0], 1.4f);
+    EXPECT_FLOAT_EQ(p.shapeWind[1], 0.8f);
+    EXPECT_FLOAT_EQ(p.shapeWind[2], 0.55f);
+    EXPECT_FLOAT_EQ(p.shapeWind[3], 0.35f);
+    EXPECT_FLOAT_EQ(p.lodFar[0], 8.0f);
+    EXPECT_FLOAT_EQ(p.lodFar[1], 32.0f);
+    EXPECT_FLOAT_EQ(p.lodFar[2], 1.25f);
+    EXPECT_FLOAT_EQ(p.lodFar[3], 0.0f);
+
+    // Narrow LOD spans clamp the GPU fade band so adjacent cross-fade bands never overlap.
+    GrassSettings narrow = custom;
+    narrow.lod0Distance = 10.0f;
+    narrow.lod1Distance = 14.0f;
+    narrow.lod2Distance = 30.0f;
+    narrow.lodFadeBand = 20.0f;
+    const GrassParamsGpu pNarrow = MakeGrassParams(SanitizeGrassSettings(narrow), GrassFrameInputs{});
+    EXPECT_FLOAT_EQ(pNarrow.lodFar[0], 0.9f * 4.0f);
+
+    ApplyGrassPreset(custom, GrassPreset::Medium);
+    EXPECT_FLOAT_EQ(custom.minPixelWidth, 1.4f);
+    EXPECT_FLOAT_EQ(custom.bladeShape, 0.8f);
+    EXPECT_FLOAT_EQ(custom.windDetail, 0.55f);
+    EXPECT_FLOAT_EQ(custom.windShade, 0.35f);
+    EXPECT_FLOAT_EQ(custom.lodFadeBand, 8.0f);
+    EXPECT_FLOAT_EQ(custom.farFlatten, 32.0f);
+    EXPECT_FLOAT_EQ(custom.farLuminance, 1.25f);
 }
 
 TEST(GrassMathTest, GridCoversTheFarthestLod)
@@ -930,7 +1037,8 @@ TEST(GrassEndpointTest, ExposesAndAbsRealismLookAndVarietySettings)
     const fx::FeatureDebugResult initial = endpoint->GetState();
     ASSERT_TRUE(initial.ok);
     for (const char* key : { "jitterStrength", "clumpStrength", "minPatchDensity", "patchTint", "weedShare",
-             "dryShare", "flowerShare", "lookModern", "colorRoot", "colorTip" }) {
+             "dryShare", "flowerShare", "lookModern", "colorRoot", "colorTip", "minPixelWidth", "bladeShape",
+             "windDetail", "windShade", "lodFadeBand", "farFlatten", "farLuminance" }) {
         ASSERT_NE(FindField(initial, key), nullptr) << key;
     }
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "jitterStrength")->value), 0.6);
@@ -941,6 +1049,13 @@ TEST(GrassEndpointTest, ExposesAndAbsRealismLookAndVarietySettings)
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "dryShare")->value), 0.08);
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "flowerShare")->value), 0.004);
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "lookModern")->value), 1.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "minPixelWidth")->value), 1.1);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "bladeShape")->value), 1.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "windDetail")->value), 0.7);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "windShade")->value), 0.25);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "lodFadeBand")->value), 6.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "farFlatten")->value), 25.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "farLuminance")->value), 1.15);
 
     // Every realism technique can be turned off cleanly for live A/B testing.
     const std::vector<fx::FeatureDebugArg> allOff{
@@ -952,6 +1067,13 @@ TEST(GrassEndpointTest, ExposesAndAbsRealismLookAndVarietySettings)
         { "dryShare", "0" },
         { "flowerShare", "0" },
         { "lookModern", "0" },
+        { "minPixelWidth", "0" },
+        { "bladeShape", "0" },
+        { "windDetail", "0" },
+        { "windShade", "0" },
+        { "lodFadeBand", "0" },
+        { "farFlatten", "300" },
+        { "farLuminance", "1" },
     };
     const fx::FeatureDebugResult disabled = endpoint->Set(allOff);
     ASSERT_TRUE(disabled.ok);
@@ -963,12 +1085,26 @@ TEST(GrassEndpointTest, ExposesAndAbsRealismLookAndVarietySettings)
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(disabled, "dryShare")->value), 0.0);
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(disabled, "flowerShare")->value), 0.0);
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(disabled, "lookModern")->value), 0.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(disabled, "minPixelWidth")->value), 0.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(disabled, "bladeShape")->value), 0.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(disabled, "windDetail")->value), 0.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(disabled, "windShade")->value), 0.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(disabled, "lodFadeBand")->value), 0.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(disabled, "farFlatten")->value), 300.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(disabled, "farLuminance")->value), 1.0);
 
     const fx::FeatureDebugResult reset = endpoint->Invoke("reset_defaults", {});
     ASSERT_TRUE(reset.ok);
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(reset, "clumpStrength")->value), 0.6);
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(reset, "flowerShare")->value), 0.004);
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(reset, "lookModern")->value), 1.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(reset, "minPixelWidth")->value), 1.1);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(reset, "bladeShape")->value), 1.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(reset, "windDetail")->value), 0.7);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(reset, "windShade")->value), 0.25);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(reset, "lodFadeBand")->value), 6.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(reset, "farFlatten")->value), 25.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(reset, "farLuminance")->value), 1.15);
 }
 TEST(GrassCallbackTest, DrawPassHandlesSkippedAndBailedPrepareCleanly)
 {

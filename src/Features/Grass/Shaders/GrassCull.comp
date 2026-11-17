@@ -121,8 +121,10 @@ float GrassSunVisibility(vec3 world, vec3 normal, float rnd)
 shared float sMin[64];
 shared float sMax[64];
 shared float sLand[64];
-shared uint sCount[3];
+shared uint sPrimary[3];
+shared uint sSecondary[3];
 shared uint sBase[3];
+shared uint sFadeBase[3];
 
 // Per-chunk values, set before the blade loop.
 vec2 gChunkLoGrid;   // Grid-relative xz of the chunk corner.
@@ -289,9 +291,10 @@ bool BoxOutsideFrustum(vec3 boxMin, vec3 boxMax)
 
 // Places candidate `idx` of the current chunk and filters it. Returns a kReject* code (0 = accepted).
 // Lower densities are index prefixes of higher ones, so a blade only disappears at a density step.
-uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
+uint EvalBlade(uint idx, out uint lod, out uint fadeLod, out GrassInstance result)
 {
     lod = 3u;
+    fadeLod = 3u;
     result = GrassInstance(vec3(0.0), 0u, 0u, 0u, 0u, 0u);
     uint hb = GrassHash2(gSeed, idx);
 
@@ -309,23 +312,19 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
     if (dist >= params.lodDist.z) {
         return kRejectLod;
     }
-    lod = dist < params.lodDist.x ? 0u : (dist < params.lodDist.y ? 1u : 2u);
     float logDensity = GrassLogDensityAt(dist);
     float localDensity = params.densityLog.w > 0.5 ? exp(logDensity) : 0.0;
     if (idx >= CandidateCount(localDensity)) {
-        lod = 3u;
         return kRejectLod;
     }
 
     float waterTop = params.water.x + params.water.y;
     if (ts.flag > 0.5 || ts.height <= waterTop) {
-        lod = 3u;
         return kRejectWater;
     }
     vec3 normal = normalize(vec3(-ts.gradient.x, 1.0, -ts.gradient.y));
     float slopeDeg = degrees(acos(clamp(normal.y, 0.0, 1.0)));
     if (slopeDeg > params.slope.x) {
-        lod = 3u;
         return kRejectSlope;
     }
 
@@ -342,7 +341,6 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
     float edgeStart = params.lodDist.z * (1.0 - clamp(params.lodDist.w, 0.01, 1.0));
     m *= 1.0 - smoothstep(edgeStart, params.lodDist.z, dist);
     if (GrassUnit(GrassHash2(hb, 0x1234u)) >= m) {
-        lod = 3u;
         return kRejectNoise;
     }
 
@@ -371,6 +369,25 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
             eye = vec3(pg.x - params.camRel.x, ts.height - params.camRel.y, pg.y - params.camRel.z);
         }
     }
+
+    // Assign primary LOD and optional adjacent cross-fade LOD from the final shifted root distance.
+    float rootDist = length(eye);
+    lod = rootDist < params.lodDist.x ? 0u : (rootDist < params.lodDist.y ? 1u : 2u);
+    float halfBand = 0.5 * params.lodFar.x;
+    if (halfBand > 0.0) {
+        if (lod == 0u && rootDist >= params.lodDist.x - halfBand) {
+            fadeLod = 1u;
+        } else if (lod == 1u) {
+            if (rootDist < params.lodDist.x + halfBand) {
+                fadeLod = 0u;
+            } else if (rootDist >= params.lodDist.y - halfBand) {
+                fadeLod = 2u;
+            }
+        } else if (lod == 2u && rootDist < params.lodDist.y + halfBand) {
+            fadeLod = 1u;
+        }
+    }
+
     uint cid = GrassHash2(uint(cc.x), uint(cc.y));
     float cHeight = mix(1.0, mix(0.75, 1.2, GrassUnit(cid)), clumpActive);
     float cTint = mix(0.5, GrassUnit(GrassPcg(cid ^ 0x51ED270Bu)), clumpActive);
@@ -385,7 +402,7 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
     float farShrink = 1.0 - smoothstep(params.lodDist.z * (1.0 - params.extra.y), params.lodDist.z, dist);
     float poorSoilScale = clamp(params.variety.y / 0.22, 0.0, 1.0) * smoothstep(0.0, 0.2, params.density.w);
     float patchHeight = mix(1.0, mix(0.45, 1.0, patchMask), poorSoilScale);
-    float height = params.blade.x * (1.0 + params.blade.w * (2.0 * r1 - 1.0)) * (0.85 + 0.3 * nz) * cHeight * patchHeight * farShrink;
+    float baseHeight = params.blade.x * (1.0 + params.blade.w * (2.0 * r1 - 1.0)) * (0.85 + 0.3 * nz) * cHeight * patchHeight;
     // Thinned blades widen so the cover stays even.
     float widthScale = min(exp(params.bladeB.y * max(params.densityLog.x - logDensity, 0.0)), params.bladeB.z);
     float width = params.blade.y * (0.8 + 0.4 * r2) * widthScale;
@@ -402,32 +419,38 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
     bool isDry = !isFlower && !isWeed && (kind > 1.0 - dryShare * (0.4 + patchDry));
     if (isWeed) {
         width *= 2.2;
-        height *= 0.5;
+        baseHeight *= 0.5;
     } else if (isDry) {
-        height *= 0.8;
+        baseHeight *= 0.8;
     } else if (isFlower) {
-        height *= 1.05;
+        baseHeight *= 1.05;
         lean *= 0.65;
     }
+    float height = baseHeight * farShrink;
 
-    // Wind: slow wave plus gusts at a pattern position that drifts with the shared wind offset.
+    // Wind: slow wave, coarse + fine travelling gust octaves and per-blade stiffness.
     float yaw = r3 * 6.2831853;
     vec2 faceXz = vec2(sin(yaw), cos(yaw));
     vec2 pattern = params.cameraWorld.xy + eye.xz + params.wind1.yz;
     vec2 windDir = params.wind0.xy;
     float speedFactor = 1.0 - exp(-0.25 * params.wind0.z);
+    float windDetail = params.shapeWind.z;
     float wave = 0.5 + 0.5 * sin(dot(pattern, windDir) * (6.2831853 / max(params.wind2.z, 1.0)));
     float gust = params.wind1.x * GrassValueNoise(pattern / max(params.wind2.w, 1.0));
-    float windAngle = 0.6 * params.wind1.w * speedFactor * (0.25 + 0.5 * wave + 0.9 * gust);
+    float gust2 = min(params.wind1.x * 2.0, 1.0) * GrassValueNoise(pattern / 3.5 - windDir * (params.wind0.w * 0.7));
+    float stiff = mix(1.0, 0.6 + 0.8 * GrassUnit(GrassHash2(hb, 7u)), windDetail);
+    float windAngle = 0.6 * params.wind1.w * speedFactor * stiff * (0.25 + 0.5 * wave + 0.9 * gust + 0.35 * windDetail * gust2);
 
-    // Rest lean (plus outward tuft fountain lean) and wind push set the tip angle and bend direction.
+    // Rest lean, tuft fountain lean, wind push and height-dependent droop set the tip angle and bend direction.
     vec2 bend = faceXz * lean + outward * (0.25 * lean * clumpStr) + windDir * windAngle;
     if (isWeed) {
         bend *= 1.6;
     }
     float bendLength = length(bend);
-    float extraDroop = isDry ? 0.25 : 0.0;
-    float angle = min(bendLength + extraDroop, params.bladeB.w);
+    float heightRatio = baseHeight / max(params.blade.x, 1e-3);
+    float heightDroop = params.shapeWind.y * clamp(heightRatio - 1.0, -0.25, 1.2) * 0.35;
+    float extraDroop = (isDry ? 0.25 : 0.0) + heightDroop;
+    float angle = clamp(bendLength + extraDroop, 0.0, params.bladeB.w);
     vec2 bendDir = bendLength > 1e-4 ? bend / bendLength : faceXz;
 
     // Tip flutter: fast and small; the vertex shader scales it by t^2.
@@ -435,7 +458,7 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
     float flutterTime = params.wind0.w * params.wind2.x;
     float flutterA = sin(flutterTime + phase + dot(pattern, vec2(0.9, 0.7)));
     float flutterB = sin(flutterTime * 1.37 + phase * 1.7);
-    float flutterAmp = params.wind2.y * height * (0.04 + 0.12 * speedFactor * (0.5 + gust));
+    float flutterAmp = params.wind2.y * height * (0.04 + 0.12 * speedFactor * (0.5 + gust + 0.35 * windDetail * gust2));
 
     float r6 = GrassUnit(GrassHash2(hb, 6u));
     vec3 worldRoot = vec3(params.cameraWorld.x + eye.x, params.camRel.y + eye.y, params.cameraWorld.y + eye.z);
@@ -588,35 +611,46 @@ void main()
     // 256 candidates per round (4 per thread); one slot reservation per LOD per round.
     for (uint base = slice * 256u; base < candidates; base += 256u * slices) {
         if (lid < 3u) {
-            sCount[lid] = 0u;
+            sPrimary[lid] = 0u;
+            sSecondary[lid] = 0u;
         }
         barrier();
 
         uint lodOf[4];
+        uint fadeLodOf[4];
         uint localSlot[4];
+        uint fadeSlot[4];
         GrassInstance made[4];
         for (uint j = 0u; j < 4u; ++j) {
             lodOf[j] = 3u;
+            fadeLodOf[j] = 3u;
             localSlot[j] = 0u;
+            fadeSlot[j] = 0u;
             made[j] = GrassInstance(vec3(0.0), 0u, 0u, 0u, 0u, 0u);
             uint idx = base + lid + 64u * j;
             if (idx < candidates) {
                 uint lod;
+                uint fadeLod;
                 GrassInstance blade;
-                uint why = EvalBlade(idx, lod, blade);
+                uint why = EvalBlade(idx, lod, fadeLod, blade);
                 rejected[why] += 1u;
                 if (why == kRejectNone) {
                     lodOf[j] = lod;
+                    fadeLodOf[j] = fadeLod;
                     made[j] = blade;
-                    localSlot[j] = atomicAdd(sCount[lod], 1u);
+                    localSlot[j] = atomicAdd(sPrimary[lod], 1u);
                     accepted[lod] += 1u;
+                    if (fadeLod < 3u) {
+                        fadeSlot[j] = atomicAdd(sSecondary[fadeLod], 1u);
+                    }
                 }
             }
         }
         barrier();
 
         if (lid < 3u) {
-            uint wanted = sCount[lid];
+            uint prim = sPrimary[lid];
+            uint wanted = prim + sSecondary[lid];
             uint slot = 0u;
             if (wanted > 0u) {
                 slot = atomicAdd(stats.words[kStatSlot0 + lid], wanted);
@@ -624,13 +658,17 @@ void main()
                 uint granted = slot >= cap ? 0u : min(wanted, cap - slot);
                 if (granted > 0u) {
                     atomicAdd(commands.values[lid * 4u + 1u], granted);
-                    atomicAdd(commands.values[(lid + kGrassLodCount) * 4u + 1u], granted);
+                    if (lid < 2u) {
+                        atomicAdd(commands.values[(lid + kGrassLodCount) * 4u + 1u], granted);
+                        atomicAdd(stats.words[kStatShadowSlot0 + lid], min(prim, granted));
+                    }
                 }
                 if (granted < wanted) {
                     atomicAdd(stats.words[kStatDropped0 + lid], wanted - granted);
                 }
             }
             sBase[lid] = slot;
+            sFadeBase[lid] = slot + prim;
         }
         barrier();
 
@@ -640,6 +678,13 @@ void main()
                 uint slot = sBase[lod] + localSlot[j];
                 if (slot < params.instanceCap[lod]) {
                     instances.items[params.instanceBase[lod] + slot] = made[j];
+                }
+                uint fadeLod = fadeLodOf[j];
+                if (fadeLod < 3u) {
+                    uint fSlot = sFadeBase[fadeLod] + fadeSlot[j];
+                    if (fSlot < params.instanceCap[fadeLod]) {
+                        instances.items[params.instanceBase[fadeLod] + fSlot] = made[j];
+                    }
                 }
             }
         }

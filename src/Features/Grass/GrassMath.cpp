@@ -80,6 +80,8 @@ GrassSettings SanitizeGrassSettings(const GrassSettings& in, bool enforceOrder) 
     s.widthCompensation = Clamp(in.widthCompensation, d.widthCompensation, 0.0f, 1.0f);
     s.maxWidthScale = Clamp(in.maxWidthScale, d.maxWidthScale, 1.0f, 16.0f);
     s.lod0Segments = std::clamp(in.lod0Segments, kGrassMinLod0Segments, kGrassMaxLod0Segments);
+    s.minPixelWidth = Clamp(in.minPixelWidth, d.minPixelWidth, 0.0f, 4.0f);
+    s.bladeShape = Clamp(in.bladeShape, d.bladeShape, 0.0f, 1.0f);
 
     s.maxSlopeDeg = Clamp(in.maxSlopeDeg, d.maxSlopeDeg, 1.0f, 89.0f);
     s.slopeFadeDeg = Clamp(in.slopeFadeDeg, d.slopeFadeDeg, 0.0f, 45.0f);
@@ -95,6 +97,7 @@ GrassSettings SanitizeGrassSettings(const GrassSettings& in, bool enforceOrder) 
     s.edgeFade = Clamp(in.edgeFade, d.edgeFade, 0.01f, 1.0f);
     s.densityBlend = Clamp(in.densityBlend, d.densityBlend, 0.05f, 1.0f);
     s.farHeightFade = Clamp(in.farHeightFade, d.farHeightFade, 0.0f, 0.6f);
+    s.lodFadeBand = Clamp(in.lodFadeBand, d.lodFadeBand, 0.0f, 30.0f);
 
     s.windBend = Clamp(in.windBend, d.windBend, 0.0f, 4.0f);
     s.flutterSpeed = Clamp(in.flutterSpeed, d.flutterSpeed, 0.0f, 60.0f);
@@ -102,6 +105,8 @@ GrassSettings SanitizeGrassSettings(const GrassSettings& in, bool enforceOrder) 
     s.gustStrength = Clamp(in.gustStrength, d.gustStrength, 0.0f, 3.0f);
     s.windWaveLengthM = Clamp(in.windWaveLengthM, d.windWaveLengthM, 2.0f, 400.0f);
     s.windGustLengthM = Clamp(in.windGustLengthM, d.windGustLengthM, 2.0f, 400.0f);
+    s.windDetail = Clamp(in.windDetail, d.windDetail, 0.0f, 1.0f);
+    s.windShade = Clamp(in.windShade, d.windShade, 0.0f, 1.0f);
     s.windSpeedFallback = Clamp(in.windSpeedFallback, d.windSpeedFallback, 0.0f, 100.0f);
     s.windDirectionDegFallback = Clamp(in.windDirectionDegFallback, d.windDirectionDegFallback, -720.0f, 720.0f);
 
@@ -124,6 +129,8 @@ GrassSettings SanitizeGrassSettings(const GrassSettings& in, bool enforceOrder) 
     s.dryShare = Clamp(in.dryShare, d.dryShare, 0.0f, 0.5f);
     s.flowerShare = Clamp(in.flowerShare, d.flowerShare, 0.0f, 0.1f);
     s.lookModern = Clamp(in.lookModern, d.lookModern, 0.0f, 1.0f);
+    s.farFlatten = Clamp(in.farFlatten, d.farFlatten, 0.0f, kMaxLod2Distance);
+    s.farLuminance = Clamp(in.farLuminance, d.farLuminance, 0.2f, 4.0f);
     s.sunVisibility = Clamp(in.sunVisibility, d.sunVisibility, 0.0f, 2.0f);
     s.shadowStrength = Clamp(in.shadowStrength, d.shadowStrength, 0.0f, 1.0f);
     s.cloudFill = Clamp(in.cloudFill, d.cloudFill, 0.0f, 1.0f);
@@ -367,6 +374,10 @@ GrassParamsGpu MakeGrassParams(const GrassSettings& s, const GrassFrameInputs& i
         std::log(std::max(s.densityLod2, 1e-4f)), s.densityLod0 > 0.0f ? 1.0f : 0.0f);
     Set4(p.variety, s.clumpStrength, s.minPatchDensity, s.weedShare, s.dryShare);
     Set4(p.variety2, s.flowerShare, s.lookModern, s.jitterStrength, s.patchTint);
+    const float maxFadeBand = std::max(0.0f,
+        0.9f * std::min(s.lod0Distance, std::min(s.lod1Distance - s.lod0Distance, s.lod2Distance - s.lod1Distance)));
+    Set4(p.shapeWind, s.minPixelWidth, s.bladeShape, s.windDetail, s.windShade);
+    Set4(p.lodFar, std::min(s.lodFadeBand, maxFadeBand), s.farFlatten, s.farLuminance, 0.0f);
     return p;
 }
 GrassShadowParamsGpu MakeGrassShadowParams(const SunShadowReceiver* receiver, const CloudShadowMap* cloud,

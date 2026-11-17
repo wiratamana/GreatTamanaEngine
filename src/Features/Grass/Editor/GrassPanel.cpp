@@ -126,6 +126,8 @@ bool BuildGrassPanel(GrassSettings& edit, const GrassViewSnapshot& game, const G
             edit.lod0Segments = static_cast<std::uint32_t>(segments);
             changed = true;
         }
+        changed |= ImGui::SliderFloat("Blade shape", &edit.bladeShape, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Min pixel width (px)", &edit.minPixelWidth, 0.0f, 3.0f, "%.2f");
     }
     if (ImGui::CollapsingHeader("Where grass grows", ImGuiTreeNodeFlags_DefaultOpen)) {
         changed |= ImGui::SliderFloat("Max slope (deg)", &edit.maxSlopeDeg, 1.0f, 89.0f);
@@ -142,6 +144,7 @@ bool BuildGrassPanel(GrassSettings& edit, const GrassViewSnapshot& game, const G
         changed |= ImGui::SliderFloat("LOD2 / cull (m)", &edit.lod2Distance, 20.0f, 360.0f);
         changed |= ImGui::SliderFloat("Far edge thinning", &edit.edgeFade, 0.02f, 1.0f);
         changed |= ImGui::SliderFloat("Far edge shrink", &edit.farHeightFade, 0.0f, 0.6f);
+        changed |= ImGui::SliderFloat("LOD cross-fade band (m)", &edit.lodFadeBand, 0.0f, 20.0f, "%.1f");
     }
     if (ImGui::CollapsingHeader("Wind")) {
         changed |= ImGui::Checkbox("Follow the cloud wind", &edit.followCloudWind);
@@ -151,6 +154,8 @@ bool BuildGrassPanel(GrassSettings& edit, const GrassViewSnapshot& game, const G
         changed |= ImGui::SliderFloat("Flutter strength", &edit.flutterStrength, 0.0f, 3.0f);
         changed |= ImGui::SliderFloat("Wave length (m)", &edit.windWaveLengthM, 4.0f, 200.0f);
         changed |= ImGui::SliderFloat("Gust length (m)", &edit.windGustLengthM, 4.0f, 200.0f);
+        changed |= ImGui::SliderFloat("Fine gust & stiffness", &edit.windDetail, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Wind brightness wave", &edit.windShade, 0.0f, 1.0f, "%.2f");
         ImGui::BeginDisabled(edit.followCloudWind);
         changed |= ImGui::SliderFloat("Own wind speed (m/s)", &edit.windSpeedFallback, 0.0f, 40.0f);
         changed |= ImGui::SliderFloat("Own wind direction (deg)", &edit.windDirectionDegFallback, -180.0f, 180.0f);
@@ -168,6 +173,8 @@ bool BuildGrassPanel(GrassSettings& edit, const GrassViewSnapshot& game, const G
         changed |= ImGui::SliderFloat("Root darkening", &edit.rootAo, 0.0f, 1.0f);
         changed |= ImGui::SliderFloat("Terrain colour tint", &edit.terrainTint, 0.0f, 1.0f);
         changed |= ImGui::SliderFloat("Far terrain colour blend", &edit.farTerrainBlend, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Far flatten start (m)", &edit.farFlatten, 0.0f, 300.0f, "%.1f");
+        changed |= ImGui::SliderFloat("Far luminance (>100 m)", &edit.farLuminance, 0.5f, 2.5f, "%.2f");
         changed |= ImGui::SliderFloat("Ground normal blend", &edit.groundNormalBlend, 0.0f, 1.0f);
         changed |= ImGui::SliderFloat("Ground self shadow", &edit.selfShadow, 0.0f, 1.0f);
         changed |= ImGui::SliderFloat("Translucency", &edit.translucency, 0.0f, 3.0f);

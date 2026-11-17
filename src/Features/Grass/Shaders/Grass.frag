@@ -1,22 +1,23 @@
 #version 450
 
-// Opaque blade shading: patch/species palette, two-sided leaf transmission, tangent sheen, sky Fresnel and distance flatten.
+// Opaque blade shading: LOD dither cross-fade, species palette, two-sided transmission, sheen and far luminance match.
 // Linear HDR radiance with the same energy scale as DirectionalLighting.glsl (kDirectScale 0.65).
 #include "GrassCommon.glsl"
+#include "InterleavedGradientNoise.glsl"
 
-// NOTE: must match the block in Grass.vert.
+// NOTE: must match GrassPushGpu in GrassTypes.h and GrassPush in Grass.vert (16 bytes).
 layout(push_constant) uniform GrassPush {
     uint lod;
     uint instanceBase;
-    uint reserved0;
+    uint viewportHeight;
     uint reserved1;
 } pc;
 
 layout(location = 0) in vec3 inNormal;
 layout(location = 1) in vec4 inInfo;
 layout(location = 2) in vec3 inPosRel;
-layout(location = 3) flat in vec4 inGround; // rgb = terrain colour, a = ground normal . sun.
-layout(location = 4) flat in float inSunVis;
+layout(location = 3) flat in vec4 inGround;     // rgb = terrain colour, a = ground normal . sun.
+layout(location = 4) flat in vec2 inSunVisDist; // x = per-blade sun visibility, y = eye-relative root distance (m).
 layout(location = 5) in vec3 inTangent;
 layout(location = 6) flat in uint inPatch;
 
@@ -24,8 +25,48 @@ layout(location = 0) out vec4 outColor;
 
 const float kDirectScale = 0.65; // Same sun energy scale as the lit material shaders.
 
+// Ordered 4x4 Bayer threshold jittered by screen-space interleaved gradient noise in (0, 1).
+float GrassScreenDither(vec2 fragCoord)
+{
+    uvec2 p = uvec2(fragCoord) & 3u;
+    uint b0 = ((p.x & 1u) << 1u) | (p.y & 1u);
+    uint b1 = ((p.x >> 1u) << 1u) | (p.y >> 1u);
+    const uint kBayer2[4] = uint[4](0u, 2u, 3u, 1u);
+    uint bayer = (kBayer2[b0] << 2u) | kBayer2[b1];
+    float ign = InterleavedGradientNoise(floor(fragCoord));
+    return (float(bayer) + clamp(ign, 0.001, 0.999)) * (1.0 / 16.0);
+}
+
 void main()
 {
+    // Complementary dither discard across the LOD0/LOD1 and LOD1/LOD2 cross-fade bands.
+    float fadeBand = params.lodFar.x;
+    if (fadeBand > 1e-4) {
+        float halfBand = 0.5 * fadeBand;
+        float rootDist = inSunVisDist.y;
+        float d0 = params.lodDist.x;
+        float d1 = params.lodDist.y;
+        if (pc.lod == 0u && rootDist > d0 - halfBand) {
+            if (GrassScreenDither(gl_FragCoord.xy) < smoothstep(d0 - halfBand, d0 + halfBand, rootDist)) {
+                discard;
+            }
+        } else if (pc.lod == 1u) {
+            if (rootDist < d0 + halfBand) {
+                if (GrassScreenDither(gl_FragCoord.xy) >= smoothstep(d0 - halfBand, d0 + halfBand, rootDist)) {
+                    discard;
+                }
+            } else if (rootDist > d1 - halfBand) {
+                if (GrassScreenDither(gl_FragCoord.xy) < smoothstep(d1 - halfBand, d1 + halfBand, rootDist)) {
+                    discard;
+                }
+            }
+        } else if (pc.lod == 2u && rootDist < d1 + halfBand) {
+            if (GrassScreenDither(gl_FragCoord.xy) >= smoothstep(d1 - halfBand, d1 + halfBand, rootDist)) {
+                discard;
+            }
+        }
+    }
+
     vec3 viewDir = normalize(-inPosRel);
     // Two-sided: turn the normal toward the viewer (does not depend on the viewport winding).
     vec3 normal = normalize(inNormal);
@@ -36,9 +77,11 @@ void main()
 
     float t = inInfo.x;
     float rnd = inInfo.y;
+    float inSunVis = inSunVisDist.x;
     float distanceM = length(inPosRel);
     float lookModern = params.variety2.y;
-    float far = smoothstep(25.0, 140.0, distanceM) * lookModern;
+    float flattenStart = params.lodFar.y;
+    float far = smoothstep(flattenStart, max(140.0, flattenStart + 30.0), distanceM) * lookModern;
     float tEff = mix(t, 0.7, far);
 
     bool isFlower = (inPatch == kGrassKindFlower);
@@ -156,8 +199,11 @@ void main()
     vec3 colorModern = albedo * (ambient * ao + sun * front * sqrt(ao)) + trans
         + sun * spec * vec3(0.9, 1.0, 0.6) + params.skyAmbient.rgb * vec3(0.5, 0.9, 0.35) * (fres * ao * (1.0 - far));
     float windWave = clamp(inInfo.z / 0.9 - 0.4, -0.4, 0.6);
-    colorModern *= 1.0 + 0.25 * windWave * (1.0 - far);
+    colorModern *= max(1.0 + params.shapeWind.w * windWave * (1.0 - far), 0.0);
 
     vec3 color = mix(colorLegacy, colorModern, lookModern);
+    if (debugMode == 0u) {
+        color *= mix(1.0, params.lodFar.z, smoothstep(75.0, 125.0, distanceM));
+    }
     outColor = vec4(color, 1.0);
 }

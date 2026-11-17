@@ -49,18 +49,20 @@ Per chunk (16 m, a grid of `gridCells` x `gridCells` around the camera). A dense
 Placement uses the integer world chunk index as the hash seed, so blades do not move when the grid scrolls with the camera.
 All shader numbers are relative to the grid corner or the eye (computed in double on the CPU). The world is +-16 km, floats alone would shake.
 ## Blade shape (`GrassBlade.glsl`, `Grass.vert`, `GrassShadow.vert`)
-- Shared quadratic curve + tip flutter live in `GrassBlade.glsl` (`GrassBladeSample` and `GrassBladePosition`).
+- Shared quadratic curve, axial twist, tip flutter and width profile live in `GrassBlade.glsl` (`GrassBladeWidth`, `GrassBladeSpine`, `GrassBladeSample` and `GrassBladePosition`).
 - No vertex input. In `Grass.vert`, vertex `v` of the list is mapped to a strip vertex: side = `v & 1`, row = `v >> 1`, `t` = row / segments.
 - LOD0: `lod0Segments` quads (default 4, 24 list vertices; 3 shows kinks, 5 to 6 costs 0.3 to 0.5 ms more). LOD1: 2 segments (12). LOD2: one triangle (3), widened by the density rule.
-- Width tapers with `t^1.5`; near LOD0 wildflowers thin the stalk and flare the top row x3 into a blossom head before fading into standard blades near `lod0Distance`. The curve is quadratic from the root to the tip: the control point is straight above the root, so the base stays upright.
+- With `bladeShape=1` (default; `0` restores the flat `1 - taper * t^1.5` ribbon), blades use a base-heavy profile `w(t) = width * (0.7 + 0.3 * smoothstep(0, 0.2, t)) * (1 - taper * t^1.6)`, twist up to `+-0.6 rad` at the tip on LOD0 and LOD1, and droop more when taller (`GrassCull.comp`). Near LOD0 wildflowers thin the stalk and flare the top row x3 into a blossom head before fading into standard blades near `lod0Distance`.
+- Blade width in `Grass.vert` is clamped to at least `minPixelWidth` screen pixels (default 1.1 px, passed via push-constant `viewportHeight` as float bits) so distant LOD1/LOD2 blades do not shimmer below 1 px.
 - Bend direction = rest lean + outward tuft lean + wind push. Random yaw per blade. The cull computes them; the vertex shader only reads the instance and walks the curve.
-- Normal: across the blade, mixed with the ground normal of the tile (`groundNormalBlend`), and converging further toward the ground normal over 12..70 m (`lookModern`) for soft field shading. Spine tangent is forwarded to `Grass.frag` for anisotropic sheen.
+- Normal: across the twisted blade, mixed with the ground normal of the tile (`groundNormalBlend`), and converging further toward the ground normal over 12..70 m (`lookModern`) for soft field shading. Spine tangent is forwarded to `Grass.frag` for anisotropic sheen.
 - Tip flutter: two fast sines, amplitude grows with `t^2`.
 - The fragment shader flips the normal toward the viewer (two-sided without relying on winding).
-- Shadow caster (`GrassShadow.vert`): 3 vertices per blade (`v = 0` root-left, `v = 1` root-right, `v = 2` curved tip), base width clamped to at least `shadowWidthScale * texelWorld[c]` so thin blades do not sub-sample out of the shadow map, shifted along `sunDir` by `shadowBiasTexels * texelWorld[c]`, and projected by `cascadeVpRel = cascadeVP * Translation(eye)` computed in `double` on the CPU.
+- Shadow caster (`GrassShadow.vert`): 3 vertices per blade (`v = 0` root-left, `v = 1` root-right, `v = 2` curved tip), sharing `GrassBladeWidth` and `GrassBladePosition`, base width clamped to at least `shadowWidthScale * texelWorld[c]`, shifted along `sunDir` by `shadowBiasTexels * texelWorld[c]`, and projected by `cascadeVpRel = cascadeVP * Translation(eye)` computed in `double` on the CPU. Secondary LOD cross-fade copies early-exit before rasterization so shadow cascades never double-count blades.
 ## Lighting (`Grass.frag`)
 Linear HDR, same energy scale as the lit materials (`kDirectScale` 0.65).
-With `lookModern=1` (default; `0` restores the legacy shading model for A/B comparison), blades use distance-flattened root-to-tip gradient and root AO (25..140 m), mild midrib darkening, wrap front diffuse, two-sided yellow-green leaf transmission (`back` underside + forward sun glow), Kajiya-Kay-like tangent sheen, sky Fresnel rim and a subtle wind brightness wave where gusts flatten the grass.
+Blades inside `lodFadeBand` (default 6 m) around `lod0Distance` and `lod1Distance` are written to both adjacent LOD regions in `Grass.Cull` and early-discarded in `Grass.frag` with complementary 4x4 Bayer + interleaved-gradient screen-space dither so mesh LOD transitions do not pop while depth writes stay consistent.
+With `lookModern=1` (default; `0` restores the legacy shading model for A/B comparison), blades use distance-flattened root-to-tip gradient and root AO (`farFlatten`..140 m, default 25 m), mild midrib darkening, wrap front diffuse, two-sided yellow-green leaf transmission (`back` underside + forward sun glow), Kajiya-Kay-like tangent sheen, sky Fresnel rim and a subtle wind brightness wave (`windShade`, default 0.25) where gusts flatten the grass. Beyond ~100 m (75..125 m ramp), lit grass colour is scaled by `farLuminance` (default 1.15) to match the distant terrain luminance.
 Albedo: de-neoned linear root-to-tip palette (`colorRoot` / `colorTip`), shifted across meadows and tufts toward olive (`patchTint`), with cooler broadleaf weeds, straw-coloured dry blades and a 4-colour LOD0 wildflower table (white, yellow, violet, pink), then pulled toward the **terrain colour** of the ground under the blade (`terrainTint`, strongest at the root). Far blades converge to the terrain colour (`farTerrainBlend`, from 0.2 to 0.9 of `lod2Distance`), so the field melts into the ground. The sun term fades on ground that faces away from the sun (`selfShadow`, ground normal dot sun).
 Sun and its tint come from `ResolveActiveDirectionalLight` and the Atmosphere sun light record. Ambient uses the SceneLighting defaults times the Atmosphere ambient scale.
 Sun cascade shadows (`SunShadowReceiver`) and cloud shadows (`CloudShadowMap`) are sampled per accepted blade in `Grass.Cull` (with normal and sunward offset, slope-aware bias and rotated spiral PCF), packed into the fourth byte of `ground`, and forwarded flat from `Grass.vert` to `Grass.frag`. `Grass.frag` scales the direct sun and subsurface terms by `sunVis` and adds `cloudFill * (1 - sunVis)` diffuse sky fill so shadowed blades are not black; when no shadow data is published or `applyInMaterials` is off, `sunVis` stays 1. GTAO runs before grass so screen-space AO does not darken blades.
@@ -70,7 +72,7 @@ There was no `GlobalWindUBO` in the engine. Now:
 - `src/Game/Lighting/WindState.h`: `WindState { directionX, directionZ, speed, offsetX, offsetZ }` and channel `VolumetricCloud.Wind`.
 - `VolumetricCloudFeature` publishes it every frame from its always-on PreOpaque entry. The offset is the cloud drift, never wrapped. It moves against the wind, like the cloud noise lookup, so grass waves travel with the clouds.
 - Grass reads it with `fx::ChannelReader<WindState>`. With the cloud feature off, or `followCloudWind=false`, Grass uses `windSpeedFallback` and `windDirectionDegFallback` and its own drift.
-- There is no wind noise texture. A slow sine wave along the wind direction and a value-noise gust are computed in the shader (`windWaveLengthM`, `windGustLengthM`, `gustStrength`).
+- There is no wind noise texture. A slow sine wave along the wind direction, a coarse value-noise gust (`windWaveLengthM`, `windGustLengthM`, `gustStrength`) and a fine 3.5 m travelling gust octave with per-blade stiffness `0.6..1.4` (`windDetail`) are computed in `GrassCull.comp`.
 
 ## Height tile (what the editor layer must give)
 ```cpp
@@ -121,15 +123,19 @@ Sanitized on write (`SanitizeGrassSettings`). NaN and infinity become the defaul
 | `heightVariation` / `lean` / `maxBend` | 0.35 / 0.25 / 1.2 | 0..0.9 / 0..1.2 / 0.1..1.5 | Variation, rest lean (rad), largest tip angle (rad) |
 | `widthCompensation` / `maxWidthScale` | 0.45 / 5 | 0..1 / 1..16 | Thinned blades widen by (full density / density) to this power, at most this much |
 | `lod0Segments` | 4 | 3..6 | Quads of a near blade |
+| `minPixelWidth` | 1.1 | 0..4 | Minimum screen-space blade width in pixels (`0` = off) |
+| `bladeShape` | 1.0 | 0..1 | Blend from flat ribbon (`0`) to axial twist, droop-by-height and base-heavy width profile (`1`) |
 | `maxSlopeDeg` / `slopeFadeDeg` | 50 / 12 | 1..89 / 0..45 | No grass on steeper ground, thinning before it |
 | `waterMargin` / `waterFadeBand` | 0.6 / 1.5 | -2..20 / 0..20 | Metres above the water where grass starts, and its fade |
 | `sandHeight` | 7 | 0..200 | Metres above the ocean that stay bare (beach), fades in over 3 m. Matches the terrain `sandMaxHeight` |
 | `alpineHeight` / `alpineFade` | 450 / 150 | -1000..100000 / 0..5000 | World Y where grass starts to thin out (rock, snow) and the band to zero |
 | `lod0Distance` / `lod1Distance` / `lod2Distance` | 40 / 120 / 300 | ordered, lod2 up to 360 | LOD ends. Over `lod2Distance` nothing is drawn |
 | `edgeFade` / `farHeightFade` | 0.2 / 0.15 | 0.01..1 / 0..0.6 | Share of the last LOD where blades thin out, and where they shrink to nothing |
+| `lodFadeBand` | 6 | 0..30 | Dithered cross-fade band width around `lod0Distance` and `lod1Distance` in metres (`0` = hard switch) |
 | `windBend` / `gustStrength` | 1 / 0.5 | 0..4 / 0..3 | Wind push and gust |
 | `flutterSpeed` / `flutterStrength` | 9 / 1 | 0..60 rad/s / 0..4 | Tip flutter |
 | `windWaveLengthM` / `windGustLengthM` | 28 / 14 | 2..400 | Pattern sizes |
+| `windDetail` / `windShade` | 0.7 / 0.25 | 0..1 / 0..1 | Fine 3.5 m gust octave + per-blade stiffness (`0` = uniform wind); brightness wave from tip angle (`0` = off) |
 | `followCloudWind` | true | bool | Use the shared cloud wind |
 | `windSpeedFallback` / `windDirectionDegFallback` | 4 / 45 | 0..100 / any | Own wind (0 deg = +X, 90 = +Z) |
 | `translucency` / `rootAo` / `tintVariation` / `sunVisibility` | 0.6 / 0.35 / 0.5 / 1 | | Look |
@@ -143,6 +149,8 @@ Sanitized on write (`SanitizeGrassSettings`). NaN and infinity become the defaul
 | `terrainTint` / `farTerrainBlend` | 0.6 / 0.8 | 0..1 | Pull toward the terrain colour (near, far) |
 | `groundNormalBlend` / `selfShadow` | 0.5 / 0.7 | 0..1 | Ground normal in the blade normal; sun fade on ground facing away |
 | `lookModern` | 1.0 | 0..1 | Blend from legacy shading (`0`) to two-sided translucent + sheen + distance flatten (`1`) |
+| `farFlatten` | 25 | 0..360 | Distance (m) where root-to-tip gradient and root AO flattening starts |
+| `farLuminance` | 1.15 | 0.2..4 | Multiplier applied to lit grass colour beyond 100 m to match terrain luminance (`1` = off) |
 | `patchTint` | 1.0 | 0..1 | Meadow and tuft hue shift toward olive (`0` = uniform palette) |
 | `weedShare` / `dryShare` / `flowerShare` | 0.06 / 0.08 / 0.004 | 0..0.5 / 0..0.5 / 0..0.1 | Shares of broadleaf weeds, dry straw blades and LOD0 wildflowers (`0` = off) |
 | `colorRoot` / `colorTip` | `0.022,0.06,0.009` / `0.1,0.2,0.035` | `r,g,b` 0..2 | De-neoned linear root and tip albedo |
@@ -183,7 +191,7 @@ Name for `/feature_debug`: `Grass`. Every setting above is writable: `/feature_d
 |---|---|
 | `status` | `NotRendered`, `Ok`, `Disabled`, `NoValidCamera`, `NoTile`, `ShadersNotReady`, `TargetFailed`, `PassDisabled` |
 | `hizUsed`, `windShared`, `shadow.cascades`, `shadow.cloud`, `shadow.castCascades`, `shadow.castBlades`, `gridCells`, `instanceBytes`, `tileRevision` | What this frame used |
-| `stats.*` | Counters from the GPU, two frames old: `chunksInGrid`, `chunksCulledDistance / NoData / Water / Frustum / Hiz`, `chunksLod0..2`, `candidates`, `accepted0..2`, `rejectNoData / LodStep / Water / Slope / Noise`, `dropped0..2`, `requested0..2` |
+| `stats.*` | Counters from the GPU, two frames old: `chunksInGrid`, `chunksCulledDistance / NoData / Water / Frustum / Hiz`, `chunksLod0..2`, `candidates`, `accepted0..2`, `rejectNoData / LodStep / Water / Slope / Noise`, `dropped0..2`, `slot0..2`, `shadowSlot0..1`, `requested0..2` |
 
 Also `tile.*` (size, origin, sea level, revision), `source.*` (tile provider), `game.wind.*` (direction, speed and pattern offset the blades used), `synthetic.enabled`, `eye`.
 Short routes: `GET /grass/tile`, `GET /grass/probe?x=&z=`, `GET /grass/probe_batch?n=&radius=&seed=`.
@@ -252,8 +260,8 @@ Cull and draw (GPU ms, `ground`): Lean 0.54 / 0.65, Medium 0.75 / 1.73, Big 1.38
 ## Limits
 - Sun cascade and cloud shadows are evaluated once per blade root in `Grass.Cull` (8-bit visibility per blade, not per fragment along the blade). Because `Grass.Cull` reads the cascades before `Grass.Shadow.*` writes into them, grass casts contact shadows onto the terrain without self-shadowing through the cascade map.
 - While `Grass.Cull` runs in `PreOpaque`, scene depth does not exist yet, so `hizCulling` is off by default and ignored if set.
-- The mesh LOD still switches at `lod0Distance` / `lod1Distance` (5 or 4 segments to 2 to 1 triangle). The blade count no longer jumps there, the blade shape does.
-- LOD2 blades are single flat triangles. They shimmer without TAA.
+- Adjacent mesh LODs cross-fade over `lodFadeBand` (default 6 m) around `lod0Distance` and `lod1Distance` via complementary Bayer + interleaved-gradient screen-space dither (`0` restores the hard switch).
+- Sub-pixel shimmer on distant LOD1 and LOD2 blades is suppressed by clamping blade width to `minPixelWidth` (default 1.1 px); single-triangle LOD2 blades still benefit from TAA.
 - The terrain camera near plane shrinks with the height above ground (0.1 x the height, between 0.15 m and 3 m, `TerrainWorld::AdaptCameraNear`), so you can stand 1.7 m above the grass. The far plane is still 5 to 13.5 km: depth precision at very long range is lower at ground level (not seen as artefacts in the test views). The free camera still keeps 3 m of clearance; use `/terrain/flight` with `minAlt` or `/terrain/cam?mode=script&alt=1.7`.
 - Grass takes the terrain colour from the node vertex colours. Biome limits are still settings: `sandHeight` (7 m, like the terrain `sandMaxHeight`), `alpineHeight` / `alpineFade` (450 m and 150 m, below the terrain snow line at 0.55 x heightScale), `maxSlopeDeg` (50, terrain grass slope is 32 to 42).
 - The pipelined frame mode (`PipelinedDeferredReadback`) refuses every CPU parameter upload, so no feature with `GpuParams` draws in it. Grass is the same.
