@@ -273,6 +273,12 @@ void BigWorldDemo::CheckAgreement()
     if (!h.water.featureConnected) {
         m_agreementWarnings.push_back("the water feature is not connected to the water world");
     }
+    if (m_ports.terrain != nullptr && h.water.hasOcean) {
+        const std::optional<double> ground = m_ports.terrain->GroundHeight(m_state.plan.spotX, m_state.plan.spotZ);
+        if (ground && *ground < h.water.oceanLevel) {
+            m_agreementWarnings.push_back("the spot is under the sea (ground " + Number(*ground) + " m): no grass grows here");
+        }
+    }
     if (m_state.plan.tweaks.empty() || !h.grass.available) {
         return;
     }

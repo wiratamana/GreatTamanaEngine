@@ -20,6 +20,7 @@ public:
     bigworld::PortResult PlaceCamera(const bigworld::CameraPlacement& placement) override;
     bigworld::PortResult Close() override;
     bigworld::TerrainFacts Facts() const override;
+    std::optional<double> GroundHeight(double x, double z) const override;
 
 private:
     const IEditorModuleDirectory& m_modules;

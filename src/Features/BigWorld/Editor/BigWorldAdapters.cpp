@@ -118,6 +118,16 @@ bigworld::TerrainFacts TerrainPortAdapter::Facts() const
     return facts;
 }
 
+std::optional<double> TerrainPortAdapter::GroundHeight(double x, double z) const
+{
+    const terrain::ITerrainWorld* const world = TerrainOf(m_modules);
+    if (world == nullptr || !world->IsOpen()) {
+        return std::nullopt;
+    }
+    const std::optional<terrain::TerrainHeightProbe> probe = world->ProbeHeight(x, z);
+    return probe ? std::optional<double>(probe->carvedHeight) : std::nullopt;
+}
+
 PortResult WaterPortAdapter::AddLake(const bigworld::LakeRequest& request)
 {
     water::IWaterWorld* const world = WaterOf(m_modules);

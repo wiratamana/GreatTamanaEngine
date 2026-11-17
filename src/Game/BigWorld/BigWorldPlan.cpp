@@ -46,7 +46,7 @@ void AddCloudTierValues(Quality quality, FeatureTweak& clouds)
         clouds.values.push_back({ "maxSteps", "48" });
         clouds.values.push_back({ "resolutionDivisor", "6" });
         clouds.values.push_back({ "shadowSteps", "6" });
-        clouds.values.push_back({ "shadowUpdate", "5" });
+        clouds.values.push_back({ "shadowUpdate", "4" });
         break;
     case Quality::Medium:
         clouds.values.push_back({ "maxSteps", "64" });

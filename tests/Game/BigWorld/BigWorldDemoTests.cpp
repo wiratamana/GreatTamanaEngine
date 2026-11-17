@@ -39,8 +39,10 @@ public:
         return {};
     }
     TerrainFacts Facts() const override { return facts; }
+    std::optional<double> GroundHeight(double, double) const override { return ground; }
 
     TerrainFacts facts;
+    std::optional<double> ground;
     CameraPlacement lastCamera;
     std::string lastProfile;
     bool failOpen = false;
@@ -562,6 +564,18 @@ TEST_F(BigWorldDemoTest, GrassWithoutAnOceanWhileWaterHasOneIsReported)
     Pump(1.0);
     ASSERT_FALSE(demo.State().warnings.empty());
     EXPECT_NE(demo.State().warnings[0].find("no ocean"), std::string::npos);
+}
+
+TEST_F(BigWorldDemoTest, ASpotUnderTheSeaIsReportedAndDryGroundIsNot)
+{
+    OpenAndRunToReady();
+    terrain.ground = 25.0;
+    Pump(1.0);
+    EXPECT_TRUE(demo.State().warnings.empty());
+    terrain.ground = -31.0;
+    Pump(1.0);
+    ASSERT_FALSE(demo.State().warnings.empty());
+    EXPECT_NE(demo.State().warnings[0].find("under the sea"), std::string::npos);
 }
 
 TEST_F(BigWorldDemoTest, ADisconnectedWaterFeatureIsReported)

@@ -53,6 +53,8 @@ public:
     virtual PortResult PlaceCamera(const CameraPlacement& placement) = 0;
     virtual PortResult Close() = 0;
     virtual TerrainFacts Facts() const = 0;
+    // Ground height under a point in metres; empty when unknown.
+    virtual std::optional<double> GroundHeight(double /*x*/, double /*z*/) const { return std::nullopt; }
 };
 
 struct LakeRequest {

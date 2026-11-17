@@ -69,7 +69,7 @@ src/Features/BigWorld/Editor/       gte_editor
 ## Quality tiers
 | Tier | Grass preset | Cloud settings | River |
 |---|---|---|---|
-| `lean` | Lean | `maxSteps` 48, `resolutionDivisor` 6, `shadowSteps` 6, `shadowUpdate` 5 | no |
+| `lean` | Lean | `maxSteps` 48, `resolutionDivisor` 6, `shadowSteps` 6, `shadowUpdate` 4 | no |
 | `medium` | Medium | `maxSteps` 64, `resolutionDivisor` 6 | yes |
 | `big` (menu default) | Big | feature defaults | yes |
 
@@ -79,6 +79,7 @@ The clouds are the biggest cost of the scene (about 13 to 15 ms of 35 at ground 
 - The terrain must be resident before water is added (the carve needs the terrain).
 - The ocean level of the Water world must equal the sea level of the grass height tile.
 - The Water feature must be connected to the Water world.
+- The spot must be above the sea. A spot under the sea only raises a warning.
 - Grass must draw and hold a height tile.
 - The terrain must still be open. Another scene (Open Scene, Hi-Z demo, `/terrain/open`) ends the demo cleanly.
 
@@ -87,6 +88,6 @@ The clouds are the biggest cost of the scene (about 13 to 15 ms of 35 at ground 
 - No test draws anything. Headless rendering is not possible here. The live checks use `/get_game_view` and `/get_swapchain`.
 
 ## Known limits
-- Only one demo spot. Other spots work through the `x`, `z`, `heading` options, but the lake and river are placed relative to it and may land in a hill.
+- Only one tuned demo spot (the west coast). Other spots work through the `x`, `z`, `heading` options, but the lake and river are placed relative to the spot with fixed sizes. The river is a fixed-length strip: it only reaches the sea when the coast is close. Live checks at 5 other spots showed: a spot in the sea opens under water with no grass and now raises the warning "the spot is under the sea"; a high alpine spot gets a perched lake and almost no grass (grass fades out above `alpineHeight`).
 - The Big World replaces the current scene. It does not ask first.
 - Frame time is dominated by the clouds, not by the landscape systems.
