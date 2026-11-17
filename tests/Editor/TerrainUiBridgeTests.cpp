@@ -1,5 +1,5 @@
-#include "Editor/Terrain/TerrainOverlayData.h"
-#include "Editor/Terrain/TerrainUiBridge.h"
+#include "Features/Terrain/Editor/TerrainOverlayData.h"
+#include "Features/Terrain/Editor/TerrainUiBridge.h"
 
 #include "FakeTerrainWorld.h"
 

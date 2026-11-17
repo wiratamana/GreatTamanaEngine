@@ -10,7 +10,7 @@
 - One ocean at most, 16 bodies at most. The ocean level is `seaLevel` (default 0, the same height the terrain colours use).
 
 ## Terrain carve
-- `terrain::ITerrainCarve` (src/Terrain/TerrainCarve.h) is a pure function of world X/Z and the base height. `WaterCarve` implements it.
+- `terrain::ITerrainCarve` (src/Features/Terrain/TerrainCarve.h) is a pure function of world X/Z and the base height. `WaterCarve` implements it.
 - Hook: `BuildGridMesh` applies it after erosion on the whole tile (margin included), so neighbouring nodes stay bit-equal. `TerrainHeightField::Height()` applies it too. `FillGrid` and `BaseHeight` stay raw.
 - Lake: bed slopes to `depth` over `shoreWidth`; land outside is pulled to the water over `bankWidth`; optional rim (dam) keeps low ground from spilling.
 - River: parabolic channel along the spline, same bank; the surface never rises downstream (`EnforceDescent`).

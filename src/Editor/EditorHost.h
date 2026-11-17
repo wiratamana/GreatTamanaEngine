@@ -12,7 +12,7 @@
 #include "FurinaShowcaseSceneOpener.h"
 #include "HizDemoSceneOpener.h"
 #include "Grass/GrassTileProvider.h"
-#include "Terrain/TerrainWorld.h"
+#include "../Features/Terrain/Editor/TerrainWorld.h"
 #include "Water/WaterWorld.h"
 #include "../Game/Game.h"
 #include "../Network/NetworkServer.h"

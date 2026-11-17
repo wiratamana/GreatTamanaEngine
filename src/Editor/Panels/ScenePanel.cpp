@@ -9,7 +9,7 @@
 #include "../SceneCameraFrustum.h"
 #include "../SceneOverlay.h"
 #include "../TransformGizmo.h"
-#include "../Terrain/TerrainViewOverlay.h"
+#include "../../Features/Terrain/Editor/TerrainViewOverlay.h"
 #include "../Water/WaterGizmoOverlay.h"
 #include "../../ECS/Components/Camera.h"
 #include "../../ECS/Components/Transform.h"

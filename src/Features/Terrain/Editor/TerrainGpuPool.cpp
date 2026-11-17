@@ -1,14 +1,14 @@
 #include "TerrainGpuPool.h"
 
-#include "../../Core/Logging.h"
-#include "../../Game/Game.h"
-#include "../../Renderer/Culling/CullingTypes.h"
-#include "../../Renderer/MaterialImageRole.h"
-#include "../../Renderer/MaterialParams.h"
-#include "../../Renderer/MaterialTexture.h"
-#include "../../Renderer/Mesh.h"
-#include "../../Renderer/Renderer.h"
-#include "../../Features/Terrain/TerrainTypes.h"
+#include "../../../Core/Logging.h"
+#include "../../../Game/Game.h"
+#include "../../../Renderer/Culling/CullingTypes.h"
+#include "../../../Renderer/MaterialImageRole.h"
+#include "../../../Renderer/MaterialParams.h"
+#include "../../../Renderer/MaterialTexture.h"
+#include "../../../Renderer/Mesh.h"
+#include "../../../Renderer/Renderer.h"
+#include "../TerrainTypes.h"
 
 #include <algorithm>
 #include <cstring>

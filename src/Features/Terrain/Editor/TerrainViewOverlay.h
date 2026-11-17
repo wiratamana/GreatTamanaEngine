@@ -3,7 +3,7 @@
 // ImGui glue of the terrain debug views: node boxes over a view image and the free-fly / orbit camera input.
 
 #include "TerrainUiBridge.h"
-#include "../../Math/Vec2.h"
+#include "../../../Math/Vec2.h"
 
 namespace gte {
 

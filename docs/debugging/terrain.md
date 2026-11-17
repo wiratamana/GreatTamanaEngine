@@ -9,7 +9,7 @@
 - Read everything with `GET /terrain/state`. Look at the world with `GET /get_game_view` after `GET /activate_tab?name=Game`.
 - Move the camera with the free-fly or orbit mode (`GET /terrain/cam`), `GET /terrain/flight` (repeatable) or `POST /set_entity_trs` with `"name":"Terrain Camera"`.
 - Everything is also a panel: Window > Terrain (sliders, live preview, save and load, bounding boxes, stats). See [Terrain panel](#terrain-panel-window--terrain).
-- Code: `src/Terrain/` (pure CPU), `src/Editor/Terrain/` (GPU pool, world, commands), `src/Network/NetworkTerrainRoutes.*`.
+- Code: `src/Features/Terrain/` (pure CPU), `src/Features/Terrain/Editor/` (GPU pool, world, commands), `src/Network/NetworkTerrainRoutes.*`.
 
 ## Routes
 All routes are `GET`. Routes that change something refuse browser requests (`403`). `state`, `settings` read only.
@@ -65,7 +65,7 @@ A dockable window (closed by default) with every setting as a slider, grouped li
 - **Save Terrain Asset** and **Load Terrain Asset** with a path field (default `<exe dir>/Project/terrain_world.gta`). Both run on a background thread: the panel shows `Baking and saving ... NN%` and the editor keeps drawing. Save bakes `Bake nodes per side` squared nodes (256 nodes: 10.8 MB; 1024 nodes: 43 MB in 1.4 s, a bit slower frames while it runs). Load of 1024 nodes takes 117 ms. A second save or load is refused while one runs. The whole file is read into memory (no lazy chunk streaming).
 - **Show chunk bounding boxes** draws the 12 edges of every resident node over the Game and Scene views. Colour by state (green drawn, red outside the view, grey hidden by a finer or coarser node) or by LOD level.
 - Stats: nodes resident, pending, wanted and in view, pool slots, triangles, GPU cull counters (drawn, frustum culled, Hi-Z culled), memory, generation time, tick time, preview time, camera.
-- The panel talks to the world only through `TerrainUiBridge` (`src/Editor/Terrain/TerrainUiBridge.h`). The host applies its request at the start of the next frame, so GPU buffers are never touched while the frame is being drawn.
+- The panel talks to the world only through `TerrainUiBridge` (`src/Features/Terrain/Editor/TerrainUiBridge.h`). The host applies its request at the start of the next frame, so GPU buffers are never touched while the frame is being drawn.
 
 ## Camera
 Three modes, set in the panel or with `GET /terrain/cam?mode=script|free|orbit`.

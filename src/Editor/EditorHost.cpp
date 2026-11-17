@@ -1,10 +1,10 @@
 #include "EditorHost.h"
 
 #include "Logger.h"
-#include "Terrain/TerrainCommands.h"
+#include "../Features/Terrain/Editor/TerrainCommands.h"
 #include "Water/WaterCommands.h"
 #include "Water/WaterUiBridge.h"
-#include "Terrain/TerrainUiBridge.h"
+#include "../Features/Terrain/Editor/TerrainUiBridge.h"
 #include "../Game/RenderSystem.h"
 #include "EditorSceneIOCapability.h"
 #include "EditorLogQueryCapability.h"

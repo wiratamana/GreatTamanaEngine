@@ -4,19 +4,19 @@
 // The GPU-driven draw path culls the clusters (frustum, then Hi-Z) and draws the survivors with one indirect call.
 // A slot is written (vertices) first and enabled (cluster record) second, so a node is never drawn half-written.
 
-#include "../../Core/GraphicsHandles.h"
-#include "../../ECS/Components/MeshRenderer.h"
-#include "../../Renderer/MaterialTextureHandle.h"
-#include "../../Renderer/MeshHandle.h"
-#include "../../Renderer/OffscreenFrameTicket.h"
-#include "../../Renderer/PipelineHandle.h"
-#include "../../Features/Terrain/Gpu/TerrainClusterRecords.h"
-#include "../../Features/Terrain/Gpu/TerrainNodePacking.h"
-#include "../../Features/Terrain/Gpu/TerrainPoolLayout.h"
-#include "../../Features/Terrain/Gpu/TerrainRampImage.h"
-#include "../../Features/Terrain/Gpu/TerrainSlotAllocator.h"
-#include "../../Features/Terrain/TerrainSettings.h"
-#include "../../Features/Terrain/TerrainTypes.h"
+#include "../../../Core/GraphicsHandles.h"
+#include "../../../ECS/Components/MeshRenderer.h"
+#include "../../../Renderer/MaterialTextureHandle.h"
+#include "../../../Renderer/MeshHandle.h"
+#include "../../../Renderer/OffscreenFrameTicket.h"
+#include "../../../Renderer/PipelineHandle.h"
+#include "../Gpu/TerrainClusterRecords.h"
+#include "../Gpu/TerrainNodePacking.h"
+#include "../Gpu/TerrainPoolLayout.h"
+#include "../Gpu/TerrainRampImage.h"
+#include "../Gpu/TerrainSlotAllocator.h"
+#include "../TerrainSettings.h"
+#include "../TerrainTypes.h"
 
 #include <cstdint>
 #include <optional>

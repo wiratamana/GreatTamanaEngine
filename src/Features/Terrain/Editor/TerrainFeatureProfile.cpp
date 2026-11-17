@@ -1,9 +1,9 @@
 #include "TerrainFeatureProfile.h"
 
-#include "../HizDemoProfile.h"
-#include "../PresetFeatureSettings.h"
-#include "../PresetSceneSupport.h"
-#include "../../Core/Plugins/RenderFeatureCompositor.h"
+#include "../../../Editor/HizDemoProfile.h"
+#include "../../../Editor/PresetFeatureSettings.h"
+#include "../../../Editor/PresetSceneSupport.h"
+#include "../../../Core/Plugins/RenderFeatureCompositor.h"
 
 #include <algorithm>
 #include <array>

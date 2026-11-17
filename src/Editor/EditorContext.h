@@ -12,7 +12,7 @@
 #include "../Core/Extent.h"
 #include "../Core/UiTextureHandle.h"
 #include "TransformGizmo.h"
-#include "Terrain/TerrainUiBridge.h"
+#include "../Features/Terrain/Editor/TerrainUiBridge.h"
 #include "Water/WaterUiBridge.h"
 #include "../Math/Mat4.h"
 #include "../Math/Vec2.h"

@@ -1,11 +1,11 @@
 #include "TerrainPanel.h"
 
-#include "../EditorContext.h"
-#include "../EditorFrame.h"
-#include "../ImGuiUniqueId.h"
-#include "../ProjectRootPath.h"
-#include "../../Features/Terrain/TerrainApplyPolicy.h"
-#include "../../Features/Terrain/TerrainSettingsTable.h"
+#include "../../../Editor/EditorContext.h"
+#include "../../../Editor/EditorFrame.h"
+#include "../../../Editor/ImGuiUniqueId.h"
+#include "../../../Editor/ProjectRootPath.h"
+#include "../TerrainApplyPolicy.h"
+#include "../TerrainSettingsTable.h"
 
 #include <imgui.h>
 

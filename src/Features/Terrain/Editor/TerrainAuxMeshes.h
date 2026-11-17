@@ -3,14 +3,14 @@
 // Small CPU-drawn meshes next to the terrain pool: the live preview chunk (host-visible vertices, rewritten in place
 // on every slider move, so there is no mesh swap and no GPU drain) and a flat ocean quad at sea level.
 
-#include "../../Core/GraphicsHandles.h"
-#include "../../ECS/Components/MeshRenderer.h"
-#include "../../Renderer/MeshHandle.h"
-#include "../../Renderer/OffscreenFrameTicket.h"
-#include "../../Renderer/OffscreenRingGuard.h"
-#include "../../Renderer/PipelineHandle.h"
-#include "../../Features/Terrain/Gpu/TerrainNodePacking.h"
-#include "../../Features/Terrain/TerrainTypes.h"
+#include "../../../Core/GraphicsHandles.h"
+#include "../../../ECS/Components/MeshRenderer.h"
+#include "../../../Renderer/MeshHandle.h"
+#include "../../../Renderer/OffscreenFrameTicket.h"
+#include "../../../Renderer/OffscreenRingGuard.h"
+#include "../../../Renderer/PipelineHandle.h"
+#include "../Gpu/TerrainNodePacking.h"
+#include "../TerrainTypes.h"
 
 #include <cstdint>
 #include <string>

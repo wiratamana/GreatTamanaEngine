@@ -1,4 +1,4 @@
-#include "Editor/Terrain/TerrainCommands.h"
+#include "Features/Terrain/Editor/TerrainCommands.h"
 
 #include "FakeTerrainWorld.h"
 

@@ -1,6 +1,6 @@
 #include "TerrainOverlayData.h"
 
-#include "../../Features/Terrain/Debug/TerrainMapImage.h"
+#include "../Debug/TerrainMapImage.h"
 
 #include <algorithm>
 

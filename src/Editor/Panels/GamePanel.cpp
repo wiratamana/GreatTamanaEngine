@@ -3,7 +3,7 @@
 #include "../EditorContext.h"
 #include "../EditorFrame.h"
 #include "OverlayLabel.h"
-#include "../Terrain/TerrainViewOverlay.h"
+#include "../../Features/Terrain/Editor/TerrainViewOverlay.h"
 #include "../Water/WaterGizmoOverlay.h"
 
 #include <imgui.h>

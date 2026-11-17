@@ -64,7 +64,7 @@
 
 ## Grass on the real terrain (branch `feature/precural-landscape`, 2026-11-16)
 - `GrassTileProvider` (editor layer) builds the Grass height tile from the resident terrain node meshes and the live water bodies on a worker thread. Roots match the drawn mesh within 7 mm. See [Grass](reference/render-features/grass.md).
-- `src/Terrain/TerrainSurface.*`: `SurfaceSnapshot`, `NodeHeightAt` (same triangle split as the drawn mesh) and `SurfaceSampler`. `ITerrainWorld::SnapshotSurface` (default empty) and `TerrainStreamer::FieldShared`.
+- `src/Features/Terrain/TerrainSurface.*`: `SurfaceSnapshot`, `NodeHeightAt` (same triangle split as the drawn mesh) and `SurfaceSampler`. `ITerrainWorld::SnapshotSurface` (default empty) and `TerrainStreamer::FieldShared`.
 - The terrain camera near plane now shrinks close to the ground (0.15 m to 3 m), so ground-level views are possible.
 - Grass: `sandHeight`, `alpineHeight`, `alpineFade` settings; tile texel default 1.5 m; debug actions `tile`, `probe`, `probe_batch`, routes `/grass/tile`, `/grass/probe`, `/grass/probe_batch`; `game.wind.*` fields.
 - Tests: `TerrainSurfaceTests`, `GrassTileBuilderTests` (tile build, flags, rebuild policy).

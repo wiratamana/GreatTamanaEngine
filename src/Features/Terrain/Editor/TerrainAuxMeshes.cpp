@@ -1,10 +1,10 @@
 #include "TerrainAuxMeshes.h"
 
-#include "../../Game/Game.h"
-#include "../../Renderer/Culling/CullingTypes.h"
-#include "../../Renderer/Mesh.h"
-#include "../../Renderer/Renderer.h"
-#include "../../Renderer/Vertex.h"
+#include "../../../Game/Game.h"
+#include "../../../Renderer/Culling/CullingTypes.h"
+#include "../../../Renderer/Mesh.h"
+#include "../../../Renderer/Renderer.h"
+#include "../../../Renderer/Vertex.h"
 
 #include <array>
 #include <cstddef>

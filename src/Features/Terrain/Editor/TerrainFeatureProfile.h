@@ -3,10 +3,10 @@
 // What the terrain scene changes in the render features while it is open, and the undo of it:
 // heavy fixed-cost features off, and the GPU-driven culling set to the mode the terrain settings ask for.
 
-#include "../../Core/FeatureKit/FeatureDebug.h"
-#include "../PresetFeatureSettings.h"
-#include "../../Core/Plugins/RenderFeatureDebugEntry.h"
-#include "../../Features/Terrain/TerrainControl.h"
+#include "../../../Core/FeatureKit/FeatureDebug.h"
+#include "../../../Editor/PresetFeatureSettings.h"
+#include "../../../Core/Plugins/RenderFeatureDebugEntry.h"
+#include "../TerrainControl.h"
 
 #include <functional>
 #include <span>

@@ -1,7 +1,7 @@
 #include "TerrainViewOverlay.h"
 
 #include "TerrainOverlayData.h"
-#include "../CameraFrustumOverlay.h"
+#include "../../../Editor/CameraFrustumOverlay.h"
 
 #include <imgui.h>
 

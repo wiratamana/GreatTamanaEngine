@@ -4,7 +4,7 @@
 // bounding-box overlay and live stats. It talks to the world only through TerrainUiBridge.
 
 #include "TerrainUiBridge.h"
-#include "../EditorWindow.h"
+#include "../../../Editor/EditorWindow.h"
 
 #include <array>
 #include <optional>

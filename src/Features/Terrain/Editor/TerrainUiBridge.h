@@ -4,8 +4,8 @@
 // (changes GPU buffers). The panel only writes `request`; the host applies it at the start of the next frame
 // and fills `snapshot` for the panel and the view overlays. No ImGui and no GPU types here.
 
-#include "../../Math/Mat4.h"
-#include "../../Features/Terrain/TerrainControl.h"
+#include "../../../Math/Mat4.h"
+#include "../TerrainControl.h"
 
 #include <cstdint>
 #include <optional>

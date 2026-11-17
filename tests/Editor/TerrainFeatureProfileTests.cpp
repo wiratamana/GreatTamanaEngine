@@ -1,6 +1,6 @@
 // Tier 1: which render features the terrain scene switches off, and the culling mode the settings ask for.
 
-#include "Editor/Terrain/TerrainFeatureProfile.h"
+#include "Features/Terrain/Editor/TerrainFeatureProfile.h"
 
 #include <gtest/gtest.h>
 
