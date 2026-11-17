@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [Feature editor modules](#feature-editor-modules-branch-featureprecural-landscape-2026-11-17) | `feature/precural-landscape` | 2026-11-17 |
 | [Grass: smooth density, terrain colour, presets](#grass-smooth-density-terrain-colour-presets-branch-featureprecural-landscape-2026-11-17) | `feature/precural-landscape` | 2026-11-17 |
 | [Grass on the real terrain](#grass-on-the-real-terrain-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
 | [Procedural grass feature](#procedural-grass-feature-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
@@ -51,6 +52,12 @@
 | [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+
+## Feature editor modules (branch `feature/precural-landscape`, 2026-11-17)
+- New `IEditorFeatureModule`, `EditorModuleSet` and `EditorExtensions` in `src/Editor/`. A feature now owns its editor objects instead of `EditorHost`.
+- `TerrainWorld`, `WaterWorld` and `GrassTileProvider` moved into the modules `TerrainWorld`, `WaterWorld` and `GrassTiles`. The Terrain and Water windows are normal feature windows.
+- `EditorHost`, `EditorContext`, `EditorLayer` and `ImGuiEditorLayer` no longer name terrain, water or grass. The HTTP command bridge is now `ModuleCommandBridge`. The profiler scope `EditorHost::ExecuteTerrainCommand` is now `EditorHost::ExecuteModuleCommand`.
+- URLs and behaviour are unchanged.
 
 ## Grass: smooth density, terrain colour, presets (branch `feature/precural-landscape`, 2026-11-17)
 - **Smooth density.** Blade count falls with distance (`GrassDensityAt`, geometric smoothstep between `densityLod0/1/2` at the LOD distances, `densityBlend`). Thinned blades widen (`widthCompensation`, `maxWidthScale`) and shrink to nothing at the far edge (`farHeightFade`). The hard step between LOD0 and LOD1 is gone. `lod1WidthScale` and `lod2WidthScale` are removed.

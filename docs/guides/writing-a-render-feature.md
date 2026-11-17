@@ -188,6 +188,9 @@ GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("Foo", &CreateFooWindow);
 - The window appears in the Window menu and docks into the bottom strip by default.
 - A window that throws in its constructor is not caught. Fix the window.
 
+### 9b. Own a live editor object (optional)
+If the feature needs a world, a worker or a panel mailbox that uses `Game` or `Renderer`, put an `IEditorFeatureModule` in `Editor/` (see [Editor](../architecture/editor.md#feature-editor-modules)). The render feature stays pure. The module owns the world and ticks it once per frame.
+
 ### 10. Guard the side channels
 If a channel or scene slot of yours is read by another pass that can be toggled alone, add a rule in `KnownRiskBlackboardKeyRules()` (`src/Editor/FrameDebuggerSideChannelChecker.cpp`). Use `AddChannelRules()` per view, or `AddSharedChannelRule()` for a Shared publish. See [Render honesty](../conventions/render-honesty.md).
 

@@ -146,6 +146,15 @@ Every window below derives from `EditorWindow`. Open any of them from the Window
 - A render feature derives from `EditorWindow` in `Features/<Name>/Editor/` and registers a factory with `GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("Name", &Factory)`.
 - Registration order is draw order and default tab order. All windows with `DefaultDock` Bottom tab into the bottom strip.
 
+## Feature editor modules
+A feature that owns live editor objects (a world, a worker thread, a panel mailbox) derives from `IEditorFeatureModule` (`src/Editor/EditorFeatureModule.h`) in its own `Editor/` folder. `EditorHost` does not know the feature. It only loops over the modules.
+- Register with `GTE_REGISTER_BUILTIN_FEATURE_MODULE("Name", &Factory)`. The factory gets `Core&`. The name must differ from the render feature name (`TerrainWorld`, `WaterWorld`, `GrassTiles`). A window registered with `GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL` uses the module name as its key.
+- Hooks (all optional, main thread): `TickOrder()`, `OnAttach()`, `OnUiRequests()` (before `Game::Update`), `OnFrameTick()` (after `Game::Update`, before the frame is built), `CommandPrefix()` and `OnCommand()` (one HTTP command per frame), `OnShutdown()`.
+- Modules find each other with `IEditorModuleDirectory` (`Find<T>("Name")`, `FindEndpoint("Feature")`). Resolve on every use. Never cache the result.
+- UI state shared between a module and its windows lives in `EditorContext::extensions` (`Get<T>()`, one slot per type).
+- `EditorModuleSet` calls `OnShutdown()` in reverse tick order after the HTTP server and the GPU idle guard, while every module and `Core` are still alive. Release your world there.
+- Tick order today: `TerrainWorld` 0, `WaterWorld` 10, `GrassTiles` 20.
+
 ## Gotchas
 - `WantsCaptureMouse` and `WantsCaptureKeyboard` stop clicks in ImGui from reaching gameplay. They come from `ImGuiIO`.
 - `/get_window?title=...` captures floating (undocked) windows only. For docked panels use `/get_swapchain`.
