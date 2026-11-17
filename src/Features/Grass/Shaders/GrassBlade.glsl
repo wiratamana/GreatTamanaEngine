@@ -8,8 +8,12 @@
 float GrassBladeWidth(float width, float taper, float t, float shapeBlend)
 {
     float tc = max(t, 0.0);
-    float flatProfile = 1.0 - taper * (tc > 0.0 ? pow(tc, 1.5) : 0.0);
-    float baseHeavy = (0.7 + 0.3 * smoothstep(0.0, 0.2, tc)) * (1.0 - taper * (tc > 0.0 ? pow(tc, 1.6) : 0.0));
+    float tPow = tc * sqrt(tc); // t^1.5 for both profiles.
+    float baseHeavy = (0.7 + 0.3 * smoothstep(0.0, 0.2, tc)) * (1.0 - taper * tPow);
+    if (shapeBlend >= 0.999) {
+        return width * baseHeavy;
+    }
+    float flatProfile = 1.0 - taper * tPow;
     return width * mix(flatProfile, baseHeavy, shapeBlend);
 }
 
@@ -19,8 +23,9 @@ vec3 GrassBladeSpine(GrassInstance inst, float height, vec4 ground, float t, flo
 {
     vec4 frame = unpackSnorm4x8(inst.frame);
     vec2 flutter = unpackHalf2x16(inst.flutter);
-    vec2 faceXz = normalize(frame.xy);
-    vec2 bendDir = normalize(frame.zw);
+    // snorm8 pairs are unit length to within about 1 percent, so no renormalisation.
+    vec2 faceXz = frame.xy;
+    vec2 bendDir = frame.zw;
 
     outSideAxis = vec3(faceXz.y, 0.0, -faceXz.x);
     vec3 bendAxis = vec3(bendDir.x, 0.0, bendDir.y);
@@ -35,8 +40,10 @@ vec3 GrassBladeSpine(GrassInstance inst, float height, vec4 ground, float t, flo
 
     float twist = (rnd - 0.5) * 1.2 * t * twistStrength;
     if (abs(twist) > 1e-5) {
-        float c = cos(twist);
-        float s = sin(twist);
+        // Twist is within +-0.6 rad: short series for sin and cos.
+        float x2 = twist * twist;
+        float c = 1.0 - x2 * (0.5 - x2 * (1.0 / 24.0));
+        float s = twist * (1.0 - x2 * (1.0 / 6.0 - x2 * (1.0 / 120.0)));
         outSideAxis = outSideAxis * c + cross(outTangent, outSideAxis) * s
             + outTangent * (dot(outTangent, outSideAxis) * (1.0 - c));
     }

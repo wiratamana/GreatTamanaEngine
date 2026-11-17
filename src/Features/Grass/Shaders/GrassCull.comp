@@ -53,10 +53,9 @@ layout(binding = 9) uniform sampler2D shadowDepth2;
 layout(binding = 10) uniform sampler2D shadowDepth3;
 layout(binding = 11) uniform sampler2D cloudShadowMap;
 
-// Per-invocation slope-aware bias (texels), read by ORTHO_BIAS_TEXELS inside OrthoMapSetVisibility().
-float gShadowBiasTexels = 0.0;
+#include "CloudShadowLookup.glsl"
 
-float OrthoMapDepthAt(int k, vec2 uv)
+float GrassDepthAt(int k, vec2 uv)
 {
     switch (k) {
     case 0: return textureLod(shadowDepth0, uv, 0.0).r;
@@ -66,21 +65,30 @@ float OrthoMapDepthAt(int k, vec2 uv)
     }
 }
 
-#define ORTHO_VIEW_PROJECTION(k) shadow.cascadeViewProjection[k]
-#define ORTHO_SPLIT_FAR(k) shadow.cascadeSplitFar[k]
-#define ORTHO_BLEND_WIDTH(k) shadow.cascadeBlendWidth[k]
-#define ORTHO_TEXEL_WORLD(k) shadow.cascadeTexelWorld[k]
-#define ORTHO_DEPTH_RANGE(k) shadow.cascadeDepthRange[k]
-#define ORTHO_EYE shadow.eyeAndFadeStart.xyz
-#define ORTHO_FORWARD shadow.forwardAndFadeEnd.xyz
-#define ORTHO_COUNT shadow.counts.x
-#define ORTHO_TAPS shadow.counts.y
-#define ORTHO_BIAS_TEXELS gShadowBiasTexels
-#define ORTHO_FILTER_TEXELS shadow.shadowParams.z
-#define ORTHO_INV_MAP_SIZE shadow.shadowParams.w
+// Spiral PCF directions (golden angle), shared by every tap loop.
+const vec2 kGrassSpiral[4] = vec2[4](vec2(1.0, 0.0), vec2(-0.73736882, 0.67549036), vec2(0.08742555, -0.99617106),
+    vec2(0.60843907, 0.79360059));
 
-#include "OrthoMapSetVisibility.glsl"
-#include "CloudShadowLookup.glsl"
+// Lit fraction of a world point in cascade k, or -1 outside the map. Taps are rotated per blade to hide banding.
+float GrassCascadeLit(int k, vec3 world, float biasTexels, vec2 rotCosSin, int taps)
+{
+    vec4 clip = shadow.cascadeViewProjection[k] * vec4(world, 1.0);
+    vec3 ndc = clip.xyz / max(clip.w, 1e-6);
+    vec2 uv = ndc.xy * 0.5 + 0.5;
+    if (!(clip.w > 1e-6) || any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) || ndc.z < 0.0 || ndc.z > 1.0) {
+        return -1.0;
+    }
+    float biasedDepth = ndc.z - shadow.cascadeTexelWorld[k] * biasTexels / max(shadow.cascadeDepthRange[k], 1e-6);
+    float radiusUv = shadow.shadowParams.z * shadow.shadowParams.w;
+    float lit = 0.0;
+    for (int i = 0; i < taps; ++i) {
+        vec2 d = kGrassSpiral[i];
+        vec2 rotated = vec2(d.x * rotCosSin.x - d.y * rotCosSin.y, d.x * rotCosSin.y + d.y * rotCosSin.x);
+        vec2 offset = rotated * (sqrt((float(i) + 0.5) / float(taps)) * radiusUv);
+        lit += biasedDepth > GrassDepthAt(k, uv + offset) ? 0.0 : 1.0;
+    }
+    return lit / float(taps);
+}
 
 // Combined cascade and cloud sun visibility at the blade root in [0, 1].
 float GrassSunVisibility(vec3 world, vec3 normal, float rnd)
@@ -101,12 +109,20 @@ float GrassSunVisibility(vec3 world, vec3 normal, float rnd)
                 }
             }
             float texel = shadow.cascadeTexelWorld[c];
-            vec3 sunDir = length(params.sunDir.xyz) > 1e-6 ? normalize(params.sunDir.xyz) : vec3(0.0, 1.0, 0.0);
+            vec3 sunDir = params.sunDir.xyz; // Unit length from the CPU.
             float nDotL = clamp(dot(normal, sunDir), 0.0, 1.0);
             float tanTheta = clamp(sqrt(max(1.0 - nDotL * nDotL, 0.0)) / max(nDotL, 0.05), 0.0, 10.0);
-            gShadowBiasTexels = shadow.shadowParams.y + shadow.biasExtra.x * tanTheta;
+            float biasTexels = shadow.shadowParams.y + shadow.biasExtra.x * tanTheta;
             vec3 offsetWorld = world + normal * (shadow.biasExtra.y * texel) + sunDir * (shadow.biasExtra.z * texel);
-            float visCascade = OrthoMapSetVisibility(offsetWorld, rnd * 6.2831853);
+            int taps = clamp(int(shadow.counts.y), 1, 4);
+            float angle = rnd * 6.2831853;
+            vec2 rot = taps > 1 ? vec2(cos(angle), sin(angle)) : vec2(1.0, 0.0);
+            // Outside map c the next map alone decides.
+            float visCascade = -1.0;
+            for (int k = c; k < count && visCascade < 0.0; ++k) {
+                visCascade = GrassCascadeLit(k, offsetWorld, biasTexels, rot, taps);
+            }
+            visCascade = visCascade < 0.0 ? 1.0 : visCascade;
             float fadeSpan = max(fadeEnd - fadeStart, 1e-4);
             float distanceFade = 1.0 - smoothstep(0.0, 1.0, clamp((viewDepth - fadeStart) / fadeSpan, 0.0, 1.0));
             vis = 1.0 - strength * (1.0 - visCascade) * distanceFade;
@@ -137,6 +153,7 @@ const uint kRejectLod = 2u;
 const uint kRejectWater = 3u;
 const uint kRejectSlope = 4u;
 const uint kRejectNoise = 5u;
+const uint kRejectFrustum = 6u;
 
 bool HasFlag(uint flag)
 {
@@ -315,6 +332,14 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
         return kRejectLod;
     }
 
+    // Per-blade frustum test (the chunk test is coarse): margin covers blade height, lean, jitter/clump shift and caster pad.
+    float frustumMargin = params.blade.x * (1.0 + params.blade.w) * 1.25 + 1.2 + max(params.groundAmbient.w, 0.0);
+    for (int fp = 0; fp < 6; ++fp) {
+        if (dot(params.planes[fp].xyz, eye) + params.planes[fp].w < -frustumMargin) {
+            return kRejectFrustum;
+        }
+    }
+
     float waterTop = params.water.x + params.water.y;
     if (ts.flag > 0.5 || ts.height <= waterTop) {
         return kRejectWater;
@@ -344,27 +369,40 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
     // Break the R2 quasi-lattice using candidate-intrinsic spacing so world roots never drift with camera motion.
     float candDensity = max(float(idx + 1u) / (params.camRel.w * params.camRel.w), 0.5);
     float jr = min(params.variety2.z * inversesqrt(candDensity), 0.75);
-    vec2 jit = (vec2(GrassUnit(GrassHash2(hb, 11u)), GrassUnit(GrassHash2(hb, 12u))) - 0.5) * (2.0 * jr);
+    vec2 jit = vec2(0.0);
+    if (params.variety2.z > 0.0) {
+        jit = (vec2(GrassUnit(GrassHashK(hb, 11u)), GrassUnit(GrassHashK(hb, 12u))) - 0.5) * (2.0 * jr);
+    }
 
     // Tuft clumping on a 0.55 m lattice: pull roots toward tuft centres, share tuft height/tint and lean outward.
     vec2 wxz = worldXz + jit;
-    ivec2 cc = ivec2(floor(wxz / 0.55));
-    vec2 cJit = vec2(GrassCellHash(cc), GrassCellHash(cc + ivec2(7, 13)));
-    vec2 centre = (vec2(cc) + 0.2 + 0.6 * cJit) * 0.55;
     float clumpStr = params.variety.x;
-    float clumpActive = clamp(clumpStr / 0.6, 0.0, 1.0);
-    vec2 shifted = mix(wxz, centre, 0.55 * clumpStr);
-    vec2 deltaXz = shifted - worldXz;
-    if (dot(deltaXz, deltaXz) > 1e-8) {
-        vec2 pgShifted = gChunkLoGrid + local + deltaXz;
-        TileSample tsShifted;
-        if (SampleTile(pgShifted, tsShifted) && tsShifted.flag <= 0.5 && tsShifted.height > waterTop) {
-            local += deltaXz;
-            pg = pgShifted;
-            ts = tsShifted;
-            normal = normalize(vec3(-ts.gradient.x, 1.0, -ts.gradient.y));
-            eye = vec3(pg.x - params.camRel.x, ts.height - params.camRel.y, pg.y - params.camRel.z);
+    float cHeight = 1.0;
+    float cTint = 0.5;
+    vec2 outward = vec2(0.0);
+    if (clumpStr > 0.0) {
+        float clumpActive = clamp(clumpStr / 0.6, 0.0, 1.0);
+        ivec2 cc = ivec2(floor(wxz / 0.55));
+        vec2 cJit = vec2(GrassCellHash(cc), GrassCellHash(cc + ivec2(7, 13)));
+        vec2 centre = (vec2(cc) + 0.2 + 0.6 * cJit) * 0.55;
+        vec2 shifted = mix(wxz, centre, 0.55 * clumpStr);
+        vec2 deltaXz = shifted - worldXz;
+        if (dot(deltaXz, deltaXz) > 1e-8) {
+            vec2 pgShifted = gChunkLoGrid + local + deltaXz;
+            TileSample tsShifted;
+            if (SampleTile(pgShifted, tsShifted) && tsShifted.flag <= 0.5 && tsShifted.height > waterTop) {
+                local += deltaXz;
+                pg = pgShifted;
+                ts = tsShifted;
+                normal = normalize(vec3(-ts.gradient.x, 1.0, -ts.gradient.y));
+                eye = vec3(pg.x - params.camRel.x, ts.height - params.camRel.y, pg.y - params.camRel.z);
+            }
         }
+        uint cid = GrassHash2(uint(cc.x), uint(cc.y));
+        cHeight = mix(1.0, mix(0.75, 1.2, GrassUnit(cid)), clumpActive);
+        cTint = mix(0.5, GrassUnit(GrassPcg(cid ^ 0x51ED270Bu)), clumpActive);
+        vec2 toBlade = (gChunkWorldLo + local) - centre;
+        outward = dot(toBlade, toBlade) > 1e-8 ? normalize(toBlade) : vec2(0.0);
     }
 
     // Stochastic per-blade LOD selection across lodFadeBand around lod0Distance and lod1Distance.
@@ -372,7 +410,7 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
     lod = rootDist < params.lodDist.x ? 0u : (rootDist < params.lodDist.y ? 1u : 2u);
     float halfBand = 0.5 * params.lodFar.x;
     if (halfBand > 1e-4) {
-        float lodRnd = GrassUnit(GrassHash2(hb, 8u));
+        float lodRnd = GrassUnit(GrassHashK(hb, 8u));
         if (abs(rootDist - params.lodDist.x) < halfBand) {
             lod = lodRnd < smoothstep(params.lodDist.x - halfBand, params.lodDist.x + halfBand, rootDist) ? 1u : 0u;
         } else if (abs(rootDist - params.lodDist.y) < halfBand) {
@@ -380,17 +418,11 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
         }
     }
 
-    uint cid = GrassHash2(uint(cc.x), uint(cc.y));
-    float cHeight = mix(1.0, mix(0.75, 1.2, GrassUnit(cid)), clumpActive);
-    float cTint = mix(0.5, GrassUnit(GrassPcg(cid ^ 0x51ED270Bu)), clumpActive);
-    vec2 toBlade = (gChunkWorldLo + local) - centre;
-    vec2 outward = dot(toBlade, toBlade) > 1e-8 ? normalize(toBlade) : vec2(0.0);
-
-    float r1 = GrassUnit(GrassHash2(hb, 1u));
-    float r2 = GrassUnit(GrassHash2(hb, 2u));
-    float r3 = GrassUnit(GrassHash2(hb, 3u));
-    float r4 = GrassUnit(GrassHash2(hb, 4u));
-    float r5 = GrassUnit(GrassHash2(hb, 5u));
+    float r1 = GrassUnit(GrassHashK(hb, 1u));
+    float r2 = GrassUnit(GrassHashK(hb, 2u));
+    float r3 = GrassUnit(GrassHashK(hb, 3u));
+    float r4 = GrassUnit(GrassHashK(hb, 4u));
+    float r5 = GrassUnit(GrassHashK(hb, 5u));
     float farShrink = 1.0 - smoothstep(params.lodDist.z * (1.0 - params.extra.y), params.lodDist.z, dist);
     float poorSoilScale = clamp(params.variety.y / 0.22, 0.0, 1.0) * smoothstep(0.0, 0.2, params.density.w);
     float patchHeight = mix(1.0, mix(0.45, 1.0, patchMask), poorSoilScale);
@@ -402,10 +434,13 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
 
     // Blade species: rare flowers, broadleaf rosette weeds and dry straw blades.
     float patchDry = 1.0 - patchMask;
-    float kind = GrassUnit(GrassHash2(hb, 21u));
     float flowerShare = params.variety2.x;
     float weedShare = params.variety.z;
     float dryShare = params.variety.w;
+    float kind = 0.5;
+    if (flowerShare + weedShare + dryShare > 0.0) {
+        kind = GrassUnit(GrassHashK(hb, 21u));
+    }
     bool isFlower = kind < flowerShare;
     bool isWeed = !isFlower && (kind < flowerShare + weedShare);
     bool isDry = !isFlower && !isWeed && (kind > 1.0 - dryShare * (0.4 + patchDry));
@@ -429,8 +464,12 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
     float windDetail = params.shapeWind.z;
     float wave = 0.5 + 0.5 * sin(dot(pattern, windDir) * (6.2831853 / max(params.wind2.z, 1.0)));
     float gust = params.wind1.x * GrassValueNoise(pattern / max(params.wind2.w, 1.0));
-    float gust2 = min(params.wind1.x * 2.0, 1.0) * GrassValueNoise(pattern / 3.5 - windDir * (params.wind0.w * 0.7));
-    float stiff = mix(1.0, 0.6 + 0.8 * GrassUnit(GrassHash2(hb, 7u)), windDetail);
+    float gust2 = 0.0;
+    float stiff = 1.0;
+    if (windDetail > 0.0) {
+        gust2 = min(params.wind1.x * 2.0, 1.0) * GrassValueNoise(pattern / 3.5 - windDir * (params.wind0.w * 0.7));
+        stiff = mix(1.0, 0.6 + 0.8 * GrassUnit(GrassHashK(hb, 7u)), windDetail);
+    }
     float windAngle = 0.6 * params.wind1.w * speedFactor * stiff * (0.25 + 0.5 * wave + 0.9 * gust + 0.35 * windDetail * gust2);
 
     // Rest lean, tuft fountain lean, wind push and height-dependent droop set the tip angle and bend direction.
@@ -452,7 +491,7 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
     float flutterB = sin(flutterTime * 1.37 + phase * 1.7);
     float flutterAmp = params.wind2.y * height * (0.04 + 0.12 * speedFactor * (0.5 + gust + 0.35 * windDetail * gust2));
 
-    float r6 = GrassUnit(GrassHash2(hb, 6u));
+    float r6 = GrassUnit(GrassHashK(hb, 6u));
     vec3 worldRoot = vec3(params.cameraWorld.x + eye.x, params.camRel.y + eye.y, params.cameraWorld.y + eye.z);
     float sunVis = GrassSunVisibility(worldRoot, normal, r6);
 
@@ -597,7 +636,7 @@ void main()
     gOffY = GrassPcg(gSeed ^ 0x63D83595u);
 
     uint candidates = CandidateCount(chunkDensity);
-    uint rejected[6] = uint[6](0u, 0u, 0u, 0u, 0u, 0u);
+    uint rejected[7] = uint[7](0u, 0u, 0u, 0u, 0u, 0u, 0u);
     uint accepted[3] = uint[3](0u, 0u, 0u);
 
     // 256 candidates per round (4 per thread); one slot reservation per LOD per round.
@@ -664,7 +703,7 @@ void main()
 
     if (collect) {
         // rejected[0] counts accepted blades; the rest are the reasons.
-        atomicAdd(stats.words[kStatCandidates], rejected[0] + rejected[1] + rejected[2] + rejected[3] + rejected[4] + rejected[5]);
+        atomicAdd(stats.words[kStatCandidates], rejected[0] + rejected[1] + rejected[2] + rejected[3] + rejected[4] + rejected[5] + rejected[6]);
         atomicAdd(stats.words[kStatAccepted0], accepted[0]);
         atomicAdd(stats.words[kStatAccepted1], accepted[1]);
         atomicAdd(stats.words[kStatAccepted2], accepted[2]);
@@ -673,5 +712,6 @@ void main()
         atomicAdd(stats.words[kStatRejectWater], rejected[3]);
         atomicAdd(stats.words[kStatRejectSlope], rejected[4]);
         atomicAdd(stats.words[kStatRejectNoise], rejected[5]);
+        atomicAdd(stats.words[kStatRejectFrustum], rejected[6]);
     }
 }

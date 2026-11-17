@@ -32,7 +32,6 @@ void main()
     if (dot(normal, viewDir) < 0.0) {
         normal = -normal;
     }
-    vec3 tangent = normalize(inTangent);
 
     float t = inInfo.x;
     float rnd = inInfo.y;
@@ -51,11 +50,10 @@ void main()
 
     vec3 baseRoot = params.colorRoot.rgb;
     vec3 baseTip = params.colorTip.rgb;
-    // Patch palette: lush deep green at low patch values, yellow-olive meadow at high values.
-    vec3 oliveScale = vec3(2.1, 1.0, 1.6);
-    vec3 lushScale = vec3(0.7, 1.08, 0.8);
-    vec3 rootCol = mix(mix(baseRoot, baseRoot * lushScale, lushMix), baseRoot * oliveScale, oliveMix);
-    vec3 tipCol = mix(mix(baseTip, baseTip * lushScale, lushMix), baseTip * oliveScale, oliveMix);
+    // Patch palette: lush deep green at low patch values, yellow-olive meadow at high values (one scale for root and tip).
+    vec3 paletteScale = mix(mix(vec3(1.0), vec3(0.7, 1.08, 0.8), lushMix), vec3(2.1, 1.0, 1.6), oliveMix);
+    vec3 rootCol = baseRoot * paletteScale;
+    vec3 tipCol = baseTip * paletteScale;
 
     if (isWeed) {
         rootCol = baseRoot * vec3(0.85, 0.92, 1.15);
@@ -74,7 +72,9 @@ void main()
     float varModern = 1.0 + tint * (rnd * 2.0 - 1.0) * 0.36;
     float varLegacy = 1.0 + tint * (rnd * 2.0 - 1.0) * 0.60;
     albedo *= mix(varLegacy, varModern, lookModern);
-    albedo = mix(albedo, albedo * vec3(1.35, 1.1, 0.55), (1.0 - lookModern) * tint * smoothstep(0.6, 1.0, rnd));
+    if (lookModern < 0.999) {
+        albedo = mix(albedo, albedo * vec3(1.35, 1.1, 0.55), (1.0 - lookModern) * tint * smoothstep(0.6, 1.0, rnd));
+    }
 
     // Mild darker midrib and slightly lighter blade edges.
     float mid = smoothstep(0.0, 0.25, abs(inInfo.w));
@@ -135,37 +135,54 @@ void main()
         * (0.3 * kDirectScale * params.sunRadiance.w * sunUp * max(sunDir.y, 0.0) * params.skyAmbient.w * (1.0 - sunVis) * hemi);
     vec3 ambient = mix(params.groundAmbient.rgb, params.skyAmbient.rgb, hemi) + skyFill;
 
-    // Legacy lighting model for A/B comparison (lookModern = 0).
-    float aoLegacy = mix(params.colorRoot.w, 1.0, smoothstep(0.0, 0.45, t));
-    float throughLegacy = pow(clamp(dot(viewDir, -sunDir), 0.0, 1.0), 3.0);
-    vec3 colorLegacy = albedo * (ambient * aoLegacy + sun * front * sqrt(aoLegacy))
-        + albedo * vec3(1.1, 1.2, 0.5) * sun * (throughLegacy * params.sunDir.w * mix(0.5, 1.0, t) * aoLegacy);
+    vec3 color = vec3(0.0);
+
+    // Legacy lighting model for A/B comparison (lookModern = 0); skipped when the modern model fully applies.
+    if (lookModern < 0.999) {
+        float aoLegacy = mix(params.colorRoot.w, 1.0, smoothstep(0.0, 0.45, t));
+        float throughBase = clamp(dot(viewDir, -sunDir), 0.0, 1.0);
+        float throughLegacy = throughBase * throughBase * throughBase;
+        vec3 colorLegacy = albedo * (ambient * aoLegacy + sun * front * sqrt(aoLegacy))
+            + albedo * vec3(1.1, 1.2, 0.5) * sun * (throughLegacy * params.sunDir.w * mix(0.5, 1.0, t) * aoLegacy);
+        color = colorLegacy * (1.0 - lookModern);
+    }
 
     // Modern shading: distance-flattened AO, two-sided leaf transmission, Kajiya-Kay sheen, sky Fresnel and wind brightness wave.
-    float aoNear = mix(params.colorRoot.w, 1.0, pow(max(smoothstep(0.0, 0.5, t), 1e-4), 0.8));
-    float ao = mix(aoNear, 0.92, far);
-    float back = clamp(-nl, 0.0, 1.0);
-    vec3 transTint = mix(vec3(1.05, 1.15, 0.45), vec3(1.0), flowerMask);
-    vec3 leaf = albedo * transTint;
-    float vs = pow(clamp(dot(viewDir, -sunDir), 0.0, 1.0), 4.0);
-    float thin = mix(0.55, 1.0, t);
-    vec3 trans = leaf * sun * (params.sunDir.w * thin * (0.45 * back + 2.0 * vs) * ao);
+    if (lookModern > 0.001) {
+        vec3 tangent = normalize(inTangent);
+        float aoBase = max(smoothstep(0.0, 0.5, t), 1e-4);
+        float aoNear = mix(params.colorRoot.w, 1.0, sqrt(aoBase * sqrt(aoBase)));
+        float ao = mix(aoNear, 0.92, far);
+        float back = clamp(-nl, 0.0, 1.0);
+        vec3 transTint = mix(vec3(1.05, 1.15, 0.45), vec3(1.0), flowerMask);
+        vec3 leaf = albedo * transTint;
+        float vsBase = clamp(dot(viewDir, -sunDir), 0.0, 1.0);
+        float vs2 = vsBase * vsBase;
+        float vs = vs2 * vs2;
+        float thin = mix(0.55, 1.0, t);
+        vec3 trans = leaf * sun * (params.sunDir.w * thin * (0.45 * back + 2.0 * vs) * ao);
 
-    vec3 halfSum = sunDir + viewDir;
-    float halfLen2 = dot(halfSum, halfSum);
-    vec3 H = halfLen2 > 1e-6 ? halfSum * inversesqrt(halfLen2) : vec3(0.0, 1.0, 0.0);
-    float th = clamp(dot(tangent, H), -1.0, 1.0);
-    float sinTH = sqrt(max(1.0 - th * th, 0.0));
-    // Sheen and rim stay green-tinted and weak so blades never turn grey.
-    float spec = (halfLen2 > 1e-4 ? pow(sinTH, 48.0) : 0.0) * 0.05 * (1.0 - far);
-    float fres = pow(1.0 - clamp(dot(normal, viewDir), 0.0, 1.0), 4.0) * 0.06;
+        vec3 halfSum = sunDir + viewDir;
+        float halfLen2 = dot(halfSum, halfSum);
+        vec3 H = halfLen2 > 1e-6 ? halfSum * inversesqrt(halfLen2) : vec3(0.0, 1.0, 0.0);
+        float th = clamp(dot(tangent, H), -1.0, 1.0);
+        // sinTH^48 = (1 - th^2)^24 by repeated squaring.
+        float s2 = max(1.0 - th * th, 0.0);
+        float s4 = s2 * s2;
+        float s8 = s4 * s4;
+        float s16 = s8 * s8;
+        // Sheen and rim stay green-tinted and weak so blades never turn grey.
+        float spec = (halfLen2 > 1e-4 ? s16 * s8 : 0.0) * 0.05 * (1.0 - far);
+        float fresBase = 1.0 - clamp(dot(normal, viewDir), 0.0, 1.0);
+        float fres2 = fresBase * fresBase;
+        float fres = fres2 * fres2 * 0.06;
 
-    vec3 colorModern = albedo * (ambient * ao + sun * front * sqrt(ao)) + trans
-        + sun * spec * vec3(0.9, 1.0, 0.6) + params.skyAmbient.rgb * vec3(0.5, 0.9, 0.35) * (fres * ao * (1.0 - far));
-    float windWave = clamp(inInfo.z / 0.9 - 0.4, -0.4, 0.6);
-    colorModern *= max(1.0 + params.shapeWind.w * windWave * (1.0 - far), 0.0);
-
-    vec3 color = mix(colorLegacy, colorModern, lookModern);
+        vec3 colorModern = albedo * (ambient * ao + sun * front * sqrt(ao)) + trans
+            + sun * spec * vec3(0.9, 1.0, 0.6) + params.skyAmbient.rgb * vec3(0.5, 0.9, 0.35) * (fres * ao * (1.0 - far));
+        float windWave = clamp(inInfo.z / 0.9 - 0.4, -0.4, 0.6);
+        colorModern *= max(1.0 + params.shapeWind.w * windWave * (1.0 - far), 0.0);
+        color += colorModern * lookModern;
+    }
     if (debugMode == 0u) {
         color *= mix(1.0, params.lodFar.z, smoothstep(75.0, 125.0, distanceM));
     }

@@ -46,7 +46,7 @@ TEST(GrassMathTest, ParamsBlockLayoutIsPinned)
     EXPECT_EQ(offsetof(GrassShadowPushGpu, minWidth), 72u);
     EXPECT_EQ(offsetof(GrassShadowPushGpu, biasM), 76u);
     EXPECT_EQ(sizeof(GrassStatsGpu), 128u);
-    EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::Count), 24u);
+    EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::Count), 25u);
     EXPECT_EQ(sizeof(GrassDrawCommand), 16u);
     EXPECT_EQ(kGrassShadowLodCount, 2u);
     EXPECT_EQ(kGrassCommandCount, 6u);

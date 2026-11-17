@@ -195,7 +195,7 @@ TEST(GrassShaderNamesTest, ShaderTextCarriesTheSharedConstants)
     EXPECT_EQ(GrassVertexCount(2, 5), 3u);
     EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::Slot0), 21u);
     EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::Slot2), 23u);
-    EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::Count), 24u);
+    EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::Count), 25u);
     EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::Dropped0), 18u);
     EXPECT_EQ(text.find("kStatShadowSlot"), std::string::npos);
 

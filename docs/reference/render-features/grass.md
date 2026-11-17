@@ -34,6 +34,7 @@ Per chunk (16 m, a grid of `gridCells` x `gridCells` around the camera). A dense
 3. Reduce the min, max and highest dry height of the chunk from the tile. No dry texel above the waterline: leave.
 4. 3D distance of the chunk box (with blade height) over `lod2Distance`: leave.
 5. Frustum test (6 planes, eye-relative, box padded by 0.9 x blade height for lean and wind, plus `shadowPadM` when casting shadows so blades just outside the view still cast into it).
+   Each surviving candidate is then tested against the frustum on its own (sphere margin of blade height + shift + `shadowPadM`), which drops about half of the LOD0 blades that sat in partly visible chunks (`rejectFrustum`).
 6. Hi-Z test (skipped while `Grass.Cull` runs in `PreOpaque`, where scene depth does not exist yet).
 7. Blade loop. Candidate `i` of a chunk:
    - Position from a low-discrepancy R2 sequence plus a per-chunk shift, broken up for accepted blades by a candidate-intrinsic hash jitter (`jitterStrength`) and pulled toward 0.55 m tuft centres (`clumpStrength`) that share tuft height, tint and outward fountain lean without drifting as the camera moves.
@@ -191,7 +192,7 @@ Name for `/feature_debug`: `Grass`. Every setting above is writable: `/feature_d
 |---|---|
 | `status` | `NotRendered`, `Ok`, `Disabled`, `NoValidCamera`, `NoTile`, `ShadersNotReady`, `TargetFailed`, `PassDisabled` |
 | `hizUsed`, `windShared`, `shadow.cascades`, `shadow.cloud`, `shadow.castCascades`, `shadow.castBlades`, `gridCells`, `instanceBytes`, `tileRevision` | What this frame used |
-| `stats.*` | Counters from the GPU, two frames old: `chunksInGrid`, `chunksCulledDistance / NoData / Water / Frustum / Hiz`, `chunksLod0..2`, `candidates`, `accepted0..2`, `rejectNoData / LodStep / Water / Slope / Noise`, `dropped0..2`, `slot0..2`, `requested0..2` |
+| `stats.*` | Counters from the GPU, two frames old: `chunksInGrid`, `chunksCulledDistance / NoData / Water / Frustum / Hiz`, `chunksLod0..2`, `candidates`, `accepted0..2`, `rejectNoData / LodStep / Water / Slope / Noise / Frustum`, `dropped0..2`, `slot0..2`, `requested0..2` |
 
 Also `tile.*` (size, origin, sea level, revision), `source.*` (tile provider), `game.wind.*` (direction, speed and pattern offset the blades used), `synthetic.enabled`, `eye`.
 Short routes: `GET /grass/tile`, `GET /grass/probe?x=&z=`, `GET /grass/probe_batch?n=&radius=&seed=`.

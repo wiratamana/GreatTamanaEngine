@@ -68,6 +68,7 @@ enum class GrassStatsWord : std::uint32_t {
     Slot0,
     Slot1,
     Slot2,
+    RejectFrustum,
     Count,
 };
 static_assert(static_cast<std::uint32_t>(GrassStatsWord::Count) <= kGrassStatsWords);

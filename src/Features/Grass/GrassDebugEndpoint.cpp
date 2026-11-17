@@ -142,7 +142,7 @@ constexpr std::array<std::string_view, static_cast<std::size_t>(GrassStatsWord::
     "chunksCulledDistance", "chunksCulledNoData", "chunksCulledWater", "chunksCulledFrustum", "chunksCulledHiz",
     "chunksLod0", "chunksLod1", "chunksLod2", "candidates", "accepted0", "accepted1", "accepted2", "rejectNoData",
     "rejectLodStep", "rejectWater", "rejectSlope", "rejectNoise", "dropped0", "dropped1", "dropped2", "slot0", "slot1",
-    "slot2" };
+    "slot2", "rejectFrustum" };
 
 // A float shown with 6 significant digits, so 0.85f reads 0.85 and not 0.8500000238.
 double Shown(float value) noexcept

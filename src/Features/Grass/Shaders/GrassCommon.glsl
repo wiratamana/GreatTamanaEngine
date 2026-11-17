@@ -89,6 +89,7 @@ const uint kStatDropped2 = 20u;
 const uint kStatSlot0 = 21u; // Slot reservation counters: required, not optional.
 const uint kStatSlot1 = 22u;
 const uint kStatSlot2 = 23u;
+const uint kStatRejectFrustum = 24u;
 
 // Blade triangle lists: LOD0 look.w quads (6 vertices each), LOD1 two quads, LOD2 one triangle.
 const uint kGrassVertsList1 = 12u;
@@ -106,6 +107,12 @@ uint GrassHash2(uint a, uint b)
     return GrassPcg(a ^ GrassPcg(b + 0x9E3779B9u));
 }
 
+// One-round salted variant of GrassHash2 for already hashed seeds (half the cost).
+uint GrassHashK(uint h, uint k)
+{
+    return GrassPcg(h + k * 0x9E3779B9u);
+}
+
 uint GrassHash3(uint a, uint b, uint c)
 {
     return GrassPcg(a ^ GrassPcg(b ^ GrassPcg(c)));
@@ -118,7 +125,7 @@ float GrassUnit(uint h)
 
 float GrassCellHash(ivec2 cell)
 {
-    return GrassUnit(GrassHash2(uint(cell.x), uint(cell.y)));
+    return GrassUnit(GrassPcg(uint(cell.x) * 1597334677u + uint(cell.y) * 3812015801u));
 }
 
 // Smooth value noise in 0..1, one lattice cell per unit of x.

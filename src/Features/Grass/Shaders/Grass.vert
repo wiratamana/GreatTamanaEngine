@@ -67,12 +67,11 @@ void main()
     vec3 position = spine + sideAxis * (side * 0.5 * widthAtT);
 
     // Normal: rounded across the twisted blade width, leaned toward up, then blended toward ground normal with distance.
-    vec3 normal = normalize(cross(sideAxis, tangent));
-    normal = normalize(normal + sideAxis * (side * 0.35) + vec3(0.0, 0.5, 0.0));
+    vec3 normal = normalize(cross(sideAxis, tangent) + sideAxis * (side * 0.35) + vec3(0.0, 0.5, 0.0));
     vec2 gxz = ground.xy * 2.0 - 1.0;
     vec3 groundNormal = vec3(gxz.x, sqrt(max(1.0 - dot(gxz, gxz), 0.0)), gxz.y);
     float toGround = mix(params.look.y, max(params.look.y, 0.92), smoothstep(12.0, 70.0, dRoot) * params.variety2.y);
-    normal = normalize(mix(normal, groundNormal, toGround));
+    normal = mix(normal, groundNormal, toGround); // Grass.frag renormalises.
 
     outNormal = normal;
     outInfo = vec4(t, rnd, ground.z, side);
