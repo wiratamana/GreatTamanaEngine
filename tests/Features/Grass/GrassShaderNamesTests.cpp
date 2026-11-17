@@ -129,7 +129,7 @@ TEST(GrassShaderNamesTest, DrawShadersFitTheFullscreenRules)
     ASSERT_TRUE(result.hasPushConstantRange);
     EXPECT_EQ(result.pushConstantRange.offset, 0u);
     EXPECT_EQ(result.pushConstantRange.size, sizeof(GrassPushGpu));
-    EXPECT_EQ(offsetof(GrassPushGpu, viewportHeight), 8u);
+    EXPECT_EQ(offsetof(GrassPushGpu, reserved0), 8u);
     EXPECT_FALSE(rg::ValidateFullscreenReflection(result).has_value());
 }
 

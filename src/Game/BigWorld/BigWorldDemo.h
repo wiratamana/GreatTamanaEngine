@@ -29,14 +29,8 @@ const char* PhaseName(Phase phase) noexcept;
 // Expected end of a demo whose scene another scene replaced; hosts may log it below warning level.
 inline constexpr const char* kSceneReplacedNote = "the terrain scene was replaced";
 
-struct GrassHealth {
-    bool available = false;
-    std::string status;      // Grass render status, "Ok" when it draws.
-    bool tilePresent = false;
-    double seaLevel = 0.0;   // Sea level the grass height tile uses; very low when there is no ocean.
-    std::int64_t tileRevision = 0;
-    std::int64_t blades[3] = {};
-};
+// Above this camera ground altitude (metres), SDSM cascade texels exceed the grass shadow limit by design.
+inline constexpr double kGrassShadowCastMaxAltitude = 15.0;
 
 struct BigWorldHealth {
     TerrainFacts terrain;
@@ -44,12 +38,16 @@ struct BigWorldHealth {
     GrassHealth grass;
     bool cloudsAvailable = false;
     bool cloudsEnabled = false;
+    bool sunAvailable = false;
+    bool sunAboveHorizon = true;
+    double sunElevationDegrees = 0.0;
 };
 
 struct BigWorldState {
     Phase phase = Phase::Idle;
     std::string status = "closed";
     std::string error;                   // Why the last open failed.
+    std::string info;                    // Benign state note (for example camera above grass shadow cast range).
     std::vector<std::string> warnings;   // Things that work but look wrong.
     BigWorldPlan plan;
     BigWorldHealth health;

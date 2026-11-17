@@ -77,7 +77,6 @@ public:
 
     // Remembers the real vertical extent of a built node so distance tests stay tight.
     void SetNodeHeightRange(const NodeKey& key, float minY, float maxY);
-    void ForgetNodeHeightRange(const NodeKey& key);
 
     // Replaces `out` with the wanted leaf nodes. The leaves never overlap.
     void Select(const LodView& view, std::vector<WantedNode>& out, LodSelectionStats* stats = nullptr);

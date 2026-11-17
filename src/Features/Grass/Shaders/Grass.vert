@@ -11,7 +11,7 @@ layout(std430, binding = 1) readonly buffer GrassInstancesBlock {
 layout(push_constant) uniform GrassPush {
     uint lod;
     uint instanceBase;
-    uint viewportHeight;
+    uint reserved0;
     uint reserved1;
 } pc;
 

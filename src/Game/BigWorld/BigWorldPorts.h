@@ -1,8 +1,7 @@
 #pragma once
 
-// The three small interfaces the Big World demo drives. They use plain data only, so the Game layer does not
-// include any feature header; an editor-side adapter implements them on top of the live worlds.
-// Every call happens on the main thread.
+// The three small interfaces the Big World demo drives. Plain data only, so the Game layer includes no feature header.
+// An editor-side adapter implements them on top of the live worlds; every call runs on the main thread.
 
 #include "BigWorldPlan.h"
 
@@ -43,6 +42,7 @@ struct TerrainFacts {
     int nodesPending = 0;
     int uploadQueue = 0;
     int nodesRebuilding = 0; // Nodes still showing an old mesh after a carve change.
+    std::optional<double> cameraAboveGround; // Live camera altitude above carved ground in metres, when known.
     std::string lastError;
 };
 
@@ -88,6 +88,29 @@ public:
     virtual WaterFacts Facts() const = 0;
 };
 
+struct GrassHealth {
+    bool available = false;
+    std::string status;      // Grass render status, "Ok" when it draws.
+    bool tilePresent = false;
+    double seaLevel = -1.0e6; // Sea level the grass height tile uses; very low when there is no ocean.
+    std::int64_t tileRevision = 0;
+    std::int64_t blades[3] = {};
+    std::int64_t shadowCascades = 0;
+    bool receivesSunShadow = false;
+    bool receivesCloudShadow = false;
+    std::int64_t castCascades = 0;
+    std::int64_t castBlades = 0;
+};
+
+struct FeatureState {
+    GrassHealth grass;
+    bool cloudsAvailable = false;
+    bool cloudsEnabled = false;
+    bool sunAvailable = false;
+    bool sunAboveHorizon = true;
+    double sunElevationDegrees = 0.0;
+};
+
 class IFeaturePort {
 public:
     virtual ~IFeaturePort() = default;
@@ -96,8 +119,7 @@ public:
     virtual PortResult Snapshot(std::string_view feature, std::span<const std::string> keys) = 0;
     virtual PortResult Set(std::string_view feature, std::span<const KeyValue> values) = 0;
     virtual PortResult RestoreAll() = 0;
-    // One value per key, in order; empty when the feature or the key is unknown.
-    virtual std::vector<std::optional<std::string>> Read(std::string_view feature, std::span<const std::string_view> keys) const = 0;
+    virtual FeatureState GetState() const = 0;
 };
 
 struct BigWorldPorts {

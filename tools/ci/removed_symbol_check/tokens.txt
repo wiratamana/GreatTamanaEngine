@@ -196,3 +196,5 @@ EditTranslate
 IsWaterAction
 kGrassCandidateRound
 WaterBodySource
+
+ForgetNodeHeightRange

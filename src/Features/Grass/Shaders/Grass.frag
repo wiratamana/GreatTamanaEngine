@@ -9,7 +9,7 @@
 layout(push_constant) uniform GrassPush {
     uint lod;
     uint instanceBase;
-    uint viewportHeight;
+    uint reserved0;
     uint reserved1;
 } pc;
 

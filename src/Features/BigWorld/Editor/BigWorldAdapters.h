@@ -12,6 +12,8 @@
 
 namespace gte {
 
+class Core;
+
 class TerrainPortAdapter final : public bigworld::ITerrainPort {
 public:
     explicit TerrainPortAdapter(const IEditorModuleDirectory& modules) noexcept : m_modules(modules) {}
@@ -41,16 +43,21 @@ private:
 
 class FeaturePortAdapter final : public bigworld::IFeaturePort {
 public:
-    explicit FeaturePortAdapter(const IEditorModuleDirectory& modules) noexcept : m_modules(modules) {}
+    explicit FeaturePortAdapter(const IEditorModuleDirectory& modules, Core* core = nullptr) noexcept
+        : m_modules(modules)
+        , m_core(core)
+    {
+    }
 
     bool Has(std::string_view feature) const override;
     bigworld::PortResult Snapshot(std::string_view feature, std::span<const std::string> keys) override;
     bigworld::PortResult Set(std::string_view feature, std::span<const bigworld::KeyValue> values) override;
     bigworld::PortResult RestoreAll() override;
-    std::vector<std::optional<std::string>> Read(std::string_view feature, std::span<const std::string_view> keys) const override;
+    bigworld::FeatureState GetState() const override;
 
 private:
     const IEditorModuleDirectory& m_modules;
+    Core* m_core = nullptr;
     std::vector<SavedFeatureSettings> m_saved;
 };
 

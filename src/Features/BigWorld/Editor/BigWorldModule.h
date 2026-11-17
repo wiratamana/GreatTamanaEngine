@@ -18,6 +18,7 @@ inline constexpr const char* kBigWorldModuleName = "BigWorld";
 class BigWorldModule final : public IEditorFeatureModule {
 public:
     BigWorldModule() = default;
+    explicit BigWorldModule(Core& core) noexcept : m_core(&core) {}
     ~BigWorldModule() override;
 
     const char* ModuleName() const override { return kBigWorldModuleName; }
@@ -38,6 +39,7 @@ private:
     ModuleCommandResult StateCommand();
     void LogPhaseChange();
 
+    Core* m_core = nullptr;
     std::optional<TerrainPortAdapter> m_terrain;
     std::optional<WaterPortAdapter> m_water;
     std::optional<FeaturePortAdapter> m_features;

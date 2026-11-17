@@ -1,9 +1,7 @@
 #include "BigWorldDemo.h"
 
-#include <algorithm>
 #include <charconv>
 #include <cmath>
-#include <iterator>
 
 namespace gte::bigworld {
 
@@ -14,32 +12,6 @@ constexpr double kPollReadySeconds = 0.5;
 constexpr double kSeaLevelTolerance = 0.05;
 constexpr double kNoOceanBelow = -1.0e5; // The grass tile reports a very low sea level when there is no ocean.
 constexpr int kMaxStepsPerTick = 8;
-
-std::int64_t ParseInt(const std::optional<std::string>& text) noexcept
-{
-    std::int64_t value = 0;
-    if (text) {
-        std::from_chars(text->data(), text->data() + text->size(), value);
-    }
-    return value;
-}
-
-double ParseDouble(const std::optional<std::string>& text, double fallback) noexcept
-{
-    double value = 0.0;
-    if (text) {
-        const auto [end, ec] = std::from_chars(text->data(), text->data() + text->size(), value);
-        if (ec == std::errc{} && std::isfinite(value)) {
-            return value;
-        }
-    }
-    return fallback;
-}
-
-bool IsTrue(const std::optional<std::string>& text) noexcept
-{
-    return text && (*text == "true" || *text == "1");
-}
 
 std::string Escape(const std::string& text)
 {
@@ -197,6 +169,7 @@ PortResult BigWorldDemo::Close()
     }
     Cleanup();
     m_state.error.clear();
+    m_state.info.clear();
     m_state.warnings.clear();
     m_phaseWarnings.clear();
     m_agreementWarnings.clear();
@@ -209,6 +182,7 @@ PortResult BigWorldDemo::Close()
 void BigWorldDemo::Cleanup()
 {
     m_agreementWarnings.clear();
+    m_state.info.clear();
     if (m_ports.features != nullptr) {
         const PortResult restored = m_ports.features->RestoreAll();
         if (!restored.ok) {
@@ -246,29 +220,19 @@ void BigWorldDemo::ReadHealth()
     if (m_ports.features == nullptr) {
         return;
     }
-    static constexpr std::string_view kGrassKeys[] = { "game.status", "tile.present", "tile.seaLevel", "tile.revision",
-        "game.stats.accepted0", "game.stats.accepted1", "game.stats.accepted2" };
-    const auto grass = m_ports.features->Read("Grass", kGrassKeys);
-    h.grass = GrassHealth{};
-    if (grass.size() == std::size(kGrassKeys)) {
-        h.grass.available = true;
-        h.grass.status = grass[0].value_or("");
-        h.grass.tilePresent = IsTrue(grass[1]);
-        h.grass.seaLevel = ParseDouble(grass[2], kNoOceanBelow * 10.0);
-        h.grass.tileRevision = ParseInt(grass[3]);
-        for (int i = 0; i < 3; ++i) {
-            h.grass.blades[i] = ParseInt(grass[4 + i]);
-        }
-    }
-    static constexpr std::string_view kCloudKeys[] = { "enabled" };
-    const auto clouds = m_ports.features->Read("VolumetricCloud", kCloudKeys);
-    h.cloudsAvailable = clouds.size() == 1;
-    h.cloudsEnabled = h.cloudsAvailable && IsTrue(clouds[0]);
+    const FeatureState f = m_ports.features->GetState();
+    h.grass = f.grass;
+    h.cloudsAvailable = f.cloudsAvailable;
+    h.cloudsEnabled = f.cloudsEnabled;
+    h.sunAvailable = f.sunAvailable;
+    h.sunAboveHorizon = f.sunAboveHorizon;
+    h.sunElevationDegrees = f.sunElevationDegrees;
 }
 
 void BigWorldDemo::CheckAgreement()
 {
     m_agreementWarnings.clear();
+    m_state.info.clear();
     const BigWorldHealth& h = m_state.health;
     if (!h.water.featureConnected) {
         m_agreementWarnings.push_back("the water feature is not connected to the water world");
@@ -278,6 +242,9 @@ void BigWorldDemo::CheckAgreement()
         if (ground && *ground < h.water.oceanLevel) {
             m_agreementWarnings.push_back("the spot is under the sea (ground " + Number(*ground) + " m): no grass grows here");
         }
+    }
+    if (h.sunAvailable && !h.sunAboveHorizon) {
+        m_agreementWarnings.push_back("the sun is not above the horizon (elevation " + Number(h.sunElevationDegrees) + " deg)");
     }
     if (m_state.plan.tweaks.empty() || !h.grass.available) {
         return;
@@ -296,6 +263,24 @@ void BigWorldDemo::CheckAgreement()
     } else if (grassHasOcean && std::abs(h.water.oceanLevel - h.grass.seaLevel) > kSeaLevelTolerance) {
         m_agreementWarnings.push_back("ocean level " + Number(h.water.oceanLevel) + " differs from the grass sea level "
             + Number(h.grass.seaLevel));
+    }
+    if (h.grass.status != "Ok") {
+        return;
+    }
+    if (!h.grass.receivesSunShadow || h.grass.shadowCascades <= 0) {
+        m_agreementWarnings.push_back("grass gets no sun shadow");
+    }
+    if (h.grass.castCascades <= 0) {
+        const double altitude = h.terrain.cameraAboveGround.value_or(m_state.plan.heightAboveGround);
+        if (altitude < kGrassShadowCastMaxAltitude) {
+            m_agreementWarnings.push_back("grass casts no sun shadow");
+        } else {
+            m_state.info = "grass shadow casting is inactive above " + Number(kGrassShadowCastMaxAltitude)
+                + " m ground altitude (camera " + Number(altitude) + " m)";
+        }
+    }
+    if (h.cloudsEnabled && !h.grass.receivesCloudShadow) {
+        m_agreementWarnings.push_back("grass gets no cloud shadow");
     }
 }
 
@@ -317,6 +302,8 @@ void BigWorldDemo::Refresh(double nowSeconds)
     ReadHealth();
     if (m_state.phase == Phase::Ready) {
         CheckAgreement();
+    } else {
+        m_state.info.clear();
     }
     m_state.warnings = m_phaseWarnings;
     m_state.warnings.insert(m_state.warnings.end(), m_agreementWarnings.begin(), m_agreementWarnings.end());
@@ -454,10 +441,14 @@ void BigWorldDemo::Tick(double nowSeconds)
         LoseTerrain();
         return;
     }
+    const Phase beforeSteps = m_state.phase;
     for (int i = 0; i < kMaxStepsPerTick && Step(); ++i) {
         if (m_state.phase == Phase::Failed || m_state.phase == Phase::Idle) {
             break;
         }
+    }
+    if (beforeSteps != Phase::Ready && m_state.phase == Phase::Ready) {
+        CheckAgreement();
     }
     m_state.warnings = m_phaseWarnings;
     m_state.warnings.insert(m_state.warnings.end(), m_agreementWarnings.begin(), m_agreementWarnings.end());
@@ -471,6 +462,7 @@ std::string BigWorldStateToJson(const BigWorldState& s)
     j += ",\"phase\":" + Quote(PhaseName(s.phase));
     j += ",\"status\":" + Quote(s.status);
     j += ",\"error\":" + Quote(s.error);
+    j += ",\"info\":" + Quote(s.info);
     j += std::string(",\"open\":") + Bool(s.phase != Phase::Idle && s.phase != Phase::Failed);
     j += std::string(",\"ready\":") + Bool(s.phase == Phase::Ready);
     j += ",\"secondsInPhase\":" + Number(s.secondsInPhase);
@@ -487,7 +479,7 @@ std::string BigWorldStateToJson(const BigWorldState& s)
     j += "],\"plan\":{\"spotX\":" + Number(s.plan.spotX) + ",\"spotZ\":" + Number(s.plan.spotZ)
         + ",\"heightAboveGround\":" + Number(s.plan.heightAboveGround) + ",\"headingDegrees\":" + Number(s.plan.headingDegrees)
         + ",\"lookDownDegrees\":" + Number(s.plan.lookDownDegrees) + ",\"lake\":" + Bool(s.plan.lake)
-        + ",\"river\":" + Bool(s.plan.river) + "}";
+        + ",\"river\":" + Bool(s.plan.river) + ",\"cloudCoverage\":" + Number(s.plan.cloudCoverage) + "}";
     j += std::string(",\"terrain\":{\"available\":") + Bool(h.terrain.available) + ",\"open\":" + Bool(h.terrain.open)
         + ",\"nodesResident\":" + std::to_string(h.terrain.nodesResident) + ",\"nodesPending\":" + std::to_string(h.terrain.nodesPending)
         + ",\"uploadQueue\":" + std::to_string(h.terrain.uploadQueue) + ",\"nodesRebuilding\":" + std::to_string(h.terrain.nodesRebuilding)
@@ -499,7 +491,11 @@ std::string BigWorldStateToJson(const BigWorldState& s)
     j += std::string(",\"grass\":{\"available\":") + Bool(h.grass.available) + ",\"status\":" + Quote(h.grass.status)
         + ",\"tilePresent\":" + Bool(h.grass.tilePresent) + ",\"seaLevel\":" + Number(h.grass.seaLevel)
         + ",\"tileRevision\":" + std::to_string(h.grass.tileRevision) + ",\"blades\":[" + std::to_string(h.grass.blades[0]) + ","
-        + std::to_string(h.grass.blades[1]) + "," + std::to_string(h.grass.blades[2]) + "]}";
+        + std::to_string(h.grass.blades[1]) + "," + std::to_string(h.grass.blades[2]) + "]"
+        + ",\"receivesSunShadow\":" + Bool(h.grass.receivesSunShadow)
+        + ",\"receivesCloudShadow\":" + Bool(h.grass.receivesCloudShadow)
+        + ",\"castCascades\":" + std::to_string(h.grass.castCascades)
+        + ",\"castBlades\":" + std::to_string(h.grass.castBlades) + "}";
     j += std::string(",\"clouds\":{\"available\":") + Bool(h.cloudsAvailable) + ",\"enabled\":" + Bool(h.cloudsEnabled) + "}";
     j += "}";
     return j;

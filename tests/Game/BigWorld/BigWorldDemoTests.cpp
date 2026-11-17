@@ -6,12 +6,38 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <map>
 #include <set>
 
 namespace gte::bigworld {
 namespace {
+
+std::int64_t ParseInt(const std::string& text) noexcept
+{
+    std::int64_t value = 0;
+    std::from_chars(text.data(), text.data() + text.size(), value);
+    return value;
+}
+
+double ParseDouble(const std::string& text, double fallback) noexcept
+{
+    double value = 0.0;
+    const auto [end, ec] = std::from_chars(text.data(), text.data() + text.size(), value);
+    return (ec == std::errc{} && end == text.data() + text.size() && std::isfinite(value)) ? value : fallback;
+}
+
+bool ParseBool(const std::string& text) noexcept
+{
+    return text == "true" || text == "1";
+}
+
+bool HasWarningContaining(const std::vector<std::string>& warnings, std::string_view needle)
+{
+    return std::any_of(warnings.begin(), warnings.end(),
+        [needle](const std::string& w) { return w.find(needle) != std::string::npos; });
+}
 
 class FakeTerrain final : public ITerrainPort {
 public:
@@ -30,6 +56,7 @@ public:
     {
         ++cameraCalls;
         lastCamera = placement;
+        facts.cameraAboveGround = placement.heightAboveGround;
         return failCamera ? PortResult{ false, "camera refused", 0 } : PortResult{};
     }
     PortResult Close() override
@@ -129,22 +156,46 @@ public:
     PortResult RestoreAll() override
     {
         ++restoreCalls;
-        for (const Saved& s : saved) {
-            values[s.feature][s.key] = s.value;
+        for (auto it = saved.rbegin(); it != saved.rend(); ++it) {
+            values[it->feature][it->key] = it->value;
         }
         saved.clear();
         return {};
     }
-    std::vector<std::optional<std::string>> Read(std::string_view feature, std::span<const std::string_view> keys) const override
+    FeatureState GetState() const override
     {
-        std::vector<std::optional<std::string>> out;
-        const auto f = values.find(std::string(feature));
-        if (f == values.end()) {
-            return out;
+        FeatureState out;
+        if (const auto g = values.find("Grass"); g != values.end()) {
+            const auto get = [&](const char* key) -> std::string {
+                const auto it = g->second.find(key);
+                return it == g->second.end() ? std::string{} : it->second;
+            };
+            out.grass.available = true;
+            out.grass.status = get("game.status");
+            out.grass.tilePresent = ParseBool(get("tile.present"));
+            out.grass.seaLevel = ParseDouble(get("tile.seaLevel"), -1.0e6);
+            out.grass.tileRevision = ParseInt(get("tile.revision"));
+            out.grass.blades[0] = ParseInt(get("game.stats.accepted0"));
+            out.grass.blades[1] = ParseInt(get("game.stats.accepted1"));
+            out.grass.blades[2] = ParseInt(get("game.stats.accepted2"));
+            out.grass.shadowCascades = ParseInt(get("game.shadow.cascades"));
+            out.grass.receivesSunShadow = out.grass.shadowCascades > 0;
+            out.grass.receivesCloudShadow = ParseBool(get("game.shadow.cloud"));
+            out.grass.castCascades = ParseInt(get("game.shadow.castCascades"));
+            out.grass.castBlades = ParseInt(get("game.shadow.castBlades"));
         }
-        for (const std::string_view key : keys) {
-            const auto it = f->second.find(std::string(key));
-            out.push_back(it == f->second.end() ? std::nullopt : std::optional<std::string>(it->second));
+        if (const auto c = values.find("VolumetricCloud"); c != values.end()) {
+            out.cloudsAvailable = true;
+            const auto it = c->second.find("enabled");
+            out.cloudsEnabled = it != c->second.end() && ParseBool(it->second);
+        }
+        if (const auto s = values.find("Shadow"); s != values.end()) {
+            const auto it = s->second.find("game.sunElevationDegrees");
+            if (it != s->second.end()) {
+                out.sunAvailable = true;
+                out.sunElevationDegrees = ParseDouble(it->second, 0.0);
+                out.sunAboveHorizon = out.sunElevationDegrees > 0.0;
+            }
         }
         return out;
     }
@@ -168,11 +219,17 @@ protected:
     BigWorldDemoTest() : demo({ &terrain, &water, &features })
     {
         features.values["VolumetricCloud"]["enabled"] = "false";
+        features.values["VolumetricCloud"]["coverage"] = "0.8";
+        features.values["Shadow"]["game.sunElevationDegrees"] = "35";
         features.values["Grass"]["enabled"] = "true";
         features.values["Grass"]["densityLod0"] = "16";
         features.values["Grass"]["game.status"] = "NoTile";
         features.values["Grass"]["tile.present"] = "false";
         features.values["Grass"]["tile.seaLevel"] = "-1000000";
+        features.values["Grass"]["game.shadow.cascades"] = "0";
+        features.values["Grass"]["game.shadow.cloud"] = "false";
+        features.values["Grass"]["game.shadow.castCascades"] = "0";
+        features.values["Grass"]["game.shadow.castBlades"] = "0";
         water.facts.available = true;
         water.facts.featureConnected = true;
         water.facts.hasOcean = true;
@@ -197,7 +254,7 @@ protected:
         Pump(seconds, [] {});
     }
 
-    // A world that behaves: the terrain streams in, the carve lands, grass starts to draw.
+    // A world that behaves: the terrain streams in, the carve lands, grass starts to draw with sun and cloud shadows.
     void HealthyWorld()
     {
         terrain.facts.nodesResident = 40;
@@ -209,6 +266,13 @@ protected:
             features.values["Grass"]["game.status"] = "Ok";
             features.values["Grass"]["tile.present"] = "true";
             features.values["Grass"]["tile.seaLevel"] = "0";
+            features.values["Grass"]["game.shadow.cascades"] = "2";
+            const bool cloudsOn = features.values.contains("VolumetricCloud")
+                && features.values["VolumetricCloud"]["enabled"] == "true";
+            features.values["Grass"]["game.shadow.cloud"] = cloudsOn ? "true" : "false";
+            const double alt = terrain.facts.cameraAboveGround.value_or(terrain.lastCamera.heightAboveGround);
+            features.values["Grass"]["game.shadow.castCascades"] = alt < kGrassShadowCastMaxAltitude ? "1" : "0";
+            features.values["Grass"]["game.shadow.castBlades"] = alt < kGrassShadowCastMaxAltitude ? "69000" : "0";
         }
     }
 
@@ -273,11 +337,41 @@ TEST_F(BigWorldDemoTest, SuccessPathReachesReadyAndSwitchesFeaturesOn)
     OpenAndRunToReady();
     EXPECT_EQ(demo.State().status, "ready");
     EXPECT_EQ(features.values["VolumetricCloud"]["enabled"], "true");
+    EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], "0.5");
     EXPECT_EQ(features.values["Grass"]["preset"], "Big");
     ASSERT_EQ(water.lakes.size(), 1u);
     EXPECT_EQ(water.rivers.size(), 1u);
     EXPECT_EQ(demo.State().waterBodyIds.size(), 2u);
     EXPECT_TRUE(demo.State().warnings.empty());
+    EXPECT_TRUE(demo.State().info.empty());
+}
+
+TEST_F(BigWorldDemoTest, EachTierAppliesItsCloudCoverageAndRestoresOnClose)
+{
+    struct Case {
+        Quality quality;
+        const char* expected;
+    };
+    for (const Case c : { Case{ Quality::Big, "0.5" }, Case{ Quality::Medium, "0.5" }, Case{ Quality::Lean, "0.45" } }) {
+        features.values["VolumetricCloud"]["coverage"] = "0.8";
+        OpenAndRunToReady(c.quality);
+        EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], c.expected) << QualityName(c.quality);
+        ASSERT_TRUE(demo.Close().ok);
+        EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], "0.8") << QualityName(c.quality);
+        EXPECT_EQ(features.values["VolumetricCloud"]["enabled"], "false");
+    }
+}
+
+TEST_F(BigWorldDemoTest, CloudCoverageOverrideAppliesAndRestoresOnClose)
+{
+    BigWorldPlan plan = MakeBigWorldPlan(Quality::Big);
+    SetCloudCoverage(plan, 0.35);
+    ASSERT_TRUE(demo.Open(plan, now).ok);
+    Pump(5.0, [&] { HealthyWorld(); });
+    ASSERT_TRUE(demo.Ready());
+    EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], "0.35");
+    ASSERT_TRUE(demo.Close().ok);
+    EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], "0.8");
 }
 
 TEST_F(BigWorldDemoTest, TheLakeIsAheadOfTheCameraAndTheRiverRunsAlongTheHeading)
@@ -475,6 +569,7 @@ TEST_F(BigWorldDemoTest, ASceneReplacedWhileReadyRestoresEverythingAndGoesIdle)
     EXPECT_EQ(terrain.closeCalls, 0);
     EXPECT_EQ(water.removed.size(), 2u);
     EXPECT_EQ(features.values["VolumetricCloud"]["enabled"], "false");
+    EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], "0.8");
     EXPECT_EQ(features.values["Grass"]["densityLod0"], "16");
     ASSERT_EQ(demo.State().warnings.size(), 1u); // no stale "no height tile" from the last poll
     EXPECT_EQ(demo.State().warnings[0], kSceneReplacedNote);
@@ -489,6 +584,7 @@ TEST_F(BigWorldDemoTest, CloseUndoesEveryChange)
     EXPECT_EQ(terrain.closeCalls, 1);
     EXPECT_EQ(water.removed.size(), 2u);
     EXPECT_EQ(features.values["VolumetricCloud"]["enabled"], "false");
+    EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], "0.8");
     EXPECT_EQ(features.values["Grass"]["densityLod0"], "16");
     EXPECT_TRUE(demo.State().waterBodyIds.empty());
     EXPECT_FALSE(demo.State().terrainOwned);
@@ -587,7 +683,87 @@ TEST_F(BigWorldDemoTest, ADisconnectedWaterFeatureIsReported)
     EXPECT_NE(demo.State().warnings[0].find("not connected"), std::string::npos);
 }
 
-TEST_F(BigWorldDemoTest, HealthReadsTheGrassCounters)
+TEST_F(BigWorldDemoTest, MissingSunShadowCascadesOnGrassWarnsAndPublishedCascadesDoNot)
+{
+    OpenAndRunToReady();
+    EXPECT_TRUE(demo.State().warnings.empty());
+
+    features.values["Grass"]["game.shadow.cascades"] = "0";
+    Pump(1.0);
+    EXPECT_TRUE(HasWarningContaining(demo.State().warnings, "grass gets no sun shadow"));
+
+    features.values["Grass"]["game.shadow.cascades"] = "2";
+    Pump(1.0);
+    EXPECT_TRUE(demo.State().warnings.empty());
+}
+
+TEST_F(BigWorldDemoTest, GrassNotCastingWarnsBelow15mAndReportsInfoAtOrAbove15m)
+{
+    OpenAndRunToReady();
+    EXPECT_TRUE(demo.State().warnings.empty());
+    EXPECT_TRUE(demo.State().info.empty());
+
+    // Camera is at 6 m (< 15 m): missing grass shadow casting is a warning.
+    features.values["Grass"]["game.shadow.castCascades"] = "0";
+    features.values["Grass"]["game.shadow.castBlades"] = "0";
+    Pump(1.0);
+    EXPECT_TRUE(HasWarningContaining(demo.State().warnings, "casts no sun shadow"));
+    EXPECT_TRUE(demo.State().info.empty());
+
+    // Camera at 15 m or higher: cascades are coarser than shadowMaxTexelM by design, so report info without warning.
+    terrain.facts.cameraAboveGround = 22.0;
+    Pump(1.0);
+    EXPECT_TRUE(demo.State().warnings.empty());
+    EXPECT_FALSE(demo.State().info.empty());
+    EXPECT_NE(demo.State().info.find("15"), std::string::npos);
+
+    // Back within range with active casting: both warning and info clear.
+    terrain.facts.cameraAboveGround = 6.0;
+    features.values["Grass"]["game.shadow.castCascades"] = "1";
+    Pump(1.0);
+    EXPECT_TRUE(demo.State().warnings.empty());
+    EXPECT_TRUE(demo.State().info.empty());
+}
+
+TEST_F(BigWorldDemoTest, MissingCloudShadowWarnsOnlyWhenCloudsAreEnabled)
+{
+    OpenAndRunToReady();
+    EXPECT_TRUE(demo.State().warnings.empty());
+
+    features.values["Grass"]["game.shadow.cloud"] = "false";
+    Pump(1.0);
+    EXPECT_TRUE(HasWarningContaining(demo.State().warnings, "cloud shadow"));
+
+    // With clouds turned off, no cloud shadow map is expected.
+    features.values["VolumetricCloud"]["enabled"] = "false";
+    Pump(1.0);
+    EXPECT_TRUE(demo.State().warnings.empty());
+
+    features.values["VolumetricCloud"]["enabled"] = "true";
+    features.values["Grass"]["game.shadow.cloud"] = "true";
+    Pump(1.0);
+    EXPECT_TRUE(demo.State().warnings.empty());
+}
+
+TEST_F(BigWorldDemoTest, SunAtOrBelowHorizonWarnsAndAboveHorizonDoesNot)
+{
+    OpenAndRunToReady();
+    EXPECT_TRUE(demo.State().warnings.empty());
+
+    features.values["Shadow"]["game.sunElevationDegrees"] = "0";
+    Pump(1.0);
+    EXPECT_TRUE(HasWarningContaining(demo.State().warnings, "horizon"));
+
+    features.values["Shadow"]["game.sunElevationDegrees"] = "-6.5";
+    Pump(1.0);
+    EXPECT_TRUE(HasWarningContaining(demo.State().warnings, "horizon"));
+
+    features.values["Shadow"]["game.sunElevationDegrees"] = "18";
+    Pump(1.0);
+    EXPECT_TRUE(demo.State().warnings.empty());
+}
+
+TEST_F(BigWorldDemoTest, HealthReadsTheGrassCountersAndShadowState)
 {
     features.values["Grass"]["game.stats.accepted0"] = "100";
     features.values["Grass"]["game.stats.accepted1"] = "200";
@@ -601,7 +777,12 @@ TEST_F(BigWorldDemoTest, HealthReadsTheGrassCounters)
     EXPECT_EQ(g.blades[1], 200);
     EXPECT_EQ(g.blades[2], 300);
     EXPECT_EQ(g.tileRevision, 7);
+    EXPECT_TRUE(g.receivesSunShadow);
+    EXPECT_TRUE(g.receivesCloudShadow);
+    EXPECT_EQ(g.castCascades, 1);
+    EXPECT_EQ(g.castBlades, 69000);
     EXPECT_TRUE(demo.State().health.cloudsEnabled);
+    EXPECT_TRUE(demo.State().health.sunAboveHorizon);
 }
 
 TEST_F(BigWorldDemoTest, TickDoesNotPollMoreOftenThanItsInterval)
@@ -615,19 +796,29 @@ TEST_F(BigWorldDemoTest, TickDoesNotPollMoreOftenThanItsInterval)
     EXPECT_NE(demo.State().phase, Phase::WaitingForNodes);
 }
 
-TEST_F(BigWorldDemoTest, JsonCarriesPhaseAndHealthAndEscapesText)
+TEST_F(BigWorldDemoTest, JsonCarriesPhaseShadowKeysAndEscapesText)
 {
     OpenAndRunToReady();
     std::string json = BigWorldStateToJson(demo.State());
     EXPECT_NE(json.find("\"phase\":\"Ready\""), std::string::npos);
     EXPECT_NE(json.find("\"ready\":true"), std::string::npos);
+    EXPECT_NE(json.find("\"info\":\"\""), std::string::npos);
+    EXPECT_NE(json.find("\"cloudCoverage\":0.5"), std::string::npos);
     EXPECT_NE(json.find("\"grass\":{"), std::string::npos);
+    EXPECT_NE(json.find("\"receivesSunShadow\":true"), std::string::npos);
+    EXPECT_NE(json.find("\"receivesCloudShadow\":true"), std::string::npos);
+    EXPECT_NE(json.find("\"castCascades\":1"), std::string::npos);
+    EXPECT_NE(json.find("\"castBlades\":69000"), std::string::npos);
     EXPECT_NE(json.find("\"waterBodyIds\":[10,11]"), std::string::npos);
 
     BigWorldState odd;
     odd.error = "bad \"quote\" and \\ slash";
     json = BigWorldStateToJson(odd);
     EXPECT_NE(json.find("bad \\\"quote\\\" and \\\\ slash"), std::string::npos);
+    EXPECT_NE(json.find("\"receivesSunShadow\":false"), std::string::npos);
+    EXPECT_NE(json.find("\"receivesCloudShadow\":false"), std::string::npos);
+    EXPECT_NE(json.find("\"castCascades\":0"), std::string::npos);
+    EXPECT_NE(json.find("\"castBlades\":0"), std::string::npos);
 }
 
 TEST_F(BigWorldDemoTest, EveryPhaseHasAName)

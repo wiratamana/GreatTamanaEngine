@@ -4,7 +4,6 @@
 #include "../../Math/Vec3.h"
 
 #include <algorithm>
-#include <bit>
 #include <cmath>
 #include <cstring>
 #include <optional>
@@ -418,12 +417,11 @@ void GrassFeature::DrawPass(fx::PostOpaqueFrame& f)
         ? params.shapeWind[0] * 2.0f / (projY * viewportH) : 0.0f;
 
     bool drawn = true;
-    const std::uint32_t viewportHeightBits = std::bit_cast<std::uint32_t>(static_cast<float>(v.extent.height));
     const std::array<std::uint32_t, kGrassLodCount> bases{ params.instanceBase[0], params.instanceBase[1], params.instanceBase[2] };
     drawn &= f.Fullscreen(m_drawShader, "Grass.Draw.L0")
                  .Params(view.drawParams[0], params)
                  .BindBuffer("instances", view.preparedInstances)
-                 .Push(GrassPushGpu{ 0, bases[0], viewportHeightBits, 0 })
+                 .Push(GrassPushGpu{ 0, bases[0], 0, 0 })
                  .IndirectDraw(view.preparedCommands, 0)
                  .Target(f.SceneColor())
                  .DepthTest(f.SceneDepth(), fx::DepthCompare::LessEqual, /*write=*/true)
@@ -431,7 +429,7 @@ void GrassFeature::DrawPass(fx::PostOpaqueFrame& f)
     drawn &= f.Fullscreen(m_drawShader, "Grass.Draw.L1")
                  .Params(view.drawParams[1], params)
                  .BindBuffer("instances", view.preparedInstances)
-                 .Push(GrassPushGpu{ 1, bases[1], viewportHeightBits, 0 })
+                 .Push(GrassPushGpu{ 1, bases[1], 0, 0 })
                  .IndirectDraw(view.preparedCommands, kGrassCommandStride)
                  .Target(f.SceneColor())
                  .DepthTest(f.SceneDepth(), fx::DepthCompare::LessEqual, /*write=*/true)
@@ -439,7 +437,7 @@ void GrassFeature::DrawPass(fx::PostOpaqueFrame& f)
     drawn &= f.Fullscreen(m_drawShader, "Grass.Draw.L2")
                  .Params(view.drawParams[2], params)
                  .BindBuffer("instances", view.preparedInstances)
-                 .Push(GrassPushGpu{ 2, bases[2], viewportHeightBits, 0 })
+                 .Push(GrassPushGpu{ 2, bases[2], 0, 0 })
                  .IndirectDraw(view.preparedCommands, 2 * kGrassCommandStride)
                  .Target(f.SceneColor())
                  .DepthTest(f.SceneDepth(), fx::DepthCompare::LessEqual, /*write=*/true)

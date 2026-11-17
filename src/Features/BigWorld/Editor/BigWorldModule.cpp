@@ -73,7 +73,7 @@ void BigWorldModule::OnAttach(const EditorModuleAttach& attach)
 {
     m_terrain.emplace(attach.modules);
     m_water.emplace(attach.modules);
-    m_features.emplace(attach.modules);
+    m_features.emplace(attach.modules, m_core);
     m_demo = std::make_unique<bigworld::BigWorldDemo>(bigworld::BigWorldPorts{ &*m_terrain, &*m_water, &*m_features });
     if (attach.hooks != nullptr) {
         attach.hooks->AddMenuItem({ "File", "Open Big World", {}, [this] { return OpenFromMenu(); } });
@@ -112,6 +112,9 @@ void BigWorldModule::LogPhaseChange()
         GTE_LOG_ERROR(kLogCategory, text);
     } else {
         GTE_LOG_INFO(kLogCategory, text);
+    }
+    if (!state.info.empty()) {
+        GTE_LOG_INFO(kLogCategory, state.info);
     }
     for (const std::string& warning : state.warnings) {
         if (warning == bigworld::kSceneReplacedNote) {
@@ -177,6 +180,8 @@ ModuleCommandResult BigWorldModule::OpenCommand(const ModuleCommandRequest& requ
             plan.lakeDistance = *number;
         } else if (key == "lakeSize") {
             plan.lakeSize = *number;
+        } else if (key == "coverage") {
+            bigworld::SetCloudCoverage(plan, *number);
         } else {
             return Fail(400, "unknown open option: " + key);
         }
@@ -221,9 +226,9 @@ void BigWorldModule::OnShutdown()
 
 namespace {
 
-std::unique_ptr<IEngineFeatureModule> MakeBigWorldModule(Core&)
+std::unique_ptr<IEngineFeatureModule> MakeBigWorldModule(Core& core)
 {
-    return std::make_unique<BigWorldModule>();
+    return std::make_unique<BigWorldModule>(core);
 }
 
 } // namespace

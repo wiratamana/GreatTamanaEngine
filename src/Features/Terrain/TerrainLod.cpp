@@ -81,11 +81,6 @@ void LodSelector::SetNodeHeightRange(const NodeKey& key, float minY, float maxY)
     m_heightRanges[key] = { minY, maxY };
 }
 
-void LodSelector::ForgetNodeHeightRange(const NodeKey& key)
-{
-    m_heightRanges.erase(key);
-}
-
 void LodSelector::Select(const LodView& view, std::vector<WantedNode>& out, LodSelectionStats* stats)
 {
     constexpr double kMinFactor = 1.5;      // Below this the 2:1 level balance guarantee is gone.

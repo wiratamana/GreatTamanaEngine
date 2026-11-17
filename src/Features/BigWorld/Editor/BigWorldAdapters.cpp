@@ -3,8 +3,12 @@
 #include "../../Terrain/Editor/TerrainModule.h"
 #include "../../Water/Editor/WaterModule.h"
 #include "../../Water/World/WaterEdit.h"
+#include "../../../Core/Core.h"
+#include "../../../Game/Game.h"
+#include "../../../Game/Lighting/DirectionalLightResolver.h"
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
 #include <memory>
 
@@ -13,6 +17,8 @@ namespace gte {
 namespace {
 
 using bigworld::PortResult;
+
+constexpr double kRadToDeg = 180.0 / 3.14159265358979323846;
 
 PortResult Fail(std::string message)
 {
@@ -49,6 +55,73 @@ PortResult FromWater(const water::WaterResult& r)
     out.message = r.message;
     out.id = r.id;
     return out;
+}
+
+const fx::FeatureDebugValue* FindField(const fx::FeatureDebugResult& state, std::string_view key) noexcept
+{
+    const auto it = std::find_if(state.fields.begin(), state.fields.end(),
+        [key](const fx::FeatureDebugField& f) { return f.key == key; });
+    return it == state.fields.end() ? nullptr : &it->value;
+}
+
+bool AsBool(const fx::FeatureDebugValue* value, bool fallback = false) noexcept
+{
+    if (value == nullptr) {
+        return fallback;
+    }
+    if (const bool* b = std::get_if<bool>(value)) {
+        return *b;
+    }
+    if (const std::string* s = std::get_if<std::string>(value)) {
+        return *s == "true" || *s == "1";
+    }
+    return fallback;
+}
+
+std::int64_t AsInt(const fx::FeatureDebugValue* value, std::int64_t fallback = 0) noexcept
+{
+    if (value == nullptr) {
+        return fallback;
+    }
+    if (const std::int64_t* n = std::get_if<std::int64_t>(value)) {
+        return *n;
+    }
+    if (const double* d = std::get_if<double>(value)) {
+        return std::isfinite(*d) ? static_cast<std::int64_t>(*d) : fallback;
+    }
+    if (const std::string* s = std::get_if<std::string>(value)) {
+        const auto parsed = fx::ParseDebugFloat(*s);
+        return parsed ? static_cast<std::int64_t>(*parsed) : fallback;
+    }
+    return fallback;
+}
+
+double AsDouble(const fx::FeatureDebugValue* value, double fallback = 0.0) noexcept
+{
+    if (value == nullptr) {
+        return fallback;
+    }
+    if (const double* d = std::get_if<double>(value)) {
+        return std::isfinite(*d) ? *d : fallback;
+    }
+    if (const std::int64_t* n = std::get_if<std::int64_t>(value)) {
+        return static_cast<double>(*n);
+    }
+    if (const std::string* s = std::get_if<std::string>(value)) {
+        const auto parsed = fx::ParseDebugFloat(*s);
+        return parsed.value_or(fallback);
+    }
+    return fallback;
+}
+
+std::string AsString(const fx::FeatureDebugValue* value)
+{
+    if (value != nullptr) {
+        if (const std::string* s = std::get_if<std::string>(value)) {
+            return *s;
+        }
+    }
+    return {};
 }
 
 } // namespace
@@ -114,6 +187,11 @@ bigworld::TerrainFacts TerrainPortAdapter::Facts() const
     facts.nodesPending = stats.nodesPending;
     facts.uploadQueue = stats.uploadQueue;
     facts.nodesRebuilding = stats.nodesRebuilding;
+    if (facts.open) {
+        if (const std::optional<terrain::TerrainHeightProbe> probe = world->ProbeHeight(stats.cameraX, stats.cameraZ)) {
+            facts.cameraAboveGround = stats.cameraY - probe->carvedHeight;
+        }
+    }
     facts.lastError = stats.lastError;
     return facts;
 }
@@ -246,23 +324,42 @@ PortResult FeaturePortAdapter::RestoreAll()
     return allOk ? PortResult{} : Fail("some feature settings could not be restored (see the log)");
 }
 
-std::vector<std::optional<std::string>> FeaturePortAdapter::Read(
-    std::string_view feature, std::span<const std::string_view> keys) const
+bigworld::FeatureState FeaturePortAdapter::GetState() const
 {
-    std::vector<std::optional<std::string>> out;
-    const fx::IFeatureDebugEndpoint* const endpoint = m_modules.FindEndpoint(feature);
-    if (endpoint == nullptr) {
-        return out;
+    bigworld::FeatureState out;
+    if (const fx::IFeatureDebugEndpoint* const grass = m_modules.FindEndpoint("Grass")) {
+        const fx::FeatureDebugResult s = grass->GetState();
+        out.grass.available = true;
+        out.grass.status = AsString(FindField(s, "game.status"));
+        out.grass.tilePresent = AsBool(FindField(s, "tile.present"));
+        out.grass.seaLevel = AsDouble(FindField(s, "tile.seaLevel"), -1.0e6);
+        out.grass.tileRevision = AsInt(FindField(s, "tile.revision"));
+        out.grass.blades[0] = AsInt(FindField(s, "game.stats.accepted0"));
+        out.grass.blades[1] = AsInt(FindField(s, "game.stats.accepted1"));
+        out.grass.blades[2] = AsInt(FindField(s, "game.stats.accepted2"));
+        out.grass.shadowCascades = AsInt(FindField(s, "game.shadow.cascades"));
+        out.grass.receivesSunShadow = out.grass.shadowCascades > 0;
+        out.grass.receivesCloudShadow = AsBool(FindField(s, "game.shadow.cloud"));
+        out.grass.castCascades = AsInt(FindField(s, "game.shadow.castCascades"));
+        out.grass.castBlades = AsInt(FindField(s, "game.shadow.castBlades"));
     }
-    const fx::FeatureDebugResult state = endpoint->GetState();
-    out.reserve(keys.size());
-    for (const std::string_view key : keys) {
-        const auto found = std::find_if(state.fields.begin(), state.fields.end(),
-            [&](const fx::FeatureDebugField& f) { return f.key == key; });
-        if (found == state.fields.end()) {
-            out.emplace_back(std::nullopt);
-        } else {
-            out.emplace_back(FeatureDebugValueText(found->value));
+    if (const fx::IFeatureDebugEndpoint* const clouds = m_modules.FindEndpoint("VolumetricCloud")) {
+        const fx::FeatureDebugResult s = clouds->GetState();
+        out.cloudsAvailable = true;
+        out.cloudsEnabled = AsBool(FindField(s, "enabled"));
+    }
+    if (m_core != nullptr) {
+        const ResolvedDirectionalLight sun = ResolveActiveDirectionalLight(m_core->GetGame().GetRegistry());
+        const double y = std::clamp(static_cast<double>(sun.directionTowardSun.y), -1.0, 1.0);
+        out.sunAvailable = true;
+        out.sunElevationDegrees = std::asin(y) * kRadToDeg;
+        out.sunAboveHorizon = y > 0.0;
+    } else if (const fx::IFeatureDebugEndpoint* const shadow = m_modules.FindEndpoint("Shadow")) {
+        const fx::FeatureDebugResult s = shadow->GetState();
+        if (const fx::FeatureDebugValue* const elev = FindField(s, "game.sunElevationDegrees")) {
+            out.sunAvailable = true;
+            out.sunElevationDegrees = AsDouble(elev);
+            out.sunAboveHorizon = out.sunElevationDegrees > 0.0;
         }
     }
     return out;

@@ -107,11 +107,11 @@ static_assert(sizeof(GrassInstanceGpu) == kGrassInstanceBytes);
 struct GrassPushGpu {
     std::uint32_t lod;
     std::uint32_t instanceBase;
-    std::uint32_t viewportHeight; // Viewport height in pixels as float bits.
+    std::uint32_t reserved0;
     std::uint32_t reserved1;
 };
 static_assert(sizeof(GrassPushGpu) == 16);
-static_assert(offsetof(GrassPushGpu, viewportHeight) == 8);
+static_assert(offsetof(GrassPushGpu, reserved0) == 8);
 
 // Push constants of GrassShadow.vert (one depth-only draw per cascade and LOD).
 // NOTE: must match GrassShadowPush in Shaders/GrassShadow.vert (80 bytes).

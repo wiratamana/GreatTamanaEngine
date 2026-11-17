@@ -37,7 +37,7 @@ TEST(GrassMathTest, ParamsBlockLayoutIsPinned)
     EXPECT_EQ(sizeof(GrassPushGpu), 16u);
     EXPECT_EQ(offsetof(GrassPushGpu, lod), 0u);
     EXPECT_EQ(offsetof(GrassPushGpu, instanceBase), 4u);
-    EXPECT_EQ(offsetof(GrassPushGpu, viewportHeight), 8u);
+    EXPECT_EQ(offsetof(GrassPushGpu, reserved0), 8u);
     EXPECT_EQ(offsetof(GrassPushGpu, reserved1), 12u);
     EXPECT_EQ(sizeof(GrassShadowPushGpu), 80u);
     EXPECT_EQ(offsetof(GrassShadowPushGpu, cascadeVpRel), 0u);

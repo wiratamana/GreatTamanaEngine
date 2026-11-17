@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cmath>
 
 namespace gte::bigworld {
@@ -18,6 +19,13 @@ double Finite(double value, double fallback) noexcept
 double Bounded(double value, double fallback, double lo, double hi) noexcept
 {
     return std::clamp(Finite(value, fallback), lo, hi);
+}
+
+std::string FormatDouble(double value)
+{
+    char buffer[40];
+    const auto [end, ec] = std::to_chars(buffer, buffer + sizeof(buffer), value);
+    return ec == std::errc{} ? std::string(buffer, end) : std::string("0.5");
 }
 
 bool EqualsNoCase(std::string_view a, std::string_view b) noexcept
@@ -57,6 +65,26 @@ void AddCloudTierValues(Quality quality, FeatureTweak& clouds)
     }
 }
 
+void SyncCloudCoverageTweak(BigWorldPlan& plan, bool addIfMissing)
+{
+    const auto tweak = std::find_if(plan.tweaks.begin(), plan.tweaks.end(),
+        [](const FeatureTweak& t) { return t.feature == "VolumetricCloud"; });
+    if (tweak == plan.tweaks.end()) {
+        return;
+    }
+    if (std::find(tweak->restoreKeys.begin(), tweak->restoreKeys.end(), "coverage") == tweak->restoreKeys.end()) {
+        tweak->restoreKeys.push_back("coverage");
+    }
+    const std::string formatted = FormatDouble(plan.cloudCoverage);
+    const auto kv = std::find_if(tweak->values.begin(), tweak->values.end(),
+        [](const KeyValue& entry) { return entry.key == "coverage"; });
+    if (kv != tweak->values.end()) {
+        kv->value = formatted;
+    } else if (addIfMissing) {
+        tweak->values.push_back({ "coverage", formatted });
+    }
+}
+
 } // namespace
 
 const char* QualityName(Quality quality) noexcept
@@ -67,6 +95,16 @@ const char* QualityName(Quality quality) noexcept
     case Quality::Big: break;
     }
     return "big";
+}
+
+double TierCloudCoverage(Quality quality) noexcept
+{
+    switch (quality) {
+    case Quality::Lean: return kLeanCloudCoverage;
+    case Quality::Medium: return kMediumCloudCoverage;
+    case Quality::Big: break;
+    }
+    return kBigCloudCoverage;
 }
 
 bool TryParseQuality(std::string_view text, Quality& out) noexcept
@@ -84,12 +122,13 @@ BigWorldPlan MakeBigWorldPlan(Quality quality)
 {
     BigWorldPlan plan;
     plan.quality = quality;
+    plan.cloudCoverage = TierCloudCoverage(quality);
     plan.river = quality != Quality::Lean;
 
     FeatureTweak clouds;
     clouds.feature = "VolumetricCloud";
-    clouds.restoreKeys = { "enabled", "maxSteps", "resolutionDivisor", "shadowSteps", "shadowUpdate" };
-    clouds.values = { { "enabled", "true" } };
+    clouds.restoreKeys = { "enabled", "coverage", "maxSteps", "resolutionDivisor", "shadowSteps", "shadowUpdate" };
+    clouds.values = { { "enabled", "true" }, { "coverage", FormatDouble(plan.cloudCoverage) } };
     AddCloudTierValues(quality, clouds);
     plan.tweaks.push_back(std::move(clouds));
 
@@ -103,9 +142,16 @@ BigWorldPlan MakeBigWorldPlan(Quality quality)
     return plan;
 }
 
+void SetCloudCoverage(BigWorldPlan& plan, double coverage)
+{
+    plan.cloudCoverage = Bounded(coverage, TierCloudCoverage(plan.quality), 0.0, 1.0);
+    SyncCloudCoverageTweak(plan, /*addIfMissing=*/true);
+}
+
 BigWorldPlan SanitizeBigWorldPlan(BigWorldPlan plan)
 {
     const BigWorldPlan defaults;
+    plan.cloudCoverage = Bounded(plan.cloudCoverage, TierCloudCoverage(plan.quality), 0.0, 1.0);
     plan.spotX = Bounded(plan.spotX, defaults.spotX, -15000.0, 15000.0);
     plan.spotZ = Bounded(plan.spotZ, defaults.spotZ, -15000.0, 15000.0);
     plan.heightAboveGround = Bounded(plan.heightAboveGround, defaults.heightAboveGround, 1.0, 2000.0);
@@ -131,6 +177,7 @@ BigWorldPlan SanitizeBigWorldPlan(BigWorldPlan plan)
         plan.terrainProfile = defaults.terrainProfile;
     }
     std::erase_if(plan.tweaks, [](const FeatureTweak& t) { return t.feature.empty() || t.values.empty(); });
+    SyncCloudCoverageTweak(plan, /*addIfMissing=*/false);
     return plan;
 }
 

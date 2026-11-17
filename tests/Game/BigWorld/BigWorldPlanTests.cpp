@@ -1,4 +1,4 @@
-// Checks the Big World plan: quality tiers, sanitizing and the geometry helper.
+// Checks the Big World plan: quality tiers, cloud coverage, sanitizing and the geometry helpers.
 
 #include "Game/BigWorld/BigWorldPlan.h"
 
@@ -58,6 +58,41 @@ TEST(BigWorldPlanTest, EveryTierSwitchesCloudsAndGrassOn)
     }
 }
 
+TEST(BigWorldPlanTest, CloudCoverageFollowsTierConstantsAndOverridesCleanly)
+{
+    EXPECT_DOUBLE_EQ(kLeanCloudCoverage, 0.45);
+    EXPECT_DOUBLE_EQ(kMediumCloudCoverage, 0.5);
+    EXPECT_DOUBLE_EQ(kBigCloudCoverage, 0.5);
+
+    const BigWorldPlan lean = MakeBigWorldPlan(Quality::Lean);
+    const BigWorldPlan medium = MakeBigWorldPlan(Quality::Medium);
+    const BigWorldPlan big = MakeBigWorldPlan(Quality::Big);
+    EXPECT_DOUBLE_EQ(lean.cloudCoverage, kLeanCloudCoverage);
+    EXPECT_DOUBLE_EQ(medium.cloudCoverage, kMediumCloudCoverage);
+    EXPECT_DOUBLE_EQ(big.cloudCoverage, kBigCloudCoverage);
+    EXPECT_EQ(ValueOf(*FindTweak(lean, "VolumetricCloud"), "coverage"), "0.45");
+    EXPECT_EQ(ValueOf(*FindTweak(medium, "VolumetricCloud"), "coverage"), "0.5");
+    EXPECT_EQ(ValueOf(*FindTweak(big, "VolumetricCloud"), "coverage"), "0.5");
+
+    BigWorldPlan custom = MakeBigWorldPlan(Quality::Big);
+    SetCloudCoverage(custom, 0.32);
+    EXPECT_DOUBLE_EQ(custom.cloudCoverage, 0.32);
+    EXPECT_EQ(ValueOf(*FindTweak(custom, "VolumetricCloud"), "coverage"), "0.32");
+
+    SetCloudCoverage(custom, -0.5);
+    EXPECT_DOUBLE_EQ(custom.cloudCoverage, 0.0);
+    EXPECT_EQ(ValueOf(*FindTweak(custom, "VolumetricCloud"), "coverage"), "0");
+
+    SetCloudCoverage(custom, 2.5);
+    EXPECT_DOUBLE_EQ(custom.cloudCoverage, 1.0);
+    EXPECT_EQ(ValueOf(*FindTweak(custom, "VolumetricCloud"), "coverage"), "1");
+
+    BigWorldPlan nanPlan = MakeBigWorldPlan(Quality::Lean);
+    SetCloudCoverage(nanPlan, std::numeric_limits<double>::quiet_NaN());
+    EXPECT_DOUBLE_EQ(nanPlan.cloudCoverage, kLeanCloudCoverage);
+    EXPECT_EQ(ValueOf(*FindTweak(nanPlan, "VolumetricCloud"), "coverage"), "0.45");
+}
+
 TEST(BigWorldPlanTest, GrassPresetFollowsTheTier)
 {
     EXPECT_EQ(ValueOf(*FindTweak(MakeBigWorldPlan(Quality::Lean), "Grass"), "preset"), "Lean");
@@ -67,17 +102,19 @@ TEST(BigWorldPlanTest, GrassPresetFollowsTheTier)
 
 TEST(BigWorldPlanTest, EverySetKeyIsSavedForRestoreExceptThePresetShortcut)
 {
-    const BigWorldPlan plan = MakeBigWorldPlan(Quality::Big);
-    for (const FeatureTweak& tweak : plan.tweaks) {
-        for (const KeyValue& kv : tweak.values) {
-            if (kv.key == "preset") {
-                // A preset changes many keys; the tweak must save at least the density and tile ones.
-                EXPECT_NE(std::find(tweak.restoreKeys.begin(), tweak.restoreKeys.end(), "densityLod0"), tweak.restoreKeys.end());
-                EXPECT_NE(std::find(tweak.restoreKeys.begin(), tweak.restoreKeys.end(), "heightTileTexels"), tweak.restoreKeys.end());
-                continue;
+    for (const Quality q : { Quality::Lean, Quality::Medium, Quality::Big }) {
+        const BigWorldPlan plan = MakeBigWorldPlan(q);
+        for (const FeatureTweak& tweak : plan.tweaks) {
+            for (const KeyValue& kv : tweak.values) {
+                if (kv.key == "preset") {
+                    // A preset changes many keys; the tweak must save at least the density and tile ones.
+                    EXPECT_NE(std::find(tweak.restoreKeys.begin(), tweak.restoreKeys.end(), "densityLod0"), tweak.restoreKeys.end());
+                    EXPECT_NE(std::find(tweak.restoreKeys.begin(), tweak.restoreKeys.end(), "heightTileTexels"), tweak.restoreKeys.end());
+                    continue;
+                }
+                EXPECT_NE(std::find(tweak.restoreKeys.begin(), tweak.restoreKeys.end(), kv.key), tweak.restoreKeys.end())
+                    << tweak.feature << "." << kv.key;
             }
-            EXPECT_NE(std::find(tweak.restoreKeys.begin(), tweak.restoreKeys.end(), kv.key), tweak.restoreKeys.end())
-                << tweak.feature << "." << kv.key;
         }
     }
 }
@@ -112,6 +149,7 @@ TEST(BigWorldPlanTest, LeanHasNoRiverAndTheOthersDo)
 TEST(BigWorldPlanTest, SanitizeReplacesNonFiniteValuesAndClampsRanges)
 {
     BigWorldPlan plan = MakeBigWorldPlan(Quality::Big);
+    plan.cloudCoverage = 0.28;
     plan.spotX = std::numeric_limits<double>::quiet_NaN();
     plan.heightAboveGround = -5.0;
     plan.lookDownDegrees = 500.0;
@@ -119,6 +157,8 @@ TEST(BigWorldPlanTest, SanitizeReplacesNonFiniteValuesAndClampsRanges)
     plan.minResidentNodes = -3;
     plan.terrainProfile.clear();
     const BigWorldPlan safe = SanitizeBigWorldPlan(plan);
+    EXPECT_DOUBLE_EQ(safe.cloudCoverage, 0.28);
+    EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricCloud"), "coverage"), "0.28");
     EXPECT_TRUE(std::isfinite(safe.spotX));
     EXPECT_GE(safe.heightAboveGround, 1.0);
     EXPECT_LE(safe.lookDownDegrees, 85.0);

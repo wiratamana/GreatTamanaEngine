@@ -11,7 +11,13 @@ namespace gte::bigworld {
 
 enum class Quality { Lean, Medium, Big };
 
+// Default cloud coverage per tier: lower than the 0.8 feature default so one coarse shadow texel does not shade the whole field.
+inline constexpr double kLeanCloudCoverage = 0.45;
+inline constexpr double kMediumCloudCoverage = 0.5;
+inline constexpr double kBigCloudCoverage = 0.5;
+
 const char* QualityName(Quality quality) noexcept;
+double TierCloudCoverage(Quality quality) noexcept;
 
 // Case-insensitive "lean", "medium" or "big". False when unknown.
 bool TryParseQuality(std::string_view text, Quality& out) noexcept;
@@ -31,6 +37,7 @@ struct FeatureTweak {
 
 struct BigWorldPlan {
     Quality quality = Quality::Big;
+    double cloudCoverage = kBigCloudCoverage;
 
     // Camera. Heading 0 looks along +Z, 90 along +X.
     double spotX = -2000.0;
@@ -68,8 +75,11 @@ struct BigWorldPlan {
     bool waitForGrass = true;
 };
 
-// The plan of a quality tier, with its feature tweaks (clouds on, grass preset).
+// The plan of a quality tier, with its feature tweaks (clouds on, cloud coverage, grass preset).
 BigWorldPlan MakeBigWorldPlan(Quality quality);
+
+// Overrides the cloud coverage of `plan` (clamped to 0..1) and updates its VolumetricCloud tweak.
+void SetCloudCoverage(BigWorldPlan& plan, double coverage);
 
 // Finite values, bounded ranges, no empty names. Never throws.
 BigWorldPlan SanitizeBigWorldPlan(BigWorldPlan plan);
