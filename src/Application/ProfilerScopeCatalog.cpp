@@ -4,6 +4,9 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <optional>
+#include <mutex>
+#include <vector>
 
 namespace gte {
 namespace {
@@ -37,9 +40,6 @@ constexpr auto kRaw = std::to_array<Entry>({
     { "EditorHost::ExecutePhysicsDebugCommand", "Physics debug command", "Runs one physics debug command that came in through the HTTP debug server.", "", LoadingAndTools, false },
     { "EditorHost::ExecuteHizDemoMenuAction", "Hi-Z demo menu action", "Opens or closes the Hi-Z demo scene.", "", LoadingAndTools, false },
     { "EditorHost::ExecuteModuleCommand", "Module command", "Runs one HTTP command of a feature module (terrain, water ...).", "", LoadingAndTools, false },
-    { "TerrainWorld::Tick", "Terrain streaming", "Picks the terrain nodes the camera needs, writes new ones into the graphics memory pool and updates the culling table.", "If this is big, lower the visible node cap or the uploads per frame.", Simulation, false },
-    { "Terrain.BuildNode", "Building a terrain node", "A worker thread makes the heights, erosion and vertices of one terrain node.", "", Simulation, false },
-    { "Terrain.Bake", "Baking terrain nodes", "A worker thread bakes one terrain node into the saved world data.", "", Simulation, false },
     { "EditorHost::ExecuteProjectLifecycleLoad", "Loading a project", "Loads the code of a game project into the editor.", "", LoadingAndTools, false },
     { "EditorHost::ExecuteRenderGraphControlCommand", "Render graph command", "Switches a render pass or feature on or off.", "", LoadingAndTools, false },
     { "EditorHost::PerformProjectAssemblyHotReload", "Hot reload of project code", "Rebuilds and reloads your project code. The editor is frozen while this runs.", "", LoadingAndTools, false },
@@ -155,6 +155,29 @@ ScopeInfo FromEntry(const Entry& entry)
 {
     return { std::string(entry.title), std::string(entry.explanation), std::string(entry.hint), entry.category,
         entry.waiting };
+}
+
+struct RegisteredRows {
+    std::mutex mutex;
+    std::vector<ScopeDescription> rows;
+};
+
+RegisteredRows& Registered()
+{
+    static RegisteredRows rows;
+    return rows;
+}
+
+std::optional<ScopeInfo> FindRegistered(std::string_view name)
+{
+    RegisteredRows& registered = Registered();
+    const std::scoped_lock lock(registered.mutex);
+    for (const ScopeDescription& row : registered.rows) {
+        if (row.name == name) {
+            return ScopeInfo{ std::string(row.title), std::string(row.explanation), std::string(row.hint), row.category, row.waiting };
+        }
+    }
+    return std::nullopt;
 }
 
 const Entry* FindExact(std::string_view name)
@@ -325,6 +348,20 @@ const char* CategoryLabel(ScopeCategory category)
     return "Other";
 }
 
+void RegisterScopeDescription(const ScopeDescription& description)
+{
+    if (description.name.empty() || FindExact(description.name) != nullptr) {
+        return;
+    }
+    RegisteredRows& registered = Registered();
+    const std::scoped_lock lock(registered.mutex);
+    const bool known = std::any_of(registered.rows.begin(), registered.rows.end(),
+        [&description](const ScopeDescription& row) { return row.name == description.name; });
+    if (!known) {
+        registered.rows.push_back(description);
+    }
+}
+
 ScopeInfo DescribeScope(std::string_view name, ScopeLane lane, ScopeOrigin origin)
 {
     if (lane == ScopeLane::Gpu) {
@@ -332,6 +369,9 @@ ScopeInfo DescribeScope(std::string_view name, ScopeLane lane, ScopeOrigin origi
     }
     if (const Entry* entry = FindExact(name)) {
         return FromEntry(*entry);
+    }
+    if (std::optional<ScopeInfo> registered = FindRegistered(name)) {
+        return std::move(*registered);
     }
     bool found = false;
     ScopeInfo info = DescribeByPrefix(name, found);

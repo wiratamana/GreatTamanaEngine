@@ -40,7 +40,24 @@ struct ScopeInfo {
     bool generic = false;    // no real description was found: this is the origin fallback text
 };
 
-// Describes a raw scope name. Exact name first, then prefix rule, then origin fallback. Never throws.
+// A catalog row a feature adds itself. All strings must be literals (they are never copied).
+struct ScopeDescription {
+    std::string_view name;
+    std::string_view title;
+    std::string_view explanation;
+    std::string_view hint;
+    ScopeCategory category = ScopeCategory::Other;
+    bool waiting = false;
+};
+
+// Adds a row at static-init time. A name the built-in table already has, or an earlier registration, wins.
+void RegisterScopeDescription(const ScopeDescription& description);
+
+struct ScopeDescriptionAutoRegister {
+    explicit ScopeDescriptionAutoRegister(const ScopeDescription& description) { RegisterScopeDescription(description); }
+};
+
+// Describes a raw scope name. Exact name first, then registered rows, then prefix rule, then origin fallback. Never throws.
 ScopeInfo DescribeScope(std::string_view name, Profiling::ScopeLane lane, Profiling::ScopeOrigin origin);
 
 // Describes a GPU feature row (the sum of its passes).

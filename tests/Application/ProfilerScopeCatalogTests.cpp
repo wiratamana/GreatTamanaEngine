@@ -98,6 +98,32 @@ TEST(ProfilerScopeCatalogTest, EveryExactNameHasItsListedText)
     }
 }
 
+TEST(ProfilerScopeCatalogTest, ARegisteredRowIsDescribedAndNeverReplacesABuiltInOne)
+{
+    static const ScopeDescriptionAutoRegister kMine({ "Sample.Registered", "Sample title", "Sample text.", "Sample hint.",
+        ScopeCategory::Simulation, false });
+    static const ScopeDescriptionAutoRegister kClash({ "Game::Update", "Hijacked", "Hijacked.", "", ScopeCategory::Other, false });
+    static const ScopeDescriptionAutoRegister kLater({ "Sample.Registered", "Second", "Second.", "", ScopeCategory::Other, false });
+
+    const ScopeInfo mine = DescribeScope("Sample.Registered", ScopeLane::Main, ScopeOrigin::Engine);
+    EXPECT_EQ(mine.title, "Sample title");
+    EXPECT_EQ(mine.hint, "Sample hint.");
+    EXPECT_EQ(mine.category, ScopeCategory::Simulation);
+    EXPECT_FALSE(mine.generic);
+
+    EXPECT_NE(DescribeScope("Game::Update", ScopeLane::Main, ScopeOrigin::Engine).title, "Hijacked");
+    EXPECT_TRUE(DescribeScope("Sample.NotRegistered", ScopeLane::Main, ScopeOrigin::Engine).generic);
+}
+
+TEST(ProfilerScopeCatalogTest, TheTerrainFeatureDescribesItsOwnScopes)
+{
+    for (const std::string_view name : { "TerrainWorld::Tick", "Terrain.BuildNode", "Terrain.Bake" }) {
+        const ScopeInfo info = DescribeScope(name, ScopeLane::Main, ScopeOrigin::Engine);
+        EXPECT_FALSE(info.generic) << name;
+        EXPECT_EQ(info.category, ScopeCategory::Simulation) << name;
+    }
+}
+
 TEST(ProfilerScopeCatalogTest, ExactNameBeatsPrefixRule)
 {
     const ScopeInfo exact = DescribeScope("Panel.ViewDescriptors", ScopeLane::Main, ScopeOrigin::Engine);
