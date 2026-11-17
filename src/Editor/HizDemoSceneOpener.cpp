@@ -313,6 +313,15 @@ bool ReleaseHizDemoSettings(const HizDemoServices& services) noexcept
     return restored;
 }
 
+bool HizDemoSceneReplaced(const Registry& registry, const HizDemoState& state) noexcept
+{
+    if (!state.active || state.created.empty()) {
+        return false;
+    }
+    return std::none_of(state.created.begin(), state.created.end(),
+        [&registry](Entity entity) { return registry.IsAlive(entity); });
+}
+
 std::string BuildHizDemoDetailsJson(const HizDemoReport& report)
 {
     const auto flag = [](bool value) { return value ? "true" : "false"; };

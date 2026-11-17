@@ -82,6 +82,22 @@ TEST(BigWorldPlanTest, EverySetKeyIsSavedForRestoreExceptThePresetShortcut)
     }
 }
 
+TEST(BigWorldPlanTest, LowerTiersMarchTheCloudsWithFewerSteps)
+{
+    const BigWorldPlan leanPlan = MakeBigWorldPlan(Quality::Lean);
+    const BigWorldPlan mediumPlan = MakeBigWorldPlan(Quality::Medium);
+    const BigWorldPlan bigPlan = MakeBigWorldPlan(Quality::Big);
+    const FeatureTweak* lean = FindTweak(leanPlan, "VolumetricCloud");
+    const FeatureTweak* medium = FindTweak(mediumPlan, "VolumetricCloud");
+    const FeatureTweak* big = FindTweak(bigPlan, "VolumetricCloud");
+    ASSERT_NE(lean, nullptr);
+    ASSERT_NE(medium, nullptr);
+    ASSERT_NE(big, nullptr);
+    EXPECT_LT(std::stoi(ValueOf(*lean, "maxSteps")), std::stoi(ValueOf(*medium, "maxSteps")));
+    EXPECT_EQ(ValueOf(*big, "maxSteps"), ""); // the full tier keeps the feature default
+    EXPECT_NE(std::find(big->restoreKeys.begin(), big->restoreKeys.end(), "maxSteps"), big->restoreKeys.end());
+}
+
 TEST(BigWorldPlanTest, LeanHasNoRiverAndTheOthersDo)
 {
     EXPECT_FALSE(MakeBigWorldPlan(Quality::Lean).river);

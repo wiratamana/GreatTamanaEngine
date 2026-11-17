@@ -208,6 +208,7 @@ PortResult BigWorldDemo::Close()
 
 void BigWorldDemo::Cleanup()
 {
+    m_agreementWarnings.clear();
     if (m_ports.features != nullptr) {
         const PortResult restored = m_ports.features->RestoreAll();
         if (!restored.ok) {

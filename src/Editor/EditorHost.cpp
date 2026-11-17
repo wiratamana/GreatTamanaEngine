@@ -608,6 +608,10 @@ HizDemoServices EditorHost::MakeHizDemoServices()
 void EditorHost::ServiceHizDemoMenuAction()
 {
     const HizDemoEditorHandles handles = m_editorLayer->HizDemoHandles();
+    // Another scene (a module, a command, Open Scene) may have removed the demo's entities: give its settings back.
+    if (handles.state != nullptr && HizDemoSceneReplaced(m_game.GetRegistry(), *handles.state)) {
+        ReleaseHizDemoSettings(MakeHizDemoServices());
+    }
     if (handles.pendingMenuAction == nullptr || *handles.pendingMenuAction == HizDemoMenuAction::None) {
         return;
     }

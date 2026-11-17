@@ -18,6 +18,7 @@
 namespace gte {
 
 class Game;
+class Registry;
 class Renderer;
 class RenderFeatureCompositor;
 class InstanceGridResources;
@@ -66,6 +67,9 @@ bool CloseHizDemo(Game& game, const HizDemoServices& services, std::string& mess
 // Restores the settings only; for a scene that was replaced by something else. A no-op when not active.
 // False when the restore was incomplete (each failure is logged).
 bool ReleaseHizDemoSettings(const HizDemoServices& services) noexcept;
+
+// True when the demo is active but none of its entities is alive any more: another scene replaced it. Pure.
+bool HizDemoSceneReplaced(const Registry& registry, const HizDemoState& state) noexcept;
 
 // The hiz_demo-specific keys of the open reply as a JSON object text.
 std::string BuildHizDemoDetailsJson(const HizDemoReport& report);

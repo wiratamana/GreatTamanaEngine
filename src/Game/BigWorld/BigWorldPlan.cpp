@@ -38,6 +38,17 @@ const char* GrassPresetFor(Quality quality) noexcept
     return "Big";
 }
 
+// Fewer march steps per cloud ray: the biggest cloud cost lever that changes the picture very little.
+const char* CloudMaxSteps(Quality quality) noexcept
+{
+    switch (quality) {
+    case Quality::Lean: return "48";
+    case Quality::Medium: return "64";
+    case Quality::Big: break;
+    }
+    return nullptr;
+}
+
 } // namespace
 
 const char* QualityName(Quality quality) noexcept
@@ -69,8 +80,11 @@ BigWorldPlan MakeBigWorldPlan(Quality quality)
 
     FeatureTweak clouds;
     clouds.feature = "VolumetricCloud";
-    clouds.restoreKeys = { "enabled" };
+    clouds.restoreKeys = { "enabled", "maxSteps" };
     clouds.values = { { "enabled", "true" } };
+    if (const char* steps = CloudMaxSteps(quality)) {
+        clouds.values.push_back({ "maxSteps", steps });
+    }
     plan.tweaks.push_back(std::move(clouds));
 
     FeatureTweak grass;

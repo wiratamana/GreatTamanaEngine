@@ -474,7 +474,7 @@ TEST_F(BigWorldDemoTest, ASceneReplacedWhileReadyRestoresEverythingAndGoesIdle)
     EXPECT_EQ(water.removed.size(), 2u);
     EXPECT_EQ(features.values["VolumetricCloud"]["enabled"], "false");
     EXPECT_EQ(features.values["Grass"]["densityLod0"], "16");
-    ASSERT_FALSE(demo.State().warnings.empty());
+    ASSERT_EQ(demo.State().warnings.size(), 1u); // no stale "no height tile" from the last poll
     EXPECT_NE(demo.State().warnings[0].find("replaced"), std::string::npos);
 }
 
