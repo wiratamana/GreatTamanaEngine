@@ -1,6 +1,6 @@
 #include "TerrainAssetTask.h"
 
-#include "../Jobs/JobSystem.h"
+#include "../../Jobs/JobSystem.h"
 
 #include <algorithm>
 #include <chrono>

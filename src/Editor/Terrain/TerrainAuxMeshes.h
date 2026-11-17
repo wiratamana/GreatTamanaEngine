@@ -9,8 +9,8 @@
 #include "../../Renderer/OffscreenFrameTicket.h"
 #include "../../Renderer/OffscreenRingGuard.h"
 #include "../../Renderer/PipelineHandle.h"
-#include "../../Terrain/Gpu/TerrainNodePacking.h"
-#include "../../Terrain/TerrainTypes.h"
+#include "../../Features/Terrain/Gpu/TerrainNodePacking.h"
+#include "../../Features/Terrain/TerrainTypes.h"
 
 #include <cstdint>
 #include <string>

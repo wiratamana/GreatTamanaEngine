@@ -1,6 +1,6 @@
 // Tier 1: terrain settings sanitizing, hashing and change classification.
 
-#include "Terrain/TerrainSettings.h"
+#include "Features/Terrain/TerrainSettings.h"
 
 #include <gtest/gtest.h>
 

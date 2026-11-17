@@ -1,6 +1,6 @@
 // Tier 1: quadtree LOD selection.
 
-#include "Terrain/TerrainLod.h"
+#include "Features/Terrain/TerrainLod.h"
 
 #include <gtest/gtest.h>
 

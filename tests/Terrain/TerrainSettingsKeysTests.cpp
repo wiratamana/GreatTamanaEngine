@@ -1,4 +1,4 @@
-#include "Terrain/TerrainSettingsKeys.h"
+#include "Features/Terrain/TerrainSettingsKeys.h"
 
 #include <gtest/gtest.h>
 

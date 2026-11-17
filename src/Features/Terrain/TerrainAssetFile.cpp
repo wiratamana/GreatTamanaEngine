@@ -1,7 +1,7 @@
 #include "TerrainAsset.h"
 
-#include "../Assets/AtomicFile.h"
-#include "../Assets/GtaFile.h"
+#include "../../Assets/AtomicFile.h"
+#include "../../Assets/GtaFile.h"
 
 #include <algorithm>
 #include <array>

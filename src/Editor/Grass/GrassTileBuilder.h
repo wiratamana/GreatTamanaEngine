@@ -4,7 +4,7 @@
 // Pure CPU work on plain inputs, so it can run on a worker thread and be unit tested.
 
 #include "../../Features/Grass/GrassTypes.h"
-#include "../../Terrain/TerrainSurface.h"
+#include "../../Features/Terrain/TerrainSurface.h"
 #include "../../Water/WaterBodySet.h"
 
 #include <cstdint>

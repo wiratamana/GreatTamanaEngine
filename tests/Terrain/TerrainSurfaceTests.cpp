@@ -1,6 +1,6 @@
 // Tests for reading the drawn terrain surface from resident node meshes.
 
-#include "Terrain/TerrainSurface.h"
+#include "Features/Terrain/TerrainSurface.h"
 
 #include <gtest/gtest.h>
 

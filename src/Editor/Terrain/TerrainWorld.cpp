@@ -12,9 +12,9 @@
 #include "../../Profiling/ScopeTimer.h"
 #include "../../Renderer/Culling/ClusterCullMath.h"
 #include "../../Renderer/Renderer.h"
-#include "../../Terrain/Gpu/TerrainClusterRecords.h"
-#include "../../Terrain/TerrainErosion.h"
-#include "../../Terrain/TerrainNode.h"
+#include "../../Features/Terrain/Gpu/TerrainClusterRecords.h"
+#include "../../Features/Terrain/TerrainErosion.h"
+#include "../../Features/Terrain/TerrainNode.h"
 
 #include <algorithm>
 #include <cmath>

@@ -3,7 +3,7 @@
 // Pure parts of the chunk bounding-box overlay: the 12 edges of a node box and the colour bucket of a node.
 
 #include "../CameraFrustumGizmo.h"
-#include "../../Terrain/TerrainControl.h"
+#include "../../Features/Terrain/TerrainControl.h"
 
 #include <array>
 #include <cstdint>

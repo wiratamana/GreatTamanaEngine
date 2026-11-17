@@ -2,7 +2,7 @@
 
 // Carves lake basins and river channels into the terrain heights. Implements the terrain carve hook.
 
-#include "../Terrain/TerrainCarve.h"
+#include "../Features/Terrain/TerrainCarve.h"
 #include "WaterBodySet.h"
 
 #include <memory>

@@ -8,7 +8,7 @@
 #include "TerrainSettings.h"
 #include "TerrainTypes.h"
 
-#include "../Jobs/JobTypes.h"
+#include "../../Jobs/JobTypes.h"
 
 #include <chrono>
 #include <cstdint>

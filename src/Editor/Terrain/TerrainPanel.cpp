@@ -4,8 +4,8 @@
 #include "../EditorFrame.h"
 #include "../ImGuiUniqueId.h"
 #include "../ProjectRootPath.h"
-#include "../../Terrain/TerrainApplyPolicy.h"
-#include "../../Terrain/TerrainSettingsTable.h"
+#include "../../Features/Terrain/TerrainApplyPolicy.h"
+#include "../../Features/Terrain/TerrainSettingsTable.h"
 
 #include <imgui.h>
 

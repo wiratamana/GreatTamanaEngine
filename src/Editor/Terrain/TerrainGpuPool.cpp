@@ -8,7 +8,7 @@
 #include "../../Renderer/MaterialTexture.h"
 #include "../../Renderer/Mesh.h"
 #include "../../Renderer/Renderer.h"
-#include "../../Terrain/TerrainTypes.h"
+#include "../../Features/Terrain/TerrainTypes.h"
 
 #include <algorithm>
 #include <cstring>

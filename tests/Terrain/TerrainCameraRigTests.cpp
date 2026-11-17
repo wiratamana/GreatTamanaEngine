@@ -1,4 +1,4 @@
-#include "Terrain/TerrainCameraRig.h"
+#include "Features/Terrain/TerrainCameraRig.h"
 
 #include <gtest/gtest.h>
 

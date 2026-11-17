@@ -1,8 +1,8 @@
 #include "TerrainCommands.h"
 
 #include "../../Encoding/PngEncoder.h"
-#include "../../Terrain/Debug/TerrainMapImage.h"
-#include "../../Terrain/TerrainSettingsKeys.h"
+#include "../../Features/Terrain/Debug/TerrainMapImage.h"
+#include "../../Features/Terrain/TerrainSettingsKeys.h"
 
 #include <cmath>
 #include <cstdint>

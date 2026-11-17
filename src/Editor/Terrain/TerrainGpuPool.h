@@ -10,13 +10,13 @@
 #include "../../Renderer/MeshHandle.h"
 #include "../../Renderer/OffscreenFrameTicket.h"
 #include "../../Renderer/PipelineHandle.h"
-#include "../../Terrain/Gpu/TerrainClusterRecords.h"
-#include "../../Terrain/Gpu/TerrainNodePacking.h"
-#include "../../Terrain/Gpu/TerrainPoolLayout.h"
-#include "../../Terrain/Gpu/TerrainRampImage.h"
-#include "../../Terrain/Gpu/TerrainSlotAllocator.h"
-#include "../../Terrain/TerrainSettings.h"
-#include "../../Terrain/TerrainTypes.h"
+#include "../../Features/Terrain/Gpu/TerrainClusterRecords.h"
+#include "../../Features/Terrain/Gpu/TerrainNodePacking.h"
+#include "../../Features/Terrain/Gpu/TerrainPoolLayout.h"
+#include "../../Features/Terrain/Gpu/TerrainRampImage.h"
+#include "../../Features/Terrain/Gpu/TerrainSlotAllocator.h"
+#include "../../Features/Terrain/TerrainSettings.h"
+#include "../../Features/Terrain/TerrainTypes.h"
 
 #include <cstdint>
 #include <optional>

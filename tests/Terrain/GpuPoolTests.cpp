@@ -1,9 +1,9 @@
 // Tier 1: GPU node pool layout, absolute index pattern and slot bookkeeping (no device needed).
 
 #include "Renderer/OffscreenRingGuard.h"
-#include "Terrain/Gpu/TerrainPoolLayout.h"
-#include "Terrain/Gpu/TerrainSlotAllocator.h"
-#include "Terrain/TerrainTypes.h"
+#include "Features/Terrain/Gpu/TerrainPoolLayout.h"
+#include "Features/Terrain/Gpu/TerrainSlotAllocator.h"
+#include "Features/Terrain/TerrainTypes.h"
 
 #include <gtest/gtest.h>
 

@@ -1,6 +1,6 @@
 // Background save and load of a terrain asset.
 
-#include "Terrain/TerrainAssetTask.h"
+#include "Features/Terrain/TerrainAssetTask.h"
 
 #include <gtest/gtest.h>
 

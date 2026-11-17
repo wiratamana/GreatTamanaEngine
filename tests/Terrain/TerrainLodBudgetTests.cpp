@@ -1,6 +1,6 @@
 // Tier 1: the LOD selector keeps the number of leaves under a budget by lowering the detail.
 
-#include "Terrain/TerrainLod.h"
+#include "Features/Terrain/TerrainLod.h"
 
 #include <gtest/gtest.h>
 

@@ -6,7 +6,7 @@
 #include "../../Core/FeatureKit/FeatureDebug.h"
 #include "../PresetFeatureSettings.h"
 #include "../../Core/Plugins/RenderFeatureDebugEntry.h"
-#include "../../Terrain/TerrainControl.h"
+#include "../../Features/Terrain/TerrainControl.h"
 
 #include <functional>
 #include <span>

@@ -1,6 +1,6 @@
-#include "Terrain/TerrainApplyPolicy.h"
-#include "Terrain/TerrainSettingsKeys.h"
-#include "Terrain/TerrainSettingsTable.h"
+#include "Features/Terrain/TerrainApplyPolicy.h"
+#include "Features/Terrain/TerrainSettingsKeys.h"
+#include "Features/Terrain/TerrainSettingsTable.h"
 
 #include <gtest/gtest.h>
 

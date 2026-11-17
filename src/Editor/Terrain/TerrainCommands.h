@@ -3,7 +3,7 @@
 // Runs one /terrain/<action> HTTP command on the main thread against the terrain world.
 
 #include "../../Application/TerrainCommandBridge.h"
-#include "../../Terrain/TerrainControl.h"
+#include "../../Features/Terrain/TerrainControl.h"
 
 namespace gte {
 

@@ -1,6 +1,6 @@
 // Tier 1: node cache, background generation, eviction and draw list fallback.
 
-#include "Terrain/TerrainStreamer.h"
+#include "Features/Terrain/TerrainStreamer.h"
 
 #include "Jobs/JobSystem.h"
 

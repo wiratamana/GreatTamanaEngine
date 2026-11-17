@@ -2,7 +2,7 @@
 
 // Node key and the CPU mesh of one terrain node. Every node has the same vertex and index count.
 
-#include "../Math/Vec3.h"
+#include "../../Math/Vec3.h"
 
 #include <cstddef>
 #include <cstdint>

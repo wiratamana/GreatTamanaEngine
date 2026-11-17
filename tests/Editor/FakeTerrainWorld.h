@@ -2,7 +2,7 @@
 
 // Records every call; shared by the terrain command and UI bridge tests.
 
-#include "Terrain/TerrainControl.h"
+#include "Features/Terrain/TerrainControl.h"
 
 #include <string>
 #include <vector>

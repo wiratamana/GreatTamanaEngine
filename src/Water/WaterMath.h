@@ -2,7 +2,7 @@
 
 // Pure geometry of water bodies: Catmull-Rom river paths, polyline queries, polygon distance.
 
-#include "../Terrain/TerrainCarve.h"
+#include "../Features/Terrain/TerrainCarve.h"
 #include "WaterTypes.h"
 
 #include <span>

@@ -1,10 +1,10 @@
 // Tier 1: colour ramp image with its replicated border, and node vertex packing for the pool and the preview.
 
-#include "Terrain/Gpu/TerrainNodePacking.h"
-#include "Terrain/Gpu/TerrainRampImage.h"
-#include "Terrain/TerrainHeightField.h"
-#include "Terrain/TerrainMaterial.h"
-#include "Terrain/TerrainNode.h"
+#include "Features/Terrain/Gpu/TerrainNodePacking.h"
+#include "Features/Terrain/Gpu/TerrainRampImage.h"
+#include "Features/Terrain/TerrainHeightField.h"
+#include "Features/Terrain/TerrainMaterial.h"
+#include "Features/Terrain/TerrainNode.h"
 
 #include <gtest/gtest.h>
 

@@ -1,7 +1,7 @@
 // Tier 1: terrain nodes with a carve hook: seams, determinism, no-op equality.
 
-#include "Terrain/TerrainHeightField.h"
-#include "Terrain/TerrainNode.h"
+#include "Features/Terrain/TerrainHeightField.h"
+#include "Features/Terrain/TerrainNode.h"
 #include "Water/WaterCarve.h"
 
 #include <gtest/gtest.h>

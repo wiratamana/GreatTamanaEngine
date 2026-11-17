@@ -4,10 +4,10 @@
 
 #include "Encoding/PngEncoder.h"
 #include "Jobs/JobSystem.h"
-#include "Terrain/TerrainLod.h"
-#include "Terrain/TerrainMaterial.h"
-#include "Terrain/TerrainNode.h"
-#include "Terrain/TerrainStreamer.h"
+#include "Features/Terrain/TerrainLod.h"
+#include "Features/Terrain/TerrainMaterial.h"
+#include "Features/Terrain/TerrainNode.h"
+#include "Features/Terrain/TerrainStreamer.h"
 
 #include <gtest/gtest.h>
 

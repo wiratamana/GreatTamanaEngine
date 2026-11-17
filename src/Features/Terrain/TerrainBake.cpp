@@ -4,8 +4,8 @@
 #include "TerrainMaterial.h"
 #include "TerrainNode.h"
 
-#include "../Jobs/JobSystem.h"
-#include "../Profiling/JobScopeTimer.h"
+#include "../../Jobs/JobSystem.h"
+#include "../../Profiling/JobScopeTimer.h"
 
 #include <algorithm>
 #include <chrono>

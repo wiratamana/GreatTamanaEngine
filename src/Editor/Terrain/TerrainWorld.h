@@ -11,12 +11,12 @@
 #include "../../Core/GraphicsHandles.h"
 #include "../../ECS/Entity.h"
 #include "../../Renderer/OffscreenFrameTicket.h"
-#include "../../Terrain/TerrainAsset.h"
-#include "../../Terrain/TerrainAssetTask.h"
-#include "../../Terrain/TerrainControl.h"
-#include "../../Terrain/TerrainFlight.h"
-#include "../../Terrain/TerrainLod.h"
-#include "../../Terrain/TerrainStreamer.h"
+#include "../../Features/Terrain/TerrainAsset.h"
+#include "../../Features/Terrain/TerrainAssetTask.h"
+#include "../../Features/Terrain/TerrainControl.h"
+#include "../../Features/Terrain/TerrainFlight.h"
+#include "../../Features/Terrain/TerrainLod.h"
+#include "../../Features/Terrain/TerrainStreamer.h"
 
 #include <chrono>
 #include <cstdint>

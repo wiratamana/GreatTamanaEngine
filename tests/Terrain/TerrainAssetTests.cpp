@@ -1,13 +1,13 @@
 // Tier 1: baked world asset (codec pieces, bake, .gta file, seek reader, corrupt files, streamer provider).
 
-#include "Terrain/TerrainAsset.h"
+#include "Features/Terrain/TerrainAsset.h"
 
 #include "Assets/AssetDatabase.h"
 #include "Assets/Crc32.h"
 #include "Assets/GtaFile.h"
-#include "Terrain/TerrainHeightField.h"
-#include "Terrain/TerrainMaterial.h"
-#include "Terrain/TerrainNode.h"
+#include "Features/Terrain/TerrainHeightField.h"
+#include "Features/Terrain/TerrainMaterial.h"
+#include "Features/Terrain/TerrainNode.h"
 
 #include <gtest/gtest.h>
 

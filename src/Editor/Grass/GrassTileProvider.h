@@ -5,7 +5,7 @@
 
 #include "GrassTileBuilder.h"
 #include "../../Features/Grass/GrassFeature.h"
-#include "../../Terrain/TerrainControl.h"
+#include "../../Features/Terrain/TerrainControl.h"
 #include "../../Water/WaterControl.h"
 
 #include <condition_variable>

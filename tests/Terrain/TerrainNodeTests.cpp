@@ -1,8 +1,8 @@
 // Tier 1: height field, erosion, node meshes: determinism, seams, bounds, winding.
 
-#include "Terrain/TerrainHeightField.h"
-#include "Terrain/TerrainMaterial.h"
-#include "Terrain/TerrainNode.h"
+#include "Features/Terrain/TerrainHeightField.h"
+#include "Features/Terrain/TerrainMaterial.h"
+#include "Features/Terrain/TerrainNode.h"
 
 #include <gtest/gtest.h>
 

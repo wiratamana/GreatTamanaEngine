@@ -5,7 +5,7 @@
 // and fills `snapshot` for the panel and the view overlays. No ImGui and no GPU types here.
 
 #include "../../Math/Mat4.h"
-#include "../../Terrain/TerrainControl.h"
+#include "../../Features/Terrain/TerrainControl.h"
 
 #include <cstdint>
 #include <optional>

@@ -3,10 +3,10 @@
 #include "Assets/MeshClusterValidation.h"
 #include "Renderer/Culling/ClusterCullMath.h"
 #include "Renderer/Culling/CullingTypes.h"
-#include "Terrain/Gpu/TerrainClusterRecords.h"
-#include "Terrain/Gpu/TerrainNodePacking.h"
-#include "Terrain/TerrainHeightField.h"
-#include "Terrain/TerrainNode.h"
+#include "Features/Terrain/Gpu/TerrainClusterRecords.h"
+#include "Features/Terrain/Gpu/TerrainNodePacking.h"
+#include "Features/Terrain/TerrainHeightField.h"
+#include "Features/Terrain/TerrainNode.h"
 
 #include <gtest/gtest.h>
 

@@ -1,7 +1,7 @@
 // Tier 1: scripted flight path, camera rotation convention and the control helpers.
 
-#include "Terrain/TerrainControl.h"
-#include "Terrain/TerrainFlight.h"
+#include "Features/Terrain/TerrainControl.h"
+#include "Features/Terrain/TerrainFlight.h"
 
 #include <gtest/gtest.h>
 

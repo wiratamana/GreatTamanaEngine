@@ -2,7 +2,7 @@
 
 // Scripted camera flight over the world: a pure function of elapsed time, so benchmark runs repeat exactly.
 
-#include "../Math/Quat.h"
+#include "../../Math/Quat.h"
 
 #include <functional>
 
