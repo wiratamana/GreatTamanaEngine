@@ -86,43 +86,6 @@ bool RayHitPlaneY(const WaterRay& ray, double y, double& x, double& z)
     return true;
 }
 
-bool RayHitGround(const WaterRay& ray, const water::HeightFn& ground, double maxDistance, double& x, double& y, double& z)
-{
-    const auto above = [&](double t) {
-        const double px = ray.origin[0] + ray.direction[0] * t;
-        const double pz = ray.origin[2] + ray.direction[2] * t;
-        return ray.origin[1] + ray.direction[1] * t - static_cast<double>(ground(px, pz));
-    };
-    constexpr int kSteps = 96;
-    double previous = 0.0;
-    double previousHeight = above(0.0);
-    if (previousHeight <= 0.0) {
-        return false; // Starts below the ground.
-    }
-    for (int i = 1; i <= kSteps; ++i) {
-        // Steps grow with distance: fine near the camera, coarse far away.
-        const double t = maxDistance * static_cast<double>(i * i) / static_cast<double>(kSteps * kSteps);
-        const double h = above(t);
-        if (h <= 0.0) {
-            double lo = previous;
-            double hi = t;
-            for (int k = 0; k < 24; ++k) {
-                const double mid = 0.5 * (lo + hi);
-                (above(mid) > 0.0 ? lo : hi) = mid;
-            }
-            const double hit = 0.5 * (lo + hi);
-            x = ray.origin[0] + ray.direction[0] * hit;
-            y = ray.origin[1] + ray.direction[1] * hit;
-            z = ray.origin[2] + ray.direction[2] * hit;
-            return true;
-        }
-        previous = t;
-        previousHeight = h;
-    }
-    static_cast<void>(previousHeight);
-    return false;
-}
-
 void BuildWaterHandles(const water::WaterBody& body, const Mat4& viewProjection, Vec2 rectMin, Vec2 rectMax, std::vector<WaterHandle>& out)
 {
     const std::size_t n = PointCount(body);

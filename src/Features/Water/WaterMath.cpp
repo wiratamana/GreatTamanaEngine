@@ -65,7 +65,6 @@ WaterSettings SanitizeWaterSettings(const WaterSettings& settings) noexcept
     s.roughness = f(settings.roughness, 0.02f, 0.6f, d.roughness);
     s.sunSpecular = f(settings.sunSpecular, 0.0f, 8.0f, d.sunSpecular);
     s.reflectionStrength = f(settings.reflectionStrength, 0.0f, 2.0f, d.reflectionStrength);
-    s.shadowStrength = f(settings.shadowStrength, 0.0f, 1.0f, d.shadowStrength);
 
     s.crestFoam = f(settings.crestFoam, 0.0f, 2.0f, d.crestFoam);
     s.shoreFoam = f(settings.shoreFoam, 0.0f, 2.0f, d.shoreFoam);

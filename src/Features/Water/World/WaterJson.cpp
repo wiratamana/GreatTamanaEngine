@@ -255,7 +255,6 @@ bool ParseNumberText(const std::string& v, double& out)
 } // namespace
 
 std::string SettingsToJson(const WaterSettings& s) { return SettingsObject(s).dump(); }
-std::string BodyToJson(const WaterBody& b) { return BodyObject(b).dump(); }
 
 std::string WorldToJson(const WaterBodySet& set)
 {
@@ -273,12 +272,6 @@ bool ParseSettingsJson(const std::string& text, WaterSettings& settings, std::st
 {
     Json j;
     return ParseText(text, j, error) && ApplySettings(j, settings, error);
-}
-
-bool ParseBodyJson(const std::string& text, WaterBody& body, std::string& error)
-{
-    Json j;
-    return ParseText(text, j, error) && ApplyBody(j, body, error);
 }
 
 bool ParseWorldJson(const std::string& text, WaterSettings& settings, std::vector<WaterBody>& bodies, std::string& error)

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "WaterBodySource.h"
+#include "WaterBodyDesc.h"
 #include "../../Core/Extent.h"
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
@@ -71,7 +71,6 @@ struct WaterSettings {
     float roughness = 0.07f;             // 0.02..0.6, sun glint width.
     float sunSpecular = 1.0f;            // 0..8.
     float reflectionStrength = 1.0f;     // 0..2.
-    float shadowStrength = 0.0f;         // 0..1, unused until sun shadows are bound.
 
     // Foam.
     float crestFoam = 0.8f;              // 0..2.
@@ -106,7 +105,6 @@ struct WaterViewSnapshot {
     std::uint32_t waveCount = 0;
     std::uint64_t textureBytes = 0;
     bool skyValid = false;
-    bool receiverBound = false;
 };
 
 // One wave of the shade table; two vec4 so the std430 array stride is 32 bytes.

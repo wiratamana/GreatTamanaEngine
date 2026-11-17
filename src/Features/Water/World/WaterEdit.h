@@ -23,12 +23,6 @@ bool EditMovePoint(WaterBody& body, int index, double x, double z, std::optional
 bool EditInsertPoint(WaterBody& body, int index, double x, double z, std::string& error);
 bool EditRemovePoint(WaterBody& body, int index, std::string& error);
 
-// Middle of the lake outline's bounding box and its largest half-extent.
-void BodyCenter(const WaterBody& body, double& x, double& z, double& radius) noexcept;
-
-// Moves a whole body by (dx, dz).
-void EditTranslate(WaterBody& body, double dx, double dz) noexcept;
-
 struct LakeLeakReport {
     int samples = 0;
     int below = 0;         // Outline samples where the ground is lower than the level (the water would spill).

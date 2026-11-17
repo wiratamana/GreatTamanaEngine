@@ -50,7 +50,6 @@ constexpr std::array kSettingKeys{
     SettingKey{ "roughness", &WaterSettings::roughness },
     SettingKey{ "sunSpecular", &WaterSettings::sunSpecular },
     SettingKey{ "reflectionStrength", &WaterSettings::reflectionStrength },
-    SettingKey{ "shadowStrength", &WaterSettings::shadowStrength },
     SettingKey{ "crestFoam", &WaterSettings::crestFoam },
     SettingKey{ "shoreFoam", &WaterSettings::shoreFoam },
     SettingKey{ "shoreWidth", &WaterSettings::shoreWidth },

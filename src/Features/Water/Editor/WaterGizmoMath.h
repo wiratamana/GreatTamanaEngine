@@ -5,7 +5,6 @@
 #include "../../../Math/Mat4.h"
 #include "../../../Math/Vec2.h"
 #include "../../../Math/Vec3.h"
-#include "../World/WaterEdit.h"
 #include "../World/WaterTypes.h"
 
 #include <cstdint>
@@ -24,9 +23,6 @@ bool ScreenToRay(const Mat4& viewProjection, Vec2 rectMin, Vec2 rectMax, Vec2 pi
 
 // Where the ray crosses the horizontal plane at height `y` (in front of the origin only).
 bool RayHitPlaneY(const WaterRay& ray, double y, double& x, double& z);
-
-// First crossing of the ray with the ground: marches `maxDistance` metres, then bisects.
-bool RayHitGround(const WaterRay& ray, const water::HeightFn& ground, double maxDistance, double& x, double& y, double& z);
 
 // One draggable point of a body outline or river path. A midpoint handle inserts a new point when used.
 struct WaterHandle {

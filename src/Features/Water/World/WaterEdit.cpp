@@ -173,37 +173,6 @@ bool EditRemovePoint(WaterBody& body, int index, std::string& error)
     return false;
 }
 
-void BodyCenter(const WaterBody& body, double& x, double& z, double& radius) noexcept
-{
-    Rect2 r{ 0.0, 0.0, 0.0, 0.0 };
-    if (body.kind == WaterBodyKind::Lake && !body.polygon.empty()) {
-        r = PolygonBounds(body.polygon);
-    } else if (body.kind == WaterBodyKind::River && !body.river.empty()) {
-        r = { 1.0e300, 1.0e300, -1.0e300, -1.0e300 };
-        for (const RiverPoint& p : body.river) {
-            r.minX = std::min(r.minX, p.x);
-            r.minZ = std::min(r.minZ, p.z);
-            r.maxX = std::max(r.maxX, p.x);
-            r.maxZ = std::max(r.maxZ, p.z);
-        }
-    }
-    x = 0.5 * (r.minX + r.maxX);
-    z = 0.5 * (r.minZ + r.maxZ);
-    radius = 0.5 * std::max(r.maxX - r.minX, r.maxZ - r.minZ);
-}
-
-void EditTranslate(WaterBody& body, double dx, double dz) noexcept
-{
-    for (Point2& p : body.polygon) {
-        p.x += dx;
-        p.z += dz;
-    }
-    for (RiverPoint& p : body.river) {
-        p.x += dx;
-        p.z += dz;
-    }
-}
-
 LakeLeakReport CheckLakeLeaks(const WaterBody& lake, const HeightFn& ground)
 {
     LakeLeakReport report;

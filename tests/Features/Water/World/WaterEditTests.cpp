@@ -79,20 +79,6 @@ TEST(WaterEditTests, AutoRiverLevelsNeverRise)
     EXPECT_FLOAT_EQ(river.river[0].surfaceY, 99.0f);
 }
 
-TEST(WaterEditTests, TranslateAndCenter)
-{
-    WaterBody lake = MakeBoxLake("L", 10, 20, 40, 60, 0.0f);
-    double x = 0, z = 0, r = 0;
-    BodyCenter(lake, x, z, r);
-    EXPECT_NEAR(x, 10.0, 1e-9);
-    EXPECT_NEAR(z, 20.0, 1e-9);
-    EXPECT_NEAR(r, 30.0, 1e-9);
-    EditTranslate(lake, 5.0, -5.0);
-    BodyCenter(lake, x, z, r);
-    EXPECT_NEAR(x, 15.0, 1e-9);
-    EXPECT_NEAR(z, 15.0, 1e-9);
-}
-
 TEST(WaterMapImageTests, DrawsOceanLakeRiverAndShoreBand)
 {
     WaterBody ocean = MakeOceanBody(0.0f);

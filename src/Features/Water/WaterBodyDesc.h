@@ -38,16 +38,4 @@ struct WaterBodyDesc {
     std::vector<WaterBodyPoint> points;
 };
 
-// Supplies the bodies of the scene. Called on the main thread, once per rendered frame.
-class IWaterBodySource {
-public:
-    virtual ~IWaterBodySource() = default;
-
-    // Changes whenever the set of bodies changes.
-    virtual std::uint64_t Revision() const = 0;
-
-    // Appends every body to `out`.
-    virtual void Collect(std::vector<WaterBodyDesc>& out) const = 0;
-};
-
 } // namespace gte

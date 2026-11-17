@@ -9,7 +9,4 @@ namespace gte {
 
 ModuleCommandResult ExecuteWaterCommand(water::IWaterWorld& world, const ModuleCommandRequest& request);
 
-// True for actions that belong to the water executor.
-inline bool IsWaterAction(const std::string& action) noexcept { return action.rfind("water.", 0) == 0; }
-
 } // namespace gte

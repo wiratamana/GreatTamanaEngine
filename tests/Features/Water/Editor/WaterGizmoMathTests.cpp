@@ -2,6 +2,7 @@
 
 #include "Editor/ViewportProjection.h"
 #include "Features/Water/Editor/WaterGizmoMath.h"
+#include "Features/Water/World/WaterEdit.h"
 
 #include <gtest/gtest.h>
 
@@ -56,25 +57,6 @@ TEST(WaterGizmoMathTests, DegenerateInputsAreRefused)
     WaterRay flat;
     flat.direction[0] = 1.0;
     EXPECT_FALSE(RayHitPlaneY(flat, 0.0, x, z));
-}
-
-TEST(WaterGizmoMathTests, GroundPickFindsTheSurfaceUnderThePixel)
-{
-    const Mat4 vp = View();
-    const water::HeightFn ground = [](double x, double z) { return static_cast<float>(5.0 + 0.1 * x + 0.05 * z); };
-    const Vec3 target(30.0f, 5.0f + 3.0f + 0.05f * 10.0f, 10.0f);
-    Vec2 pixel;
-    ASSERT_TRUE(ProjectToScreen(target, vp, kMin, kMax, pixel));
-    WaterRay ray;
-    ASSERT_TRUE(ScreenToRay(vp, kMin, kMax, pixel, ray));
-    double x = 0, y = 0, z = 0;
-    ASSERT_TRUE(RayHitGround(ray, ground, 2000.0, x, y, z));
-    EXPECT_NEAR(y, ground(x, z), 0.01);
-    EXPECT_NEAR(x, 30.0, 0.5);
-    // A ray that never goes down finds nothing.
-    WaterRay sky = ray;
-    sky.direction[1] = 0.5;
-    EXPECT_FALSE(RayHitGround(sky, ground, 2000.0, x, y, z));
 }
 
 TEST(WaterGizmoMathTests, HandlesPickMidpointsInsertAndCornersWin)

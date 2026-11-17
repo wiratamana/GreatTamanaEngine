@@ -20,9 +20,6 @@ public:
     float Apply(double x, double z, float h, double spacing) const noexcept override;
     void ApplyTile(float* tile, int side, double originX, double originZ, double spacing) const override;
 
-    std::size_t LakeCount() const noexcept { return m_lakes.size(); }
-    std::size_t RiverCount() const noexcept { return m_rivers.size(); }
-
 private:
     struct Lake {
         std::vector<Point2> poly;

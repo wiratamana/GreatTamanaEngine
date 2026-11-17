@@ -51,11 +51,6 @@ WaterViewSnapshot WaterFeature::Snapshot(rg::ViewScope scope) const
     return snapshot;
 }
 
-void WaterFeature::SetBodySource(std::shared_ptr<const IWaterBodySource> source)
-{
-    m_bodySource = std::move(source);
-}
-
 bool WaterFeature::AddLocalBody(WaterBodyDesc body)
 {
     if (m_localBodies.size() >= kWaterMaxBodies) {
@@ -81,11 +76,7 @@ void WaterFeature::ClearLocalBodies()
 
 WaterProbe WaterFeature::Probe(Vec2 xz)
 {
-    m_frameBodies = m_localBodies;
-    if (m_bodySource) {
-        m_bodySource->Collect(m_frameBodies);
-    }
-    return WaterProbePoint(m_frameBodies, m_settings, m_time, xz);
+    return WaterProbePoint(m_localBodies, m_settings, m_time, xz);
 }
 
 void WaterFeature::AdvanceClock(const fx::Frame& f)
@@ -129,12 +120,8 @@ void WaterFeature::SurfacePass(fx::PostOpaqueFrame& f)
         bail(WaterFrameStatus::PassDisabled);
         return;
     }
-    m_frameBodies = m_localBodies;
-    if (m_bodySource) {
-        m_bodySource->Collect(m_frameBodies);
-    }
     std::uint32_t bodyCount = 0;
-    const WaterBodiesGpu bodies = PackWaterBodies(m_frameBodies, cfg.seaLevel, bodyCount);
+    const WaterBodiesGpu bodies = PackWaterBodies(m_localBodies, cfg.seaLevel, bodyCount);
     snap.bodyCount = bodyCount;
     if (!WaterAnyBodyBelowEye(bodies, v.eye.y)) {
         bail(bodyCount == 0 ? WaterFrameStatus::NoBodies : WaterFrameStatus::CameraUnderwater);

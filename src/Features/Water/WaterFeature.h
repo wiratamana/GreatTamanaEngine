@@ -1,6 +1,6 @@
 #pragma once
 
-#include "WaterBodySource.h"
+#include "WaterBodyDesc.h"
 #include "WaterDebugEndpoint.h"
 #include "WaterMath.h"
 #include "WaterTypes.h"
@@ -40,10 +40,7 @@ public:
     // The last state of `scope`'s view; NotRendered when that view has not rendered for a few frames.
     WaterViewSnapshot Snapshot(rg::ViewScope scope) const;
 
-    // Bodies from the editor layer; null clears. The feature shares ownership. Main thread only.
-    void SetBodySource(std::shared_ptr<const IWaterBodySource> source);
-
-    // Bodies added by the debug endpoint. With no local body and no source one ocean at the sea level is drawn.
+    // Bodies added by the debug endpoint. With no body one ocean at the sea level is drawn.
     const std::vector<WaterBodyDesc>& LocalBodies() const noexcept { return m_localBodies; }
     bool AddLocalBody(WaterBodyDesc body);
     bool RemoveLocalBody(std::size_t index);
@@ -60,8 +57,6 @@ private:
 
     WaterSettings m_settings;
     std::vector<WaterBodyDesc> m_localBodies;
-    std::shared_ptr<const IWaterBodySource> m_bodySource;
-    std::vector<WaterBodyDesc> m_frameBodies; // Scratch for the merged list.
     double m_time = 0.0;
     std::uint64_t m_clockFrame = ~std::uint64_t{ 0 };
     std::uint64_t m_newestFrame = 0;

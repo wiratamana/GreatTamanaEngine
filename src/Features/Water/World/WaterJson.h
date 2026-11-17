@@ -11,13 +11,11 @@
 namespace gte::water {
 
 std::string SettingsToJson(const WaterSettings& settings);
-std::string BodyToJson(const WaterBody& body);
 // {"settings": {...}, "bodies": [...]}; the output of this is accepted by ParseWorldJson.
 std::string WorldToJson(const WaterBodySet& set);
 
 // Missing keys keep the value already in `settings`. Returns false and sets `error` on malformed text.
 bool ParseSettingsJson(const std::string& text, WaterSettings& settings, std::string& error);
-bool ParseBodyJson(const std::string& text, WaterBody& body, std::string& error);
 bool ParseWorldJson(const std::string& text, WaterSettings& settings, std::vector<WaterBody>& bodies, std::string& error);
 
 // Names of the settings keys, in a fixed order (HTTP set route, tests).

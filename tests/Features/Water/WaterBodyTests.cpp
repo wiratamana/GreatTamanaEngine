@@ -1,6 +1,6 @@
 // Body packing, polygon and river queries of the Water feature.
 
-#include "Features/Water/WaterBodySource.h"
+#include "Features/Water/WaterBodyDesc.h"
 #include "Features/Water/WaterMath.h"
 
 #include <gtest/gtest.h>
