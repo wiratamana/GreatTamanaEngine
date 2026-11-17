@@ -986,8 +986,8 @@ void TerrainWorld::TickStreaming(const TerrainTickContext& context, Game& game, 
     m_streamer->Update(m_wanted, context.frameIndex, context.nowSeconds, m_update);
 
     // Evictions first: their slots go back to the pool (hidden before they can be reused).
+    // The measured height range is kept, else the node flips wanted/unwanted and rebuilds in a loop.
     for (const NodeKey& key : m_update.evicted) {
-        m_selector->ForgetNodeHeightRange(key);
         if (const auto it = m_slotOfKey.find(key); it != m_slotOfKey.end()) {
             m_pool->Release(it->second, frame);
             m_keyOfSlot[it->second].reset();
