@@ -1,6 +1,5 @@
 #include "TerrainFeatureProfile.h"
 
-#include "../../../Editor/HizDemoProfile.h"
 #include "../../../Editor/PresetFeatureSettings.h"
 #include "../../../Editor/PresetSceneSupport.h"
 #include "../../../Core/Plugins/RenderFeatureCompositor.h"
@@ -23,6 +22,10 @@ constexpr std::array<std::string_view, 5> kSettingKeys{ "enabled", "mode", "cone
 
 // The fixed-cost features that hurt most on an integrated GPU.
 constexpr std::array<std::string_view, 3> kLeanPrefixes{ "VolumetricLight", "Ssgi", "Gtao" };
+
+// Features the geometry-only profile turns off on top of the lean ones.
+constexpr std::array<std::string_view, 6> kGeometryOnlyPrefixes{
+    "Shadow", "VolumetricLight", "Atmosphere", "Ssgi", "Gtao", "ToneMapping" };
 
 // Quality the render budget sets: shadows only near the camera on small maps, fewer aerial perspective samples.
 struct BudgetKey {
@@ -66,7 +69,7 @@ std::vector<std::string> PlanTerrainFeatureSwitch(
             continue;
         }
         const bool lean = StartsWithAny(entry.name, kLeanPrefixes);
-        const bool geometryOnly = profile == terrain::TerrainProfile::GeometryOnly && IsGeometryOnlyFeature(entry.name);
+        const bool geometryOnly = profile == terrain::TerrainProfile::GeometryOnly && StartsWithAny(entry.name, kGeometryOnlyPrefixes);
         if (lean || geometryOnly) {
             off.push_back(entry.name);
         }

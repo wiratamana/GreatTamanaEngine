@@ -48,7 +48,7 @@ TEST(TerrainFeatureProfileTests, LeanSwitchesOffTheHeavyScreenSpaceAndVolumeFeat
     EXPECT_FALSE(Has(off, "GpuDrivenScene")) << "the culling feature must stay on";
 }
 
-TEST(TerrainFeatureProfileTests, GeometryOnlyAddsTheFixedCostFeaturesOfTheHizDemo)
+TEST(TerrainFeatureProfileTests, GeometryOnlyAlsoTurnsOffShadowAtmosphereAndToneMapping)
 {
     const std::vector<std::string> off = PlanTerrainFeatureSwitch(terrain::TerrainProfile::GeometryOnly, AllFeatures());
     for (const char* name : { "Atmosphere", "Shadow", "Gtao", "Ssgi", "VolumetricLight", "ToneMapping" }) {
