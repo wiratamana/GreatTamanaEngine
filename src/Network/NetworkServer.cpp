@@ -5,7 +5,7 @@
 #include "NetworkPhysicsDebugRoutes.h"
 #include "NetworkProfilerRoutes.h"
 #include "NetworkRoutes.h"
-#include "NetworkTerrainRoutes.h"
+#include "NetworkModuleRoutes.h"
 #include "NetworkRequestGuard.h"
 #include "NetworkSceneCameraPose.h"
 
@@ -13,6 +13,7 @@
 #include "../Application/EditorUiCommandBridge.h"
 #include "../Application/EngineCommandBridge.h"
 #include "../Application/FeatureDebugCommandBridge.h"
+#include "../Application/FeatureRouteRegistry.h"
 #include "../Application/FrameCaptureBridge.h"
 #include "../Application/FrameDebuggerCommandBridge.h"
 #include "../Application/PhysicsDebugCommandBridge.h"
@@ -480,8 +481,8 @@ void RegisterFeatureDebugRoutes(httplib::Server& server, FeatureDebugCommandBrid
     registerCommand("/feature_debug/set", FeatureDebugRoute::Set, FeatureDebugCommandKind::Set);
     registerCommand("/feature_debug/invoke", FeatureDebugRoute::Invoke, FeatureDebugCommandKind::Invoke);
 
-    // Short routes for two Grass actions: /grass/tile (height tile source) and /grass/probe?x=&z= (root height check).
-    const auto registerAlias = [&server, bridge, respond, bridgeMissing](const char* path, const char* feature, const char* action) {
+    // Short routes that features register: GET <path> answers like /feature_debug/invoke for one action.
+    const auto registerAlias = [&server, bridge, respond, bridgeMissing](const std::string& path, const std::string& feature, const std::string& action) {
         server.Get(path, [bridge, feature, action, respond, bridgeMissing](const httplib::Request& req, httplib::Response& res) {
             std::vector<std::pair<std::string, std::string>> params(req.params.begin(), req.params.end());
             params.emplace_back("name", feature);
@@ -506,9 +507,9 @@ void RegisterFeatureDebugRoutes(httplib::Server& server, FeatureDebugCommandBrid
                              parsed.featureName, submit.result ? submit.result->result : empty));
         });
     };
-    registerAlias("/grass/tile", "Grass", "tile");
-    registerAlias("/grass/probe", "Grass", "probe");
-    registerAlias("/grass/probe_batch", "Grass", "probe_batch");
+    for (const DebugRouteAlias& alias : FeatureRouteRegistry::Instance().DebugAliases()) {
+        registerAlias(alias.path, alias.featureName, alias.action);
+    }
 }
 
 // Writes the answer of a failed viewer or Scene camera command.
@@ -869,7 +870,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     RenderGraphControlCommandBridge* renderGraphControlCommandBridge, IHotReloadDebugCapability* hotReloadDebugCapability,
     IProjectLifecycleCapability* projectLifecycleCapability, IAssetScaffoldingCapability* assetScaffoldingCapability,
     FeatureDebugCommandBridge* featureDebugCommandBridge, ProfilerSnapshotBridge* profilerSnapshotBridge,
-    PhysicsDebugCommandBridge* physicsDebugCommandBridge, ModuleCommandBridge* terrainCommandBridge)
+    PhysicsDebugCommandBridge* physicsDebugCommandBridge, ModuleCommandBridge* moduleCommandBridge)
 {
     server.Get("/http_hello_world", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(HandleHelloWorld(), "text/plain; charset=utf-8");
@@ -2524,7 +2525,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     RegisterProfilerRoutes(server, profilerSnapshotBridge, &RefuseBrowserRequest);
     RegisterFeatureDebugRoutes(server, featureDebugCommandBridge);
     RegisterPhysicsDebugRoutes(server, physicsDebugCommandBridge, &RefuseBrowserRequest);
-    RegisterTerrainRoutes(server, terrainCommandBridge, &RefuseBrowserRequest);
+    RegisterModuleRoutes(server, moduleCommandBridge, &RefuseBrowserRequest);
     RegisterClusterViewerRoutes(server, uiCommandBridge, assetImportCommandBridge);
 }
 
@@ -2540,7 +2541,7 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     RenderGraphControlCommandBridge* renderGraphControlCommandBridge, IHotReloadDebugCapability* hotReloadDebugCapability,
     IProjectLifecycleCapability* projectLifecycleCapability, IAssetScaffoldingCapability* assetScaffoldingCapability,
     FeatureDebugCommandBridge* featureDebugCommandBridge, ProfilerSnapshotBridge* profilerSnapshotBridge,
-    PhysicsDebugCommandBridge* physicsDebugCommandBridge, ModuleCommandBridge* terrainCommandBridge)
+    PhysicsDebugCommandBridge* physicsDebugCommandBridge, ModuleCommandBridge* moduleCommandBridge)
     : m_impl(std::make_unique<Impl>())
     , m_captureBridge(captureBridge)
     , m_commandBridge(commandBridge)
@@ -2555,13 +2556,13 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     , m_featureDebugCommandBridge(featureDebugCommandBridge)
     , m_profilerSnapshotBridge(profilerSnapshotBridge)
     , m_physicsDebugCommandBridge(physicsDebugCommandBridge)
-    , m_terrainCommandBridge(terrainCommandBridge)
+    , m_moduleCommandBridge(moduleCommandBridge)
 {
     // Routes are registered once here, never in Start(), so a restart cannot register them twice.
     RegisterRoutes(m_impl->server, m_captureBridge, m_commandBridge, m_uiCommandBridge, m_frameDebuggerCommandBridge,
         m_assetImportCommandBridge, m_logQueryCapability, m_renderGraphControlCommandBridge, m_hotReloadDebugCapability,
         m_projectLifecycleCapability, m_assetScaffoldingCapability, m_featureDebugCommandBridge, m_profilerSnapshotBridge,
-        m_physicsDebugCommandBridge, m_terrainCommandBridge);
+        m_physicsDebugCommandBridge, m_moduleCommandBridge);
 }
 
 NetworkServer::~NetworkServer()

@@ -47,7 +47,7 @@ public:
         FeatureDebugCommandBridge* featureDebugCommandBridge = nullptr,
         ProfilerSnapshotBridge* profilerSnapshotBridge = nullptr,
         PhysicsDebugCommandBridge* physicsDebugCommandBridge = nullptr,
-        ModuleCommandBridge* terrainCommandBridge = nullptr);
+        ModuleCommandBridge* moduleCommandBridge = nullptr);
     ~NetworkServer();
 
     NetworkServer(const NetworkServer&) = delete;
@@ -91,7 +91,7 @@ private:
     FeatureDebugCommandBridge* m_featureDebugCommandBridge = nullptr;
     ProfilerSnapshotBridge* m_profilerSnapshotBridge = nullptr;
     PhysicsDebugCommandBridge* m_physicsDebugCommandBridge = nullptr;
-    ModuleCommandBridge* m_terrainCommandBridge = nullptr;
+    ModuleCommandBridge* m_moduleCommandBridge = nullptr;
 };
 
 } // namespace gte::Network

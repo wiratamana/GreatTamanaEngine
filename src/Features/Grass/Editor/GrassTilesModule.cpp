@@ -2,6 +2,7 @@
 
 #include "../../Terrain/Editor/TerrainModule.h"
 #include "../../Water/Editor/WaterModule.h"
+#include "../../../Application/FeatureRouteRegistry.h"
 #include "../../../Core/Core.h"
 #include "../../../Core/Plugins/BuiltinFeatureModuleRegistry.h"
 #include "../../../Game/Game.h"
@@ -67,5 +68,9 @@ std::unique_ptr<IEngineFeatureModule> MakeGrassTilesModule(Core& core)
 } // namespace
 
 GTE_REGISTER_BUILTIN_FEATURE_MODULE("GrassTiles", &MakeGrassTilesModule);
+// Short routes: the height tile source and the root height checks.
+GTE_REGISTER_DEBUG_ROUTE_ALIAS("/grass/tile", "Grass", "tile");
+GTE_REGISTER_DEBUG_ROUTE_ALIAS("/grass/probe", "Grass", "probe");
+GTE_REGISTER_DEBUG_ROUTE_ALIAS("/grass/probe_batch", "Grass", "probe_batch");
 
 } // namespace gte

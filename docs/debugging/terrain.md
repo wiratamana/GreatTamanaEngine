@@ -9,7 +9,7 @@
 - Read everything with `GET /terrain/state`. Look at the world with `GET /get_game_view` after `GET /activate_tab?name=Game`.
 - Move the camera with the free-fly or orbit mode (`GET /terrain/cam`), `GET /terrain/flight` (repeatable) or `POST /set_entity_trs` with `"name":"Terrain Camera"`.
 - Everything is also a panel: Window > Terrain (sliders, live preview, save and load, bounding boxes, stats). See [Terrain panel](#terrain-panel-window--terrain).
-- Code: `src/Features/Terrain/` (pure CPU), `src/Features/Terrain/Editor/` (GPU pool, world, commands), `src/Network/NetworkTerrainRoutes.*`.
+- Code: `src/Features/Terrain/` (pure CPU), `src/Features/Terrain/Editor/` (GPU pool, world, commands), `GTE_REGISTER_MODULE_ROUTES` in `TerrainModule.cpp`.
 
 ## Routes
 All routes are `GET`. Routes that change something refuse browser requests (`403`). `state`, `settings` read only.

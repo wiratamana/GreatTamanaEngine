@@ -4,6 +4,7 @@
 #include "TerrainPanel.h"
 #include "TerrainUiBridge.h"
 #include "TerrainViewOverlay.h"
+#include "../../../Application/FeatureRouteRegistry.h"
 #include "../../../Core/Core.h"
 #include "../../../Core/Plugins/BuiltinFeatureModuleRegistry.h"
 #include "../../../Editor/BuiltinFeatureEditorPanelRegistry.h"
@@ -126,5 +127,6 @@ std::unique_ptr<EditorWindow> CreateTerrainPanel(
 
 GTE_REGISTER_BUILTIN_FEATURE_MODULE("TerrainWorld", &MakeTerrainModule);
 GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("TerrainWorld", &CreateTerrainPanel);
+GTE_REGISTER_MODULE_ROUTES("terrain", "", "state", "map", "settings", "height");
 
 } // namespace gte

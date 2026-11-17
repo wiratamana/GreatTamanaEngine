@@ -169,3 +169,8 @@ DrawTopThings
 m_topThings
 kTopThingMinPercent
 kTopThingsPerLane
+RegisterTerrainRoutes
+NetworkTerrainRoutes
+TerrainBrowserRefusal
+m_terrainCommandBridge
+terrainCommandBridge

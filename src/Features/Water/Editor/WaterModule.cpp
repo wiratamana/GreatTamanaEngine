@@ -6,6 +6,7 @@
 #include "WaterUiBridge.h"
 #include "../../Terrain/Editor/TerrainModule.h"
 #include "../../Terrain/Editor/TerrainUiBridge.h"
+#include "../../../Application/FeatureRouteRegistry.h"
 #include "../../../Core/Plugins/BuiltinFeatureModuleRegistry.h"
 #include "../../../Editor/BuiltinFeatureEditorPanelRegistry.h"
 #include "../../../Editor/EditorExtensions.h"
@@ -107,5 +108,6 @@ std::unique_ptr<EditorWindow> CreateWaterPanel(
 
 GTE_REGISTER_BUILTIN_FEATURE_MODULE("WaterWorld", &MakeWaterModule);
 GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("WaterWorld", &CreateWaterPanel);
+GTE_REGISTER_MODULE_ROUTES("water", "water.", "state", "list", "settings", "probe", "map", "leaks");
 
 } // namespace gte

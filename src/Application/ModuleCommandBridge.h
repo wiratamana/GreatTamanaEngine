@@ -7,7 +7,7 @@
 
 namespace gte {
 
-// One module HTTP call (/terrain/<action>, /water/<action>): the action name plus the raw query pairs, parsed on the main thread.
+// One module HTTP call (/<prefix>/<name>): the action name plus the raw query pairs, parsed on the main thread.
 struct ModuleCommandRequest {
     std::string action;
     std::vector<std::pair<std::string, std::string>> params;
