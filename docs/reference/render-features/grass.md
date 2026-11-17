@@ -245,11 +245,11 @@ Cull and draw (GPU ms, `ground`): Lean 0.54 / 0.65, Medium 0.75 / 1.73, Big 1.38
 - Grass takes the terrain colour from the node vertex colours. Biome limits are still settings: `sandHeight` (7 m, like the terrain `sandMaxHeight`), `alpineHeight` / `alpineFade` (450 m and 150 m, below the terrain snow line at 0.55 x heightScale), `maxSlopeDeg` (40, terrain grass slope is 32 to 42).
 - The pipelined frame mode (`PipelinedDeferredReadback`) refuses every CPU parameter upload, so no feature with `GpuParams` draws in it. Grass is the same.
 - `GrassCull.comp` returns early for a whole group before its barriers. All 64 threads of a group take the same path. Keep it so.
-- Not verified: the Frame Debugger replay of the indirect draws, and synchronization validation. Core validation was run (layer is in the Vulkan SDK `Bin` folder; start the editor with `VK_LAYER_PATH` set and `--vulkan-validation`) and showed no Grass messages.
+- Validation: core and synchronization validation ran clean for Grass (see [Troubleshooting](../../troubleshooting.md), "Vulkan validation messages"). Not verified: the Frame Debugger replay of the indirect draws, one event at a time.
 
 ## Debug views and checks (F3)
 - `debugView=LodColor`, `Sway` (blue to red by tip angle) and `ChunkBounds` all work on the packed instance.
-- Checked live: Scene view enabled (`/render_graph/set_feature_enabled?name=Grass.Draw&enabled=true&view=secondary`, status Ok), Frame Debugger enabled and a capture taken, window resize 640x400 to 1500x800, 3 terrain close and open cycles, `enabled=false` (no Grass rows in the profiler, status `Disabled`). `/get_logs?category=FeatureKit` stays at the one startup Gtao line. The Vulkan validation layer is not installed, so none of it ran under validation.
+- Checked live: Scene view enabled (`/render_graph/set_feature_enabled?name=Grass.Draw&enabled=true&view=secondary`, status Ok), Frame Debugger enabled and a capture taken, window resize 640x400 to 1500x800, 3 terrain close and open cycles, `enabled=false` (no Grass rows in the profiler, status `Disabled`). `/get_logs?category=FeatureKit` stays at the one startup Gtao line. The same actions also ran under core and synchronization validation without a Grass message.
 - The Grass window is an `EditorWindow` (always dockable, default dock Bottom on a first run). An existing `imgui.ini` without a Grass entry shows it floating, as an own OS window: drag it into a dock. It is not a bug.
 
 ## Tests

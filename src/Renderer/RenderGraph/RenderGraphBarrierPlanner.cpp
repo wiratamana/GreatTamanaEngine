@@ -17,21 +17,21 @@ ResourceState RequiredStateFor(ResourceAccess access, bool isDepthResource) noex
         assert(!isDepthResource &&
             "RequiredStateFor: ColorAttachmentWrite requested against a resource flagged as depth - "
             "these two ResourceAccess/isDepthResource combinations are mutually exclusive by construction.");
+        // READ too: a pass may load the attachment, blend into it or depth-test against it.
         return ResourceState{
             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
         };
     case ResourceAccess::DepthStencilAttachmentReadWrite:
         assert(isDepthResource &&
             "RequiredStateFor: DepthStencilAttachmentReadWrite requested against a resource NOT flagged as "
             "depth - these two ResourceAccess/isDepthResource combinations are mutually exclusive by "
             "construction.");
-        // Access mask is WRITE only (not READ | WRITE), matching the established depth-attachment barrier.
         return ResourceState{
             VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
         };
     case ResourceAccess::ShaderRead:
         return ResourceState{

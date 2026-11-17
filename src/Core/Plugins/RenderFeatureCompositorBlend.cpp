@@ -27,7 +27,9 @@ rg::TextureHandle RenderFeatureCompositor::Impl::AcquireTarget(
     rg::RenderGraphBuilder& builder, const char* internedName, Extent2D extent)
 {
     const rg::RenderFeatureScope owner(builder, kTargetOwner);
-    return targets[internedName].Acquire(builder, internedName, extent, PixelFormat::RGBA16_Float);
+    // TransferDst: features blit their result into the private target.
+    return targets[internedName].Acquire(builder, internedName, extent, PixelFormat::RGBA16_Float,
+        rg::TextureUsage::Storage | rg::TextureUsage::TransferDst);
 }
 
 bool RenderFeatureCompositor::Impl::DispatchBlend(rg::RenderGraphBuilder& builder, rg::TextureHandle dstIn,

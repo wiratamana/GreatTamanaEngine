@@ -62,6 +62,9 @@
 - **Fix:** opening another scene (a module action, `/terrain/open`, Open Scene) while the Hi-Z demo was active left its feature switches on: the sky and aerial perspective stayed off. The host now releases the Hi-Z demo settings when none of its entities is alive (`HizDemoSceneReplaced`).
 - **Fix:** the Water edit handles and outlines no longer draw over the Game view while the Water window is closed. The Scene view is unchanged.
 - Profiler: every editor feature module gets CPU rows `EditorModule.<name>.FrameTick` and `.UiRequests`, plus `EditorFeatureHooks::RunViewInput` and `RunViewOverlay`. Read them with `/profiler/table?view=flat&lane=main`.
+- **Fix (synchronization):** the render graph barrier for an attachment now carries READ and WRITE access. Before, a pass that loads or depth-tests an attachment (grass draws, water composite, other passes) raised 4 `READ_AFTER_WRITE` hazards per frame under synchronization validation.
+- **Fix (validation):** the feature compositor's private targets are created with `TransferDst`, because features blit into them. Before, 5 blits per frame wrote into an image without that usage bit.
+- Validation recipe (layer path, synchronization validation, duplicate limit) is in [Troubleshooting](troubleshooting.md#vulkan-validation-messages).
 
 ## Landscape dead code removed (branch `feature/precural-landscape`, 2026-11-17)
 - Terrain: removed unused `LodSelector::ClearHeightRanges`, `TerrainHeightField::LevelForSpacing`, the unused pool and streamer counters, and the 10 disabled manual bench tests. `InlineTerrainExecutor` moved into the test folder.

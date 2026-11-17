@@ -26,8 +26,16 @@
 | Editor runs, no HTTP | Port `8080` is taken. The log says `failed to bind` (category `Network`). | Close the other editor. One instance can serve. |
 | Editor runs, no HTTP at all | Built with `GTE_ENABLE_NETWORK=OFF` | Configure with it `ON`. |
 | Window stops drawing after a GPU error | Device lost. `Core` logs one line and stops rendering. | Restart the editor. |
-| Need Vulkan validation messages | Validation is off by default | Start with `--vulkan-validation`. |
+| Need Vulkan validation messages | Validation is off by default | Start with `--vulkan-validation`. See "Vulkan validation messages" below. |
 | Benchmark numbers jump | Vsync snaps FPS to refresh steps | Start with `--no-vsync`. Compare milliseconds. |
+
+## Vulkan validation messages
+- The Khronos layer is in the Vulkan SDK `Bin` folder. Set `VK_LAYER_PATH` to it, then start the editor with `--vulkan-validation`.
+- Messages arrive in the engine log with category `Vulkan`. Read them with `/get_logs?min_level=warning`.
+- For synchronization checks also set `VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT` and `VK_KHRONOS_VALIDATION_VALIDATE_SYNC=true`. A hazard then reads `READ_AFTER_WRITE hazard detected`.
+- The layer stops repeating one message after 10 times. Set `VK_KHRONOS_VALIDATION_DUPLICATE_MESSAGE_LIMIT=1000000` to see every frame. The log keeps only the newest 2000 entries.
+- A clean steady state has no new `Vulkan` entries per frame. At startup a few pipeline interface warnings and one swapchain layout transition message are known and harmless.
+- Known editor-only messages: a descriptor set update while in use when the Scene view is hidden, and an image view destroyed while in use when the Frame Debugger is turned off.
 
 ## HTTP
 | Symptom | Cause | Fix |

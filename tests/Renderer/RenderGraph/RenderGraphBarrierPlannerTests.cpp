@@ -10,6 +10,11 @@
 namespace gte::rg {
 namespace {
 
+// Attachments are read too (load, blend, depth test), so the planner asks for both bits.
+constexpr VkAccessFlags2 kColorAttachmentAccess = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+constexpr VkAccessFlags2 kDepthAttachmentAccess =
+    VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
 // --- RequiredStateFor() - one case per ResourceAccess enumerator ----------
 
 TEST(RenderGraphBarrierPlannerTest, RequiredStateForColorAttachmentWrite)
@@ -18,19 +23,18 @@ TEST(RenderGraphBarrierPlannerTest, RequiredStateForColorAttachmentWrite)
 
     EXPECT_EQ(state.layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     EXPECT_EQ(state.stageMask, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
-    EXPECT_EQ(state.accessMask, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    EXPECT_EQ(state.accessMask, kColorAttachmentAccess);
 }
 
-TEST(RenderGraphBarrierPlannerTest, RequiredStateForDepthStencilAttachmentReadWriteMatchesFrameRecordersOwnDepthBarrier)
+TEST(RenderGraphBarrierPlannerTest, RequiredStateForDepthStencilAttachmentReadWrite)
 {
-    // Matches the hand-written depth attachment barrier in FrameRecorder.cpp.
     const ResourceState state = RequiredStateFor(ResourceAccess::DepthStencilAttachmentReadWrite, true);
 
     EXPECT_EQ(state.layout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
     EXPECT_EQ(state.stageMask,
         static_cast<VkPipelineStageFlags2>(
             VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT));
-    EXPECT_EQ(state.accessMask, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+    EXPECT_EQ(state.accessMask, kDepthAttachmentAccess);
 }
 
 TEST(RenderGraphBarrierPlannerTest, RequiredStateForShaderRead)
@@ -307,13 +311,13 @@ TEST(RenderGraphBarrierPlannerTest, ThreePassPingPongSequenceEmitsExactlyTwoBarr
 
     const VkImageMemoryBarrier2 barrierAfterA =
         BuildImageMemoryBarrier2(VK_NULL_HANDLE, VkImageSubresourceRange{}, stateEnteringB, afterB);
-    EXPECT_EQ(barrierAfterA.srcAccessMask, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    EXPECT_EQ(barrierAfterA.srcAccessMask, kColorAttachmentAccess);
     EXPECT_EQ(barrierAfterA.dstAccessMask, VK_ACCESS_2_SHADER_READ_BIT);
 
     const VkImageMemoryBarrier2 barrierAfterB =
         BuildImageMemoryBarrier2(VK_NULL_HANDLE, VkImageSubresourceRange{}, stateEnteringC, afterC);
     EXPECT_EQ(barrierAfterB.srcAccessMask, VK_ACCESS_2_SHADER_READ_BIT);
-    EXPECT_EQ(barrierAfterB.dstAccessMask, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    EXPECT_EQ(barrierAfterB.dstAccessMask, kColorAttachmentAccess);
 }
 
 // --- BuildImageMemoryBarrier2()/BuildBufferMemoryBarrier2() - plain field population ---
@@ -375,7 +379,7 @@ TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersOwnColorAttac
     EXPECT_EQ(barrier.srcStageMask, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT);
     EXPECT_EQ(barrier.srcAccessMask, VK_ACCESS_2_NONE);
     EXPECT_EQ(barrier.dstStageMask, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
-    EXPECT_EQ(barrier.dstAccessMask, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    EXPECT_EQ(barrier.dstAccessMask, kColorAttachmentAccess);
     EXPECT_EQ(barrier.oldLayout, VK_IMAGE_LAYOUT_UNDEFINED);
     EXPECT_EQ(barrier.newLayout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 }
@@ -394,7 +398,7 @@ TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersOwnDepthAttac
     EXPECT_EQ(barrier.dstStageMask,
         static_cast<VkPipelineStageFlags2>(
             VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT));
-    EXPECT_EQ(barrier.dstAccessMask, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+    EXPECT_EQ(barrier.dstAccessMask, kDepthAttachmentAccess);
     EXPECT_EQ(barrier.oldLayout, VK_IMAGE_LAYOUT_UNDEFINED);
     EXPECT_EQ(barrier.newLayout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 }
@@ -410,7 +414,7 @@ TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersPresentPathFi
         BuildImageMemoryBarrier2(VK_NULL_HANDLE, VkImageSubresourceRange{}, afterColorWrite, presentSource);
 
     EXPECT_EQ(barrier.srcStageMask, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
-    EXPECT_EQ(barrier.srcAccessMask, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    EXPECT_EQ(barrier.srcAccessMask, kColorAttachmentAccess);
     EXPECT_EQ(barrier.dstStageMask, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT);
     EXPECT_EQ(barrier.dstAccessMask, VK_ACCESS_2_NONE);
     EXPECT_EQ(barrier.oldLayout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
@@ -427,7 +431,7 @@ TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersRenderOffscre
         BuildImageMemoryBarrier2(VK_NULL_HANDLE, VkImageSubresourceRange{}, afterColorWrite, shaderReadSource);
 
     EXPECT_EQ(barrier.srcStageMask, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
-    EXPECT_EQ(barrier.srcAccessMask, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    EXPECT_EQ(barrier.srcAccessMask, kColorAttachmentAccess);
     EXPECT_EQ(barrier.dstStageMask, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
     EXPECT_EQ(barrier.dstAccessMask, VK_ACCESS_2_SHADER_READ_BIT);
     EXPECT_EQ(barrier.oldLayout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
