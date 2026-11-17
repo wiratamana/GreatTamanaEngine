@@ -1,7 +1,6 @@
 #version 450
 
-// Per frame, before the cull: zero the stats words and reset the three indirect draw commands.
-// Dispatch at least 64 invocations. Command layout: 3 x {vertexCount, instanceCount, firstVertex, firstInstance}.
+// Per frame, before the cull: zero the stats words and reset the six indirect draw commands (3 colour + 3 shadow).
 #include "GrassCommon.glsl"
 
 layout(local_size_x = 64) in;
@@ -27,9 +26,16 @@ void main()
         } else if (i == 1u) {
             vertexCount = kGrassVertsList1;
         }
-        commands.values[i * 4u + 0u] = vertexCount;
-        commands.values[i * 4u + 1u] = 0u;
-        commands.values[i * 4u + 2u] = 0u;
-        commands.values[i * 4u + 3u] = 0u;
+        uint colorBase = i * 4u;
+        commands.values[colorBase + 0u] = vertexCount;
+        commands.values[colorBase + 1u] = 0u;
+        commands.values[colorBase + 2u] = 0u;
+        commands.values[colorBase + 3u] = 0u;
+
+        uint shadowBase = (i + kGrassLodCount) * 4u;
+        commands.values[shadowBase + 0u] = kGrassVertsList2;
+        commands.values[shadowBase + 1u] = 0u;
+        commands.values[shadowBase + 2u] = 0u;
+        commands.values[shadowBase + 3u] = 0u;
     }
 }

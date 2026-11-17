@@ -68,10 +68,28 @@ struct GrassFrameInputs {
     float hizDepthK = 0.0f;
     float hizDepthB = 0.0f;
     float hizLevels = 0.0f;
+    bool shadowCasting = false; // Adds shadowPadM to the chunk frustum test while castShadows is on.
 };
 
 // Workgroups that share one chunk: dense chunks have thousands of candidates, so one group per chunk would leave the GPU idle.
 std::uint32_t GrassSlicesPerChunk(float densityLod0) noexcept;
+
+// One eligible cascade for GrassShadow depth draws, with its eye-relative matrix built in double precision.
+struct GrassShadowCascadeDraw {
+    std::uint32_t cascadeIndex = 0;
+    Mat4 viewProjectionRelative = Mat4::Identity();
+    float minWidth = 0.0f;
+    float biasM = 0.0f;
+};
+
+struct GrassShadowCastPlan {
+    std::uint32_t count = 0;
+    GrassShadowCascadeDraw cascades[kSunShadowReceiverMaxCascades]{};
+};
+
+// Plans which sun cascades receive depth-only grass draws and builds their eye-relative matrices in double.
+GrassShadowCastPlan MakeGrassShadowCastPlan(const SunShadowReceiver* receiver, const Vec3& sunDir,
+    double eyeX, double eyeY, double eyeZ, const GrassSettings& settings) noexcept;
 
 // Packs cascade and cloud shadow parameters for GrassCull.comp; zeroes unusable or mismatched inputs.
 GrassShadowParamsGpu MakeGrassShadowParams(const SunShadowReceiver* receiver, const CloudShadowMap* cloud,

@@ -1,8 +1,10 @@
-// Tests for the Grass settings, grid, planes, params packing and the made-up landscape.
+// Tests for the Grass settings, grid, planes, params packing, shadow casting plan and debug endpoint.
 
+#include "ECS/Registry.h"
 #include "Features/Grass/GrassFeature.h"
 #include "Features/Grass/GrassMath.h"
 #include "Game/Lighting/WindState.h"
+#include "Math/Mat4d.h"
 
 #include <gtest/gtest.h>
 
@@ -29,8 +31,17 @@ TEST(GrassMathTest, ParamsBlockLayoutIsPinned)
     EXPECT_EQ(offsetof(GrassParamsGpu, depthMap), 592u);
     EXPECT_EQ(sizeof(GrassInstanceGpu), 32u);
     EXPECT_EQ(sizeof(GrassPushGpu), 16u);
+    EXPECT_EQ(sizeof(GrassShadowPushGpu), 80u);
+    EXPECT_EQ(offsetof(GrassShadowPushGpu, cascadeVpRel), 0u);
+    EXPECT_EQ(offsetof(GrassShadowPushGpu, lod), 64u);
+    EXPECT_EQ(offsetof(GrassShadowPushGpu, instanceBase), 68u);
+    EXPECT_EQ(offsetof(GrassShadowPushGpu, minWidth), 72u);
+    EXPECT_EQ(offsetof(GrassShadowPushGpu, biasM), 76u);
     EXPECT_EQ(sizeof(GrassStatsGpu), 128u);
     EXPECT_EQ(sizeof(GrassDrawCommand), 16u);
+    EXPECT_EQ(kGrassShadowLodCount, 2u);
+    EXPECT_EQ(kGrassCommandCount, 6u);
+    EXPECT_EQ(kGrassCommandBytes, 96u);
     EXPECT_EQ(sizeof(GrassShadowParamsGpu), 448u);
     EXPECT_EQ(offsetof(GrassShadowParamsGpu, cascadeSplitFar), 256u);
     EXPECT_EQ(offsetof(GrassShadowParamsGpu, eyeAndFadeStart), 320u);
@@ -43,7 +54,15 @@ TEST(GrassMathTest, ParamsBlockLayoutIsPinned)
 TEST(GrassMathTest, DefaultsSurviveSanitizing)
 {
     const GrassSettings d;
+    EXPECT_FALSE(d.hizCulling);
+    EXPECT_TRUE(d.castShadows);
+    EXPECT_FLOAT_EQ(d.shadowMaxTexelM, 0.40f);
+    EXPECT_FLOAT_EQ(d.shadowBiasTexels, 1.0f);
+    EXPECT_FLOAT_EQ(d.shadowWidthScale, 1.5f);
+    EXPECT_FLOAT_EQ(d.shadowPadM, 3.0f);
+
     const GrassSettings s = SanitizeGrassSettings(d);
+    EXPECT_EQ(s.hizCulling, d.hizCulling);
     EXPECT_FLOAT_EQ(s.densityLod0, d.densityLod0);
     EXPECT_FLOAT_EQ(s.lod2Distance, d.lod2Distance);
     EXPECT_EQ(s.gridCells, d.gridCells);
@@ -53,6 +72,11 @@ TEST(GrassMathTest, DefaultsSurviveSanitizing)
     EXPECT_EQ(s.receiveCloudShadow, d.receiveCloudShadow);
     EXPECT_FLOAT_EQ(s.shadowStrength, d.shadowStrength);
     EXPECT_FLOAT_EQ(s.cloudFill, d.cloudFill);
+    EXPECT_EQ(s.castShadows, d.castShadows);
+    EXPECT_FLOAT_EQ(s.shadowMaxTexelM, d.shadowMaxTexelM);
+    EXPECT_FLOAT_EQ(s.shadowBiasTexels, d.shadowBiasTexels);
+    EXPECT_FLOAT_EQ(s.shadowWidthScale, d.shadowWidthScale);
+    EXPECT_FLOAT_EQ(s.shadowPadM, d.shadowPadM);
     EXPECT_FLOAT_EQ(MakeGrassParams(s, GrassFrameInputs{}).skyAmbient[3], d.cloudFill);
     GrassSettings debug = d;
     debug.debugView = GrassDebugView::SunVis;
@@ -89,11 +113,43 @@ TEST(GrassMathTest, NonFiniteValuesFallBackToDefaults)
     in.bladeHeight = std::numeric_limits<float>::quiet_NaN();
     in.maxSlopeDeg = std::numeric_limits<float>::infinity();
     in.colorTip[1] = std::numeric_limits<float>::quiet_NaN();
+    in.shadowMaxTexelM = std::numeric_limits<float>::quiet_NaN();
+    in.shadowBiasTexels = -std::numeric_limits<float>::infinity();
+    in.shadowWidthScale = std::numeric_limits<float>::infinity();
+    in.shadowPadM = std::numeric_limits<float>::quiet_NaN();
     const GrassSettings d;
     const GrassSettings s = SanitizeGrassSettings(in);
     EXPECT_FLOAT_EQ(s.bladeHeight, d.bladeHeight);
     EXPECT_FLOAT_EQ(s.colorTip[1], d.colorTip[1]);
     EXPECT_LE(s.maxSlopeDeg, 89.0f);
+    EXPECT_FLOAT_EQ(s.shadowMaxTexelM, d.shadowMaxTexelM);
+    EXPECT_FLOAT_EQ(s.shadowBiasTexels, d.shadowBiasTexels);
+    EXPECT_FLOAT_EQ(s.shadowWidthScale, d.shadowWidthScale);
+    EXPECT_FLOAT_EQ(s.shadowPadM, d.shadowPadM);
+}
+
+TEST(GrassMathTest, ShadowCastSettingsClampToBounds)
+{
+    GrassSettings in;
+    in.shadowMaxTexelM = 0.0f;
+    in.shadowBiasTexels = -50.0f;
+    in.shadowWidthScale = -1.0f;
+    in.shadowPadM = -3.0f;
+    GrassSettings s = SanitizeGrassSettings(in);
+    EXPECT_FLOAT_EQ(s.shadowMaxTexelM, 0.01f);
+    EXPECT_FLOAT_EQ(s.shadowBiasTexels, -4.0f);
+    EXPECT_FLOAT_EQ(s.shadowWidthScale, 0.0f);
+    EXPECT_FLOAT_EQ(s.shadowPadM, 0.0f);
+
+    in.shadowMaxTexelM = 99.0f;
+    in.shadowBiasTexels = 99.0f;
+    in.shadowWidthScale = 99.0f;
+    in.shadowPadM = 99.0f;
+    s = SanitizeGrassSettings(in);
+    EXPECT_FLOAT_EQ(s.shadowMaxTexelM, 4.0f);
+    EXPECT_FLOAT_EQ(s.shadowBiasTexels, 8.0f);
+    EXPECT_FLOAT_EQ(s.shadowWidthScale, 8.0f);
+    EXPECT_FLOAT_EQ(s.shadowPadM, 32.0f);
 }
 
 TEST(GrassMathTest, GridCoversTheFarthestLod)
@@ -164,11 +220,12 @@ TEST(GrassMathTest, FrustumPlanesSeparateInsideFromOutside)
     }
 }
 
-TEST(GrassMathTest, ParamsPackTileGridAndRegions)
+TEST(GrassMathTest, ParamsPackTileGridRegionsAndShadowFrustumPad)
 {
     GrassSettings s = SanitizeGrassSettings(GrassSettings{});
     s.collectStats = true;
     s.hizCulling = true;
+    s.shadowPadM = 4.5f;
     const GrassHeightTile tile = MakeSyntheticGrassTile(GrassSyntheticSpec{}, 10.0, 20.0, 128, 1.0f, 7);
     GrassFrameInputs in;
     in.eyeX = 10.0;
@@ -176,6 +233,7 @@ TEST(GrassMathTest, ParamsPackTileGridAndRegions)
     in.eyeZ = 20.0;
     in.tile = &tile;
     in.hizUsable = true;
+    in.shadowCasting = true;
     const GrassParamsGpu p = MakeGrassParams(s, in);
 
     const GrassGrid grid = MakeGrassGrid(10.0, 20.0, s.gridCells);
@@ -183,6 +241,7 @@ TEST(GrassMathTest, ParamsPackTileGridAndRegions)
     EXPECT_EQ(p.grid[2], static_cast<std::int32_t>(s.gridCells));
     EXPECT_NE(p.grid[3] & kGrassFlagHiz, 0);
     EXPECT_NE(p.grid[3] & kGrassFlagStats, 0);
+    EXPECT_FLOAT_EQ(p.groundAmbient[3], 4.5f);
     // Texel (0, 0) in grid space plus the grid corner is the tile origin in world space.
     EXPECT_NEAR(p.tile[0] + grid.originChunkX * kGrassChunkSizeM, static_cast<float>(tile.originX), 1e-3f);
     EXPECT_NEAR(p.tile[1] + grid.originChunkZ * kGrassChunkSizeM, static_cast<float>(tile.originZ), 1e-3f);
@@ -194,6 +253,13 @@ TEST(GrassMathTest, ParamsPackTileGridAndRegions)
 
     s.hizCulling = false;
     EXPECT_EQ(MakeGrassParams(s, in).grid[3] & kGrassFlagHiz, 0);
+
+    // Without active shadow casting or with castShadows off, the extra frustum pad stays zero.
+    in.shadowCasting = false;
+    EXPECT_FLOAT_EQ(MakeGrassParams(s, in).groundAmbient[3], 0.0f);
+    in.shadowCasting = true;
+    s.castShadows = false;
+    EXPECT_FLOAT_EQ(MakeGrassParams(s, in).groundAmbient[3], 0.0f);
 }
 
 TEST(GrassMathTest, NoTileGivesAnEmptyTileRange)
@@ -326,8 +392,10 @@ TEST(GrassMathTest, ApplyPresetKeepsTheLook)
 {
     GrassSettings s;
     s.bladeHeight = 1.1f;
+    s.castShadows = false;
     ApplyGrassPreset(s, GrassPreset::Big);
     EXPECT_FLOAT_EQ(s.bladeHeight, 1.1f);
+    EXPECT_FALSE(s.castShadows);
     EXPECT_FLOAT_EQ(s.lod2Distance, MakeGrassPreset(GrassPreset::Big).lod2Distance);
 }
 
@@ -539,6 +607,103 @@ TEST(GrassShadowParamsTest, SettingsTogglesDisableIndividualShadowSources)
     EXPECT_FLOAT_EQ(pZero.cloudGrid[3], 0.0f);
 }
 
+TEST(GrassShadowCastPlanTest, DisabledOrUnusableReceiverPlansNoDraws)
+{
+    const GrassSettings d = SanitizeGrassSettings(GrassSettings{});
+    EXPECT_EQ(MakeGrassShadowCastPlan(nullptr, Vec3::Up(), 0.0, 0.0, 0.0, d).count, 0u);
+
+    const SunShadowReceiver r = MakeTestReceiver(3);
+    GrassSettings off = d;
+    off.castShadows = false;
+    EXPECT_EQ(MakeGrassShadowCastPlan(&r, Vec3::Up(), 0.0, 0.0, 0.0, off).count, 0u);
+
+    SunShadowReceiver broken = r;
+    broken.maps[0] = fx::Texture{};
+    EXPECT_EQ(MakeGrassShadowCastPlan(&broken, Vec3::Up(), 0.0, 0.0, 0.0, d).count, 0u);
+
+    // Mismatched sun direction skips shadow casting.
+    EXPECT_EQ(MakeGrassShadowCastPlan(&r, Normalize(Vec3{ 0.2f, 1.0f, 0.0f }), 0.0, 0.0, 0.0, d).count, 0u);
+
+    // Non-finite eye coordinates skip shadow casting.
+    EXPECT_EQ(
+        MakeGrassShadowCastPlan(&r, Vec3::Up(), std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0, d).count, 0u);
+
+    // applyInMaterials off (materialStrength == 0) still casts into cascades for debug mask views.
+    SunShadowReceiver maskOnly = r;
+    maskOnly.materialStrength = 0.0f;
+    EXPECT_EQ(MakeGrassShadowCastPlan(&maskOnly, Vec3::Up(), 0.0, 0.0, 0.0, d).count, 3u);
+}
+
+TEST(GrassShadowCastPlanTest, FiltersCascadesByTexelSizeAndLod1SliceStart)
+{
+    GrassSettings s = SanitizeGrassSettings(GrassSettings{});
+    s.lod1Distance = 120.0f;
+
+    // Big World demo setup: 2 cascades at 0.32 m and 2.1 m per texel.
+    SunShadowReceiver bigWorld = MakeTestReceiver(2);
+    bigWorld.texelWorld[0] = 0.32f;
+    bigWorld.texelWorld[1] = 2.10f;
+    bigWorld.splitFar[0] = 110.0f;
+    bigWorld.blendWidth[0] = 11.0f;
+    bigWorld.splitFar[1] = 800.0f;
+
+    const GrassShadowCastPlan defaultPlan = MakeGrassShadowCastPlan(&bigWorld, Vec3::Up(), 0.0, 0.0, 0.0, s);
+    ASSERT_EQ(defaultPlan.count, 1u);
+    EXPECT_EQ(defaultPlan.cascades[0].cascadeIndex, 0u);
+    EXPECT_FLOAT_EQ(defaultPlan.cascades[0].minWidth, 1.5f * 0.32f);
+    EXPECT_FLOAT_EQ(defaultPlan.cascades[0].biasM, 1.0f * 0.32f);
+
+    // Raising shadowMaxTexelM includes cascade 1 while its sliceStart (110 - 11 = 99 m) is under lod1Distance (120 m).
+    s.shadowMaxTexelM = 2.5f;
+    const GrassShadowCastPlan widePlan = MakeGrassShadowCastPlan(&bigWorld, Vec3::Up(), 0.0, 0.0, 0.0, s);
+    ASSERT_EQ(widePlan.count, 2u);
+    EXPECT_EQ(widePlan.cascades[1].cascadeIndex, 1u);
+
+    // Once cascade 1's sliceStart (140 - 10 = 130 m) begins past lod1Distance (120 m), no L0/L1 blades reach it.
+    bigWorld.splitFar[0] = 140.0f;
+    bigWorld.blendWidth[0] = 10.0f;
+    const GrassShadowCastPlan farSlicePlan = MakeGrassShadowCastPlan(&bigWorld, Vec3::Up(), 0.0, 0.0, 0.0, s);
+    ASSERT_EQ(farSlicePlan.count, 1u);
+    EXPECT_EQ(farSlicePlan.cascades[0].cascadeIndex, 0u);
+}
+
+TEST(GrassShadowCastPlanTest, BuildsEyeRelativeCascadeMatrixInDoubleAt30Km)
+{
+    const double eyeX = 30000.25;
+    const double eyeY = 145.5;
+    const double eyeZ = -24800.75;
+    const Vec3 sunDir = Normalize(Vec3{ 0.4f, 0.8f, -0.3f });
+
+    const Vec3 cascadeCenter{ static_cast<float>(eyeX), static_cast<float>(eyeY), static_cast<float>(eyeZ) };
+    const Mat4 lightView = Mat4::LookToLH(cascadeCenter + sunDir * 300.0f, -sunDir, Vec3::Up());
+    const Mat4 lightProj = Mat4::OrthographicLH_ZO(-160.0f, 160.0f, -160.0f, 160.0f, 0.0f, 600.0f, true);
+
+    SunShadowReceiver r = MakeTestReceiver(1);
+    r.directionTowardSun = sunDir;
+    r.viewProjection[0] = lightProj * lightView;
+    r.texelWorld[0] = 0.3125f;
+
+    GrassSettings s = SanitizeGrassSettings(GrassSettings{});
+    s.shadowWidthScale = 1.25f;
+    s.shadowBiasTexels = -0.5f;
+    const GrassShadowCastPlan plan = MakeGrassShadowCastPlan(&r, sunDir, eyeX, eyeY, eyeZ, s);
+    ASSERT_EQ(plan.count, 1u);
+    EXPECT_FLOAT_EQ(plan.cascades[0].minWidth, 1.25f * 0.3125f);
+    EXPECT_FLOAT_EQ(plan.cascades[0].biasM, -0.5f * 0.3125f);
+
+    // Compare shader clip = cascadeVpRel * (pRel, 1) against double-precision cascadeVp * (eye + pRel, 1).
+    const Vec3 bladeRel{ 18.75f, -2.25f, -31.5f };
+    const Vec4 gpuClip = plan.cascades[0].viewProjectionRelative * Vec4(bladeRel.x, bladeRel.y, bladeRel.z, 1.0f);
+    const double worldPt[4] = { eyeX + bladeRel.x, eyeY + bladeRel.y, eyeZ + bladeRel.z, 1.0 };
+    double exactClip[4] = {};
+    Mat4d::FromMat4(r.viewProjection[0]).Transform(worldPt, exactClip);
+
+    EXPECT_NEAR(gpuClip.x, static_cast<float>(exactClip[0]), 1e-5f);
+    EXPECT_NEAR(gpuClip.y, static_cast<float>(exactClip[1]), 1e-5f);
+    EXPECT_NEAR(gpuClip.z, static_cast<float>(exactClip[2]), 1e-5f);
+    EXPECT_NEAR(gpuClip.w, static_cast<float>(exactClip[3]), 1e-5f);
+}
+
 const fx::FeatureDebugField* FindField(const fx::FeatureDebugResult& result, std::string_view key)
 {
     for (const fx::FeatureDebugField& field : result.fields) {
@@ -549,15 +714,34 @@ const fx::FeatureDebugField* FindField(const fx::FeatureDebugResult& result, std
     return nullptr;
 }
 
-TEST(GrassEndpointTest, SetupDeclaresEmptyViewShadowChannelReader)
+TEST(GrassEndpointTest, SetupSplitsPreOpaquePrepareAndPostOpaqueDraw)
 {
     GrassFeature feature;
     fx::FeatureSetup setup;
     feature.Setup(setup);
     ASSERT_TRUE(setup.Errors().empty());
-    ASSERT_EQ(setup.Registrations().size(), 2u);
-    EXPECT_EQ(setup.Registrations()[1].name, "Grass.Draw");
-    EXPECT_EQ(setup.Registrations()[1].consumedChannel, "Shadow.Receiver");
+    ASSERT_EQ(setup.Registrations().size(), 3u);
+
+    const fx::Registration& stamp = setup.Registrations()[0];
+    EXPECT_EQ(stamp.name, "Grass.FrameStamp");
+    EXPECT_EQ(stamp.stage, fx::Stage::PreOpaque);
+    EXPECT_EQ(stamp.priority, 38);
+    EXPECT_TRUE(stamp.gate.always);
+
+    const fx::Registration& prepare = setup.Registrations()[1];
+    EXPECT_EQ(prepare.name, "Grass.Prepare");
+    EXPECT_EQ(prepare.stage, fx::Stage::PreOpaque);
+    EXPECT_EQ(prepare.priority, 50);
+    EXPECT_FALSE(prepare.secondaryViewDefault);
+    EXPECT_EQ(prepare.consumedChannel, "Shadow.Receiver");
+    EXPECT_EQ(prepare.gate.passNames.size(), 11u);
+
+    const fx::Registration& draw = setup.Registrations()[2];
+    EXPECT_EQ(draw.name, "Grass.Draw");
+    EXPECT_EQ(draw.stage, fx::Stage::PostOpaque);
+    EXPECT_EQ(draw.priority, -20);
+    EXPECT_FALSE(draw.secondaryViewDefault);
+    EXPECT_EQ(draw.gate.passNames.size(), 3u);
 }
 
 TEST(GrassEndpointTest, ExposesShadowSettingsSunVisAndReadOnlyShadowState)
@@ -568,16 +752,26 @@ TEST(GrassEndpointTest, ExposesShadowSettingsSunVisAndReadOnlyShadowState)
 
     const fx::FeatureDebugResult initial = endpoint->GetState();
     ASSERT_TRUE(initial.ok);
-    for (const char* key : { "receiveSunShadow", "receiveCloudShadow", "shadowStrength", "cloudFill",
-             "game.shadow.cascades", "game.shadow.cloud", "scene.shadow.cascades", "scene.shadow.cloud" }) {
+    for (const char* key : { "hizCulling", "receiveSunShadow", "receiveCloudShadow", "shadowStrength", "cloudFill",
+             "castShadows", "shadowMaxTexelM", "shadowBiasTexels", "shadowWidthScale", "shadowPadM",
+             "game.shadow.cascades", "game.shadow.cloud", "game.shadow.castCascades", "game.shadow.castBlades",
+             "scene.shadow.cascades", "scene.shadow.cloud", "scene.shadow.castCascades", "scene.shadow.castBlades" }) {
         ASSERT_NE(FindField(initial, key), nullptr) << key;
     }
+    EXPECT_FALSE(std::get<bool>(FindField(initial, "hizCulling")->value));
     EXPECT_TRUE(std::get<bool>(FindField(initial, "receiveSunShadow")->value));
     EXPECT_TRUE(std::get<bool>(FindField(initial, "receiveCloudShadow")->value));
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "shadowStrength")->value), 1.0);
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "cloudFill")->value), 0.35);
+    EXPECT_TRUE(std::get<bool>(FindField(initial, "castShadows")->value));
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "shadowMaxTexelM")->value), 0.4);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "shadowBiasTexels")->value), 1.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "shadowWidthScale")->value), 1.5);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "shadowPadM")->value), 3.0);
     EXPECT_EQ(std::get<std::int64_t>(FindField(initial, "game.shadow.cascades")->value), 0);
     EXPECT_FALSE(std::get<bool>(FindField(initial, "game.shadow.cloud")->value));
+    EXPECT_EQ(std::get<std::int64_t>(FindField(initial, "game.shadow.castCascades")->value), 0);
+    EXPECT_EQ(std::get<std::int64_t>(FindField(initial, "game.shadow.castBlades")->value), 0);
 
     const auto set = [&](std::vector<fx::FeatureDebugArg> args) { return endpoint->Set(args); };
     const fx::FeatureDebugResult updated = set({
@@ -585,6 +779,11 @@ TEST(GrassEndpointTest, ExposesShadowSettingsSunVisAndReadOnlyShadowState)
         { "receiveCloudShadow", "false" },
         { "shadowStrength", "0.6" },
         { "cloudFill", "0.2" },
+        { "castShadows", "false" },
+        { "shadowMaxTexelM", "0.8" },
+        { "shadowBiasTexels", "0.5" },
+        { "shadowWidthScale", "2.0" },
+        { "shadowPadM", "5.0" },
         { "debugView", "SunVis" },
     });
     ASSERT_TRUE(updated.ok);
@@ -592,16 +791,69 @@ TEST(GrassEndpointTest, ExposesShadowSettingsSunVisAndReadOnlyShadowState)
     EXPECT_FALSE(std::get<bool>(FindField(updated, "receiveCloudShadow")->value));
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(updated, "shadowStrength")->value), 0.6);
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(updated, "cloudFill")->value), 0.2);
+    EXPECT_FALSE(std::get<bool>(FindField(updated, "castShadows")->value));
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(updated, "shadowMaxTexelM")->value), 0.8);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(updated, "shadowBiasTexels")->value), 0.5);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(updated, "shadowWidthScale")->value), 2.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(updated, "shadowPadM")->value), 5.0);
     EXPECT_EQ(std::get<std::string>(FindField(updated, "debugView")->value), "SunVis");
 
     EXPECT_FALSE(set({ { "debugView", "UnknownMode" } }).ok);
     EXPECT_FALSE(set({ { "game.shadow.cascades", "4" } }).ok);
     EXPECT_FALSE(set({ { "game.shadow.cloud", "true" } }).ok);
+    EXPECT_FALSE(set({ { "game.shadow.castCascades", "2" } }).ok);
+    EXPECT_FALSE(set({ { "game.shadow.castBlades", "100" } }).ok);
 
     const fx::FeatureDebugResult reset = endpoint->Invoke("reset_defaults", {});
     ASSERT_TRUE(reset.ok);
+    EXPECT_FALSE(std::get<bool>(FindField(reset, "hizCulling")->value));
     EXPECT_TRUE(std::get<bool>(FindField(reset, "receiveSunShadow")->value));
+    EXPECT_TRUE(std::get<bool>(FindField(reset, "castShadows")->value));
     EXPECT_EQ(std::get<std::string>(FindField(reset, "debugView")->value), "Normal");
+}
+TEST(GrassCallbackTest, DrawPassHandlesSkippedAndBailedPrepareCleanly)
+{
+    GrassFeature feature;
+    fx::FeatureSetup setup;
+    feature.Setup(setup);
+    ASSERT_EQ(setup.Registrations().size(), 3u);
+
+    const auto& stampCb = std::get<fx::PreOpaqueCallback>(setup.Registrations()[0].callback);
+    const auto& prepareCb = std::get<fx::PreOpaqueCallback>(setup.Registrations()[1].callback);
+    const auto& drawCb = std::get<fx::PostOpaqueCallback>(setup.Registrations()[2].callback);
+
+    Registry scene;
+    fx::View view;
+    view.scope = rg::ViewScope::Primary;
+    view.extent = Extent2D{ 1280, 720 };
+    view.eye = Vec3{ 0.0f, 5.0f, 0.0f };
+    view.viewProjection = Mat4::PerspectiveFovLH_ZO(1.1f, 16.0f / 9.0f, 0.2f, 500.0f);
+    view.relative = MakeEyeRelativeCamera(view.viewProjection, view.eye);
+
+    // Frame 0: Prepare skipped (e.g. Grass.Prepare disabled), DrawPass runs -> NotRendered.
+    const std::uint64_t serial0 = fx::FrameSerial(0, rg::ViewScope::Primary);
+    {
+        fx::PreOpaqueFrame pre(view, scene, serial0);
+        stampCb(pre);
+        fx::PostOpaqueFrame post(view, scene, serial0, rg::TextureHandle{ 1, 1 }, rg::TextureHandle{ 2, 1 });
+        drawCb(post);
+    }
+    EXPECT_EQ(feature.Snapshot(rg::ViewScope::Primary).status, GrassFrameStatus::NotRendered);
+
+    // Frame 1: Grass disabled -> PreparePass sets Disabled and DrawPass preserves Disabled.
+    GrassSettings disabled;
+    disabled.enabled = false;
+    feature.ApplySettings(disabled);
+    const std::uint64_t serial1 = fx::FrameSerial(1, rg::ViewScope::Primary);
+    {
+        fx::PreOpaqueFrame pre(view, scene, serial1);
+        stampCb(pre);
+        prepareCb(pre);
+        fx::PostOpaqueFrame post(view, scene, serial1, rg::TextureHandle{ 1, 1 }, rg::TextureHandle{ 2, 1 });
+        drawCb(post);
+    }
+    EXPECT_EQ(feature.Snapshot(rg::ViewScope::Primary).status, GrassFrameStatus::Disabled);
+    EXPECT_FALSE(feature.Snapshot(rg::ViewScope::Primary).hizUsed);
 }
 
 } // namespace

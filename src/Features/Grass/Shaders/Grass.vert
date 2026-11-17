@@ -1,9 +1,7 @@
 #version 450
 
-// Builds one grass blade from gl_VertexIndex and its instance. No vertex input; the cull already did the wind maths.
-// Triangle list: list vertex v maps to strip vertex v / 3 + v % 3 (side = i & 1, row = i >> 1).
-// LOD0 = look.w segments, LOD1 = 2, LOD2 = one triangle (tip width 0). One draw per LOD with firstInstance 0.
-#include "GrassCommon.glsl"
+// Builds one grass blade from gl_VertexIndex and its instance; LOD0 = look.w quads, LOD1 = 2, LOD2 = 1 triangle.
+#include "GrassBlade.glsl"
 
 layout(std430, binding = 1) readonly buffer GrassInstancesBlock {
     GrassInstance items[];
@@ -27,13 +25,9 @@ void main()
 {
     GrassInstance inst = instances.items[pc.instanceBase + uint(gl_InstanceIndex)];
     vec2 hw = unpackHalf2x16(inst.heightWidth);
-    vec4 frame = unpackSnorm4x8(inst.frame);
     vec4 ground = unpackUnorm4x8(inst.ground);
-    vec2 flutter = unpackHalf2x16(inst.flutter);
     float height = hw.x;
     float width = hw.y;
-    vec2 faceXz = normalize(frame.xy);
-    vec2 bendDir = normalize(frame.zw);
     float rnd = float(inst.colorRnd & 255u) * (1.0 / 255.0);
     vec3 terrainColor = vec3(float(inst.colorRnd >> 24u), float((inst.colorRnd >> 16u) & 255u), float((inst.colorRnd >> 8u) & 255u)) * (1.0 / 255.0);
 
@@ -43,25 +37,12 @@ void main()
     float t = min(float(v >> 1u) / float(segments), 1.0);
     float side = float(v & 1u) * 2.0 - 1.0;
 
-    // Blade frame on the ground: side axis across the blade (yaw = atan(sin, cos) of faceXz).
-    vec3 sideAxis = vec3(faceXz.y, 0.0, -faceXz.x);
-    vec3 bendAxis = vec3(bendDir.x, 0.0, bendDir.y);
-
-    // Quadratic curve root -> tip: control point straight above the root keeps the base upright.
-    float sinA = ground.z;
-    float cosA = sqrt(max(1.0 - sinA * sinA, 0.0));
-    vec3 control = vec3(0.0, 0.5 * height, 0.0);
-    vec3 tip = vec3(0.0, height * cosA, 0.0) + bendAxis * (height * sinA);
-    float omt = 1.0 - t;
-    vec3 curve = 2.0 * omt * t * control + t * t * tip;
-    vec3 tangent = normalize((2.0 - 4.0 * t) * control + 2.0 * t * tip + vec3(0.0, 1e-4, 0.0));
-
-    curve += (sideAxis * flutter.x + bendAxis * flutter.y) * (t * t);
-
     // Width tapers toward the tip; LOD2 tapers to a point.
     float taper = pc.lod == 2u ? 1.0 : params.blade.z;
     float widthAtT = width * (1.0 - taper * pow(t, 1.5));
-    vec3 position = inst.root + curve + sideAxis * (side * 0.5 * widthAtT);
+    vec3 sideAxis;
+    vec3 tangent;
+    vec3 position = GrassBladeSample(inst, height, ground, t, side, widthAtT, sideAxis, tangent);
 
     // Normal: across the blade plane, rounded over its width, leaned toward up, then pulled toward the ground normal.
     vec3 normal = normalize(cross(sideAxis, tangent));
@@ -71,7 +52,7 @@ void main()
     normal = normalize(mix(normal, groundNormal, params.look.y));
 
     outNormal = normal;
-    outInfo = vec4(t, rnd, sinA, side);
+    outInfo = vec4(t, rnd, ground.z, side);
     outPosRel = position;
     outGround = vec4(terrainColor, dot(groundNormal, normalize(params.sunDir.xyz)));
     outSunVis = ground.w;

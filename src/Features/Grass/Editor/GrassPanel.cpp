@@ -57,10 +57,11 @@ void DrawStats(const GrassViewSnapshot& view)
     if (dropped > 0) {
         ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.2f, 1.0f), "%u blades dropped: a LOD region is full (raise the capacity).", dropped);
     }
-    ImGui::TextWrapped("GPU memory: %.1f MiB of instances. Hi-Z %s. Wind: %s. Shadows: %u cascades, cloud %s.",
+    ImGui::TextWrapped("GPU memory: %.1f MiB of instances. Hi-Z %s. Wind: %s. Shadows: recv %u (cloud %s), cast %u (%llu blades).",
         static_cast<double>(view.instanceBytes) / (1024.0 * 1024.0), view.hizUsed ? "on" : "off",
         view.windShared ? "shared with the clouds" : "own fallback", static_cast<unsigned>(view.shadowCascades),
-        view.shadowCloud ? "on" : "off");
+        view.shadowCloud ? "on" : "off", static_cast<unsigned>(view.shadowCastCascades),
+        static_cast<unsigned long long>(view.shadowCastBlades));
 }
 
 } // namespace
@@ -168,6 +169,13 @@ bool BuildGrassPanel(GrassSettings& edit, const GrassViewSnapshot& game, const G
         changed |= ImGui::Checkbox("Receive cloud shadows", &edit.receiveCloudShadow);
         changed |= ImGui::SliderFloat("Shadow strength", &edit.shadowStrength, 0.0f, 1.0f);
         changed |= ImGui::SliderFloat("Shadow sky fill", &edit.cloudFill, 0.0f, 1.0f);
+        changed |= ImGui::Checkbox("Cast sun shadows", &edit.castShadows);
+        ImGui::BeginDisabled(!edit.castShadows);
+        changed |= ImGui::SliderFloat("Shadow max texel (m)", &edit.shadowMaxTexelM, 0.05f, 2.5f, "%.2f");
+        changed |= ImGui::SliderFloat("Shadow bias (texels)", &edit.shadowBiasTexels, -2.0f, 4.0f, "%.2f");
+        changed |= ImGui::SliderFloat("Shadow min width (texels)", &edit.shadowWidthScale, 0.0f, 4.0f, "%.2f");
+        changed |= ImGui::SliderFloat("Shadow frustum pad (m)", &edit.shadowPadM, 0.0f, 16.0f, "%.1f");
+        ImGui::EndDisabled();
     }
     if (ImGui::CollapsingHeader("Budget")) {
         ImGui::TextDisabled("Grass memory: %.1f MiB of instances.", static_cast<double>(GrassInstanceBytes(SanitizeGrassSettings(edit))) / (1024.0 * 1024.0));

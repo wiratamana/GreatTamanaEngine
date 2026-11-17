@@ -1,31 +1,31 @@
 # Grass (GPU-driven procedural grass)
 > Blades are placed, culled and built on the GPU. No mesh asset, no CPU per-blade work. For anyone tuning, extending or debugging grass.
 > Verified against code: 2026-11-17
-
 ## TL;DR
-- A compute pass places blades per 16 m chunk and writes the survivors and three draw commands. Three indirect draws (one per LOD) build each blade from its vertex index.
+- A `PreOpaque` compute pass places blades per 16 m chunk and writes the survivors plus six indirect draw commands (three colour, three shadow). Depth-only indirect draws cast L0 and L1 blades into eligible sun shadow cascades before terrain draws; three `PostOpaque` indirect draws shade L0, L1 and L2 into the view.
 - Terrain height comes from a **height tile** that the editor layer submits (`GrassFeature::SubmitHeightTile`). Without a tile, nothing is drawn (status `NoTile`).
 - Wind is shared with the clouds through the `WindState` channel. Gust and tip flutter are procedural in the vertex shader.
-- Opaque, depth-writing, drawn before the water. Blades receive sun cascade shadows and cloud shadows per blade in `Grass.Cull`.
+- Opaque, depth-writing, drawn before the water. Blades receive sun cascade and cloud shadows per blade in `Grass.Cull` (before grass writes into the cascades, so grass does not self-shadow through the map) and cast contact shadows onto the terrain.
 - Off in the Scene view by default.
 
 ## Where in the frame
 | Registration | Stage | Priority | Toggle names |
 |---|---|---|---|
 | `Grass.FrameStamp` | PreOpaque | 38 | `Always` (wind clock, synthetic tile) |
-| `Grass.Draw` | PostOpaque | -20 | `Grass.Init`, `Grass.Cull`, `Grass.Stats.Copy`, `Grass.Hiz.Base`, `Grass.Hiz.Top`, `Grass.Draw.L0`, `Grass.Draw.L1`, `Grass.Draw.L2` |
+| `Grass.Prepare` | PreOpaque | 50 | `Grass.Init`, `Grass.Cull`, `Grass.Stats.Copy`, `Grass.Shadow.C0.L0`, `Grass.Shadow.C0.L1`, `Grass.Shadow.C1.L0`, `Grass.Shadow.C1.L1`, `Grass.Shadow.C2.L0`, `Grass.Shadow.C2.L1`, `Grass.Shadow.C3.L0`, `Grass.Shadow.C3.L1` |
+| `Grass.Draw` | PostOpaque | -20 | `Grass.Draw.L0`, `Grass.Draw.L1`, `Grass.Draw.L2` |
 
-Code: `src/Features/Grass/`. Shaders: `GrassInit.comp`, `GrassCull.comp`, `Grass.vert`, `Grass.frag`, `GrassCommon.glsl`.
-Priority -20 runs after the terrain (Opaque stage), before the shadow mask (0), the water (25) and the sky (100). Grass writes depth, so the later passes see it.
+Code: `src/Features/Grass/`. Shaders: `GrassInit.comp`, `GrassCull.comp`, `GrassBlade.glsl`, `Grass.vert`, `Grass.frag`, `GrassShadow.vert`, `GrassShadow.frag`, `GrassCommon.glsl`.
+`Grass.Prepare` at `PreOpaque` priority 50 runs after `Shadow.Cascades` (10), `VolumetricCloud.ShadowMap` (12), `Grass.FrameStamp` (38), `TemporalAa.Jitter` (48) and `VolumetricCloud.FrameStamp` (49, shared wind), and before `Opaque` (terrain). `Grass.Draw` at `PostOpaque` priority -20 runs after the terrain, before the shadow mask (0), the water (25) and the sky (100).
 
 ## Passes per frame
-1. `Grass.Hiz.*` (optional): farthest-depth pyramid of the final terrain depth (`fx::HizPyramid`). About 0.1 to 0.15 ms.
-2. `Grass.Init`: zero the counters, write the three draw commands with their vertex counts (`lod0Segments * 6`, 12, 3).
-3. `Grass.Cull`: 64-thread groups, `extra.w` groups per chunk (1 to 16, 1 per 2048 candidates of the densest LOD). See below.
-4. `Grass.Stats.Copy`: copy the 128 byte counter block to a readback (two frames late).
-5. `Grass.Draw.L0/L1/L2`: `Fullscreen` verb with `IndirectDraw` (see [writing a render feature](../../guides/writing-a-render-feature.md)). Triangle list, no culling, depth test `LessEqual`, depth write on.
+1. `Grass.Init`: zero the counters, write six indirect draw commands — three colour (`lod0Segments * 6`, 12, 3 vertices) and three shadow (3 vertices each).
+2. `Grass.Cull`: 64-thread groups, `extra.w` groups per chunk (1 to 16, 1 per 2048 candidates of the densest LOD). Grants accepted instances to both the colour and shadow indirect commands.
+3. `Grass.Stats.Copy`: copy the 128 byte counter block to a readback (two frames late).
+4. `Grass.Shadow.C<0..3>.L<0..1>` (optional): depth-only `Fullscreen` verb with `IndirectDraw` into `SunShadowReceiver::maps[c]`, depth compare `Less`, depth write on, no colour target. Draws L0 and L1 regions as single curved 3-vertex triangles (`GrassShadow.vert` / `GrassShadow.frag`). Skipped when `castShadows=false`, when `texelWorld[c] > shadowMaxTexelM`, or when cascade `c`'s slice starts at or past `lod1Distance`.
+5. `Grass.Draw.L0/L1/L2`: `Fullscreen` verb with `IndirectDraw` (see [writing a render feature](../../guides/writing-a-render-feature.md)) using the jittered eye-relative view-projection read in `PostOpaque`. Triangle list, no culling, depth test `LessEqual`, depth write on.
 
-There are three draws and not one, because the vertex counts differ (24, 12 and 3 with the default 4 segments). Each draw has its own push constant with the first instance of its region (`firstInstance` must stay 0).
+There are separate draws per LOD because the vertex counts differ (24, 12 and 3 for colour; 3 for shadow). Each draw pushes the first instance of its region (`firstInstance` must stay 0).
 
 ## How `GrassCull.comp` works
 Per chunk (16 m, a grid of `gridCells` x `gridCells` around the camera). A dense chunk has thousands of candidates, so up to 16 groups share it (`GrassSlicesPerChunk`): group `s` takes candidate blocks `s, s + k, s + 2k ...` of 256. Groups past the candidates leave right after the distance test. One group per chunk left most of the iGPU idle (cull 1.6 ms, now 0.6 ms).
@@ -33,8 +33,8 @@ Per chunk (16 m, a grid of `gridCells` x `gridCells` around the camera). A dense
 2. Chunk outside the height tile: leave (`chunksCulledNoData`).
 3. Reduce the min, max and highest dry height of the chunk from the tile. No dry texel above the waterline: leave.
 4. 3D distance of the chunk box (with blade height) over `lod2Distance`: leave.
-5. Frustum test (6 planes, eye-relative, box padded by 0.9 x blade height for lean and wind).
-6. Hi-Z test of the same box (only when the pyramid was built).
+5. Frustum test (6 planes, eye-relative, box padded by 0.9 x blade height for lean and wind, plus `shadowPadM` when casting shadows so blades just outside the view still cast into it).
+6. Hi-Z test (skipped while `Grass.Cull` runs in `PreOpaque`, where scene depth does not exist yet).
 7. Blade loop. Candidate `i` of a chunk:
    - Position from a low-discrepancy sequence plus a per-chunk shift. Every prefix of the sequence covers the chunk evenly, so a lower density keeps a subset of the same blades.
    - Bilinear height and exact gradient from the tile. The 3D distance `d` of the blade gives its density `GrassDensityAt(d)`: `densityLod0` close up, falling smoothly (geometric, smoothstep) to `densityLod1` at `lod0Distance` and to `densityLod2` at `lod1Distance`; `densityBlend` is the share of a LOD range the fall takes. `i >= candidates(density)` drops the blade. Lower densities are index prefixes of higher ones, so blades only leave, never move. Thinned blades widen by `(densityLod0 / density) ^ widthCompensation`, at most `maxWidthScale`. Near the far edge they shrink to nothing over the last `farHeightFade` of `lod2Distance`.
@@ -47,16 +47,16 @@ Per chunk (16 m, a grid of `gridCells` x `gridCells` around the camera). A dense
 
 Placement uses the integer world chunk index as the hash seed, so blades do not move when the grid scrolls with the camera.
 All shader numbers are relative to the grid corner or the eye (computed in double on the CPU). The world is +-16 km, floats alone would shake.
-
-## Blade shape (`Grass.vert`)
-- No vertex input. Vertex `v` of the list is mapped to a strip vertex: side = `v & 1`, row = `v >> 1`, `t` = row / segments.
+## Blade shape (`GrassBlade.glsl`, `Grass.vert`, `GrassShadow.vert`)
+- Shared quadratic curve + tip flutter live in `GrassBlade.glsl` (`GrassBladeSample` and `GrassBladePosition`).
+- No vertex input. In `Grass.vert`, vertex `v` of the list is mapped to a strip vertex: side = `v & 1`, row = `v >> 1`, `t` = row / segments.
 - LOD0: `lod0Segments` quads (default 4, 24 list vertices; 3 shows kinks, 5 to 6 costs 0.3 to 0.5 ms more). LOD1: 2 segments (12). LOD2: one triangle (3), widened by the density rule.
 - Width tapers with `t^1.5`. The curve is quadratic from the root to the tip: the control point is straight above the root, so the base stays upright.
 - Bend direction = rest lean + wind push. Random yaw per blade. The cull computes them; the vertex shader only reads the instance and walks the curve.
 - Normal: across the blade, then mixed with the ground normal of the tile (`groundNormalBlend`).
 - Tip flutter: two fast sines, amplitude grows with `t^2`.
 - The fragment shader flips the normal toward the viewer (two-sided without relying on winding).
-
+- Shadow caster (`GrassShadow.vert`): 3 vertices per blade (`v = 0` root-left, `v = 1` root-right, `v = 2` curved tip), base width clamped to at least `shadowWidthScale * texelWorld[c]` so thin blades do not sub-sample out of the shadow map, shifted along `sunDir` by `shadowBiasTexels * texelWorld[c]`, and projected by `cascadeVpRel = cascadeVP * Translation(eye)` computed in `double` on the CPU.
 ## Lighting (`Grass.frag`)
 Linear HDR, same energy scale as the lit materials (`kDirectScale` 0.65).
 `colour = albedo * (hemisphere ambient * ao + sun * wrap diffuse * sqrt(ao))` plus a fake translucency term when the sun is behind the blade.
@@ -107,7 +107,7 @@ Sanitized on write (`SanitizeGrassSettings`). NaN and infinity become the defaul
 | Key | Default | Range | Meaning |
 |---|---|---|---|
 | `enabled` | true | bool | Off gives status `Disabled` |
-| `hizCulling` | true | bool | Occlusion test of chunks against the terrain depth |
+| `hizCulling` | false | bool | Occlusion test setting; safely ignored while `Grass.Cull` runs in `PreOpaque` (no scene depth yet) |
 | `collectStats` | true | bool | Counters in `game.stats.*` |
 | `debugView` | `Normal` | `Normal`, `LodColor`, `Sway`, `ChunkBounds`, `SunVis` | LOD colour: LOD0 green, LOD1 yellow, LOD2 red. Chunk bounds: 16 m checker with white borders. `SunVis`: per-blade sun visibility (blue shadowed to yellow lit) |
 | `preset` | - | `Lean`, `Medium`, `Big`, `Huge` | Write-only shortcut: sets density, distances, capacities and tile size. Defaults are `Big` |
@@ -132,6 +132,11 @@ Sanitized on write (`SanitizeGrassSettings`). NaN and infinity become the defaul
 | `translucency` / `rootAo` / `tintVariation` / `sunVisibility` | 0.6 / 0.35 / 0.5 / 1 | | Look |
 | `receiveSunShadow` / `receiveCloudShadow` | true / true | bool | Sample sun cascades (`Shadow.Receiver`) and cloud shadow (`VolumetricCloud.ShadowMap`) in `Grass.Cull` |
 | `shadowStrength` / `cloudFill` | 1 / 0.35 | 0..1 / 0..1 | Shadow darkening strength and diffuse sky fill added to shadowed blades |
+| `castShadows` | true | bool | Draw depth-only L0 and L1 shadow blades into eligible sun cascades in `Grass.Prepare` |
+| `shadowMaxTexelM` | 0.40 | 0.01..4 | Skip cascades whose `texelWorld` exceeds this size (m) |
+| `shadowBiasTexels` | 1.0 | -4..8 | Caster shift along the sun direction in cascade texels |
+| `shadowWidthScale` | 1.5 | 0..8 | Minimum shadow blade base width in cascade texels |
+| `shadowPadM` | 3.0 | 0..32 | Extra camera-frustum chunk padding while casting shadows (m) |
 | `terrainTint` / `farTerrainBlend` | 0.6 / 0.8 | 0..1 | Pull toward the terrain colour (near, far) |
 | `groundNormalBlend` / `selfShadow` | 0.5 / 0.7 | 0..1 | Ground normal in the blade normal; sun fade on ground facing away |
 | `colorRoot` / `colorTip` | dark / light green | `r,g,b` 0..2 | Linear albedo |
@@ -171,7 +176,7 @@ Name for `/feature_debug`: `Grass`. Every setting above is writable: `/feature_d
 | Read-only key (prefix `game.` or `scene.`) | Meaning |
 |---|---|
 | `status` | `NotRendered`, `Ok`, `Disabled`, `NoValidCamera`, `NoTile`, `ShadersNotReady`, `TargetFailed`, `PassDisabled` |
-| `hizUsed`, `windShared`, `shadow.cascades`, `shadow.cloud`, `gridCells`, `instanceBytes`, `tileRevision` | What this frame used |
+| `hizUsed`, `windShared`, `shadow.cascades`, `shadow.cloud`, `shadow.castCascades`, `shadow.castBlades`, `gridCells`, `instanceBytes`, `tileRevision` | What this frame used |
 | `stats.*` | Counters from the GPU, two frames old: `chunksInGrid`, `chunksCulledDistance / NoData / Water / Frustum / Hiz`, `chunksLod0..2`, `candidates`, `accepted0..2`, `rejectNoData / LodStep / Water / Slope / Noise`, `dropped0..2`, `requested0..2` |
 
 Also `tile.*` (size, origin, sea level, revision), `source.*` (tile provider), `game.wind.*` (direction, speed and pattern offset the blades used), `synthetic.enabled`, `eye`.
@@ -183,9 +188,9 @@ curl.exe "http://127.0.0.1:8080/feature_debug/set?name=Grass&debugView=LodColor"
 curl.exe -o game.png "http://127.0.0.1:8080/get_game_view"
 curl.exe "http://127.0.0.1:8080/profiler/table?view=flat&lane=gpu&limit=256"
 ```
-Rows: `Grass.Init`, `Grass.Cull`, `Grass.Hiz.Base`, `Grass.Hiz.Top`, `Grass.Stats.Copy`, `Grass.Draw.L0..L2`.
+Rows: `Grass.Init`, `Grass.Cull`, `Grass.Stats.Copy`, `Grass.Shadow.C0..3.L0..1`, `Grass.Draw.L0..L2`.
 A synthetic tile hangs in the air over the real terrain. Use a flat terrain (`/terrain/set?heightScale=3&erosionEnabled=false`) or a ground height above the terrain to look at it.
-To turn the feature off for one view use the registration name: `/render_graph/set_feature_enabled?name=Grass.Draw&enabled=false&view=primary`.
+To turn the feature off for one view use the registration names: `/render_graph/set_feature_enabled?name=Grass.Prepare&enabled=false&view=primary` and `/render_graph/set_feature_enabled?name=Grass.Draw&enabled=false&view=primary`.
 
 ## Cost (Intel Iris Xe, 15 W, lean terrain, overlap off, medians of 2 to 3 rounds)
 Older tables (F1, F2): "default" there means the old settings, now the `Medium` preset with a hard density step and a 30-vertex LOD0. The current numbers are in "Presets, full scene (F3)" below.
@@ -239,8 +244,8 @@ Big costs +6.3 ms at the worst pose (32 FPS in the whole scene). Huge is 25 FPS.
 Cull and draw (GPU ms, `ground`): Lean 0.54 / 0.65, Medium 0.75 / 1.73, Big 1.38 / 2.83, Huge 3.77 / 8.98. The draw cost is about 1.1 ms of vertex and triangle work plus a part that grows with blade width (1.68 to 1.12 ms when the width goes 0.045 to 0.010 at 47k blades).
 
 ## Limits
-- Sun cascade and cloud shadows are evaluated once per blade root in `Grass.Cull` (8-bit visibility per blade, not per fragment along the blade). Grass does not cast into the cascade maps, and GTAO runs before grass.
-- The Hi-Z pyramid is built from the terrain depth of the same frame. It does not hide blades behind other grass.
+- Sun cascade and cloud shadows are evaluated once per blade root in `Grass.Cull` (8-bit visibility per blade, not per fragment along the blade). Because `Grass.Cull` reads the cascades before `Grass.Shadow.*` writes into them, grass casts contact shadows onto the terrain without self-shadowing through the cascade map.
+- While `Grass.Cull` runs in `PreOpaque`, scene depth does not exist yet, so `hizCulling` is off by default and ignored if set.
 - The mesh LOD still switches at `lod0Distance` / `lod1Distance` (5 or 4 segments to 2 to 1 triangle). The blade count no longer jumps there, the blade shape does.
 - LOD2 blades are single flat triangles. They shimmer without TAA.
 - The terrain camera near plane shrinks with the height above ground (0.1 x the height, between 0.15 m and 3 m, `TerrainWorld::AdaptCameraNear`), so you can stand 1.7 m above the grass. The far plane is still 5 to 13.5 km: depth precision at very long range is lower at ground level (not seen as artefacts in the test views). The free camera still keeps 3 m of clearance; use `/terrain/flight` with `minAlt` or `/terrain/cam?mode=script&alt=1.7`.
@@ -255,7 +260,7 @@ Cull and draw (GPU ms, `ground`): Lean 0.54 / 0.65, Medium 0.75 / 1.73, Big 1.38
 - The Grass window is an `EditorWindow` (always dockable, default dock Bottom on a first run). An existing `imgui.ini` without a Grass entry shows it floating, as an own OS window: drag it into a dock. It is not a bug.
 
 ## Tests
-`tests/Features/Terrain/TerrainSurfaceTests.cpp` (drawn-surface sampling, finest node wins), `tests/Features/Grass/Editor/GrassTileBuilderTests.cpp` (snapping, node sampling, ocean and lake flags, bilinear tile sampling, rebuild policy). `tests/Features/Grass/`: settings sanitizing, grid and plane math, params packing, synthetic tile, shader reflection of all four shaders (names, access, push size, fullscreen rules) and the shared constants between the GLSL text and the C++ side.
+`tests/Features/Terrain/TerrainSurfaceTests.cpp` (drawn-surface sampling, finest node wins), `tests/Features/Grass/Editor/GrassTileBuilderTests.cpp` (snapping, node sampling, ocean and lake flags, bilinear tile sampling, rebuild policy). `tests/Features/Grass/`: settings sanitizing, grid and plane math, params packing, shadow-cast planning and 30 km eye-relative cascade precision, synthetic tile, shader reflection of all six shaders (names, access, push size, fullscreen and depth-only attachment rules) and the shared constants between the GLSL text and the C++ side.
 
 ## Related
 - [Render features](README.md) · [Water](water.md) · [Volumetric cloud](volumetric-cloud.md) · [GPU-driven scene](gpu-driven-scene.md)

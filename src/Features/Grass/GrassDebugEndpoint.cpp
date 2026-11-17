@@ -78,6 +78,11 @@ constexpr std::array kSettingKeys{
     SettingKey{ "receiveCloudShadow", &GrassSettings::receiveCloudShadow },
     SettingKey{ "shadowStrength", &GrassSettings::shadowStrength },
     SettingKey{ "cloudFill", &GrassSettings::cloudFill },
+    SettingKey{ "castShadows", &GrassSettings::castShadows },
+    SettingKey{ "shadowMaxTexelM", &GrassSettings::shadowMaxTexelM },
+    SettingKey{ "shadowBiasTexels", &GrassSettings::shadowBiasTexels },
+    SettingKey{ "shadowWidthScale", &GrassSettings::shadowWidthScale },
+    SettingKey{ "shadowPadM", &GrassSettings::shadowPadM },
     SettingKey{ "gridCells", &GrassSettings::gridCells },
     SettingKey{ "heightTileTexels", &GrassSettings::heightTileTexels },
     SettingKey{ "heightTileTexelSize", &GrassSettings::heightTileTexelSize },
@@ -192,6 +197,8 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const GrassVi
     Add(out, key("instanceBytes"), Count(v.instanceBytes));
     Add(out, key("shadow.cascades"), static_cast<std::int64_t>(v.shadowCascades));
     Add(out, key("shadow.cloud"), v.shadowCloud);
+    Add(out, key("shadow.castCascades"), static_cast<std::int64_t>(v.shadowCastCascades));
+    Add(out, key("shadow.castBlades"), Count(v.shadowCastBlades));
     Add(out, key("stats.valid"), v.statsValid);
     Add(out, key("stats.frame"), Count(v.statsFrame));
     if (v.statsValid) {
@@ -363,7 +370,7 @@ fx::FeatureDebugResult GrassDebugEndpoint::GetState() const
     const Vec3 eye = m_feature.LastEye();
     Add(out, "eye", std::to_string(Shown(eye.x)) + "," + std::to_string(Shown(eye.y)) + "," + std::to_string(Shown(eye.z)));
     Add(out, "profiler.rows",
-        std::string("Grass.Init, Grass.Cull, Grass.Hiz.*, Grass.Draw.L0..L2: /profiler/table?view=flat&lane=gpu"));
+        std::string("Grass.Init, Grass.Cull, Grass.Stats.Copy, Grass.Shadow.C0..3.L0..1, Grass.Draw.L0..L2: /profiler/table?view=flat&lane=gpu"));
     for (const ScopeName& scope : kScopes) {
         AddView(out, scope.prefix, m_feature.Snapshot(scope.scope));
     }

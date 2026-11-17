@@ -43,12 +43,13 @@
 | PreOpaque | 47 | `TemporalAa.FrameStamp` | TemporalAa | none (`Always`) |
 | PreOpaque | 48 | `TemporalAa.Jitter` | TemporalAa | none (`Always`) |
 | PreOpaque | 49 | `VolumetricCloud.FrameStamp` | VolumetricCloud (also publishes the shared wind) | none (`Always`) |
+| PreOpaque | 50 | `Grass.Prepare` | Grass | `Grass.Init`, `Grass.Cull`, `Grass.Stats.Copy`, `Grass.Shadow.C0..3.L0..1` |
 | Opaque | -10 | `GpuDrivenScene.SceneCull` | GpuDrivenScene | none (`Always`) |
 | Opaque | 0 | `GpuDrivenScene.Opaque` | GpuDrivenScene | `GpuDrivenScene.*` passes |
 | Opaque | 100 | `ToonCharacter.Surface` | ToonCharacter | `ToonCharacter.Surface.Draw` |
 | Opaque | 110 | `ToonCharacter.Outline` | ToonCharacter | `ToonCharacter.Outline.Draw` |
 | Opaque | 120 | `ToonCharacter.Overlay` | ToonCharacter | `ToonCharacter.Overlay.Draw` |
-| PostOpaque | -20 | `Grass.Draw` | Grass | `Grass.Init`, `Grass.Cull`, `Grass.Stats.Copy`, `Grass.Hiz.Base/Top`, `Grass.Draw.L0..L2` |
+| PostOpaque | -20 | `Grass.Draw` | Grass | `Grass.Draw.L0..L2` |
 | PostOpaque | 0 | `Shadow.Mask` | Shadow | `Shadow.Mask.Dispatch` |
 | PostOpaque | 20 | `AtmosphereAerialVolume` | Atmosphere | `AtmosphereAerialPerspectiveVolumePass` |
 | PostOpaque | 25 | `Water.Surface` | Water | `Water.Shade.Dispatch`, `Water.Composite.Draw` |
@@ -87,7 +88,7 @@ Shadow.Cascades --> Shadow.Map --> Shadow.Mask --> Shadow.Composite
 Gtao, Ssgi, VolumetricLight: Result channel from build pass to composite pass
 SceneLighting.Uniforms --> scene uniform block, binding 8 --> every lit material
 ToonCharacter.Look --> SceneLighting.Uniforms (last 64 bytes of the block) --> ToonCharacter draws
-VolumetricCloud.FrameStamp --> VolumetricCloud.Wind (WindState) --> Grass.Draw
+VolumetricCloud.FrameStamp --> VolumetricCloud.Wind (WindState) --> Grass.Prepare
 ToonCharacter.Surface (claims entities) --> Outline, Overlay (same entities)
 Bloom: PostComposite, reads scene color, adds glow before ToneMapping
 TemporalAa.Jitter (PreOpaque) --> engine draw projection --> scene color and depth --> TemporalAa resolve (PostComposite -150)

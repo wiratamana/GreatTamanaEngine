@@ -33,7 +33,7 @@ layout(std430, binding = 0) readonly buffer GrassParamsBlock {
     vec4 sunDir;              // xyz = toward the sun, w = translucency strength.
     vec4 sunRadiance;         // rgb = sun illuminance (already tinted), w = sun visibility multiplier.
     vec4 skyAmbient;          // rgb = sky ambient (already scaled by intensity), w = sky diffuse fill in shadow.
-    vec4 groundAmbient;       // rgb = ground ambient (already scaled by intensity).
+    vec4 groundAmbient;       // rgb = ground ambient (already scaled by intensity), w = shadow caster frustum pad (m).
     vec4 colorRoot;           // rgb = root albedo (linear), w = root AO 0..1.
     vec4 colorTip;            // rgb = tip albedo (linear), w = per-blade tint variation 0..1.
     vec4 cameraWorld;         // xy = camera world xz (m), z = alpine line: grass thins out above this world Y, w = its fade band (m).
@@ -51,6 +51,7 @@ const uint kGrassFlagHiz = 1u;           // Hi-Z pyramid is valid and bound.
 const uint kGrassFlagStats = 4u;         // Count rejections into the stats words.
 
 const uint kGrassLodCount = 3u;
+const uint kGrassCommandCount = 6u;
 const uint kGrassStatsWords = 32u;
 
 // Stats word indices (GrassStatsWord in GrassTypes.h).

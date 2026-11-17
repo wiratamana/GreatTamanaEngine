@@ -22,14 +22,21 @@ struct GrassViewState {
     fx::GpuParams<GrassParamsGpu> initParams;
     fx::GpuParams<GrassParamsGpu> cullParams;
     fx::GpuParams<GrassShadowParamsGpu> cullShadowParams;
+    std::array<std::array<fx::GpuParams<GrassParamsGpu>, kGrassShadowLodCount>, kSunShadowReceiverMaxCascades> shadowDrawParams;
     std::array<fx::GpuParams<GrassParamsGpu>, kGrassLodCount> drawParams;
+    fx::TransientTarget standIn{ "Grass.StandIn" };
     std::array<std::uint64_t, 4> slotRevision{};   // Tile revision each frame-slot copy holds (0 = none).
     std::array<std::uint64_t, 4> slotGeneration{}; // Buffer generation that copy was uploaded into.
+    std::uint64_t prepareRanSerial = 0;            // Serial of the last PreparePass run for this view.
+    std::uint64_t preparedSerial = 0;              // Serial when instances and commands are ready for DrawPass.
+    fx::GpuBufferRef preparedInstances;
+    fx::GpuBufferRef preparedCommands;
+    GrassParamsGpu preparedParams{};
     GrassViewSnapshot snapshot;
 };
 
-// GPU-driven grass: a compute pass places and culls blades per 16 m chunk, three indirect draws (one per LOD) build
-// each blade from its vertex index. Terrain height comes from a height tile the editor layer submits.
+// GPU-driven grass: PreOpaque PreparePass culls chunks and casts depth shadows; PostOpaque DrawPass shades L0..L2.
+// Terrain height comes from a height tile the editor layer submits.
 class GrassFeature final : public fx::Feature {
 public:
     GrassFeature() = default;
@@ -77,9 +84,10 @@ public:
 
 private:
     void FrameStamp(fx::PreOpaqueFrame& f);
+    void PreparePass(fx::PreOpaqueFrame& f);
     void DrawPass(fx::PostOpaqueFrame& f);
     void UpdateSyntheticTile(const fx::View& view);
-    void FillEnvironment(fx::PostOpaqueFrame& f, GrassFrameInputs& in, GrassViewSnapshot& snap);
+    void FillEnvironment(fx::Frame& f, GrassFrameInputs& in, GrassViewSnapshot& snap);
 
     GrassSettings m_user;
     GrassSettings m_settings;
@@ -99,8 +107,8 @@ private:
     fx::PerView<GrassViewState> m_views;
     fx::ComputeShader m_initShader{ "GrassInit" };
     fx::ComputeShader m_cullShader{ "GrassCull" };
+    fx::FullscreenShader m_shadowShader{ "GrassShadow" };
     fx::FullscreenShader m_drawShader{ "Grass" };
-    fx::HizPyramid m_hiz{ "Grass.Hiz" };
     fx::PersistentBuffer m_instances{ "Grass.Instances", fx::BufferUse::Storage };
     fx::PersistentBuffer m_commands{ "Grass.Commands", fx::BufferUse::Storage | fx::BufferUse::Indirect };
     fx::PersistentBuffer m_heights{ "Grass.Heights", fx::BufferUse::Storage | fx::BufferUse::HostWrite, 2 };

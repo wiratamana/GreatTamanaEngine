@@ -17,11 +17,15 @@ inline constexpr const char* kGrassFeatureName = "Grass";
 
 // Shared constants of the grass shaders. NOTE: must match Shaders/GrassCommon.glsl.
 inline constexpr std::uint32_t kGrassLodCount = 3;
+inline constexpr std::uint32_t kGrassShadowLodCount = 2;     // L0 and L1 regions cast into sun cascades.
+inline constexpr std::uint32_t kGrassCommandCount = 2 * kGrassLodCount; // 3 colour + 3 shadow indirect commands.
 inline constexpr float kGrassChunkSizeM = 16.0f;
 inline constexpr std::uint32_t kGrassMaxGridCells = 48;      // Chunks per grid side.
 inline constexpr std::uint32_t kGrassCullGroupSize = 64;     // local_size_x of GrassCull.comp.
 inline constexpr std::uint32_t kGrassStatsWords = 32;
 inline constexpr std::uint32_t kGrassCommandStride = 16;     // Bytes between draw commands.
+inline constexpr std::uint64_t kGrassCommandBytes = std::uint64_t{ kGrassCommandStride } * kGrassCommandCount;
+static_assert(kGrassCommandBytes == 96);
 inline constexpr std::uint32_t kGrassInstanceBytes = 32;
 inline constexpr std::uint32_t kGrassMaxTileTexels = 512;     // Height tile limit per side (the GPU copy has this fixed size).
 inline constexpr std::uint32_t kGrassTileStride = 2;          // Floats per tile texel: height, then submerged flag and colour as raw bits.
@@ -106,6 +110,22 @@ struct GrassPushGpu {
 };
 static_assert(sizeof(GrassPushGpu) == 16);
 
+// Push constants of GrassShadow.vert (one depth-only draw per cascade and LOD).
+// NOTE: must match GrassShadowPush in Shaders/GrassShadow.vert (80 bytes).
+struct GrassShadowPushGpu {
+    float cascadeVpRel[16]; // Eye-relative world to cascade clip, column-major.
+    std::uint32_t lod;
+    std::uint32_t instanceBase;
+    float minWidth;         // Minimum blade width in metres (~shadowWidthScale * texelWorld).
+    float biasM;            // Caster shift along sun direction in metres (shadowBiasTexels * texelWorld).
+};
+static_assert(sizeof(GrassShadowPushGpu) == 80);
+static_assert(std::is_trivially_copyable_v<GrassShadowPushGpu>);
+static_assert(offsetof(GrassShadowPushGpu, lod) == 64);
+static_assert(offsetof(GrassShadowPushGpu, instanceBase) == 68);
+static_assert(offsetof(GrassShadowPushGpu, minWidth) == 72);
+static_assert(offsetof(GrassShadowPushGpu, biasM) == 76);
+
 // Params storage block of every grass shader. NOTE: must match GrassParamsBlock in Shaders/GrassCommon.glsl.
 // Space: "eye" = relative to the camera; "grid" = relative to the corner of chunk grid cell (0,0) (small numbers).
 struct GrassParamsGpu {
@@ -127,7 +147,7 @@ struct GrassParamsGpu {
     float sunDir[4];              // 416  xyz = toward the sun, w = translucency strength.
     float sunRadiance[4];         // 432  rgb = sun illuminance (tinted), w = sun visibility multiplier.
     float skyAmbient[4];          // 448  rgb = sky ambient x intensity, w = sky diffuse fill in shadow.
-    float groundAmbient[4];       // 464  rgb = ground ambient x intensity.
+    float groundAmbient[4];       // 464  rgb = ground ambient x intensity, w = shadow caster frustum pad (m).
     float colorRoot[4];           // 480  rgb = root albedo (linear), w = root AO.
     float colorTip[4];            // 496  rgb = tip albedo (linear), w = tint variation.
     float cameraWorld[4];         // 512  xy = camera world xz.
@@ -217,7 +237,7 @@ enum class GrassDebugView : std::uint32_t { Normal = 0, LodColor = 1, Sway = 2, 
 // User-facing settings. Lives in the feature object; the panel and the HTTP endpoint edit it.
 struct GrassSettings {
     bool enabled = true;
-    bool hizCulling = true;
+    bool hizCulling = false;
     bool collectStats = true;
     GrassDebugView debugView = GrassDebugView::Normal; // LodColor: LOD0 green, LOD1 yellow, LOD2 red. ChunkBounds: 16 m chunk checker and borders.
 
@@ -286,8 +306,13 @@ struct GrassSettings {
     float sunVisibility = 1.0f;   // Flat multiplier on the direct sun term.
     bool receiveSunShadow = true;
     bool receiveCloudShadow = true;
-    float shadowStrength = 1.0f;  // Fraction of cascade and cloud shadow applied to the blade sun term.
-    float cloudFill = 0.35f;      // Diffuse sky fill added to shadowed blades so they are not black.
+    float shadowStrength = 1.0f;    // Fraction of cascade and cloud shadow applied to the blade sun term.
+    float cloudFill = 0.35f;        // Diffuse sky fill added to shadowed blades so they are not black.
+    bool castShadows = true;
+    float shadowMaxTexelM = 0.40f;  // Skip cascades coarser than this texel size (m).
+    float shadowBiasTexels = 1.0f;  // Shift shadow blades toward the sun (texels).
+    float shadowWidthScale = 1.5f;  // Minimum shadow blade width (texels).
+    float shadowPadM = 3.0f;        // Extra camera-frustum chunk padding while casting shadows (m).
 };
 
 // Named starting points for the settings. They only change density, distances and buffer sizes.
@@ -397,6 +422,8 @@ struct GrassViewSnapshot {
     std::uint64_t instanceBytes = 0;
     std::uint32_t shadowCascades = 0;
     bool shadowCloud = false;
+    std::uint32_t shadowCastCascades = 0;
+    std::uint64_t shadowCastBlades = 0;
     bool statsValid = false;      // `stats` came from a readback two frames old.
     std::uint64_t statsFrame = 0;
     GrassStatsGpu stats{};

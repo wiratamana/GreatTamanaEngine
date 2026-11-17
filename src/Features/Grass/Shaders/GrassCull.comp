@@ -18,7 +18,7 @@ layout(std430, binding = 2) writeonly buffer GrassInstancesBlock {
     GrassInstance items[];
 } instances;
 
-// 3 x {vertexCount, instanceCount, firstVertex, firstInstance}; only instanceCount is touched here (atomic).
+// 6 x {vertexCount, instanceCount, firstVertex, firstInstance} (3 colour + 3 shadow); instanceCount is updated atomically.
 layout(std430, binding = 3) buffer GrassCommandsBlock {
     uint values[];
 } commands;
@@ -489,11 +489,12 @@ void main()
     uint lodMin = dist < params.lodDist.x ? 0u : (dist < params.lodDist.y ? 1u : 2u);
     float chunkDensity = GrassDensityAt(dist);
 
-    // 6. Frustum and Hi-Z with the box padded for blade lean and wind.
+    // 6. Frustum (further padded when casting shadows) and Hi-Z with the box padded for blade lean and wind.
     float pad = 0.9 * maxBladeHeight;
     vec3 padMin = boxMin - vec3(pad, 0.0, pad);
     vec3 padMax = boxMax + vec3(pad, 0.0, pad);
-    if (BoxOutsideFrustum(padMin, padMax)) {
+    float shadowPad = max(params.groundAmbient.w, 0.0);
+    if (BoxOutsideFrustum(padMin - vec3(shadowPad), padMax + vec3(shadowPad))) {
         if (counter) { atomicAdd(stats.words[kStatChunksCulledFrustum], 1u); }
         return;
     }
@@ -556,6 +557,7 @@ void main()
                 uint granted = slot >= cap ? 0u : min(wanted, cap - slot);
                 if (granted > 0u) {
                     atomicAdd(commands.values[lid * 4u + 1u], granted);
+                    atomicAdd(commands.values[(lid + kGrassLodCount) * 4u + 1u], granted);
                 }
                 if (granted < wanted) {
                     atomicAdd(stats.words[kStatDropped0 + lid], wanted - granted);

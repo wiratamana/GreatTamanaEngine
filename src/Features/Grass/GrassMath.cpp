@@ -1,5 +1,7 @@
 #include "GrassMath.h"
 
+#include "../../Math/Mat4d.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -117,6 +119,10 @@ GrassSettings SanitizeGrassSettings(const GrassSettings& in, bool enforceOrder) 
     s.sunVisibility = Clamp(in.sunVisibility, d.sunVisibility, 0.0f, 2.0f);
     s.shadowStrength = Clamp(in.shadowStrength, d.shadowStrength, 0.0f, 1.0f);
     s.cloudFill = Clamp(in.cloudFill, d.cloudFill, 0.0f, 1.0f);
+    s.shadowMaxTexelM = Clamp(in.shadowMaxTexelM, d.shadowMaxTexelM, 0.01f, 4.0f);
+    s.shadowBiasTexels = Clamp(in.shadowBiasTexels, d.shadowBiasTexels, -4.0f, 8.0f);
+    s.shadowWidthScale = Clamp(in.shadowWidthScale, d.shadowWidthScale, 0.0f, 8.0f);
+    s.shadowPadM = Clamp(in.shadowPadM, d.shadowPadM, 0.0f, 32.0f);
 
     const std::uint32_t minCells = MinGrassGridCells(s.lod2Distance);
     s.gridCells = std::clamp(std::max(in.gridCells, minCells), 2u, kGrassMaxGridCells);
@@ -326,7 +332,8 @@ GrassParamsGpu MakeGrassParams(const GrassSettings& s, const GrassFrameInputs& i
     Set4(p.sunDir, in.sunDirection[0], in.sunDirection[1], in.sunDirection[2], s.translucency);
     Set4(p.sunRadiance, in.sunRadiance[0], in.sunRadiance[1], in.sunRadiance[2], s.sunVisibility);
     Set4(p.skyAmbient, in.skyAmbient[0], in.skyAmbient[1], in.skyAmbient[2], s.cloudFill);
-    Set4(p.groundAmbient, in.groundAmbient[0], in.groundAmbient[1], in.groundAmbient[2], 0.0f);
+    const float shadowFrustumPad = (s.castShadows && in.shadowCasting) ? s.shadowPadM : 0.0f;
+    Set4(p.groundAmbient, in.groundAmbient[0], in.groundAmbient[1], in.groundAmbient[2], shadowFrustumPad);
     Set4(p.colorRoot, s.colorRoot[0], s.colorRoot[1], s.colorRoot[2], s.rootAo);
     Set4(p.colorTip, s.colorTip[0], s.colorTip[1], s.colorTip[2], s.tintVariation);
     Set4(p.cameraWorld, static_cast<float>(in.eyeX), static_cast<float>(in.eyeZ), s.alpineHeight, s.alpineFade);
@@ -413,6 +420,55 @@ GrassShadowParamsGpu MakeGrassShadowParams(const SunShadowReceiver* receiver, co
     p.counts[0] = count;
     p.counts[1] = std::clamp(receiver->filterSamples, 1u, 8u);
     return p;
+}
+
+GrassShadowCastPlan MakeGrassShadowCastPlan(const SunShadowReceiver* receiver, const Vec3& sunDir,
+    double eyeX, double eyeY, double eyeZ, const GrassSettings& settings) noexcept
+{
+    constexpr float kSunMatchMinDot = 0.9999f;
+    GrassShadowCastPlan plan{};
+    if (!settings.castShadows || receiver == nullptr || !SunShadowReceiverUsable(*receiver)
+        || !std::isfinite(eyeX) || !std::isfinite(eyeY) || !std::isfinite(eyeZ)) {
+        return plan;
+    }
+    const bool sunValid = std::isfinite(sunDir.x) && std::isfinite(sunDir.y) && std::isfinite(sunDir.z)
+        && LengthSquared(sunDir) > 1e-12f;
+    if (!sunValid || !std::isfinite(receiver->directionTowardSun.x)
+        || !std::isfinite(receiver->directionTowardSun.y) || !std::isfinite(receiver->directionTowardSun.z)
+        || LengthSquared(receiver->directionTowardSun) <= 1e-12f
+        || Dot(Normalize(receiver->directionTowardSun), Normalize(sunDir)) < kSunMatchMinDot) {
+        return plan;
+    }
+
+    const float maxTexelM = Clamp(settings.shadowMaxTexelM, 0.40f, 0.01f, 4.0f);
+    const float biasTexels = Clamp(settings.shadowBiasTexels, 1.0f, -4.0f, 8.0f);
+    const float widthScale = Clamp(settings.shadowWidthScale, 1.5f, 0.0f, 8.0f);
+    const float maxSliceStart = std::max(Finite(settings.lod1Distance, 120.0f), 0.0f);
+    const Mat4d eyeTranslation = Mat4d::Translation(eyeX, eyeY, eyeZ);
+
+    const std::uint32_t cascadeCount = std::min(receiver->cascadeCount, kSunShadowReceiverMaxCascades);
+    for (std::uint32_t c = 0; c < cascadeCount; ++c) {
+        const float texel = receiver->texelWorld[c];
+        if (!(texel > 0.0f) || texel > maxTexelM) {
+            continue;
+        }
+        const float sliceStart = c == 0
+            ? 0.0f
+            : std::max(0.0f, receiver->splitFar[c - 1u] - std::max(Finite(receiver->blendWidth[c - 1u], 0.0f), 0.0f));
+        if (sliceStart >= maxSliceStart) {
+            continue;
+        }
+        const Mat4d vpRel = Mat4d::FromMat4(receiver->viewProjection[c]) * eyeTranslation;
+        if (!vpRel.IsFinite()) {
+            continue;
+        }
+        GrassShadowCascadeDraw& dst = plan.cascades[plan.count++];
+        dst.cascadeIndex = c;
+        dst.viewProjectionRelative = vpRel.ToMat4();
+        dst.minWidth = widthScale * texel;
+        dst.biasM = biasTexels * texel;
+    }
+    return plan;
 }
 
 

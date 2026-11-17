@@ -96,6 +96,8 @@ gte_test_path_defines(GreatTamanaEngineTests "${CMAKE_BINARY_DIR}/shaders"
     GTE_TEST_GRASS_CULL_SPV_PATH=GrassCull.comp.spv
     GTE_TEST_GRASS_VERT_SPV_PATH=Grass.vert.spv
     GTE_TEST_GRASS_FRAG_SPV_PATH=Grass.frag.spv
+    GTE_TEST_GRASS_SHADOW_VERT_SPV_PATH=GrassShadow.vert.spv
+    GTE_TEST_GRASS_SHADOW_FRAG_SPV_PATH=GrassShadow.frag.spv
     GTE_TEST_VOLUMETRIC_INJECT_SPV_PATH=VolumetricLightInject.comp.spv
     GTE_TEST_VOLUMETRIC_TEMPORAL_SPV_PATH=VolumetricLightTemporal.comp.spv
     GTE_TEST_VOLUMETRIC_INTEGRATE_SPV_PATH=VolumetricLightIntegrate.comp.spv
@@ -136,6 +138,7 @@ gte_test_path_defines(GreatTamanaEngineTests "${CMAKE_SOURCE_DIR}/src"
     GTE_TEST_SSGI_COMPOSITE_GLSL_PATH=Features/Ssgi/Shaders/SsgiComposite.frag
     GTE_TEST_WATER_SHADE_GLSL_PATH=Features/Water/Shaders/WaterShade.comp
     GTE_TEST_GRASS_COMMON_GLSL_PATH=Features/Grass/Shaders/GrassCommon.glsl
+    GTE_TEST_GRASS_BLADE_GLSL_PATH=Features/Grass/Shaders/GrassBlade.glsl
     GTE_TEST_TONEMAPPING_GLSL_PATH=Features/ToneMapping/Shaders/ToneMapping.comp
     GTE_TEST_TEMPORALAA_RESOLVE_GLSL_PATH=Features/TemporalAa/Shaders/TemporalAaResolve.comp)
 gte_test_path_defines(GreatTamanaEngineTests "${CMAKE_BINARY_DIR}/shaders"
