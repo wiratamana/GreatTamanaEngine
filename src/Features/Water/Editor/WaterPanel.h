@@ -17,6 +17,7 @@ public:
     WaterPanel() : EditorWindow("Water", WindowDock::Right, /*openByDefault=*/false) {}
 
 protected:
+    void OnFrame(EditorFrame& frame) override;
     void OnGui(EditorFrame& frame) override;
 
 private:

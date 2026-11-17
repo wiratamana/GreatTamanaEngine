@@ -82,7 +82,7 @@ TEST(BigWorldPlanTest, EverySetKeyIsSavedForRestoreExceptThePresetShortcut)
     }
 }
 
-TEST(BigWorldPlanTest, LowerTiersMarchTheCloudsWithFewerSteps)
+TEST(BigWorldPlanTest, LowerTiersMarchTheCloudsWithFewerStepsAndAtLowerResolution)
 {
     const BigWorldPlan leanPlan = MakeBigWorldPlan(Quality::Lean);
     const BigWorldPlan mediumPlan = MakeBigWorldPlan(Quality::Medium);
@@ -94,8 +94,12 @@ TEST(BigWorldPlanTest, LowerTiersMarchTheCloudsWithFewerSteps)
     ASSERT_NE(medium, nullptr);
     ASSERT_NE(big, nullptr);
     EXPECT_LT(std::stoi(ValueOf(*lean, "maxSteps")), std::stoi(ValueOf(*medium, "maxSteps")));
-    EXPECT_EQ(ValueOf(*big, "maxSteps"), ""); // the full tier keeps the feature default
-    EXPECT_NE(std::find(big->restoreKeys.begin(), big->restoreKeys.end(), "maxSteps"), big->restoreKeys.end());
+    EXPECT_EQ(ValueOf(*lean, "resolutionDivisor"), "6");
+    EXPECT_EQ(ValueOf(*medium, "resolutionDivisor"), "6");
+    for (const char* key : { "maxSteps", "resolutionDivisor", "shadowSteps", "shadowUpdate" }) {
+        EXPECT_EQ(ValueOf(*big, key), "") << key; // the full tier keeps the feature default
+        EXPECT_NE(std::find(big->restoreKeys.begin(), big->restoreKeys.end(), key), big->restoreKeys.end()) << key;
+    }
 }
 
 TEST(BigWorldPlanTest, LeanHasNoRiverAndTheOthersDo)

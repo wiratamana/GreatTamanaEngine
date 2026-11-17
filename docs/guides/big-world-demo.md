@@ -64,7 +64,16 @@ src/Features/BigWorld/Editor/       gte_editor
 ```
 - The Game layer names terrain, water and grass in words only. It includes no feature header.
 - The adapters find the other modules on every call. Nothing is cached across frames.
-- The clouds and the grass are driven through their debug endpoints (`enabled`, `preset`, `maxSteps`). The demo saves the keys first and puts them back on close.
+- The clouds and the grass are driven through their debug endpoints (`enabled`, `preset`, the cloud cost keys of the tier). The demo saves the keys first and puts them back on close.
+
+## Quality tiers
+| Tier | Grass preset | Cloud settings | River |
+|---|---|---|---|
+| `lean` | Lean | `maxSteps` 48, `resolutionDivisor` 6, `shadowSteps` 6, `shadowUpdate` 5 | no |
+| `medium` | Medium | `maxSteps` 64, `resolutionDivisor` 6 | yes |
+| `big` (menu default) | Big | feature defaults | yes |
+
+The clouds are the biggest cost of the scene (about 13 to 15 ms of 35 at ground level on an Iris Xe). A coarser cloud grid (`resolutionDivisor` 6 instead of the automatic 4) took 10 to 20 percent off the frame in an interleaved A/B on that GPU. The clouds get a little grainier. The far horizon clouds only thin out when `maxDistanceM` is also cut, so the tiers do not touch it.
 
 ## What the demo checks across systems
 - The terrain must be resident before water is added (the carve needs the terrain).

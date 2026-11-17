@@ -38,15 +38,23 @@ const char* GrassPresetFor(Quality quality) noexcept
     return "Big";
 }
 
-// Fewer march steps per cloud ray: the biggest cloud cost lever that changes the picture very little.
-const char* CloudMaxSteps(Quality quality) noexcept
+// Cloud cost levers of the lower tiers: a coarser march grid saves most for the least visible change.
+void AddCloudTierValues(Quality quality, FeatureTweak& clouds)
 {
     switch (quality) {
-    case Quality::Lean: return "48";
-    case Quality::Medium: return "64";
-    case Quality::Big: break;
+    case Quality::Lean:
+        clouds.values.push_back({ "maxSteps", "48" });
+        clouds.values.push_back({ "resolutionDivisor", "6" });
+        clouds.values.push_back({ "shadowSteps", "6" });
+        clouds.values.push_back({ "shadowUpdate", "5" });
+        break;
+    case Quality::Medium:
+        clouds.values.push_back({ "maxSteps", "64" });
+        clouds.values.push_back({ "resolutionDivisor", "6" });
+        break;
+    case Quality::Big:
+        break;
     }
-    return nullptr;
 }
 
 } // namespace
@@ -80,11 +88,9 @@ BigWorldPlan MakeBigWorldPlan(Quality quality)
 
     FeatureTweak clouds;
     clouds.feature = "VolumetricCloud";
-    clouds.restoreKeys = { "enabled", "maxSteps" };
+    clouds.restoreKeys = { "enabled", "maxSteps", "resolutionDivisor", "shadowSteps", "shadowUpdate" };
     clouds.values = { { "enabled", "true" } };
-    if (const char* steps = CloudMaxSteps(quality)) {
-        clouds.values.push_back({ "maxSteps", steps });
-    }
+    AddCloudTierValues(quality, clouds);
     plan.tweaks.push_back(std::move(clouds));
 
     FeatureTweak grass;

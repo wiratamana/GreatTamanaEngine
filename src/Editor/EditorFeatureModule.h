@@ -6,6 +6,7 @@
 #include "../Application/ModuleCommandBridge.h"
 #include "../Core/FeatureKit/FeatureDebug.h"
 #include "../Core/Plugins/IEngineFeatureModule.h"
+#include "../Profiling/NameTable.h"
 
 #include <cstddef>
 #include <memory>
@@ -100,6 +101,8 @@ public:
 private:
     const std::vector<std::unique_ptr<IEngineFeatureModule>>* m_all = nullptr;
     std::vector<IEditorFeatureModule*> m_ordered;
+    std::vector<Profiling::NameId> m_uiRequestScopes; // Parallel to m_ordered.
+    std::vector<Profiling::NameId> m_frameTickScopes;
 };
 
 } // namespace gte

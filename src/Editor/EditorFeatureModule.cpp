@@ -4,6 +4,7 @@
 #include "EditorFeatureHooks.h"
 #include "../Core/FeatureKit/FeatureRegistration.h"
 #include "../Core/Logging.h"
+#include "../Profiling/ScopeTimer.h"
 
 #include <algorithm>
 #include <exception>
@@ -41,6 +42,13 @@ void EditorModuleSet::Attach(const std::vector<std::unique_ptr<IEngineFeatureMod
     }
     std::stable_sort(m_ordered.begin(), m_ordered.end(),
         [](const IEditorFeatureModule* a, const IEditorFeatureModule* b) { return a->TickOrder() < b->TickOrder(); });
+    m_uiRequestScopes.clear();
+    m_frameTickScopes.clear();
+    for (const IEditorFeatureModule* module : m_ordered) {
+        const std::string name = std::string("EditorModule.") + std::string(module->ModuleName());
+        m_uiRequestScopes.push_back(Profiling::InternName((name + ".UiRequests").c_str()));
+        m_frameTickScopes.push_back(Profiling::InternName((name + ".FrameTick").c_str()));
+    }
     const EditorModuleAttach attach{ *this, extensions, extensions != nullptr ? &extensions->Get<EditorFeatureHooks>() : nullptr };
     for (IEditorFeatureModule* module : m_ordered) {
         module->OnAttach(attach);
@@ -49,15 +57,17 @@ void EditorModuleSet::Attach(const std::vector<std::unique_ptr<IEngineFeatureMod
 
 void EditorModuleSet::ApplyUiRequests()
 {
-    for (IEditorFeatureModule* module : m_ordered) {
-        module->OnUiRequests();
+    for (std::size_t i = 0; i < m_ordered.size(); ++i) {
+        GTE_PROFILE_SCOPE_ID(m_uiRequestScopes[i]);
+        m_ordered[i]->OnUiRequests();
     }
 }
 
 void EditorModuleSet::FrameTick(const EditorFrameTick& tick)
 {
-    for (IEditorFeatureModule* module : m_ordered) {
-        module->OnFrameTick(tick);
+    for (std::size_t i = 0; i < m_ordered.size(); ++i) {
+        GTE_PROFILE_SCOPE_ID(m_frameTickScopes[i]);
+        m_ordered[i]->OnFrameTick(tick);
     }
 }
 

@@ -61,6 +61,11 @@ const char* KindLabel(water::WaterBodyKind kind)
 
 } // namespace
 
+void WaterPanel::OnFrame(EditorFrame& frame)
+{
+    frame.ctx.extensions.Get<WaterUiBridge>().panelVisible = IsVisible();
+}
+
 void WaterPanel::OnGui(EditorFrame& frame)
 {
     WaterUiBridge& ui = frame.ctx.extensions.Get<WaterUiBridge>();

@@ -1,5 +1,7 @@
 #include "EditorFeatureHooks.h"
 
+#include "../Profiling/ScopeTimer.h"
+
 #include <algorithm>
 #include <exception>
 #include <utility>
@@ -20,6 +22,7 @@ void EditorFeatureHooks::RemoveViewHook(IEditorViewHook* hook)
 
 void EditorFeatureHooks::RunViewInput(EditorViewContext view) const
 {
+    GTE_PROFILE_SCOPE("EditorFeatureHooks::RunViewInput");
     const bool claimed = std::any_of(m_viewHooks.begin(), m_viewHooks.end(),
         [](const IEditorViewHook* hook) { return hook->ClaimsPointer(); });
     view.pointerFree = view.hovered && !claimed;
@@ -30,6 +33,7 @@ void EditorFeatureHooks::RunViewInput(EditorViewContext view) const
 
 void EditorFeatureHooks::RunViewOverlay(const EditorViewContext& view) const
 {
+    GTE_PROFILE_SCOPE("EditorFeatureHooks::RunViewOverlay");
     for (IEditorViewHook* hook : m_viewHooks) {
         hook->OnViewOverlay(view);
     }

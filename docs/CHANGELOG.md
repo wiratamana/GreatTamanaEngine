@@ -58,8 +58,10 @@
 ## Big World demo (branch `feature/precural-landscape`, 2026-11-17)
 - **File > Open Big World** and **Close Big World**: one click opens terrain, sea, lake, river, grass, atmosphere and volumetric clouds. See the [guide](guides/big-world-demo.md).
 - Game-layer orchestrator `src/Game/BigWorld` (plan, three ports, state machine). The editor module `src/Features/BigWorld/Editor` implements the ports on the live worlds. Routes: `/bigworld/open`, `/bigworld/close`, `/bigworld/state`.
-- Quality tiers `lean`, `medium`, `big`: grass preset, cloud march steps (`maxSteps`) and a river or not.
+- Quality tiers `lean`, `medium`, `big`: grass preset, cloud cost settings (`maxSteps`, `resolutionDivisor`, shadow steps) and a river or not.
 - **Fix:** opening another scene (a module action, `/terrain/open`, Open Scene) while the Hi-Z demo was active left its feature switches on: the sky and aerial perspective stayed off. The host now releases the Hi-Z demo settings when none of its entities is alive (`HizDemoSceneReplaced`).
+- **Fix:** the Water edit handles and outlines no longer draw over the Game view while the Water window is closed. The Scene view is unchanged.
+- Profiler: every editor feature module gets CPU rows `EditorModule.<name>.FrameTick` and `.UiRequests`, plus `EditorFeatureHooks::RunViewInput` and `RunViewOverlay`. Read them with `/profiler/table?view=flat&lane=main`.
 
 ## Landscape dead code removed (branch `feature/precural-landscape`, 2026-11-17)
 - Terrain: removed unused `LodSelector::ClearHeightRanges`, `TerrainHeightField::LevelForSpacing`, the unused pool and streamer counters, and the 10 disabled manual bench tests. `InlineTerrainExecutor` moved into the test folder.

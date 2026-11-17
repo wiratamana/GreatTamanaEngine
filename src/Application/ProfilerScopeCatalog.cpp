@@ -81,6 +81,8 @@ constexpr auto kRaw = std::to_array<Entry>({
     { "Panel.ProjectWindows", "Project windows", "Draws windows that belong to project code.", "", EditorUi, false },
     { "Panel.ViewDescriptors", "View pictures", "Prepares the pictures shown in the editor views.", "", EditorUi, false },
     { "Panel.SceneCameraAdapter", "Scene camera control", "Handles the camera of the scene view.", "", EditorUi, false },
+    { "EditorFeatureHooks::RunViewInput", "Feature view input", "Lets feature modules read the mouse over the Game view.", "", EditorUi, false },
+    { "EditorFeatureHooks::RunViewOverlay", "Feature view overlays", "Lets feature modules draw gizmos and outlines over a view.", "", EditorUi, false },
 
     // Loading and tools.
     { "Project.StartScan", "Starting a project folder scan", "Asks a helper thread to look at the project files.", "", LoadingAndTools, false },
@@ -285,6 +287,12 @@ ScopeInfo DescribeByPrefix(std::string_view name, bool& found)
         info.title = "Editor panel \"" + std::string(rest) + "\"";
         info.explanation = "Time to draw the editor panel \"" + std::string(rest) + "\". It is not part of the game.";
         info.category = EditorUi;
+        return info;
+    }
+    if (AfterPrefix(name, "EditorModule.", rest)) {
+        info.title = "Feature module \"" + std::string(rest) + "\"";
+        info.explanation = "CPU time of one per-frame step of a feature module (" + std::string(rest) + "). It runs on the main thread.";
+        info.category = Simulation;
         return info;
     }
     found = false;

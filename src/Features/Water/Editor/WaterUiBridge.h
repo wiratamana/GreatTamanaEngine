@@ -17,6 +17,7 @@ struct WaterUiBridge {
     std::uint32_t selectedId = 0;
     int selectedPoint = -1;
     bool gizmos = true;     // Draw and edit the handles in the views.
+    bool panelVisible = false; // The Water window shows its content; the Game view draws handles only then.
     bool handleHot = false; // The cursor is on a handle or one is dragged: the camera must not react.
 
     bool dragging = false;

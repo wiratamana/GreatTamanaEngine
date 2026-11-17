@@ -64,8 +64,8 @@ void WaterModule::OnViewOverlay(const EditorViewContext& view)
     if (m_ui == nullptr) {
         return;
     }
-    // The Game view shows the gizmos only over an open landscape.
-    if (view.kind == EditorViewKind::Game && (m_terrainUi == nullptr || !m_terrainUi->snapshot.open)) {
+    // The Game view shows the gizmos only over an open landscape while the Water window is shown.
+    if (view.kind == EditorViewKind::Game && (m_terrainUi == nullptr || !m_terrainUi->snapshot.open || !m_ui->panelVisible)) {
         m_ui->handleHot = false;
         return;
     }
