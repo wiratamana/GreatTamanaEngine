@@ -4,9 +4,9 @@
 // Tick() runs once per frame on the main thread; the tile itself is built on one worker thread.
 
 #include "GrassTileBuilder.h"
-#include "../../Features/Grass/GrassFeature.h"
-#include "../../Features/Terrain/TerrainControl.h"
-#include "../../Features/Water/World/WaterControl.h"
+#include "../GrassFeature.h"
+#include "../../Terrain/TerrainControl.h"
+#include "../../Water/World/WaterControl.h"
 
 #include <condition_variable>
 #include <cstdint>

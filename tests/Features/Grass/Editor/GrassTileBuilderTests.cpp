@@ -1,6 +1,6 @@
 // Tests for the Grass height tile builder: snapping, node sampling, water flags and coverage.
 
-#include "Editor/Grass/GrassTileBuilder.h"
+#include "Features/Grass/Editor/GrassTileBuilder.h"
 #include "Features/Grass/GrassMath.h"
 #include "Features/Water/World/WaterEdit.h"
 

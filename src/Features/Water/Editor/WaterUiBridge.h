@@ -3,8 +3,8 @@
 // State shared by the Water panel and the Game and Scene view gizmos. The water world only changes CPU data here;
 // the host turns it into GPU work in its own Tick, so the UI may call it directly.
 
-#include "../../Math/Vec2.h"
-#include "../../Features/Water/World/WaterControl.h"
+#include "../../../Math/Vec2.h"
+#include "../World/WaterControl.h"
 
 #include <cstdint>
 #include <string>

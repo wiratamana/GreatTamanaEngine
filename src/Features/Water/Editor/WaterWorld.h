@@ -4,8 +4,8 @@
 // and look to the Water render feature. Every call is made on the main thread.
 // Tick() runs once per frame:  waterWorld.Tick(nowSeconds);
 
-#include "../../Core/FeatureKit/FeatureDebug.h"
-#include "../../Features/Water/World/WaterControl.h"
+#include "../../../Core/FeatureKit/FeatureDebug.h"
+#include "../World/WaterControl.h"
 
 #include <functional>
 #include <memory>

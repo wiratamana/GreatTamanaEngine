@@ -2,8 +2,8 @@
 
 #include "Logger.h"
 #include "../Features/Terrain/Editor/TerrainCommands.h"
-#include "Water/WaterCommands.h"
-#include "Water/WaterUiBridge.h"
+#include "../Features/Water/Editor/WaterCommands.h"
+#include "../Features/Water/Editor/WaterUiBridge.h"
 #include "../Features/Terrain/Editor/TerrainUiBridge.h"
 #include "../Game/RenderSystem.h"
 #include "EditorSceneIOCapability.h"

@@ -1,8 +1,8 @@
 #include "WaterGizmoOverlay.h"
 
 #include "WaterGizmoMath.h"
-#include "../TransformGizmo.h"
-#include "../ViewportProjection.h"
+#include "../../../Editor/TransformGizmo.h"
+#include "../../../Editor/ViewportProjection.h"
 
 #include <imgui.h>
 

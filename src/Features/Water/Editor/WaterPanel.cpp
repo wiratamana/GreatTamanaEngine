@@ -1,10 +1,10 @@
 #include "WaterPanel.h"
 
 #include "WaterUiBridge.h"
-#include "../EditorContext.h"
-#include "../EditorFrame.h"
-#include "../ImGuiUniqueId.h"
-#include "../../Features/Water/World/WaterEdit.h"
+#include "../../../Editor/EditorContext.h"
+#include "../../../Editor/EditorFrame.h"
+#include "../../../Editor/ImGuiUniqueId.h"
+#include "../World/WaterEdit.h"
 
 #include <imgui.h>
 

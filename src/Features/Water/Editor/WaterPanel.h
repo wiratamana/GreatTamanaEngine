@@ -3,7 +3,7 @@
 // The Water window: global look and performance settings, the body list (ocean, lakes, rivers), per-body carve and
 // look, and file save/load. Handles in the Game and Scene views edit the same bodies (see WaterGizmoOverlay).
 
-#include "../EditorWindow.h"
+#include "../../../Editor/EditorWindow.h"
 
 #include <array>
 

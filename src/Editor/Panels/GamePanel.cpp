@@ -4,7 +4,7 @@
 #include "../EditorFrame.h"
 #include "OverlayLabel.h"
 #include "../../Features/Terrain/Editor/TerrainViewOverlay.h"
-#include "../Water/WaterGizmoOverlay.h"
+#include "../../Features/Water/Editor/WaterGizmoOverlay.h"
 
 #include <imgui.h>
 

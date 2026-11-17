@@ -1,8 +1,8 @@
 // Tier 1: the water world feeds the terrain carve (debounced) and the Water feature, and answers the HTTP commands.
 
-#include "Editor/Water/WaterCommands.h"
-#include "Editor/Water/WaterWorld.h"
-#include "../Features/Terrain/Editor/FakeTerrainWorld.h"
+#include "Features/Water/Editor/WaterCommands.h"
+#include "Features/Water/Editor/WaterWorld.h"
+#include "../../Terrain/Editor/FakeTerrainWorld.h"
 #include "Features/Water/World/WaterEdit.h"
 #include "Features/Water/World/WaterJson.h"
 

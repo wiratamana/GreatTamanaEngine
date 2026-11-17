@@ -1,7 +1,7 @@
 // Tier 1: mouse ray, ground pick, handle list and hit tests of the water gizmos.
 
 #include "Editor/ViewportProjection.h"
-#include "Editor/Water/WaterGizmoMath.h"
+#include "Features/Water/Editor/WaterGizmoMath.h"
 
 #include <gtest/gtest.h>
 

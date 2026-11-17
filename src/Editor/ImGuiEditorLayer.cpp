@@ -42,7 +42,7 @@
 #endif
 #include "Panels/ScenePanel.h"
 #include "../Features/Terrain/Editor/TerrainPanel.h"
-#include "Water/WaterPanel.h"
+#include "../Features/Water/Editor/WaterPanel.h"
 #include "SceneCameraAdapter.h"
 #include "TransformGizmo.h"
 #include "../Game/Game.h"

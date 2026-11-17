@@ -10,7 +10,7 @@
 #include "../SceneOverlay.h"
 #include "../TransformGizmo.h"
 #include "../../Features/Terrain/Editor/TerrainViewOverlay.h"
-#include "../Water/WaterGizmoOverlay.h"
+#include "../../Features/Water/Editor/WaterGizmoOverlay.h"
 #include "../../ECS/Components/Camera.h"
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"

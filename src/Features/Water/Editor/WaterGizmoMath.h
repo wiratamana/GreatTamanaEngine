@@ -2,11 +2,11 @@
 
 // Pure math of the water gizmos: mouse rays, ground picking, handle lists and hit tests. No ImGui.
 
-#include "../../Math/Mat4.h"
-#include "../../Math/Vec2.h"
-#include "../../Math/Vec3.h"
-#include "../../Features/Water/World/WaterEdit.h"
-#include "../../Features/Water/World/WaterTypes.h"
+#include "../../../Math/Mat4.h"
+#include "../../../Math/Vec2.h"
+#include "../../../Math/Vec3.h"
+#include "../World/WaterEdit.h"
+#include "../World/WaterTypes.h"
 
 #include <cstdint>
 #include <span>

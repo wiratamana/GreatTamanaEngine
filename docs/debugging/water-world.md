@@ -4,8 +4,8 @@
 > Verified against code: 2026-11-16
 
 ## What it is
-- `src/Water/` is pure CPU: `WaterBody` (ocean, lake polygon up to 32 corners, river path up to 64 points), `WaterSettings`, spline and polygon math, `WaterBodySet` (immutable checked snapshot with hashes), `WaterCarve`, JSON, map picture.
-- `src/Editor/Water/WaterWorld` owns the bodies on the main thread. It hands the carve to the terrain and the bodies and look to the Water render feature.
+- `src/Features/Water/World/` is pure CPU: `WaterBody` (ocean, lake polygon up to 32 corners, river path up to 64 points), `WaterSettings`, spline and polygon math, `WaterBodySet` (immutable checked snapshot with hashes), `WaterCarve`, JSON, map picture.
+- `src/Features/Water/Editor/WaterWorld` owns the bodies on the main thread. It hands the carve to the terrain and the bodies and look to the Water render feature.
 - Bodies are **not** ECS entities and are **not** saved in the `.gtscene`. Save them with `/water/save` or the panel (JSON). Reason: the terrain scene wipes every root entity on reopen, and the scene file keeps no terrain state anyway.
 - One ocean at most, 16 bodies at most. The ocean level is `seaLevel` (default 0, the same height the terrain colours use).
 

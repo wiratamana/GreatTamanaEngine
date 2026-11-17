@@ -1,9 +1,9 @@
 #include "WaterCommands.h"
 
-#include "../../Encoding/PngEncoder.h"
-#include "../../Features/Water/World/WaterEdit.h"
-#include "../../Features/Water/World/WaterJson.h"
-#include "../../Features/Water/World/WaterMapImage.h"
+#include "../../../Encoding/PngEncoder.h"
+#include "../World/WaterEdit.h"
+#include "../World/WaterJson.h"
+#include "../World/WaterMapImage.h"
 
 #include <cmath>
 #include <cstdlib>

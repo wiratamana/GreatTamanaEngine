@@ -1,6 +1,6 @@
 #include "GrassTileBuilder.h"
 
-#include "../../Features/Terrain/TerrainMaterial.h"
+#include "../../Terrain/TerrainMaterial.h"
 
 #include <algorithm>
 #include <bit>

@@ -13,7 +13,7 @@
 #include "../Core/UiTextureHandle.h"
 #include "TransformGizmo.h"
 #include "../Features/Terrain/Editor/TerrainUiBridge.h"
-#include "Water/WaterUiBridge.h"
+#include "../Features/Water/Editor/WaterUiBridge.h"
 #include "../Math/Mat4.h"
 #include "../Math/Vec2.h"
 #include "RenderGraphRegimeChoice.h"

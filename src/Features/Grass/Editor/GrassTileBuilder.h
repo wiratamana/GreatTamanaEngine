@@ -3,9 +3,9 @@
 // Builds the height tile the Grass feature reads: drawn terrain height plus a submerged flag per texel.
 // Pure CPU work on plain inputs, so it can run on a worker thread and be unit tested.
 
-#include "../../Features/Grass/GrassTypes.h"
-#include "../../Features/Terrain/TerrainSurface.h"
-#include "../../Features/Water/World/WaterBodySet.h"
+#include "../GrassTypes.h"
+#include "../../Terrain/TerrainSurface.h"
+#include "../../Water/World/WaterBodySet.h"
 
 #include <cstdint>
 #include <memory>
