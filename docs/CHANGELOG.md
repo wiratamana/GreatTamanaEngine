@@ -58,6 +58,9 @@
 - `TerrainWorld`, `WaterWorld` and `GrassTileProvider` moved into the modules `TerrainWorld`, `WaterWorld` and `GrassTiles`. The Terrain and Water windows are normal feature windows.
 - `EditorHost`, `EditorContext`, `EditorLayer` and `ImGuiEditorLayer` no longer name terrain, water or grass. The HTTP command bridge is now `ModuleCommandBridge`. The profiler scope `EditorHost::ExecuteTerrainCommand` is now `EditorHost::ExecuteModuleCommand`.
 - URLs and behaviour are unchanged.
+- `EditorFeatureHooks`: modules draw their own overlays over the Game and Scene view (`IEditorViewHook`) and add File menu items. `GamePanel`, `ScenePanel` and `DockLayout` name no feature.
+- `FeatureRouteRegistry`: `/terrain/*`, `/water/*` and `/grass/*` are registered by the features. `NetworkTerrainRoutes` is now `NetworkModuleRoutes`. The network layer names no feature.
+- `ScopeDescriptionAutoRegister`: the terrain profiler rows moved out of the central catalog into the terrain feature.
 
 ## Grass: smooth density, terrain colour, presets (branch `feature/precural-landscape`, 2026-11-17)
 - **Smooth density.** Blade count falls with distance (`GrassDensityAt`, geometric smoothstep between `densityLod0/1/2` at the LOD distances, `densityBlend`). Thinned blades widen (`widthCompensation`, `maxWidthScale`) and shrink to nothing at the far edge (`farHeightFade`). The hard step between LOD0 and LOD1 is gone. `lod1WidthScale` and `lod2WidthScale` are removed.

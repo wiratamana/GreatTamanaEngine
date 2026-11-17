@@ -50,7 +50,7 @@ struct FrameDebuggerMaterialSlot {
 struct FrameDebuggerDrawRecord {
     std::uint32_t entityIndex = 0;
     std::uint32_t entityGeneration = 0;
-    std::string displayName; // e.g. "terrain", or the "Entity <index>" fallback.
+    std::string displayName; // e.g. a mesh name, or the "Entity <index>" fallback.
     std::string pipelineDebugName;
     std::vector<FrameDebuggerMaterialSlot> materialSlots; // Empty for an untextured draw.
     std::uint32_t triangleCount = 0;

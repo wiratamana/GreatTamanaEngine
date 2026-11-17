@@ -154,6 +154,10 @@ A feature that owns live editor objects (a world, a worker thread, a panel mailb
 - UI state shared between a module and its windows lives in `EditorContext::extensions` (`Get<T>()`, one slot per type).
 - `EditorModuleSet` calls `OnShutdown()` in reverse tick order after the HTTP server and the GPU idle guard, while every module and `Core` are still alive. Release your world there.
 - Tick order today: `TerrainWorld` 0, `WaterWorld` 10, `GrassTiles` 20.
+- View hooks: a module derives (privately) from `IEditorViewHook` (`src/Editor/EditorFeatureHooks.h`) and calls `attach.hooks->AddViewHook(this)` in `OnAttach`. The Game and Scene panels call `OnViewInput` (Game view only) and `OnViewOverlay` for every hook, in registration order. `ClaimsPointer()` lets a hook keep the mouse from the others. Remove the hook in `OnShutdown`.
+- Menu items: `attach.hooks->AddMenuItem({ "File", "Label", enabledFn, actionFn })`. A click only queues the action. `EditorHost` runs it next frame on the main thread, before `Game::Update`, and the status line shows the returned message. The File menu is the only menu that lists them.
+- HTTP routes: `GTE_REGISTER_MODULE_ROUTES("prefix", "actionPrefix.", "readOnlyAction", ...)` (`src/Application/FeatureRouteRegistry.h`) gives `GET /prefix/<name>` to the module as the command `actionPrefix.<name>`. Actions that are not listed read-only refuse browser requests. `GTE_REGISTER_DEBUG_ROUTE_ALIAS("/path", "Feature", "action")` is a short route to a feature debug action.
+- Profiler rows: `ScopeDescriptionAutoRegister` (`src/Application/ProfilerScopeCatalog.h`) adds the plain-English text of a scope the feature owns.
 
 ## Gotchas
 - `WantsCaptureMouse` and `WantsCaptureKeyboard` stop clicks in ImGui from reaching gameplay. They come from `ImGuiIO`.

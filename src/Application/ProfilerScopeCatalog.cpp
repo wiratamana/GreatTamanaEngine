@@ -40,7 +40,7 @@ constexpr auto kRaw = std::to_array<Entry>({
     { "EditorHost::ExecutePhysicsDebugCommand", "Physics debug command", "Runs one physics debug command that came in through the HTTP debug server.", "", LoadingAndTools, false },
     { "EditorHost::ExecuteHizDemoMenuAction", "Hi-Z demo menu action", "Opens or closes the Hi-Z demo scene.", "", LoadingAndTools, false },
     { "EditorHost::ExecuteModuleMenuAction", "Module menu action", "Runs a File menu item that a feature module added.", "", LoadingAndTools, false },
-    { "EditorHost::ExecuteModuleCommand", "Module command", "Runs one HTTP command of a feature module (terrain, water ...).", "", LoadingAndTools, false },
+    { "EditorHost::ExecuteModuleCommand", "Module command", "Runs one HTTP command of a feature module.", "", LoadingAndTools, false },
     { "EditorHost::ExecuteProjectLifecycleLoad", "Loading a project", "Loads the code of a game project into the editor.", "", LoadingAndTools, false },
     { "EditorHost::ExecuteRenderGraphControlCommand", "Render graph command", "Switches a render pass or feature on or off.", "", LoadingAndTools, false },
     { "EditorHost::PerformProjectAssemblyHotReload", "Hot reload of project code", "Rebuilds and reloads your project code. The editor is frozen while this runs.", "", LoadingAndTools, false },
