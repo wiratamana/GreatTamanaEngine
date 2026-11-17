@@ -21,6 +21,7 @@ layout(location = 0) out vec3 outNormal;   // Eye-relative world axes, not yet f
 layout(location = 1) out vec4 outInfo;     // x = t root..tip, y = per-blade random, z = sin(tip angle), w = side -1..1.
 layout(location = 2) out vec3 outPosRel;   // Eye-relative position.
 layout(location = 3) flat out vec4 outGround; // rgb = terrain colour, a = ground normal . sun.
+layout(location = 4) flat out float outSunVis; // Per-blade sun visibility (cascades and cloud shadow).
 
 void main()
 {
@@ -73,5 +74,6 @@ void main()
     outInfo = vec4(t, rnd, sinA, side);
     outPosRel = position;
     outGround = vec4(terrainColor, dot(groundNormal, normalize(params.sunDir.xyz)));
+    outSunVis = ground.w;
     gl_Position = params.drawViewProjection * vec4(position, 1.0);
 }

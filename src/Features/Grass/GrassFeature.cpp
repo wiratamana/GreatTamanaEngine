@@ -45,6 +45,7 @@ void GrassFeature::Setup(fx::FeatureSetup& s)
         gate.passNames.push_back(std::move(name));
     }
     s.PostOpaque("Grass.Draw", kDrawPriority, [this](fx::PostOpaqueFrame& f) { DrawPass(f); }, std::move(gate));
+    s.ReadsChannelInEmptyViews("Grass.Draw", kSunShadowReceiverOwner, kSunShadowReceiverChannel);
 }
 
 void GrassFeature::ApplySettings(const GrassSettings& candidate)
@@ -260,6 +261,15 @@ void GrassFeature::DrawPass(fx::PostOpaqueFrame& f)
     }
     snap.hizUsed = in.hizUsable;
     const GrassParamsGpu params = MakeGrassParams(cfg, in);
+    const std::optional<SunShadowReceiver> publishedReceiver = m_shadowReceiver.Fetch(f);
+    const std::optional<CloudShadowMap> publishedCloud = m_cloudShadow.Fetch(f);
+    const Vec3 liveSun{ in.sunDirection[0], in.sunDirection[1], in.sunDirection[2] };
+    const GrassShadowParamsGpu shadowParams = MakeGrassShadowParams(
+        publishedReceiver ? &*publishedReceiver : nullptr, publishedCloud ? &*publishedCloud : nullptr, liveSun, cfg);
+    const bool useCascades = shadowParams.counts[0] > 0;
+    const bool useCloud = shadowParams.cloudGrid[3] > 0.0f;
+    snap.shadowCascades = shadowParams.counts[0];
+    snap.shadowCloud = useCloud;
 
     const bool inited = f.Compute(m_initShader, "Grass.Init")
                             .Params(view.initParams, params)
@@ -271,15 +281,25 @@ void GrassFeature::DrawPass(fx::PostOpaqueFrame& f)
         bail(GrassFrameStatus::ShadersNotReady);
         return;
     }
-    // A sampler needs a valid image even when the pyramid is off (the flag skips the read).
+    // Unused samplers receive scene depth/color fallbacks while zero counts/strength skip sampling.
+    const auto shadowMap = [&](std::uint32_t i) {
+        return useCascades ? publishedReceiver->maps[std::min(i, shadowParams.counts[0] - 1u)] : f.SceneDepth();
+    };
+    const fx::Texture cloudMap = useCloud ? publishedCloud->map : f.SceneColor();
     const std::uint32_t chunkCount = params.grid[2] > 0 ? static_cast<std::uint32_t>(params.grid[2] * params.grid[2]) : 0u;
     const bool culled = f.Compute(m_cullShader, "Grass.Cull")
                             .Params(view.cullParams, params)
+                            .Params("shadow", view.cullShadowParams, shadowParams)
                             .BindBuffer("heightTile", heights)
                             .BindBuffer("instances", instances)
                             .BindBuffer("commands", commands)
                             .BindOutput("stats", m_stats)
                             .Bind("hizAtlas", hizAtlas.IsValid() ? hizAtlas : f.SceneColor())
+                            .Bind("shadowDepth0", fx::Depth(shadowMap(0)))
+                            .Bind("shadowDepth1", fx::Depth(shadowMap(1)))
+                            .Bind("shadowDepth2", fx::Depth(shadowMap(2)))
+                            .Bind("shadowDepth3", fx::Depth(shadowMap(3)))
+                            .Bind("cloudShadowMap", cloudMap)
                             .Dispatch(Extent2D{ chunkCount * static_cast<std::uint32_t>(params.extra[3]) * kGrassCullGroupSize, 1 });
     if (!culled) {
         f.ReportOnce("Grass.Cull was refused");

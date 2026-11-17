@@ -56,7 +56,7 @@ GrassSettings SanitizeGrassSettings(const GrassSettings& in, bool enforceOrder) 
     const GrassSettings d{};
     GrassSettings s = in;
 
-    s.debugView = static_cast<GrassDebugView>(std::min<std::uint32_t>(static_cast<std::uint32_t>(in.debugView), 3u));
+    s.debugView = static_cast<GrassDebugView>(std::min<std::uint32_t>(static_cast<std::uint32_t>(in.debugView), 4u));
 
     s.densityLod0 = Clamp(in.densityLod0, d.densityLod0, 0.0f, 200.0f);
     s.densityLod1 = Clamp(in.densityLod1, d.densityLod1, 0.0f, 200.0f);
@@ -115,6 +115,8 @@ GrassSettings SanitizeGrassSettings(const GrassSettings& in, bool enforceOrder) 
         s.colorTip[i] = Clamp(in.colorTip[i], d.colorTip[i], 0.0f, 2.0f);
     }
     s.sunVisibility = Clamp(in.sunVisibility, d.sunVisibility, 0.0f, 2.0f);
+    s.shadowStrength = Clamp(in.shadowStrength, d.shadowStrength, 0.0f, 1.0f);
+    s.cloudFill = Clamp(in.cloudFill, d.cloudFill, 0.0f, 1.0f);
 
     const std::uint32_t minCells = MinGrassGridCells(s.lod2Distance);
     s.gridCells = std::clamp(std::max(in.gridCells, minCells), 2u, kGrassMaxGridCells);
@@ -323,7 +325,7 @@ GrassParamsGpu MakeGrassParams(const GrassSettings& s, const GrassFrameInputs& i
     Set4(p.wind2, s.flutterSpeed, s.flutterStrength, s.windWaveLengthM, s.windGustLengthM);
     Set4(p.sunDir, in.sunDirection[0], in.sunDirection[1], in.sunDirection[2], s.translucency);
     Set4(p.sunRadiance, in.sunRadiance[0], in.sunRadiance[1], in.sunRadiance[2], s.sunVisibility);
-    Set4(p.skyAmbient, in.skyAmbient[0], in.skyAmbient[1], in.skyAmbient[2], 0.0f);
+    Set4(p.skyAmbient, in.skyAmbient[0], in.skyAmbient[1], in.skyAmbient[2], s.cloudFill);
     Set4(p.groundAmbient, in.groundAmbient[0], in.groundAmbient[1], in.groundAmbient[2], 0.0f);
     Set4(p.colorRoot, s.colorRoot[0], s.colorRoot[1], s.colorRoot[2], s.rootAo);
     Set4(p.colorTip, s.colorTip[0], s.colorTip[1], s.colorTip[2], s.tintVariation);
@@ -350,6 +352,69 @@ GrassParamsGpu MakeGrassParams(const GrassSettings& s, const GrassFrameInputs& i
         std::log(std::max(s.densityLod2, 1e-4f)), s.densityLod0 > 0.0f ? 1.0f : 0.0f);
     return p;
 }
+GrassShadowParamsGpu MakeGrassShadowParams(const SunShadowReceiver* receiver, const CloudShadowMap* cloud,
+    const Vec3& sunDir, const GrassSettings& settings) noexcept
+{
+    constexpr float kSunMatchMinDot = 0.9999f;
+    constexpr float kGrassSunOffsetTexels = 1.0f;
+
+    GrassShadowParamsGpu p{};
+    const float strengthSetting = Clamp(settings.shadowStrength, 1.0f, 0.0f, 1.0f);
+    if (!(strengthSetting > 0.0f)) {
+        return p;
+    }
+
+    const bool sunValid = std::isfinite(sunDir.x) && std::isfinite(sunDir.y) && std::isfinite(sunDir.z)
+        && LengthSquared(sunDir) > 1e-12f;
+    const Vec3 liveSun = sunValid ? Normalize(sunDir) : Vec3::Up();
+
+    if (settings.receiveCloudShadow && cloud != nullptr && CloudShadowMapUsable(*cloud)
+        && std::isfinite(cloud->strength) && cloud->strength > 0.0f && std::isfinite(cloud->sunDirection.x)
+        && std::isfinite(cloud->sunDirection.z) && LengthSquared(cloud->sunDirection) > 1e-12f) {
+        const Vec3 cloudSun = Normalize(cloud->sunDirection);
+        Set4(p.cloudGrid, cloud->centerX, cloud->centerZ, 1.0f / cloud->extentM,
+            std::clamp(cloud->strength * strengthSetting, 0.0f, 1.0f));
+        Set4(p.cloudLayer, cloud->layerBaseM, cloud->layerTopM, 1.0f, static_cast<float>(kCloudShadowMapSize));
+        Set4(p.cloudSun, cloudSun.x, cloudSun.y, cloudSun.z, 0.0f);
+    }
+
+    if (!settings.receiveSunShadow || !sunValid || receiver == nullptr || !SunShadowReceiverUsable(*receiver)
+        || !std::isfinite(receiver->materialStrength) || !(receiver->materialStrength > 0.0f)
+        || !std::isfinite(receiver->directionTowardSun.x) || !std::isfinite(receiver->directionTowardSun.y)
+        || !std::isfinite(receiver->directionTowardSun.z) || LengthSquared(receiver->directionTowardSun) <= 1e-12f
+        || Dot(Normalize(receiver->directionTowardSun), liveSun) < kSunMatchMinDot) {
+        return p;
+    }
+
+    const std::uint32_t count = std::min(receiver->cascadeCount, kSunShadowReceiverMaxCascades);
+    for (std::uint32_t c = 0; c < count; ++c) {
+        std::memcpy(p.cascadeViewProjection[c], receiver->viewProjection[c].Data(), sizeof(p.cascadeViewProjection[c]));
+        p.cascadeSplitFar[c] = receiver->splitFar[c];
+        p.cascadeBlendWidth[c] = std::max(Finite(receiver->blendWidth[c], 0.0f), 0.0f);
+        p.cascadeTexelWorld[c] = receiver->texelWorld[c];
+        p.cascadeDepthRange[c] = receiver->depthRange[c];
+    }
+    for (std::uint32_t c = count; c < kSunShadowReceiverMaxCascades; ++c) {
+        p.cascadeSplitFar[c] = receiver->splitFar[count - 1u];
+    }
+
+    const float fadeEnd = std::isfinite(receiver->shadowDistance) && receiver->shadowDistance > 0.0f
+        ? receiver->shadowDistance
+        : receiver->splitFar[count - 1u];
+    const float fadeStart = Clamp(receiver->fadeStart, 0.0f, 0.0f, fadeEnd);
+    Set4(p.eyeAndFadeStart, receiver->cameraPosition.x, receiver->cameraPosition.y, receiver->cameraPosition.z, fadeStart);
+    Set4(p.forwardAndFadeEnd, receiver->cameraForward.x, receiver->cameraForward.y, receiver->cameraForward.z, fadeEnd);
+    const float invMap = 1.0f / static_cast<float>(receiver->resolution);
+    const float effStrength = std::clamp(receiver->materialStrength * strengthSetting, 0.0f, 1.0f);
+    Set4(p.shadowParams, effStrength, Clamp(receiver->constBiasTexels, 1.5f, 0.0f, 32.0f),
+        Clamp(receiver->filterRadiusTexels, 1.5f, 0.0f, 16.0f), invMap);
+    Set4(p.biasExtra, Clamp(receiver->slopeBiasTexels, 1.0f, 0.0f, 32.0f),
+        Clamp(receiver->normalOffsetTexels, 1.0f, 0.0f, 32.0f), kGrassSunOffsetTexels, 0.0f);
+    p.counts[0] = count;
+    p.counts[1] = std::clamp(receiver->filterSamples, 1u, 8u);
+    return p;
+}
+
 
 float GrassSyntheticHeight(const GrassSyntheticSpec& spec, double x, double z) noexcept
 {

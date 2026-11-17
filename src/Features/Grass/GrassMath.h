@@ -1,7 +1,10 @@
 #pragma once
 
 #include "GrassTypes.h"
+#include "../../Game/Lighting/CloudShadowMap.h"
+#include "../../Game/Lighting/SunShadowReceiver.h"
 #include "../../Math/Mat4.h"
+#include "../../Math/Vec3.h"
 
 #include <cstdint>
 
@@ -69,6 +72,10 @@ struct GrassFrameInputs {
 
 // Workgroups that share one chunk: dense chunks have thousands of candidates, so one group per chunk would leave the GPU idle.
 std::uint32_t GrassSlicesPerChunk(float densityLod0) noexcept;
+
+// Packs cascade and cloud shadow parameters for GrassCull.comp; zeroes unusable or mismatched inputs.
+GrassShadowParamsGpu MakeGrassShadowParams(const SunShadowReceiver* receiver, const CloudShadowMap* cloud,
+    const Vec3& sunDir, const GrassSettings& settings) noexcept;
 
 // Fills the params block; `settings` must be sanitized. Instance regions follow each other: LOD0, LOD1, LOD2.
 GrassParamsGpu MakeGrassParams(const GrassSettings& settings, const GrassFrameInputs& in) noexcept;

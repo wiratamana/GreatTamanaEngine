@@ -6,7 +6,7 @@
 - A compute pass places blades per 16 m chunk and writes the survivors and three draw commands. Three indirect draws (one per LOD) build each blade from its vertex index.
 - Terrain height comes from a **height tile** that the editor layer submits (`GrassFeature::SubmitHeightTile`). Without a tile, nothing is drawn (status `NoTile`).
 - Wind is shared with the clouds through the `WindState` channel. Gust and tip flutter are procedural in the vertex shader.
-- Opaque, depth-writing, drawn before the water. No shadows reach grass yet.
+- Opaque, depth-writing, drawn before the water. Blades receive sun cascade shadows and cloud shadows per blade in `Grass.Cull`.
 - Off in the Scene view by default.
 
 ## Where in the frame
@@ -42,7 +42,7 @@ Per chunk (16 m, a grid of `gridCells` x `gridCells` around the camera). A dense
    - Slope: dropped over `maxSlopeDeg` (angle of the tile gradient).
    - Density multiplier from meadow noise, slope fade, waterline fade and far edge fade. A stable per-blade hash decides.
    - The LOD of the mesh is still chosen by distance (`lod0Distance`, `lod1Distance`), but the blade count no longer jumps there.
-   - The survivor does all wind work here (wave, gust, bend direction, tip angle, flutter) and writes a packed 32 byte instance: root, height and width (half), yaw and bend direction (snorm8), ground normal and sin of the tip angle (unorm8), flutter (half), terrain colour (rgb 8 bit) and a random byte. `Grass.vert` then needs no trig except one sqrt.
+   - The survivor does all wind and shadow work here (wave, gust, bend direction, tip angle, flutter, cascade + cloud sun visibility) and writes a packed 32 byte instance: root, height and width (half), yaw and bend direction (snorm8), ground normal, sin of the tip angle and sun visibility (unorm8), flutter (half), terrain colour (rgb 8 bit) and a random byte. `Grass.vert` then needs no trig except one sqrt.
    - Survivors take a slot per LOD with one atomic per round. A full region drops the rest (`dropped0..2`). The draw never reads past its region.
 
 Placement uses the integer world chunk index as the hash seed, so blades do not move when the grid scrolls with the camera.
@@ -62,7 +62,7 @@ Linear HDR, same energy scale as the lit materials (`kDirectScale` 0.65).
 `colour = albedo * (hemisphere ambient * ao + sun * wrap diffuse * sqrt(ao))` plus a fake translucency term when the sun is behind the blade.
 Albedo: root to tip colour with per-blade tint, then pulled toward the **terrain colour** of the ground under the blade (`terrainTint`, strongest at the root). Far blades converge to the terrain colour (`farTerrainBlend`, from 0.2 to 0.9 of `lod2Distance`), so the field melts into the ground. The sun term fades on ground that faces away from the sun (`selfShadow`, ground normal dot sun).
 Sun and its tint come from `ResolveActiveDirectionalLight` and the Atmosphere sun light record. Ambient uses the SceneLighting defaults times the Atmosphere ambient scale.
-There is no cascade shadow, no cloud shadow and no AO on grass. Only the screen-space shadow mask (a later pass) darkens it, like the terrain under it.
+Sun cascade shadows (`SunShadowReceiver`) and cloud shadows (`CloudShadowMap`) are sampled per accepted blade in `Grass.Cull` (with normal and sunward offset, slope-aware bias and rotated spiral PCF), packed into the fourth byte of `ground`, and forwarded flat from `Grass.vert` to `Grass.frag`. `Grass.frag` scales the direct sun and subsurface terms by `sunVis` and adds `cloudFill * (1 - sunVis)` diffuse sky fill so shadowed blades are not black; when no shadow data is published or `applyInMaterials` is off, `sunVis` stays 1. GTAO runs before grass so screen-space AO does not darken blades.
 
 ## Wind
 There was no `GlobalWindUBO` in the engine. Now:
@@ -109,7 +109,7 @@ Sanitized on write (`SanitizeGrassSettings`). NaN and infinity become the defaul
 | `enabled` | true | bool | Off gives status `Disabled` |
 | `hizCulling` | true | bool | Occlusion test of chunks against the terrain depth |
 | `collectStats` | true | bool | Counters in `game.stats.*` |
-| `debugView` | `Normal` | `Normal`, `LodColor`, `Sway`, `ChunkBounds` | LOD colour: LOD0 green, LOD1 yellow, LOD2 red. Chunk bounds: 16 m checker with white borders |
+| `debugView` | `Normal` | `Normal`, `LodColor`, `Sway`, `ChunkBounds`, `SunVis` | LOD colour: LOD0 green, LOD1 yellow, LOD2 red. Chunk bounds: 16 m checker with white borders. `SunVis`: per-blade sun visibility (blue shadowed to yellow lit) |
 | `preset` | - | `Lean`, `Medium`, `Big`, `Huge` | Write-only shortcut: sets density, distances, capacities and tile size. Defaults are `Big` |
 | `densityLod0` / `densityLod1` / `densityLod2` | 40 / 6 / 0.8 | 0..200, non-increasing | Blades per m2 close up, at `lod0Distance`, at `lod1Distance` |
 | `densityBlend` | 0.5 | 0.05..1 | Share of a LOD range over which the density falls |
@@ -130,6 +130,8 @@ Sanitized on write (`SanitizeGrassSettings`). NaN and infinity become the defaul
 | `followCloudWind` | true | bool | Use the shared cloud wind |
 | `windSpeedFallback` / `windDirectionDegFallback` | 4 / 45 | 0..100 / any | Own wind (0 deg = +X, 90 = +Z) |
 | `translucency` / `rootAo` / `tintVariation` / `sunVisibility` | 0.6 / 0.35 / 0.5 / 1 | | Look |
+| `receiveSunShadow` / `receiveCloudShadow` | true / true | bool | Sample sun cascades (`Shadow.Receiver`) and cloud shadow (`VolumetricCloud.ShadowMap`) in `Grass.Cull` |
+| `shadowStrength` / `cloudFill` | 1 / 0.35 | 0..1 / 0..1 | Shadow darkening strength and diffuse sky fill added to shadowed blades |
 | `terrainTint` / `farTerrainBlend` | 0.6 / 0.8 | 0..1 | Pull toward the terrain colour (near, far) |
 | `groundNormalBlend` / `selfShadow` | 0.5 / 0.7 | 0..1 | Ground normal in the blade normal; sun fade on ground facing away |
 | `colorRoot` / `colorTip` | dark / light green | `r,g,b` 0..2 | Linear albedo |
@@ -169,7 +171,7 @@ Name for `/feature_debug`: `Grass`. Every setting above is writable: `/feature_d
 | Read-only key (prefix `game.` or `scene.`) | Meaning |
 |---|---|
 | `status` | `NotRendered`, `Ok`, `Disabled`, `NoValidCamera`, `NoTile`, `ShadersNotReady`, `TargetFailed`, `PassDisabled` |
-| `hizUsed`, `windShared`, `gridCells`, `instanceBytes`, `tileRevision` | What this frame used |
+| `hizUsed`, `windShared`, `shadow.cascades`, `shadow.cloud`, `gridCells`, `instanceBytes`, `tileRevision` | What this frame used |
 | `stats.*` | Counters from the GPU, two frames old: `chunksInGrid`, `chunksCulledDistance / NoData / Water / Frustum / Hiz`, `chunksLod0..2`, `candidates`, `accepted0..2`, `rejectNoData / LodStep / Water / Slope / Noise`, `dropped0..2`, `requested0..2` |
 
 Also `tile.*` (size, origin, sea level, revision), `source.*` (tile provider), `game.wind.*` (direction, speed and pattern offset the blades used), `synthetic.enabled`, `eye`.
@@ -237,7 +239,7 @@ Big costs +6.3 ms at the worst pose (32 FPS in the whole scene). Huge is 25 FPS.
 Cull and draw (GPU ms, `ground`): Lean 0.54 / 0.65, Medium 0.75 / 1.73, Big 1.38 / 2.83, Huge 3.77 / 8.98. The draw cost is about 1.1 ms of vertex and triangle work plus a part that grows with blade width (1.68 to 1.12 ms when the width goes 0.045 to 0.010 at 47k blades).
 
 ## Limits
-- No shadows on grass (no cascade, no cloud shadow). The cascade maps are scene-service bindings that the fullscreen verb cannot bind.
+- Sun cascade and cloud shadows are evaluated once per blade root in `Grass.Cull` (8-bit visibility per blade, not per fragment along the blade). Grass does not cast into the cascade maps, and GTAO runs before grass.
 - The Hi-Z pyramid is built from the terrain depth of the same frame. It does not hide blades behind other grass.
 - The mesh LOD still switches at `lod0Distance` / `lod1Distance` (5 or 4 segments to 2 to 1 triangle). The blade count no longer jumps there, the blade shape does.
 - LOD2 blades are single flat triangles. They shimmer without TAA.
@@ -248,7 +250,7 @@ Cull and draw (GPU ms, `ground`): Lean 0.54 / 0.65, Medium 0.75 / 1.73, Big 1.38
 - Validation: core and synchronization validation ran clean for Grass (see [Troubleshooting](../../troubleshooting.md), "Vulkan validation messages"). Not verified: the Frame Debugger replay of the indirect draws, one event at a time.
 
 ## Debug views and checks (F3)
-- `debugView=LodColor`, `Sway` (blue to red by tip angle) and `ChunkBounds` all work on the packed instance.
+- `debugView=LodColor`, `Sway` (blue to red by tip angle), `ChunkBounds` and `SunVis` (per-blade sun visibility) all work on the packed instance.
 - Checked live: Scene view enabled (`/render_graph/set_feature_enabled?name=Grass.Draw&enabled=true&view=secondary`, status Ok), Frame Debugger enabled and a capture taken, window resize 640x400 to 1500x800, 3 terrain close and open cycles, `enabled=false` (no Grass rows in the profiler, status `Disabled`). `/get_logs?category=FeatureKit` stays at the one startup Gtao line. The same actions also ran under core and synchronization validation without a Grass message.
 - The Grass window is an `EditorWindow` (always dockable, default dock Bottom on a first run). An existing `imgui.ini` without a Grass entry shows it floating, as an own OS window: drag it into a dock. It is not a bug.
 

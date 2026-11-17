@@ -8,7 +8,7 @@ struct GrassInstance {
     vec3 root;    // Eye-relative root, metres.
     uint heightWidth; // 2 x half: height, width.
     uint frame;   // 4 x snorm8: sin(yaw), cos(yaw), bend direction x, bend direction z.
-    uint ground;  // 4 x unorm8: ground normal x, z (* 0.5 + 0.5), sin(tip angle), spare.
+    uint ground;  // 4 x unorm8: ground normal x, z (* 0.5 + 0.5), sin(tip angle), sun visibility.
     uint flutter; // 2 x half: tip flutter along the blade side, along the bend.
     uint colorRnd; // Terrain colour r, g, b in bits 24..31, 16..23, 8..15; blade random in bits 0..7.
 };
@@ -32,14 +32,14 @@ layout(std430, binding = 0) readonly buffer GrassParamsBlock {
     vec4 wind2;               // x = flutter speed (rad/s), y = flutter strength, z = wave length (m), w = gust length (m).
     vec4 sunDir;              // xyz = toward the sun, w = translucency strength.
     vec4 sunRadiance;         // rgb = sun illuminance (already tinted), w = sun visibility multiplier.
-    vec4 skyAmbient;          // rgb = sky ambient (already scaled by intensity).
+    vec4 skyAmbient;          // rgb = sky ambient (already scaled by intensity), w = sky diffuse fill in shadow.
     vec4 groundAmbient;       // rgb = ground ambient (already scaled by intensity).
     vec4 colorRoot;           // rgb = root albedo (linear), w = root AO 0..1.
     vec4 colorTip;            // rgb = tip albedo (linear), w = per-blade tint variation 0..1.
     vec4 cameraWorld;         // xy = camera world xz (m), z = alpine line: grass thins out above this world Y, w = its fade band (m).
     uvec4 instanceBase;       // xyz = first instance index of each LOD region.
     uvec4 instanceCap;        // xyz = capacity of each LOD region.
-    uvec4 misc;               // x = debug mode (0 normal, 1 LOD colour, 2 sway), y = placement seed.
+    uvec4 misc;               // x = debug mode (0 normal, 1 LOD, 2 sway, 3 chunks, 4 sun vis), y = placement seed.
     vec4 hiz;                 // xy = atlas size, zw = level 0 size (same as ClusterCull).
     vec4 depthMap;            // x = k, y = b of d = k + b / w, z = pyramid level count.
     vec4 look;                // x = terrain tint strength, y = ground normal blend, z = self shadow strength, w = LOD0 segments.

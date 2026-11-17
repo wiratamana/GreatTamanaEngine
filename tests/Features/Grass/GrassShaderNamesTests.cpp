@@ -58,11 +58,42 @@ TEST(GrassShaderNamesTest, CullShaderExposesBoundNamesAndGroupSize)
     ExpectStorage(result, "instances", ReflectedAccess::WriteOnly);
     ExpectStorage(result, "commands", ReflectedAccess::ReadWrite);
     ExpectStorage(result, "stats", ReflectedAccess::ReadWrite);
-    const ReflectedDescriptorBinding* atlas = Find(result, "hizAtlas");
-    ASSERT_NE(atlas, nullptr);
-    EXPECT_EQ(atlas->type, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-    EXPECT_EQ(result.descriptorBindings.size(), 6u);
+    ExpectStorage(result, "shadow", ReflectedAccess::ReadOnly);
+    for (const char* sampler :
+        { "hizAtlas", "shadowDepth0", "shadowDepth1", "shadowDepth2", "shadowDepth3", "cloudShadowMap" }) {
+        const ReflectedDescriptorBinding* binding = Find(result, sampler);
+        ASSERT_NE(binding, nullptr) << sampler;
+        EXPECT_EQ(binding->type, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) << sampler;
+    }
+    EXPECT_EQ(result.descriptorBindings.size(), 12u);
     EXPECT_EQ(result.localSize.x, kGrassCullGroupSize);
+
+    const BufferObjectHandle buf = static_cast<BufferObjectHandle>(1);
+    const rg::BufferHandle tracked{ 1, 1 };
+    const rg::TextureHandle colorTex{ 1, 1 };
+    const rg::TextureHandle depthTex{ 2, 1 };
+    const rg::BindingArgument args[] = {
+        { "params", rg::BindingResourceKind::Buffer, {}, buf, {} },
+        { "shadow", rg::BindingResourceKind::Buffer, {}, buf, {} },
+        { "heightTile", rg::BindingResourceKind::TrackedBuffer, {}, BufferObjectHandle::Invalid, tracked },
+        { "instances", rg::BindingResourceKind::TrackedBuffer, {}, BufferObjectHandle::Invalid, tracked },
+        { "commands", rg::BindingResourceKind::TrackedBuffer, {}, BufferObjectHandle::Invalid, tracked },
+        { "stats", rg::BindingResourceKind::TrackedBuffer, {}, BufferObjectHandle::Invalid, tracked },
+        { "hizAtlas", rg::BindingResourceKind::Texture, colorTex, BufferObjectHandle::Invalid, {} },
+        { "shadowDepth0", rg::BindingResourceKind::DepthTexture, depthTex, BufferObjectHandle::Invalid, {} },
+        { "shadowDepth1", rg::BindingResourceKind::DepthTexture, depthTex, BufferObjectHandle::Invalid, {} },
+        { "shadowDepth2", rg::BindingResourceKind::DepthTexture, depthTex, BufferObjectHandle::Invalid, {} },
+        { "shadowDepth3", rg::BindingResourceKind::DepthTexture, depthTex, BufferObjectHandle::Invalid, {} },
+        { "cloudShadowMap", rg::BindingResourceKind::Texture, colorTex, BufferObjectHandle::Invalid, {} },
+    };
+    const auto describeTexture = [&](rg::TextureHandle h) -> std::optional<rg::TextureDesc> {
+        rg::TextureDesc desc{};
+        desc.hasColor = (h == colorTex);
+        desc.hasDepth = (h == depthTex);
+        return desc;
+    };
+    const rg::BindingPlanResult plan = rg::PlanBindings(result.descriptorBindings, args, describeTexture);
+    EXPECT_TRUE(plan.Ok()) << plan.error;
 }
 
 TEST(GrassShaderNamesTest, DrawShadersFitTheFullscreenRules)

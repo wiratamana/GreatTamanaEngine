@@ -4,7 +4,9 @@
 #include "GrassMath.h"
 #include "GrassTypes.h"
 #include "../../Core/FeatureKit/FeatureKit.h"
+#include "../../Game/Lighting/CloudShadowMap.h"
 #include "../../Game/Lighting/SunLightModulation.h"
+#include "../../Game/Lighting/SunShadowReceiver.h"
 #include "../../Game/Lighting/WindState.h"
 #include "../../Math/Vec3.h"
 
@@ -19,6 +21,7 @@ namespace gte {
 struct GrassViewState {
     fx::GpuParams<GrassParamsGpu> initParams;
     fx::GpuParams<GrassParamsGpu> cullParams;
+    fx::GpuParams<GrassShadowParamsGpu> cullShadowParams;
     std::array<fx::GpuParams<GrassParamsGpu>, kGrassLodCount> drawParams;
     std::array<std::uint64_t, 4> slotRevision{};   // Tile revision each frame-slot copy holds (0 = none).
     std::array<std::uint64_t, 4> slotGeneration{}; // Buffer generation that copy was uploaded into.
@@ -29,6 +32,7 @@ struct GrassViewState {
 // each blade from its vertex index. Terrain height comes from a height tile the editor layer submits.
 class GrassFeature final : public fx::Feature {
 public:
+    GrassFeature() = default;
     explicit GrassFeature(fx::FeatureHost& host);
 
     const char* Name() const override { return kGrassFeatureName; }
@@ -103,6 +107,8 @@ private:
     fx::GpuReadback<GrassStatsGpu> m_stats{ "Grass.Stats" };
     fx::ChannelReader<WindState> m_wind{ kWindStateOwner, kWindStateChannel };
     fx::ChannelReader<SunLightModulation> m_sunLight{ kSunLightModulationOwner, kSunLightModulationChannel };
+    fx::ChannelReader<SunShadowReceiver> m_shadowReceiver{ kSunShadowReceiverOwner, kSunShadowReceiverChannel };
+    fx::ChannelReader<CloudShadowMap> m_cloudShadow{ kCloudShadowOwner, kCloudShadowChannel };
 };
 
 } // namespace gte

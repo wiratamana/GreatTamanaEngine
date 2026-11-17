@@ -91,7 +91,7 @@ struct GrassInstanceGpu {
     float root[3];            // Eye-relative root.
     std::uint32_t heightWidth; // 2 x half: height, width (m).
     std::uint32_t frame;      // 4 x snorm8: sin(yaw), cos(yaw), bend dir x, bend dir z.
-    std::uint32_t ground;     // 4 x unorm8: ground normal x, z (* 0.5 + 0.5), sin(tip angle), spare.
+    std::uint32_t ground;     // 4 x unorm8: ground normal x, z (* 0.5 + 0.5), sin(tip angle), sun visibility.
     std::uint32_t flutter;    // 2 x half: tip flutter along the blade side and along the bend.
     std::uint32_t colorRnd;   // Terrain colour r, g, b (bits 24..31, 16..23, 8..15), blade random (bits 0..7).
 };
@@ -126,14 +126,14 @@ struct GrassParamsGpu {
     float wind2[4];               // 400  x = flutter speed rad/s, y = flutter strength, z = wave length m, w = gust length m.
     float sunDir[4];              // 416  xyz = toward the sun, w = translucency strength.
     float sunRadiance[4];         // 432  rgb = sun illuminance (tinted), w = sun visibility multiplier.
-    float skyAmbient[4];          // 448  rgb = sky ambient x intensity.
+    float skyAmbient[4];          // 448  rgb = sky ambient x intensity, w = sky diffuse fill in shadow.
     float groundAmbient[4];       // 464  rgb = ground ambient x intensity.
     float colorRoot[4];           // 480  rgb = root albedo (linear), w = root AO.
     float colorTip[4];            // 496  rgb = tip albedo (linear), w = tint variation.
     float cameraWorld[4];         // 512  xy = camera world xz.
     std::uint32_t instanceBase[4]; // 528 xyz = first instance of each LOD region.
     std::uint32_t instanceCap[4]; // 544  xyz = capacity of each LOD region.
-    std::uint32_t misc[4];        // 560  x = debug mode (0 normal, 1 LOD colour, 2 sway), y = placement seed.
+    std::uint32_t misc[4];        // 560  x = debug mode (0 normal, 1 LOD, 2 sway, 3 chunks, 4 sun vis), y = placement seed.
     float hiz[4];                 // 576  xy = atlas size, zw = level 0 size.
     float depthMap[4];            // 592  x = k, y = b of d = k + b / w, z = level count.
     float look[4];                // 608  x = terrain tint strength, y = ground normal blend, z = self shadow strength, w = LOD0 segments.
@@ -180,8 +180,39 @@ inline std::uint32_t GrassCandidatesPerChunk(float bladesPerM2) noexcept
     return count > static_cast<float>(whole) ? whole + 1u : whole;
 }
 
+// Shadow and cloud parameters of GrassCull.comp. NOTE: must match GrassShadowBlock in GrassCull.comp (448 bytes).
+struct GrassShadowParamsGpu {
+    float cascadeViewProjection[4][16]; // 0    World to cascade clip (column-major).
+    float cascadeSplitFar[4];           // 256  Planar view depth where cascade i ends.
+    float cascadeBlendWidth[4];         // 272  Blend band at the end of cascade i.
+    float cascadeTexelWorld[4];         // 288  World size of one texel in cascade i.
+    float cascadeDepthRange[4];         // 304  Ortho depth span of cascade i (world units).
+    float eyeAndFadeStart[4];           // 320  xyz = receiver camera world position, w = distance fade start.
+    float forwardAndFadeEnd[4];         // 336  xyz = receiver camera forward, w = shadow max distance.
+    float shadowParams[4];              // 352  x = strength, y = const bias (texels), z = filter radius (texels), w = 1 / map size.
+    float biasExtra[4];                 // 368  x = slope bias (texels), y = normal offset (texels), z = sun offset (texels), w = spare.
+    std::uint32_t counts[4];            // 384  x = cascade count (0 = off), y = filter taps, z = flags, w = spare.
+    float cloudGrid[4];                 // 400  xy = cloud map centre xz (m), z = 1 / extent (m), w = strength (0 = off).
+    float cloudLayer[4];                // 416  x = layer base (m), y = layer top (m), z = sharpness, w = map size (texels).
+    float cloudSun[4];                  // 432  xyz = unit direction toward sun for cloud ray, w = spare.
+};
+static_assert(sizeof(GrassShadowParamsGpu) == 448);
+static_assert(std::is_trivially_copyable_v<GrassShadowParamsGpu>);
+static_assert(offsetof(GrassShadowParamsGpu, cascadeSplitFar) == 256);
+static_assert(offsetof(GrassShadowParamsGpu, cascadeBlendWidth) == 272);
+static_assert(offsetof(GrassShadowParamsGpu, cascadeTexelWorld) == 288);
+static_assert(offsetof(GrassShadowParamsGpu, cascadeDepthRange) == 304);
+static_assert(offsetof(GrassShadowParamsGpu, eyeAndFadeStart) == 320);
+static_assert(offsetof(GrassShadowParamsGpu, forwardAndFadeEnd) == 336);
+static_assert(offsetof(GrassShadowParamsGpu, shadowParams) == 352);
+static_assert(offsetof(GrassShadowParamsGpu, biasExtra) == 368);
+static_assert(offsetof(GrassShadowParamsGpu, counts) == 384);
+static_assert(offsetof(GrassShadowParamsGpu, cloudGrid) == 400);
+static_assert(offsetof(GrassShadowParamsGpu, cloudLayer) == 416);
+static_assert(offsetof(GrassShadowParamsGpu, cloudSun) == 432);
+
 // Debug view of the blade colour.
-enum class GrassDebugView : std::uint32_t { Normal = 0, LodColor = 1, Sway = 2, ChunkBounds = 3 };
+enum class GrassDebugView : std::uint32_t { Normal = 0, LodColor = 1, Sway = 2, ChunkBounds = 3, SunVis = 4 };
 
 // User-facing settings. Lives in the feature object; the panel and the HTTP endpoint edit it.
 struct GrassSettings {
@@ -252,7 +283,11 @@ struct GrassSettings {
     std::uint32_t seed = 1;
 
     bool followCloudWind = true;  // Use the wind the clouds drift with; off uses the fallback values above.
-    float sunVisibility = 1.0f;   // Flat multiplier on the sun term (no shadows reach grass yet).
+    float sunVisibility = 1.0f;   // Flat multiplier on the direct sun term.
+    bool receiveSunShadow = true;
+    bool receiveCloudShadow = true;
+    float shadowStrength = 1.0f;  // Fraction of cascade and cloud shadow applied to the blade sun term.
+    float cloudFill = 0.35f;      // Diffuse sky fill added to shadowed blades so they are not black.
 };
 
 // Named starting points for the settings. They only change density, distances and buffer sizes.
@@ -360,6 +395,8 @@ struct GrassViewSnapshot {
     std::uint32_t gridCells = 0;
     std::uint64_t tileRevision = 0;
     std::uint64_t instanceBytes = 0;
+    std::uint32_t shadowCascades = 0;
+    bool shadowCloud = false;
     bool statsValid = false;      // `stats` came from a readback two frames old.
     std::uint64_t statsFrame = 0;
     GrassStatsGpu stats{};

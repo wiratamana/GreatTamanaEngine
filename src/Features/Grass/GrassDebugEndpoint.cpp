@@ -74,6 +74,10 @@ constexpr std::array kSettingKeys{
     SettingKey{ "groundNormalBlend", &GrassSettings::groundNormalBlend },
     SettingKey{ "selfShadow", &GrassSettings::selfShadow },
     SettingKey{ "sunVisibility", &GrassSettings::sunVisibility },
+    SettingKey{ "receiveSunShadow", &GrassSettings::receiveSunShadow },
+    SettingKey{ "receiveCloudShadow", &GrassSettings::receiveCloudShadow },
+    SettingKey{ "shadowStrength", &GrassSettings::shadowStrength },
+    SettingKey{ "cloudFill", &GrassSettings::cloudFill },
     SettingKey{ "gridCells", &GrassSettings::gridCells },
     SettingKey{ "heightTileTexels", &GrassSettings::heightTileTexels },
     SettingKey{ "heightTileTexelSize", &GrassSettings::heightTileTexelSize },
@@ -88,7 +92,7 @@ constexpr std::array<std::string_view, 4> kPresetNames{ "Lean", "Medium", "Big",
 constexpr std::string_view kDebugViewKey = "debugView";
 constexpr std::string_view kColorRootKey = "colorRoot";
 constexpr std::string_view kColorTipKey = "colorTip";
-constexpr std::array<std::string_view, 4> kDebugViewNames{ "Normal", "LodColor", "Sway", "ChunkBounds" };
+constexpr std::array<std::string_view, 5> kDebugViewNames{ "Normal", "LodColor", "Sway", "ChunkBounds", "SunVis" };
 
 struct ScopeName {
     rg::ViewScope scope;
@@ -186,6 +190,8 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const GrassVi
     Add(out, key("gridCells"), static_cast<std::int64_t>(v.gridCells));
     Add(out, key("tileRevision"), Count(v.tileRevision));
     Add(out, key("instanceBytes"), Count(v.instanceBytes));
+    Add(out, key("shadow.cascades"), static_cast<std::int64_t>(v.shadowCascades));
+    Add(out, key("shadow.cloud"), v.shadowCloud);
     Add(out, key("stats.valid"), v.statsValid);
     Add(out, key("stats.frame"), Count(v.statsFrame));
     if (v.statsValid) {
@@ -380,7 +386,7 @@ fx::FeatureDebugResult GrassDebugEndpoint::Set(std::span<const fx::FeatureDebugA
         if (arg.key == kDebugViewKey) {
             const auto found = std::find(kDebugViewNames.begin(), kDebugViewNames.end(), std::string_view(arg.value));
             if (found == kDebugViewNames.end()) {
-                return Fail(arg.key, "debugView must be one of Normal, LodColor, Sway, ChunkBounds");
+                return Fail(arg.key, "debugView must be one of Normal, LodColor, Sway, ChunkBounds, SunVis");
             }
             candidate.debugView = static_cast<GrassDebugView>(found - kDebugViewNames.begin());
             continue;

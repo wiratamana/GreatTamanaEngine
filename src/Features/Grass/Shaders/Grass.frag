@@ -16,6 +16,7 @@ layout(location = 0) in vec3 inNormal;
 layout(location = 1) in vec4 inInfo;
 layout(location = 2) in vec3 inPosRel;
 layout(location = 3) flat in vec4 inGround; // rgb = terrain colour, a = ground normal . sun.
+layout(location = 4) flat in float inSunVis;
 
 layout(location = 0) out vec4 outColor;
 
@@ -55,17 +56,24 @@ void main()
         float border = 1.0 - step(0.03, min(edge.x, edge.y));
         float checker = mod(cell.x + cell.y, 2.0);
         albedo = mix(mix(vec3(0.05, 0.25, 0.6), vec3(0.6, 0.3, 0.05), checker), vec3(1.0), border) * 0.5;
+    } else if (debugMode == 4u) {
+        vec3 visColor = mix(vec3(0.03, 0.06, 0.35), vec3(0.95, 0.90, 0.35), clamp(inSunVis, 0.0, 1.0));
+        outColor = vec4(visColor * (0.75 + 0.25 * t), 1.0);
+        return;
     }
 
     float ao = mix(params.colorRoot.w, 1.0, smoothstep(0.0, 0.45, t));
     vec3 sunDir = normalize(params.sunDir.xyz);
     float sunUp = smoothstep(-0.05, 0.1, sunDir.y);
-    // Ground facing away from the sun gets no direct light (no real shadow map reaches grass).
     float groundLit = mix(1.0, smoothstep(-0.1, 0.3, inGround.a), params.look.z);
-    vec3 sun = params.sunRadiance.rgb * (kDirectScale * params.sunRadiance.w * sunUp * groundLit);
+    float sunVis = clamp(inSunVis, 0.0, 1.0);
+    vec3 sun = params.sunRadiance.rgb * (kDirectScale * params.sunRadiance.w * sunUp * groundLit * sunVis);
 
     float wrap = clamp((dot(normal, sunDir) + 0.35) / 1.35, 0.0, 1.0);
-    vec3 ambient = mix(params.groundAmbient.rgb, params.skyAmbient.rgb, normal.y * 0.5 + 0.5);
+    float hemi = normal.y * 0.5 + 0.5;
+    vec3 skyFill = params.sunRadiance.rgb
+        * (0.3 * kDirectScale * params.sunRadiance.w * sunUp * max(sunDir.y, 0.0) * params.skyAmbient.w * (1.0 - sunVis) * hemi);
+    vec3 ambient = mix(params.groundAmbient.rgb, params.skyAmbient.rgb, hemi) + skyFill;
     vec3 color = albedo * (ambient * ao + sun * wrap * sqrt(ao));
 
     // Fake subsurface: light through the blade when the sun is behind it, stronger toward the thin tip.

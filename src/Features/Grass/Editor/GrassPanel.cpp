@@ -12,7 +12,8 @@ namespace gte {
 
 namespace {
 
-constexpr std::array<const char*, 4> kDebugLabels{ "Normal", "LOD colour (0 green, 1 yellow, 2 red)", "Wind sway", "Chunk bounds" };
+constexpr std::array<const char*, 5> kDebugLabels{ "Normal", "LOD colour (0 green, 1 yellow, 2 red)", "Wind sway",
+    "Chunk bounds", "Sun visibility" };
 
 const char* StatusText(GrassFrameStatus status) noexcept
 {
@@ -56,8 +57,10 @@ void DrawStats(const GrassViewSnapshot& view)
     if (dropped > 0) {
         ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.2f, 1.0f), "%u blades dropped: a LOD region is full (raise the capacity).", dropped);
     }
-    ImGui::TextWrapped("GPU memory: %.1f MiB of instances. Hi-Z %s. Wind: %s.", static_cast<double>(view.instanceBytes) / (1024.0 * 1024.0),
-        view.hizUsed ? "on" : "off", view.windShared ? "shared with the clouds" : "own fallback");
+    ImGui::TextWrapped("GPU memory: %.1f MiB of instances. Hi-Z %s. Wind: %s. Shadows: %u cascades, cloud %s.",
+        static_cast<double>(view.instanceBytes) / (1024.0 * 1024.0), view.hizUsed ? "on" : "off",
+        view.windShared ? "shared with the clouds" : "own fallback", static_cast<unsigned>(view.shadowCascades),
+        view.shadowCloud ? "on" : "off");
 }
 
 } // namespace
@@ -160,6 +163,11 @@ bool BuildGrassPanel(GrassSettings& edit, const GrassViewSnapshot& game, const G
         changed |= ImGui::SliderFloat("Ground self shadow", &edit.selfShadow, 0.0f, 1.0f);
         changed |= ImGui::SliderFloat("Translucency", &edit.translucency, 0.0f, 3.0f);
         changed |= ImGui::SliderFloat("Sun visibility", &edit.sunVisibility, 0.0f, 1.5f);
+        changed |= ImGui::Checkbox("Receive sun shadows", &edit.receiveSunShadow);
+        ImGui::SameLine();
+        changed |= ImGui::Checkbox("Receive cloud shadows", &edit.receiveCloudShadow);
+        changed |= ImGui::SliderFloat("Shadow strength", &edit.shadowStrength, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Shadow sky fill", &edit.cloudFill, 0.0f, 1.0f);
     }
     if (ImGui::CollapsingHeader("Budget")) {
         ImGui::TextDisabled("Grass memory: %.1f MiB of instances.", static_cast<double>(GrassInstanceBytes(SanitizeGrassSettings(edit))) / (1024.0 * 1024.0));

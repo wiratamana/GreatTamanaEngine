@@ -1,10 +1,7 @@
 #version 450
 
-// One 64-thread group per 16 m grass chunk. The group tests the chunk (distance, tile data, water, frustum, Hi-Z),
-// then every thread places candidate blades, filters them and appends the survivors to the per-LOD instance region.
-// Dispatch: groupCount = gridCells * gridCells * extra.w groups; extra.w groups share a chunk and split its candidates.
-// Run GrassInit.comp first.
-// NOTE: bindings must match README_shaders.md; Hi-Z test mirrors ClusterCull.comp.
+// Culls 16 m grass chunks (distance, tile data, water, frustum, Hi-Z) and packs surviving blades per LOD.
+// Dispatch gridCells * gridCells * extra.w groups after GrassInit.comp; extra.w groups share each chunk.
 #include "GrassCommon.glsl"
 #include "ClusterCullConstants.glsl"
 #include "HizPyramidLayout.glsl"
@@ -32,6 +29,94 @@ layout(std430, binding = 4) buffer GrassStatsBlock {
 
 // Farthest-depth pyramid atlas of this frame. Bind any 1x1 texture when kGrassFlagHiz is off.
 layout(binding = 5) uniform sampler2D hizAtlas;
+
+// Sun cascade and cloud shadow parameters. NOTE: must match GrassShadowParamsGpu in GrassTypes.h (448 bytes).
+layout(std430, binding = 6) readonly buffer GrassShadowBlock {
+    mat4 cascadeViewProjection[4];
+    vec4 cascadeSplitFar;
+    vec4 cascadeBlendWidth;
+    vec4 cascadeTexelWorld;
+    vec4 cascadeDepthRange;
+    vec4 eyeAndFadeStart;
+    vec4 forwardAndFadeEnd;
+    vec4 shadowParams;
+    vec4 biasExtra;
+    uvec4 counts;
+    vec4 cloudGrid;
+    vec4 cloudLayer;
+    vec4 cloudSun;
+} shadow;
+
+layout(binding = 7) uniform sampler2D shadowDepth0;
+layout(binding = 8) uniform sampler2D shadowDepth1;
+layout(binding = 9) uniform sampler2D shadowDepth2;
+layout(binding = 10) uniform sampler2D shadowDepth3;
+layout(binding = 11) uniform sampler2D cloudShadowMap;
+
+// Per-invocation slope-aware bias (texels), read by ORTHO_BIAS_TEXELS inside OrthoMapSetVisibility().
+float gShadowBiasTexels = 0.0;
+
+float OrthoMapDepthAt(int k, vec2 uv)
+{
+    switch (k) {
+    case 0: return textureLod(shadowDepth0, uv, 0.0).r;
+    case 1: return textureLod(shadowDepth1, uv, 0.0).r;
+    case 2: return textureLod(shadowDepth2, uv, 0.0).r;
+    default: return textureLod(shadowDepth3, uv, 0.0).r;
+    }
+}
+
+#define ORTHO_VIEW_PROJECTION(k) shadow.cascadeViewProjection[k]
+#define ORTHO_SPLIT_FAR(k) shadow.cascadeSplitFar[k]
+#define ORTHO_BLEND_WIDTH(k) shadow.cascadeBlendWidth[k]
+#define ORTHO_TEXEL_WORLD(k) shadow.cascadeTexelWorld[k]
+#define ORTHO_DEPTH_RANGE(k) shadow.cascadeDepthRange[k]
+#define ORTHO_EYE shadow.eyeAndFadeStart.xyz
+#define ORTHO_FORWARD shadow.forwardAndFadeEnd.xyz
+#define ORTHO_COUNT shadow.counts.x
+#define ORTHO_TAPS shadow.counts.y
+#define ORTHO_BIAS_TEXELS gShadowBiasTexels
+#define ORTHO_FILTER_TEXELS shadow.shadowParams.z
+#define ORTHO_INV_MAP_SIZE shadow.shadowParams.w
+
+#include "OrthoMapSetVisibility.glsl"
+#include "CloudShadowLookup.glsl"
+
+// Combined cascade and cloud sun visibility at the blade root in [0, 1].
+float GrassSunVisibility(vec3 world, vec3 normal, float rnd)
+{
+    float vis = 1.0;
+    int count = clamp(int(shadow.counts.x), 0, 4);
+    float strength = shadow.shadowParams.x;
+    if (count > 0 && strength > 0.0) {
+        float fadeStart = shadow.eyeAndFadeStart.w;
+        float fadeEnd = shadow.forwardAndFadeEnd.w;
+        float viewDepth = dot(world - shadow.eyeAndFadeStart.xyz, shadow.forwardAndFadeEnd.xyz);
+        if (viewDepth < fadeEnd) {
+            int c = count - 1;
+            for (int i = 0; i < count; ++i) {
+                if (viewDepth < shadow.cascadeSplitFar[i]) {
+                    c = i;
+                    break;
+                }
+            }
+            float texel = shadow.cascadeTexelWorld[c];
+            vec3 sunDir = length(params.sunDir.xyz) > 1e-6 ? normalize(params.sunDir.xyz) : vec3(0.0, 1.0, 0.0);
+            float nDotL = clamp(dot(normal, sunDir), 0.0, 1.0);
+            float tanTheta = clamp(sqrt(max(1.0 - nDotL * nDotL, 0.0)) / max(nDotL, 0.05), 0.0, 10.0);
+            gShadowBiasTexels = shadow.shadowParams.y + shadow.biasExtra.x * tanTheta;
+            vec3 offsetWorld = world + normal * (shadow.biasExtra.y * texel) + sunDir * (shadow.biasExtra.z * texel);
+            float visCascade = OrthoMapSetVisibility(offsetWorld, rnd * 6.2831853);
+            float fadeSpan = max(fadeEnd - fadeStart, 1e-4);
+            float distanceFade = 1.0 - smoothstep(0.0, 1.0, clamp((viewDepth - fadeStart) / fadeSpan, 0.0, 1.0));
+            vis = 1.0 - strength * (1.0 - visCascade) * distanceFade;
+        }
+    }
+    if (shadow.cloudGrid.w > 0.0) {
+        vis *= CloudSunTransmittanceFast(cloudShadowMap, shadow.cloudGrid, shadow.cloudLayer, shadow.cloudSun.xyz, world);
+    }
+    return clamp(vis, 0.0, 1.0);
+}
 
 shared float sMin[64];
 shared float sMax[64];
@@ -296,12 +381,16 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
     float flutterB = sin(flutterTime * 1.37 + phase * 1.7);
     float flutterAmp = params.wind2.y * height * (0.04 + 0.12 * speedFactor * (0.5 + gust));
 
+    float r6 = GrassUnit(GrassHash2(hb, 6u));
+    vec3 worldRoot = vec3(params.cameraWorld.x + eye.x, params.camRel.y + eye.y, params.cameraWorld.y + eye.z);
+    float sunVis = GrassSunVisibility(worldRoot, normal, r6);
+
     uvec3 rgb = uvec3(clamp(SampleTileColor(pg) * 255.0 + 0.5, vec3(0.0), vec3(255.0)));
     uint rnd8 = uint(clamp(r5 * 255.0 + 0.5, 0.0, 255.0));
     result.root = eye;
     result.heightWidth = packHalf2x16(vec2(height, width));
     result.frame = packSnorm4x8(vec4(faceXz.x, faceXz.y, bendDir.x, bendDir.y));
-    result.ground = packUnorm4x8(vec4(normal.x * 0.5 + 0.5, normal.z * 0.5 + 0.5, sin(angle), 0.0));
+    result.ground = packUnorm4x8(vec4(normal.x * 0.5 + 0.5, normal.z * 0.5 + 0.5, sin(angle), sunVis));
     result.flutter = packHalf2x16(vec2(flutterA * flutterAmp, flutterB * 0.6 * flutterAmp));
     result.colorRnd = (rgb.x << 24u) | (rgb.y << 16u) | (rgb.z << 8u) | rnd8;
     return kRejectNone;
