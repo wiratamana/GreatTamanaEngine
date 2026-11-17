@@ -15,13 +15,11 @@ namespace gte {
 // Name the feature registers under.
 inline constexpr const char* kGrassFeatureName = "Grass";
 
-
 // Shared constants of the grass shaders. NOTE: must match Shaders/GrassCommon.glsl.
 inline constexpr std::uint32_t kGrassLodCount = 3;
 inline constexpr float kGrassChunkSizeM = 16.0f;
 inline constexpr std::uint32_t kGrassMaxGridCells = 48;      // Chunks per grid side.
 inline constexpr std::uint32_t kGrassCullGroupSize = 64;     // local_size_x of GrassCull.comp.
-inline constexpr std::uint32_t kGrassCandidateRound = 256;   // Candidates per workgroup round.
 inline constexpr std::uint32_t kGrassStatsWords = 32;
 inline constexpr std::uint32_t kGrassCommandStride = 16;     // Bytes between draw commands.
 inline constexpr std::uint32_t kGrassInstanceBytes = 32;
