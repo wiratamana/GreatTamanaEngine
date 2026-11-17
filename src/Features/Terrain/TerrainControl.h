@@ -145,7 +145,7 @@ struct TerrainStats {
     double cameraFovDegrees = 60.0;    // Vertical field of view of the camera.
     double cameraAspect = 16.0 / 9.0;  // Width over height of the Game view.
 
-    // Background save or load (src/Terrain/TerrainAssetTask.h). assetResult keeps the last finished text.
+    // Background save or load (Features/Terrain/TerrainAssetTask.h). assetResult keeps the last finished text.
     bool assetBusy = false;
     std::string assetKind;             // "save", "load" or empty.
     double assetProgress = 0.0;        // 0..1 while busy.

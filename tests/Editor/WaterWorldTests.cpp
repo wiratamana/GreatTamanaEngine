@@ -2,7 +2,7 @@
 
 #include "Editor/Water/WaterCommands.h"
 #include "Editor/Water/WaterWorld.h"
-#include "FakeTerrainWorld.h"
+#include "../Features/Terrain/Editor/FakeTerrainWorld.h"
 #include "Water/WaterEdit.h"
 #include "Water/WaterJson.h"
 
