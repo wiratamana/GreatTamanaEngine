@@ -69,6 +69,7 @@
 |---|---|---|
 | [Project assembly](guides/project-assembly.md) | Make a game project, load and hot reload it | Game developers |
 | [Writing a render feature](guides/writing-a-render-feature.md) | Add a built-in feature step by step | Engine developers |
+| [Big World demo](guides/big-world-demo.md) | File > Open Big World: terrain, water, grass, sky and clouds in one scene | Landscape developers |
 
 ## Reference (look-up tables)
 | Doc | What it gives you | Who |

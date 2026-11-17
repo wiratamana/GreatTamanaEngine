@@ -71,6 +71,7 @@ More about threads and bridges: [HTTP server](../architecture/http-server.md).
 | Grass: change size and density in one go | `GET /feature_debug/set?name=Grass&preset=Lean\|Medium\|Big\|Huge` (then single keys override). Memory: `instanceMiB`; the values the shaders use: `effective.*`. See [Grass](../reference/render-features/grass.md) **W** |
 | Grass: see LODs or chunks | `GET /feature_debug/set?name=Grass&debugView=LodColor` (or `ChunkBounds`, `Sway`) then `GET /get_game_view` **W** |
 | Grass: tile source state, root height check | `GET /grass/tile`, `GET /grass/probe?x=..&z=..`, `GET /grass/probe_batch?n=60&radius=100` (same as `/feature_debug/invoke?name=Grass&action=tile\|probe\|probe_batch`). See [Grass](../reference/render-features/grass.md) **W** |
+| Open, watch and close the Big World demo | `GET /bigworld/open?quality=lean\|medium\|big`, poll `GET /bigworld/state` until `phase` is `Ready`, `GET /bigworld/close` (**W** for open and close). See [Big World demo](../guides/big-world-demo.md) |
 | Water: see a mask | `GET /feature_debug/set?name=Water&debugView=ShoreMask` then `GET /get_game_view` (set ToneMapping `mode=Clamp` to read values) **W** |
 | Inspect one draw call | `/frame_debugger/*` (see R6) |
 | Move the scene camera | `GET /scene_camera/set_pose?x=0&y=2&z=5&yaw=0&pitch=0` **W** |

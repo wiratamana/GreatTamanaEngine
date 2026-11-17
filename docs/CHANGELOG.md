@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [Big World demo](#big-world-demo-branch-featureprecural-landscape-2026-11-17) | `feature/precural-landscape` | 2026-11-17 |
 | [Landscape dead code removed](#landscape-dead-code-removed-branch-featureprecural-landscape-2026-11-17) | `feature/precural-landscape` | 2026-11-17 |
 | [Feature editor modules](#feature-editor-modules-branch-featureprecural-landscape-2026-11-17) | `feature/precural-landscape` | 2026-11-17 |
 | [Grass: smooth density, terrain colour, presets](#grass-smooth-density-terrain-colour-presets-branch-featureprecural-landscape-2026-11-17) | `feature/precural-landscape` | 2026-11-17 |
@@ -53,6 +54,12 @@
 | [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+
+## Big World demo (branch `feature/precural-landscape`, 2026-11-17)
+- **File > Open Big World** and **Close Big World**: one click opens terrain, sea, lake, river, grass, atmosphere and volumetric clouds. See the [guide](guides/big-world-demo.md).
+- Game-layer orchestrator `src/Game/BigWorld` (plan, three ports, state machine). The editor module `src/Features/BigWorld/Editor` implements the ports on the live worlds. Routes: `/bigworld/open`, `/bigworld/close`, `/bigworld/state`.
+- Quality tiers `lean`, `medium`, `big`: grass preset, cloud march steps (`maxSteps`) and a river or not.
+- **Fix:** opening another scene (a module action, `/terrain/open`, Open Scene) while the Hi-Z demo was active left its feature switches on: the sky and aerial perspective stayed off. The host now releases the Hi-Z demo settings when none of its entities is alive (`HizDemoSceneReplaced`).
 
 ## Landscape dead code removed (branch `feature/precural-landscape`, 2026-11-17)
 - Terrain: removed unused `LodSelector::ClearHeightRanges`, `TerrainHeightField::LevelForSpacing`, the unused pool and streamer counters, and the 10 disabled manual bench tests. `InlineTerrainExecutor` moved into the test folder.
