@@ -93,8 +93,15 @@ BigWorldPlan SanitizeBigWorldPlan(BigWorldPlan plan)
     plan.lookDownDegrees = Bounded(plan.lookDownDegrees, defaults.lookDownDegrees, -60.0, 85.0);
     plan.lakeDistance = Bounded(plan.lakeDistance, defaults.lakeDistance, 20.0, 2000.0);
     plan.lakeSize = Bounded(plan.lakeSize, defaults.lakeSize, 20.0, 1000.0);
-    plan.riverDistance = Bounded(plan.riverDistance, defaults.riverDistance, 20.0, 2000.0);
-    plan.riverLength = Bounded(plan.riverLength, defaults.riverLength, 50.0, 3000.0);
+    plan.lakeCorners = std::clamp(plan.lakeCorners, 6, 32);
+    plan.lakeBankWidth = Bounded(plan.lakeBankWidth, defaults.lakeBankWidth, 0.0, 200.0);
+    plan.riverStart = Bounded(plan.riverStart, defaults.riverStart, -3000.0, 3000.0);
+    plan.riverEnd = Bounded(plan.riverEnd, defaults.riverEnd, -3000.0, 3000.0);
+    if (plan.riverEnd - plan.riverStart < 50.0) {
+        plan.riverEnd = plan.riverStart + 50.0;
+    }
+    plan.riverSide = Bounded(plan.riverSide, defaults.riverSide, -2000.0, 2000.0);
+    plan.riverWiggle = Bounded(plan.riverWiggle, defaults.riverWiggle, 0.0, 300.0);
     plan.riverWidth = Bounded(plan.riverWidth, defaults.riverWidth, 2.0, 100.0);
     plan.minResidentNodes = std::clamp(plan.minResidentNodes, 1, 400);
     plan.nodeWaitSeconds = Bounded(plan.nodeWaitSeconds, defaults.nodeWaitSeconds, 1.0, 600.0);
@@ -114,6 +121,38 @@ PlanPoint PointAhead(const BigWorldPlan& plan, double distance, double side) noe
     const double forwardZ = std::cos(heading);
     // Right of the heading when seen from above with +Z north and +X east.
     return { plan.spotX + forwardX * distance + forwardZ * side, plan.spotZ + forwardZ * distance - forwardX * side };
+}
+
+std::vector<PlanPoint> LakeOutline(const BigWorldPlan& plan)
+{
+    const int corners = std::clamp(plan.lakeCorners, 6, 32);
+    const PlanPoint center = PointAhead(plan, plan.lakeDistance);
+    const double half = plan.lakeSize * 0.5;
+    std::vector<PlanPoint> outline;
+    outline.reserve(static_cast<std::size_t>(corners));
+    for (int i = 0; i < corners; ++i) {
+        const double a = 2.0 * kPi * static_cast<double>(i) / static_cast<double>(corners);
+        // Three low harmonics make an uneven shore; the radius never drops below 55 percent of the half size.
+        const double r = half * std::max(0.55, 1.0 + 0.20 * std::sin(2.0 * a + 0.7) + 0.13 * std::sin(3.0 * a + 2.1)
+                                                    + 0.07 * std::sin(5.0 * a));
+        outline.push_back({ center.x + r * std::cos(a) * 1.15, center.z + r * std::sin(a) * 0.85 });
+    }
+    return outline;
+}
+
+std::vector<PlanPoint> RiverPath(const BigWorldPlan& plan)
+{
+    constexpr int kPoints = 7;
+    std::vector<PlanPoint> path;
+    path.reserve(kPoints);
+    for (int i = 0; i < kPoints; ++i) {
+        const double t = static_cast<double>(i) / static_cast<double>(kPoints - 1);
+        const double along = plan.riverStart + (plan.riverEnd - plan.riverStart) * t;
+        // The wiggle fades out toward the end so the river meets the shore straight.
+        const double side = plan.riverSide + plan.riverWiggle * std::sin(t * 2.0 * kPi * 1.25 + 0.6) * (1.0 - t * t);
+        path.push_back(PointAhead(plan, along, side));
+    }
+    return path;
 }
 
 } // namespace gte::bigworld

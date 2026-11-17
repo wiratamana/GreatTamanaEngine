@@ -124,7 +124,15 @@ PortResult WaterPortAdapter::AddLake(const bigworld::LakeRequest& request)
     if (world == nullptr) {
         return Fail("the water world is not available");
     }
-    water::WaterBody lake = water::MakeBoxLake("Big World Lake", request.centerX, request.centerZ, request.sizeX, request.sizeZ, 0.0f);
+    if (request.outline.size() < 3) {
+        return Fail("the lake outline needs at least 3 corners");
+    }
+    water::WaterBody lake = water::MakeBoxLake("Big World Lake", 0.0, 0.0, 10.0, 10.0, 0.0f);
+    lake.polygon.clear();
+    for (const bigworld::PlanPoint& p : request.outline) {
+        lake.polygon.push_back({ p.x, p.z });
+    }
+    lake.bankWidth = static_cast<float>(request.bankWidth);
     lake.level = water::SuggestLakeLevel(lake, GroundOf(*world));
     return FromWater(world->AddBody(lake));
 }

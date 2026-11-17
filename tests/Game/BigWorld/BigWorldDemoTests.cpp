@@ -278,25 +278,30 @@ TEST_F(BigWorldDemoTest, SuccessPathReachesReadyAndSwitchesFeaturesOn)
     EXPECT_TRUE(demo.State().warnings.empty());
 }
 
-TEST_F(BigWorldDemoTest, TheLakeIsAheadOfTheCameraAndTheRiverCrossesTheView)
+TEST_F(BigWorldDemoTest, TheLakeIsAheadOfTheCameraAndTheRiverRunsAlongTheHeading)
 {
     BigWorldPlan plan = MakeBigWorldPlan(Quality::Big);
     plan.spotX = 0.0;
     plan.spotZ = 0.0;
     plan.headingDegrees = 90.0;
     plan.lakeDistance = 110.0;
-    plan.riverDistance = 160.0;
-    plan.riverLength = 400.0;
+    plan.riverStart = -200.0;
+    plan.riverEnd = 300.0;
+    plan.riverSide = 140.0;
     ASSERT_TRUE(demo.Open(plan, now).ok);
     Pump(5.0, [&] { HealthyWorld(); });
     ASSERT_EQ(water.lakes.size(), 1u);
-    EXPECT_NEAR(water.lakes[0].centerX, 110.0, 1e-6);
-    ASSERT_EQ(water.rivers.size(), 1u);
-    ASSERT_EQ(water.rivers[0].points.size(), 5u);
-    for (const PlanPoint& p : water.rivers[0].points) {
-        EXPECT_NEAR(p.x, 160.0, 1e-6);
+    ASSERT_GE(water.lakes[0].outline.size(), 3u);
+    double cx = 0.0;
+    for (const PlanPoint& p : water.lakes[0].outline) {
+        cx += p.x;
     }
-    EXPECT_NEAR(std::abs(water.rivers[0].points.front().z - water.rivers[0].points.back().z), 400.0, 1e-6);
+    EXPECT_NEAR(cx / static_cast<double>(water.lakes[0].outline.size()), 110.0, 25.0);
+    EXPECT_DOUBLE_EQ(water.lakes[0].bankWidth, plan.lakeBankWidth);
+    ASSERT_EQ(water.rivers.size(), 1u);
+    ASSERT_GE(water.rivers[0].points.size(), 2u);
+    EXPECT_NEAR(water.rivers[0].points.front().x, -200.0, 1e-6);
+    EXPECT_NEAR(water.rivers[0].points.back().x, 300.0, 1e-6);
 }
 
 TEST_F(BigWorldDemoTest, LeanTierAddsNoRiver)

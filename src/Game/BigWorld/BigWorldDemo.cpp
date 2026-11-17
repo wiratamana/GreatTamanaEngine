@@ -313,8 +313,9 @@ void BigWorldDemo::Refresh(double nowSeconds)
     }
     m_state.warnings = m_phaseWarnings;
     m_state.warnings.insert(m_state.warnings.end(), m_agreementWarnings.begin(), m_agreementWarnings.end());
-    m_state.secondsInPhase = m_now - m_phaseStart;
-    m_state.secondsTotal = m_now - m_started;
+    const bool idle = m_state.phase == Phase::Idle;
+    m_state.secondsInPhase = idle ? 0.0 : m_now - m_phaseStart;
+    m_state.secondsTotal = idle ? 0.0 : m_now - m_started;
 }
 
 void BigWorldDemo::StepWaitingForNodes()
@@ -333,8 +334,10 @@ void BigWorldDemo::StepAddingWater()
     const BigWorldPlan& p = m_state.plan;
     m_carveAppliesBefore = m_state.health.water.carveApplies;
     if (p.lake) {
-        const PlanPoint at = PointAhead(p, p.lakeDistance);
-        const PortResult lake = m_ports.water->AddLake({ at.x, at.z, p.lakeSize, p.lakeSize });
+        LakeRequest request;
+        request.outline = LakeOutline(p);
+        request.bankWidth = p.lakeBankWidth;
+        const PortResult lake = m_ports.water->AddLake(request);
         if (!lake.ok) {
             Fail("lake: " + lake.message);
             return;
@@ -345,11 +348,7 @@ void BigWorldDemo::StepAddingWater()
     if (p.river) {
         RiverRequest river;
         river.width = p.riverWidth;
-        constexpr int kPoints = 5;
-        for (int i = 0; i < kPoints; ++i) {
-            const double side = (static_cast<double>(i) / (kPoints - 1) - 0.5) * p.riverLength;
-            river.points.push_back(PointAhead(p, p.riverDistance, side));
-        }
+        river.points = RiverPath(p);
         const PortResult added = m_ports.water->AddRiver(river);
         if (!added.ok) {
             m_phaseWarnings.push_back("river: " + added.message);

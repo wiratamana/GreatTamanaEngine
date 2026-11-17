@@ -46,13 +46,17 @@ struct BigWorldPlan {
     bool flatOceanQuad = true;
     int minResidentNodes = 12;
 
-    // Water around the spawn. Distances are along the heading from the spot.
+    // Water around the spawn. Distances are along the heading from the spot, sides are to its right.
     bool lake = true;
     double lakeDistance = 110.0;
     double lakeSize = 120.0;
+    int lakeCorners = 14;
+    double lakeBankWidth = 30.0;
     bool river = false;
-    double riverDistance = 160.0;
-    double riverLength = 500.0;
+    double riverStart = -260.0; // Distance along the heading where the river begins (negative = behind the spot).
+    double riverEnd = 320.0;
+    double riverSide = 140.0;
+    double riverWiggle = 22.0;
     double riverWidth = 14.0;
 
     std::vector<FeatureTweak> tweaks;
@@ -77,5 +81,11 @@ struct PlanPoint {
 
 // A point `distance` metres from the spot along the heading (plus `side` metres to the right).
 PlanPoint PointAhead(const BigWorldPlan& plan, double distance, double side = 0.0) noexcept;
+
+// Closed outline of the lake: a rounded, uneven blob around its centre (no repeated first point).
+std::vector<PlanPoint> LakeOutline(const BigWorldPlan& plan);
+
+// River centre line from the plan start to its end: a gentle wiggle that ends in a straight run.
+std::vector<PlanPoint> RiverPath(const BigWorldPlan& plan);
 
 } // namespace gte::bigworld

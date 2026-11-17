@@ -56,10 +56,8 @@ public:
 };
 
 struct LakeRequest {
-    double centerX = 0.0;
-    double centerZ = 0.0;
-    double sizeX = 100.0;
-    double sizeZ = 100.0;
+    std::vector<PlanPoint> outline; // Closed outline, 3..32 corners.
+    double bankWidth = 30.0;
 };
 
 struct RiverRequest {

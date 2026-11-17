@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <vector>
 
 namespace gte::bigworld {
 namespace {
@@ -144,6 +145,71 @@ TEST(BigWorldPlanTest, PointAheadSideIsToTheRightOfTheHeading)
     p = PointAhead(plan, 0.0, 50.0);
     EXPECT_NEAR(p.x, 0.0, 1e-9);
     EXPECT_NEAR(p.z, -50.0, 1e-9);
+}
+
+TEST(BigWorldPlanTest, LakeOutlineIsAnUnevenClosedBlobAroundItsCentre)
+{
+    BigWorldPlan plan;
+    plan.spotX = 0.0;
+    plan.spotZ = 0.0;
+    plan.headingDegrees = 90.0;
+    plan.lakeDistance = 200.0;
+    plan.lakeSize = 100.0;
+    plan.lakeCorners = 14;
+    const std::vector<PlanPoint> outline = LakeOutline(plan);
+    ASSERT_EQ(outline.size(), 14u);
+    double minR = 1e9;
+    double maxR = 0.0;
+    for (const PlanPoint& p : outline) {
+        const double r = std::hypot(p.x - 200.0, p.z);
+        minR = std::min(minR, r);
+        maxR = std::max(maxR, r);
+    }
+    EXPECT_GT(minR, 20.0);
+    EXPECT_LT(maxR, 100.0);
+    EXPECT_GT(maxR - minR, 5.0); // not a circle
+}
+
+TEST(BigWorldPlanTest, LakeOutlineClampsTheCornerCount)
+{
+    BigWorldPlan plan;
+    plan.lakeCorners = 2;
+    EXPECT_EQ(LakeOutline(plan).size(), 6u);
+    plan.lakeCorners = 500;
+    EXPECT_EQ(LakeOutline(plan).size(), 32u);
+}
+
+TEST(BigWorldPlanTest, RiverPathRunsFromStartToEndAlongTheHeadingOnItsSide)
+{
+    BigWorldPlan plan;
+    plan.spotX = 0.0;
+    plan.spotZ = 0.0;
+    plan.headingDegrees = 90.0; // +X; right is -Z
+    plan.riverStart = -100.0;
+    plan.riverEnd = 400.0;
+    plan.riverSide = 100.0;
+    plan.riverWiggle = 20.0;
+    const std::vector<PlanPoint> path = RiverPath(plan);
+    ASSERT_GE(path.size(), 5u);
+    EXPECT_NEAR(path.front().x, -100.0, 1e-6);
+    EXPECT_NEAR(path.back().x, 400.0, 1e-6);
+    for (std::size_t i = 1; i < path.size(); ++i) {
+        EXPECT_GT(path[i].x, path[i - 1].x); // never turns back
+    }
+    for (const PlanPoint& p : path) {
+        EXPECT_LT(p.z, -75.0); // stays on the right-hand side within the wiggle
+        EXPECT_GT(p.z, -125.0);
+    }
+    EXPECT_NEAR(path.back().z, -100.0, 1e-6); // ends straight
+}
+
+TEST(BigWorldPlanTest, SanitizeKeepsTheRiverLongEnough)
+{
+    BigWorldPlan plan;
+    plan.riverStart = 100.0;
+    plan.riverEnd = 90.0;
+    const BigWorldPlan safe = SanitizeBigWorldPlan(plan);
+    EXPECT_GE(safe.riverEnd - safe.riverStart, 50.0);
 }
 
 } // namespace
