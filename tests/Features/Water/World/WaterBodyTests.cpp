@@ -1,9 +1,9 @@
 // Tier 1: water settings, geometry, body set, JSON.
 
-#include "Water/WaterBodySet.h"
-#include "Water/WaterJson.h"
-#include "Water/WaterMath.h"
-#include "Water/WaterSettings.h"
+#include "Features/Water/World/WaterBodySet.h"
+#include "Features/Water/World/WaterJson.h"
+#include "Features/Water/World/WaterMath.h"
+#include "Features/Water/World/WaterSettings.h"
 
 #include <gtest/gtest.h>
 

@@ -4,7 +4,7 @@
 // the host turns it into GPU work in its own Tick, so the UI may call it directly.
 
 #include "../../Math/Vec2.h"
-#include "../../Water/WaterControl.h"
+#include "../../Features/Water/World/WaterControl.h"
 
 #include <cstdint>
 #include <string>

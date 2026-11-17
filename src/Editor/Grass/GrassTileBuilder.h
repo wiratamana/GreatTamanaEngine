@@ -5,7 +5,7 @@
 
 #include "../../Features/Grass/GrassTypes.h"
 #include "../../Features/Terrain/TerrainSurface.h"
-#include "../../Water/WaterBodySet.h"
+#include "../../Features/Water/World/WaterBodySet.h"
 
 #include <cstdint>
 #include <memory>

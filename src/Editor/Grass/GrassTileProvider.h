@@ -6,7 +6,7 @@
 #include "GrassTileBuilder.h"
 #include "../../Features/Grass/GrassFeature.h"
 #include "../../Features/Terrain/TerrainControl.h"
-#include "../../Water/WaterControl.h"
+#include "../../Features/Water/World/WaterControl.h"
 
 #include <condition_variable>
 #include <cstdint>

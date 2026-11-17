@@ -3,7 +3,7 @@
 // Main-thread executor of the /water/<action> HTTP routes. Actions arrive as "water.<name>".
 
 #include "../../Application/TerrainCommandBridge.h"
-#include "../../Water/WaterControl.h"
+#include "../../Features/Water/World/WaterControl.h"
 
 namespace gte {
 

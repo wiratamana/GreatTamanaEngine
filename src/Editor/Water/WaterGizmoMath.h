@@ -5,8 +5,8 @@
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec2.h"
 #include "../../Math/Vec3.h"
-#include "../../Water/WaterEdit.h"
-#include "../../Water/WaterTypes.h"
+#include "../../Features/Water/World/WaterEdit.h"
+#include "../../Features/Water/World/WaterTypes.h"
 
 #include <cstdint>
 #include <span>

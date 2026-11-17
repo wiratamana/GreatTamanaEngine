@@ -2,7 +2,7 @@
 
 #include "Features/Terrain/TerrainHeightField.h"
 #include "Features/Terrain/TerrainNode.h"
-#include "Water/WaterCarve.h"
+#include "Features/Water/World/WaterCarve.h"
 
 #include <gtest/gtest.h>
 

@@ -4,7 +4,7 @@
 #include "../EditorContext.h"
 #include "../EditorFrame.h"
 #include "../ImGuiUniqueId.h"
-#include "../../Water/WaterEdit.h"
+#include "../../Features/Water/World/WaterEdit.h"
 
 #include <imgui.h>
 

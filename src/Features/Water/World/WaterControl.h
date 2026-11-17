@@ -3,7 +3,7 @@
 // Control surface of the live water world. The HTTP commands and the editor panel talk only to this interface.
 // Every call is made on the main thread.
 
-#include "../Features/Terrain/TerrainControl.h"
+#include "../../Terrain/TerrainControl.h"
 #include "WaterBodySet.h"
 #include "WaterSettings.h"
 

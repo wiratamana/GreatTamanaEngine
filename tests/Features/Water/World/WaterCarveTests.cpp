@@ -1,6 +1,6 @@
 // Tier 1: lake and river carve profile.
 
-#include "Water/WaterCarve.h"
+#include "Features/Water/World/WaterCarve.h"
 
 #include <gtest/gtest.h>
 

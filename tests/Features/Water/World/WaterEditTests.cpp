@@ -1,7 +1,7 @@
 // Tier 1: point edits, ground helpers and the debug map picture.
 
-#include "Water/WaterEdit.h"
-#include "Water/WaterMapImage.h"
+#include "Features/Water/World/WaterEdit.h"
+#include "Features/Water/World/WaterMapImage.h"
 
 #include <gtest/gtest.h>
 

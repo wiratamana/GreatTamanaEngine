@@ -1,8 +1,8 @@
 #include "WaterWorld.h"
 
-#include "../../Water/WaterCarve.h"
-#include "../../Water/WaterEdit.h"
-#include "../../Water/WaterJson.h"
+#include "../../Features/Water/World/WaterCarve.h"
+#include "../../Features/Water/World/WaterEdit.h"
+#include "../../Features/Water/World/WaterJson.h"
 
 #include <algorithm>
 #include <cmath>

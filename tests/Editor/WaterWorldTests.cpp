@@ -3,8 +3,8 @@
 #include "Editor/Water/WaterCommands.h"
 #include "Editor/Water/WaterWorld.h"
 #include "../Features/Terrain/Editor/FakeTerrainWorld.h"
-#include "Water/WaterEdit.h"
-#include "Water/WaterJson.h"
+#include "Features/Water/World/WaterEdit.h"
+#include "Features/Water/World/WaterJson.h"
 
 #include <gtest/gtest.h>
 

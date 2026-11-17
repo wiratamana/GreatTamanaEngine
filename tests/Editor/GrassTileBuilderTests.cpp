@@ -2,7 +2,7 @@
 
 #include "Editor/Grass/GrassTileBuilder.h"
 #include "Features/Grass/GrassMath.h"
-#include "Water/WaterEdit.h"
+#include "Features/Water/World/WaterEdit.h"
 
 #include <gtest/gtest.h>
 
