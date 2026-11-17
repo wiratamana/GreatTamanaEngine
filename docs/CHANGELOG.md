@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [Landscape dead code removed](#landscape-dead-code-removed-branch-featureprecural-landscape-2026-11-17) | `feature/precural-landscape` | 2026-11-17 |
 | [Feature editor modules](#feature-editor-modules-branch-featureprecural-landscape-2026-11-17) | `feature/precural-landscape` | 2026-11-17 |
 | [Grass: smooth density, terrain colour, presets](#grass-smooth-density-terrain-colour-presets-branch-featureprecural-landscape-2026-11-17) | `feature/precural-landscape` | 2026-11-17 |
 | [Grass on the real terrain](#grass-on-the-real-terrain-branch-featureprecural-landscape-2026-11-16) | `feature/precural-landscape` | 2026-11-16 |
@@ -52,6 +53,12 @@
 | [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+
+## Landscape dead code removed (branch `feature/precural-landscape`, 2026-11-17)
+- Terrain: removed unused `LodSelector::ClearHeightRanges`, `TerrainHeightField::LevelForSpacing`, the unused pool and streamer counters, and the 10 disabled manual bench tests. `InlineTerrainExecutor` moved into the test folder.
+- Water: removed `IWaterBodySource`, `WaterFeature::SetBodySource` (the body list is the feature's own list now), the reserved `shadowStrength` setting, `WaterViewSnapshot::receiverBound`, `BodyToJson`, `ParseBodyJson`, `WaterCarve::LakeCount/RiverCount`, `BodyCenter`, `EditTranslate` and `RayHitGround`. `WaterBodySource.h` is now `WaterBodyDesc.h`.
+- Grass: removed the unused constant `kGrassCandidateRound`.
+- Kept on purpose: the flat ocean quad (still shown when the Water option "Hide the old flat ocean quad" is off, and by `/terrain/ocean_quad`), the grass synthetic tile, and the small test-read getters.
 
 ## Feature editor modules (branch `feature/precural-landscape`, 2026-11-17)
 - New `IEditorFeatureModule`, `EditorModuleSet` and `EditorExtensions` in `src/Editor/`. A feature now owns its editor objects instead of `EditorHost`.
@@ -100,7 +107,7 @@
 - **New feature `Water`.** Ocean, lakes and rivers drawn per pixel, with no mesh. A compute pass (`Water.Shade.Dispatch`) traces each view ray against a wave height field and shades it. A fullscreen draw (`Water.Composite.Draw`) writes colour and `gl_FragDepth` into the view. Registrations: `Water.FrameStamp` (PreOpaque 36), `Water.Surface` (PostOpaque 25). See [Water](reference/render-features/water.md).
 - **Water is in the scene depth.** Atmosphere haze, GTAO, SSGI, TAA and the shadow depth range treat it as a surface. This is the first user of a depth write through the kit fullscreen verb. Measured: with water on the depth buffer holds the water plane instead of the seabed.
 - **Shading.** Sharpened-sine waves with analytic slopes (not true Gerstner), drifting ripple noise without textures, Fresnel, sky reflection from the Atmosphere sky-view table, GGX sun glint, per-channel absorption, depth-aware shore foam, crest foam, refraction by the slope, wet ground above the water line. Optional screen-space reflection (off by default).
-- **Bodies.** Up to 16 bodies (ocean, box lake, polygon lake up to 32 points, river polyline up to 64 points with per-point level and width). The editor layer feeds them through `IWaterBodySource`; `/feature_debug/invoke` can add them for tests.
+- **Bodies.** Up to 16 bodies (ocean, box lake, polygon lake up to 32 points, river polyline up to 64 points with per-point level and width). They are added through the `/feature_debug/invoke` actions; the Water world module uses the same actions.
 - **HTTP.** `/feature_debug/*` name `Water`: every setting, actions `add_ocean`, `add_lake`, `add_river`, `remove_body`, `clear_bodies`, `dump_bodies`, `probe`, and `debugView` masks that show in `/get_game_view`.
 - **Cost (Iris Xe).** 0.4 to 0.6 ms at 719x360. At 1264x629 half resolution switches on by itself (600000 pixels or more) and the pass costs 0.4 to 0.6 ms; full resolution was 0.8 to 1.7 ms. The pass is bandwidth bound.
 - **Half-resolution shading** (`halfRes`, `halfResAuto`). The shade pass runs on a half-size target; the composite uses a depth test so the land edge stays exact.

@@ -38,7 +38,7 @@ Far water is written at depth 0.99999. Features treat depth 0.999999 and above a
 Targets per view: `Water.Color` (RGBA16F, rgb + coverage) and `Water.Depth` (R32F). 12 bytes per pixel.
 
 ## Bodies
-Bodies come from two places: bodies added through `/feature_debug/invoke` (local), and an `IWaterBodySource` set by the editor layer (`WaterFeature::SetBodySource`).
+The feature holds its bodies. They are added through the debug endpoint actions (`add_ocean`, `add_lake`, `add_river`). The Water world editor module does the same to push its bodies.
 With no body at all, one ocean at `seaLevel` is drawn.
 
 | Kind | Shape | Level |
@@ -79,7 +79,6 @@ Sanitized on write (`SanitizeWaterSettings`). NaN and infinity become the defaul
 | `wetShore` / `wetBand` / `wetStrength` / `wetFadeDistance` | true / 1.5 / 0.45 / 3000 | bool / 0.1..20 / 0..1 / 100..50000 | Wet ground |
 | `maxDistance` | 100000 | 100..1e6 | Longest water ray, metres |
 | `halfRes` / `halfResAuto` | false / true | bool / bool | Shade at half resolution always / when the view has 600000 pixels or more |
-| `shadowStrength` | 0 | 0..1 | Reserved. Sun shadow on water is not bound |
 | `debugView` | `Off` | see below | Show a mask instead of the picture |
 
 ## Debug

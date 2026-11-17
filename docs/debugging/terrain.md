@@ -121,7 +121,7 @@ A moving benchmark: `GET /terrain/flight?kind=line&speed=400&alt=250&fixedStep=0
 ## Known limits
 - Hi-Z saves triangles only when mountains hide other mountains (57 of 375 nodes in the best test) and it does not help the shadow passes. It costs about 0.3 ms. Frustum culling is the real saver.
 - The shadow passes cost more than the terrain colour pass. The `budget` option lowers them. See [Terrain performance notes](#cost-summary).
-- Water has its own feature now (waves, shore, bodies, carve; see [Water world](water-world.md)). Still missing: triplanar texturing and LOD morphing (levels pop). Erosion strength above 2 shows a grid at node borders. The pop is small: at the split distance the p99 height step between a parent and its children is 1 to 2.7 px at 720p, the worst vertex 4 to 10 px (aliased peaks). A real fix is vertex morphing, which needs a new cluster shader (about 2 days, medium risk). Run `TerrainBench.DISABLED_LodPopError` to measure it.
+- Water has its own feature now (waves, shore, bodies, carve; see [Water world](water-world.md)). Still missing: triplanar texturing and LOD morphing (levels pop). Erosion strength above 2 shows a grid at node borders. The pop is small: at the split distance the p99 height step between a parent and its children is 1 to 2.7 px at 720p, the worst vertex 4 to 10 px (aliased peaks). A real fix is vertex morphing, which needs a new cluster shader (about 2 days, medium risk).
 - No in-world wireframe boxes: the engine has no scene line pipeline. The boxes are an ImGui overlay (Game and Scene views, not in `/get_game_view`; `/get_swapchain` shows them). Use `/terrain/map` for a capture that always works.
 
 ## Cost summary
