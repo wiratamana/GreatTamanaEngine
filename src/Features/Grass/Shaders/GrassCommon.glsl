@@ -48,7 +48,7 @@ layout(std430, binding = 0) readonly buffer GrassParamsBlock {
     vec4 variety;             // x = clump strength, y = min patch density, z = weed share, w = dry share.
     vec4 variety2;            // x = flower share, y = modern shading blend, z = jitter strength, w = patch tint.
     vec4 shapeWind;           // x = min pixel width, y = blade shape blend, z = wind detail, w = wind shade.
-    vec4 lodFar;              // x = LOD cross-fade band (m), y = far flatten start (m), z = far luminance, w = min blade width per metre of distance.
+    vec4 lodFar;              // x = stochastic LOD transition band (m), y = far flatten start (m), z = far luminance, w = min blade width per metre of distance.
 } params;
 
 // Low nibble of GrassInstance::colorRnd: 0..12 = meadow/tuft tint, 13..15 = special blade kinds.
@@ -89,8 +89,6 @@ const uint kStatDropped2 = 20u;
 const uint kStatSlot0 = 21u; // Slot reservation counters: required, not optional.
 const uint kStatSlot1 = 22u;
 const uint kStatSlot2 = 23u;
-const uint kStatShadowSlot0 = 24u;
-const uint kStatShadowSlot1 = 25u;
 
 // Blade triangle lists: LOD0 look.w quads (6 vertices each), LOD1 two quads, LOD2 one triangle.
 const uint kGrassVertsList1 = 12u;

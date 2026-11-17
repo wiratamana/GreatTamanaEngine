@@ -19,14 +19,6 @@ layout(push_constant) uniform GrassShadowPush {
 void main()
 {
     GrassInstance inst = instances.items[pc.instanceBase + uint(gl_InstanceIndex)];
-    // Skip secondary LOD cross-fade copies so each blade casts at most one shadow triangle per cascade.
-    float rootDist = length(inst.root);
-    uint primaryLod = rootDist < params.lodDist.x ? 0u : (rootDist < params.lodDist.y ? 1u : 2u);
-    if (primaryLod != pc.lod) {
-        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-        return;
-    }
-
     uint v = uint(gl_VertexIndex);
     float t = v == 2u ? 1.0 : 0.0;
     float side = v == 0u ? -1.0 : (v == 1u ? 1.0 : 0.0);

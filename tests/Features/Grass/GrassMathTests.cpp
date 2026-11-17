@@ -46,6 +46,7 @@ TEST(GrassMathTest, ParamsBlockLayoutIsPinned)
     EXPECT_EQ(offsetof(GrassShadowPushGpu, minWidth), 72u);
     EXPECT_EQ(offsetof(GrassShadowPushGpu, biasM), 76u);
     EXPECT_EQ(sizeof(GrassStatsGpu), 128u);
+    EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::Count), 24u);
     EXPECT_EQ(sizeof(GrassDrawCommand), 16u);
     EXPECT_EQ(kGrassShadowLodCount, 2u);
     EXPECT_EQ(kGrassCommandCount, 6u);
@@ -349,7 +350,7 @@ TEST(GrassMathTest, GeometryWindAndLodFadeSettingsClampAndPackIntoParams)
     EXPECT_FLOAT_EQ(p.lodFar[2], 1.25f);
     EXPECT_FLOAT_EQ(p.lodFar[3], 0.0f);
 
-    // Narrow LOD spans clamp the GPU fade band so adjacent cross-fade bands never overlap.
+    // Narrow LOD spans clamp the GPU fade band so adjacent LOD transition bands never overlap.
     GrassSettings narrow = custom;
     narrow.lod0Distance = 10.0f;
     narrow.lod1Distance = 14.0f;

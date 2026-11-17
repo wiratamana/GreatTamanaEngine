@@ -121,10 +121,8 @@ float GrassSunVisibility(vec3 world, vec3 normal, float rnd)
 shared float sMin[64];
 shared float sMax[64];
 shared float sLand[64];
-shared uint sPrimary[3];
-shared uint sSecondary[3];
+shared uint sCount[3];
 shared uint sBase[3];
-shared uint sFadeBase[3];
 
 // Per-chunk values, set before the blade loop.
 vec2 gChunkLoGrid;   // Grid-relative xz of the chunk corner.
@@ -291,10 +289,9 @@ bool BoxOutsideFrustum(vec3 boxMin, vec3 boxMax)
 
 // Places candidate `idx` of the current chunk and filters it. Returns a kReject* code (0 = accepted).
 // Lower densities are index prefixes of higher ones, so a blade only disappears at a density step.
-uint EvalBlade(uint idx, out uint lod, out uint fadeLod, out GrassInstance result)
+uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
 {
     lod = 3u;
-    fadeLod = 3u;
     result = GrassInstance(vec3(0.0), 0u, 0u, 0u, 0u, 0u);
     uint hb = GrassHash2(gSeed, idx);
 
@@ -370,21 +367,16 @@ uint EvalBlade(uint idx, out uint lod, out uint fadeLod, out GrassInstance resul
         }
     }
 
-    // Assign primary LOD and optional adjacent cross-fade LOD from the final shifted root distance.
+    // Stochastic per-blade LOD selection across lodFadeBand around lod0Distance and lod1Distance.
     float rootDist = length(eye);
     lod = rootDist < params.lodDist.x ? 0u : (rootDist < params.lodDist.y ? 1u : 2u);
     float halfBand = 0.5 * params.lodFar.x;
-    if (halfBand > 0.0) {
-        if (lod == 0u && rootDist >= params.lodDist.x - halfBand) {
-            fadeLod = 1u;
-        } else if (lod == 1u) {
-            if (rootDist < params.lodDist.x + halfBand) {
-                fadeLod = 0u;
-            } else if (rootDist >= params.lodDist.y - halfBand) {
-                fadeLod = 2u;
-            }
-        } else if (lod == 2u && rootDist < params.lodDist.y + halfBand) {
-            fadeLod = 1u;
+    if (halfBand > 1e-4) {
+        float lodRnd = GrassUnit(GrassHash2(hb, 8u));
+        if (abs(rootDist - params.lodDist.x) < halfBand) {
+            lod = lodRnd < smoothstep(params.lodDist.x - halfBand, params.lodDist.x + halfBand, rootDist) ? 1u : 0u;
+        } else if (abs(rootDist - params.lodDist.y) < halfBand) {
+            lod = lodRnd < smoothstep(params.lodDist.y - halfBand, params.lodDist.y + halfBand, rootDist) ? 2u : 1u;
         }
     }
 
@@ -611,46 +603,35 @@ void main()
     // 256 candidates per round (4 per thread); one slot reservation per LOD per round.
     for (uint base = slice * 256u; base < candidates; base += 256u * slices) {
         if (lid < 3u) {
-            sPrimary[lid] = 0u;
-            sSecondary[lid] = 0u;
+            sCount[lid] = 0u;
         }
         barrier();
 
         uint lodOf[4];
-        uint fadeLodOf[4];
         uint localSlot[4];
-        uint fadeSlot[4];
         GrassInstance made[4];
         for (uint j = 0u; j < 4u; ++j) {
             lodOf[j] = 3u;
-            fadeLodOf[j] = 3u;
             localSlot[j] = 0u;
-            fadeSlot[j] = 0u;
             made[j] = GrassInstance(vec3(0.0), 0u, 0u, 0u, 0u, 0u);
             uint idx = base + lid + 64u * j;
             if (idx < candidates) {
                 uint lod;
-                uint fadeLod;
                 GrassInstance blade;
-                uint why = EvalBlade(idx, lod, fadeLod, blade);
+                uint why = EvalBlade(idx, lod, blade);
                 rejected[why] += 1u;
                 if (why == kRejectNone) {
                     lodOf[j] = lod;
-                    fadeLodOf[j] = fadeLod;
                     made[j] = blade;
-                    localSlot[j] = atomicAdd(sPrimary[lod], 1u);
+                    localSlot[j] = atomicAdd(sCount[lod], 1u);
                     accepted[lod] += 1u;
-                    if (fadeLod < 3u) {
-                        fadeSlot[j] = atomicAdd(sSecondary[fadeLod], 1u);
-                    }
                 }
             }
         }
         barrier();
 
         if (lid < 3u) {
-            uint prim = sPrimary[lid];
-            uint wanted = prim + sSecondary[lid];
+            uint wanted = sCount[lid];
             uint slot = 0u;
             if (wanted > 0u) {
                 slot = atomicAdd(stats.words[kStatSlot0 + lid], wanted);
@@ -660,7 +641,6 @@ void main()
                     atomicAdd(commands.values[lid * 4u + 1u], granted);
                     if (lid < 2u) {
                         atomicAdd(commands.values[(lid + kGrassLodCount) * 4u + 1u], granted);
-                        atomicAdd(stats.words[kStatShadowSlot0 + lid], min(prim, granted));
                     }
                 }
                 if (granted < wanted) {
@@ -668,7 +648,6 @@ void main()
                 }
             }
             sBase[lid] = slot;
-            sFadeBase[lid] = slot + prim;
         }
         barrier();
 
@@ -678,13 +657,6 @@ void main()
                 uint slot = sBase[lod] + localSlot[j];
                 if (slot < params.instanceCap[lod]) {
                     instances.items[params.instanceBase[lod] + slot] = made[j];
-                }
-                uint fadeLod = fadeLodOf[j];
-                if (fadeLod < 3u) {
-                    uint fSlot = sFadeBase[fadeLod] + fadeSlot[j];
-                    if (fSlot < params.instanceCap[fadeLod]) {
-                        instances.items[params.instanceBase[fadeLod] + fSlot] = made[j];
-                    }
                 }
             }
         }

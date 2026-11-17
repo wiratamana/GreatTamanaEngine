@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <span>
@@ -193,11 +194,33 @@ TEST(GrassShaderNamesTest, ShaderTextCarriesTheSharedConstants)
     EXPECT_EQ(GrassVertexCount(1, 5), 12u);
     EXPECT_EQ(GrassVertexCount(2, 5), 3u);
     EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::Slot0), 21u);
+    EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::Slot2), 23u);
+    EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::Count), 24u);
     EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::Dropped0), 18u);
-    EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::ShadowSlot0), 24u);
-    EXPECT_EQ(static_cast<std::uint32_t>(GrassStatsWord::ShadowSlot1), 25u);
-    EXPECT_NE(text.find("const uint kStatShadowSlot0 = 24u;"), std::string::npos);
-    EXPECT_NE(text.find("const uint kStatShadowSlot1 = 25u;"), std::string::npos);
+    EXPECT_EQ(text.find("kStatShadowSlot"), std::string::npos);
+
+    const std::filesystem::path shaderDir = std::filesystem::path(GTE_TEST_GRASS_COMMON_GLSL_PATH).parent_path();
+    const std::string fragText = ReadText((shaderDir / "Grass.frag").string().c_str());
+    EXPECT_EQ(fragText.find("discard"), std::string::npos);
+    EXPECT_EQ(fragText.find("InterleavedGradientNoise"), std::string::npos);
+    EXPECT_EQ(fragText.find("GrassScreenDither"), std::string::npos);
+    EXPECT_EQ(fragText.find("inSunVisDist"), std::string::npos);
+    EXPECT_NE(fragText.find("flat in float inSunVis;"), std::string::npos);
+
+    const std::string vertText = ReadText((shaderDir / "Grass.vert").string().c_str());
+    EXPECT_EQ(vertText.find("outSunVisDist"), std::string::npos);
+    EXPECT_NE(vertText.find("flat out float outSunVis;"), std::string::npos);
+    EXPECT_NE(vertText.find("float dRoot = length(inst.root);"), std::string::npos);
+
+    const std::string cullText = ReadText((shaderDir / "GrassCull.comp").string().c_str());
+    EXPECT_EQ(cullText.find("sPrimary"), std::string::npos);
+    EXPECT_EQ(cullText.find("sSecondary"), std::string::npos);
+    EXPECT_EQ(cullText.find("sFadeBase"), std::string::npos);
+    EXPECT_EQ(cullText.find("fadeLod"), std::string::npos);
+    EXPECT_NE(cullText.find("params.lodFar.x"), std::string::npos);
+
+    const std::string shadowVertText = ReadText((shaderDir / "GrassShadow.vert").string().c_str());
+    EXPECT_EQ(shadowVertText.find("primaryLod"), std::string::npos);
 
     const std::string bladeText = ReadText(GTE_TEST_GRASS_BLADE_GLSL_PATH);
     EXPECT_NE(bladeText.find("float GrassBladeWidth("), std::string::npos);

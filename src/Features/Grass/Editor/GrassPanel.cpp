@@ -144,7 +144,7 @@ bool BuildGrassPanel(GrassSettings& edit, const GrassViewSnapshot& game, const G
         changed |= ImGui::SliderFloat("LOD2 / cull (m)", &edit.lod2Distance, 20.0f, 360.0f);
         changed |= ImGui::SliderFloat("Far edge thinning", &edit.edgeFade, 0.02f, 1.0f);
         changed |= ImGui::SliderFloat("Far edge shrink", &edit.farHeightFade, 0.0f, 0.6f);
-        changed |= ImGui::SliderFloat("LOD cross-fade band (m)", &edit.lodFadeBand, 0.0f, 20.0f, "%.1f");
+        changed |= ImGui::SliderFloat("LOD fade band (m)", &edit.lodFadeBand, 0.0f, 20.0f, "%.1f");
     }
     if (ImGui::CollapsingHeader("Wind")) {
         changed |= ImGui::Checkbox("Follow the cloud wind", &edit.followCloudWind);

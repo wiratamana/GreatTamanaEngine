@@ -329,8 +329,8 @@ void GrassFeature::PreparePass(fx::PreOpaqueFrame& f)
     }
 
     const std::uint32_t drawnLod[kGrassShadowLodCount] = {
-        snap.statsValid ? std::min(snap.stats.Get(GrassStatsWord::ShadowSlot0), cfg.instanceCapLod0) : 0u,
-        snap.statsValid ? std::min(snap.stats.Get(GrassStatsWord::ShadowSlot1), cfg.instanceCapLod1) : 0u,
+        snap.statsValid ? std::min(snap.stats.Get(GrassStatsWord::Slot0), cfg.instanceCapLod0) : 0u,
+        snap.statsValid ? std::min(snap.stats.Get(GrassStatsWord::Slot1), cfg.instanceCapLod1) : 0u,
     };
     std::uint32_t castCascades = 0;
     std::uint64_t castBlades = 0;

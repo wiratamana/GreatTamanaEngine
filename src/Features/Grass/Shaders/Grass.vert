@@ -15,13 +15,13 @@ layout(push_constant) uniform GrassPush {
     uint reserved1;
 } pc;
 
-layout(location = 0) out vec3 outNormal;          // Eye-relative world axes, not yet facing the viewer.
-layout(location = 1) out vec4 outInfo;            // x = t root..tip, y = per-blade random, z = sin(tip angle), w = side -1..1.
-layout(location = 2) out vec3 outPosRel;          // Eye-relative position.
-layout(location = 3) flat out vec4 outGround;     // rgb = terrain colour, a = ground normal . sun.
-layout(location = 4) flat out vec2 outSunVisDist; // x = per-blade sun visibility, y = eye-relative root distance (m).
-layout(location = 5) out vec3 outTangent;         // Blade spine tangent for anisotropic Kajiya-Kay sheen.
-layout(location = 6) flat out uint outPatch;      // Low nibble of colorRnd: 0..12 meadow/tuft tint, 13..15 blade kind.
+layout(location = 0) out vec3 outNormal;       // Eye-relative world axes, not yet facing the viewer.
+layout(location = 1) out vec4 outInfo;         // x = t root..tip, y = per-blade random, z = sin(tip angle), w = side -1..1.
+layout(location = 2) out vec3 outPosRel;       // Eye-relative position.
+layout(location = 3) flat out vec4 outGround;  // rgb = terrain colour, a = ground normal . sun.
+layout(location = 4) flat out float outSunVis; // Per-blade sun visibility (cascades and cloud shadow).
+layout(location = 5) out vec3 outTangent;      // Blade spine tangent for anisotropic Kajiya-Kay sheen.
+layout(location = 6) flat out uint outPatch;   // Low nibble of colorRnd: 0..12 meadow/tuft tint, 13..15 blade kind.
 
 void main()
 {
@@ -78,7 +78,7 @@ void main()
     outInfo = vec4(t, rnd, ground.z, side);
     outPosRel = position;
     outGround = vec4(terrainColor, dot(groundNormal, normalize(params.sunDir.xyz)));
-    outSunVisDist = vec2(ground.w, dRoot);
+    outSunVis = ground.w;
     outTangent = tangent;
     outPatch = patchNibble;
     gl_Position = params.drawViewProjection * vec4(position, 1.0);

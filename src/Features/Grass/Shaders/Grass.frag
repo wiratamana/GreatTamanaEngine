@@ -1,9 +1,8 @@
 #version 450
 
-// Opaque blade shading: LOD dither cross-fade, species palette, two-sided transmission, sheen and far luminance match.
+// Opaque blade shading: species palette, two-sided transmission, sheen, distance flatten and far luminance match.
 // Linear HDR radiance with the same energy scale as DirectionalLighting.glsl (kDirectScale 0.65).
 #include "GrassCommon.glsl"
-#include "InterleavedGradientNoise.glsl"
 
 // NOTE: must match GrassPushGpu in GrassTypes.h and GrassPush in Grass.vert (16 bytes).
 layout(push_constant) uniform GrassPush {
@@ -16,8 +15,8 @@ layout(push_constant) uniform GrassPush {
 layout(location = 0) in vec3 inNormal;
 layout(location = 1) in vec4 inInfo;
 layout(location = 2) in vec3 inPosRel;
-layout(location = 3) flat in vec4 inGround;     // rgb = terrain colour, a = ground normal . sun.
-layout(location = 4) flat in vec2 inSunVisDist; // x = per-blade sun visibility, y = eye-relative root distance (m).
+layout(location = 3) flat in vec4 inGround;  // rgb = terrain colour, a = ground normal . sun.
+layout(location = 4) flat in float inSunVis; // Per-blade sun visibility (cascades and cloud shadow).
 layout(location = 5) in vec3 inTangent;
 layout(location = 6) flat in uint inPatch;
 
@@ -25,48 +24,8 @@ layout(location = 0) out vec4 outColor;
 
 const float kDirectScale = 0.65; // Same sun energy scale as the lit material shaders.
 
-// Ordered 4x4 Bayer threshold jittered by screen-space interleaved gradient noise in (0, 1).
-float GrassScreenDither(vec2 fragCoord)
-{
-    uvec2 p = uvec2(fragCoord) & 3u;
-    uint b0 = ((p.x & 1u) << 1u) | (p.y & 1u);
-    uint b1 = ((p.x >> 1u) << 1u) | (p.y >> 1u);
-    const uint kBayer2[4] = uint[4](0u, 2u, 3u, 1u);
-    uint bayer = (kBayer2[b0] << 2u) | kBayer2[b1];
-    float ign = InterleavedGradientNoise(floor(fragCoord));
-    return (float(bayer) + clamp(ign, 0.001, 0.999)) * (1.0 / 16.0);
-}
-
 void main()
 {
-    // Complementary dither discard across the LOD0/LOD1 and LOD1/LOD2 cross-fade bands.
-    float fadeBand = params.lodFar.x;
-    if (fadeBand > 1e-4) {
-        float halfBand = 0.5 * fadeBand;
-        float rootDist = inSunVisDist.y;
-        float d0 = params.lodDist.x;
-        float d1 = params.lodDist.y;
-        if (pc.lod == 0u && rootDist > d0 - halfBand) {
-            if (GrassScreenDither(gl_FragCoord.xy) < smoothstep(d0 - halfBand, d0 + halfBand, rootDist)) {
-                discard;
-            }
-        } else if (pc.lod == 1u) {
-            if (rootDist < d0 + halfBand) {
-                if (GrassScreenDither(gl_FragCoord.xy) >= smoothstep(d0 - halfBand, d0 + halfBand, rootDist)) {
-                    discard;
-                }
-            } else if (rootDist > d1 - halfBand) {
-                if (GrassScreenDither(gl_FragCoord.xy) < smoothstep(d1 - halfBand, d1 + halfBand, rootDist)) {
-                    discard;
-                }
-            }
-        } else if (pc.lod == 2u && rootDist < d1 + halfBand) {
-            if (GrassScreenDither(gl_FragCoord.xy) >= smoothstep(d1 - halfBand, d1 + halfBand, rootDist)) {
-                discard;
-            }
-        }
-    }
-
     vec3 viewDir = normalize(-inPosRel);
     // Two-sided: turn the normal toward the viewer (does not depend on the viewport winding).
     vec3 normal = normalize(inNormal);
@@ -77,7 +36,6 @@ void main()
 
     float t = inInfo.x;
     float rnd = inInfo.y;
-    float inSunVis = inSunVisDist.x;
     float distanceM = length(inPosRel);
     float lookModern = params.variety2.y;
     float flattenStart = params.lodFar.y;

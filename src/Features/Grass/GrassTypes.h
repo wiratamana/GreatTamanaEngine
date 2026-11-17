@@ -68,8 +68,6 @@ enum class GrassStatsWord : std::uint32_t {
     Slot0,
     Slot1,
     Slot2,
-    ShadowSlot0,
-    ShadowSlot1,
     Count,
 };
 static_assert(static_cast<std::uint32_t>(GrassStatsWord::Count) <= kGrassStatsWords);
@@ -165,7 +163,7 @@ struct GrassParamsGpu {
     float variety[4];             // 656  x = clump strength, y = min patch density, z = weed share, w = dry share.
     float variety2[4];            // 672  x = flower share, y = modern shading blend, z = jitter strength, w = patch tint.
     float shapeWind[4];           // 688  x = min pixel width, y = blade shape blend, z = wind detail, w = wind shade.
-    float lodFar[4];              // 704  x = LOD cross-fade band (m), y = far flatten start (m), z = far luminance, w = min blade width per metre of distance (draw pass).
+    float lodFar[4];              // 704  x = stochastic LOD transition band (m), y = far flatten start (m), z = far luminance, w = min blade width per metre of distance (draw pass).
 };
 static_assert(sizeof(GrassParamsGpu) == 720);
 static_assert(std::is_trivially_copyable_v<GrassParamsGpu>);
@@ -287,7 +285,7 @@ struct GrassSettings {
     float edgeFade = 0.2f;       // Share of the last LOD where blades thin out.
     float densityBlend = 0.5f;   // Share of a LOD range over which the density falls (0.05 = nearly a step).
     float farHeightFade = 0.15f; // Share of lod2Distance over which blades shrink to nothing.
-    float lodFadeBand = 6.0f;    // Dithered cross-fade band width around lod0Distance and lod1Distance in metres (0 = off).
+    float lodFadeBand = 6.0f;    // Stochastic LOD transition band width around lod0Distance and lod1Distance in metres (0 = hard switch).
 
     float windBend = 1.0f;
     float flutterSpeed = 9.0f;   // rad/s.

@@ -42,7 +42,7 @@ Per chunk (16 m, a grid of `gridCells` x `gridCells` around the camera). A dense
    - Slope: dropped over `maxSlopeDeg` (angle of the tile gradient).
    - Density multiplier from meadow noise (floored by `minPatchDensity`, with shorter grass in poor soil instead of bare ground), slope fade, waterline fade and far edge fade. A stable per-blade hash decides.
    - Blade species (`flowerShare`, `weedShare`, `dryShare`): broadleaf rosette weeds widen and bend lower, dry blades shorten and droop more, and wildflowers stand slightly taller.
-   - The LOD of the mesh is still chosen by distance (`lod0Distance`, `lod1Distance`), but the blade count no longer jumps there.
+   - Inside `lodFadeBand` (default 6 m) around `lod0Distance` and `lod1Distance`, each blade stochastically picks the near or far mesh LOD with `smoothstep` probability using a stable per-blade hash (`0` = hard switch), while the blade count falls smoothly with distance.
    - The survivor does all wind and shadow work here (wave, gust, bend direction, tip angle, flutter, cascade + cloud sun visibility) and writes a packed 32 byte instance: root, height and width (half), yaw and bend direction (snorm8), ground normal, sin of the tip angle and sun visibility (unorm8), flutter (half), terrain colour (rgb 8 bit), a 4-bit blade random (`bits 4..7`) and a 4-bit patch/species nibble (`bits 0..3`: `0..12` meadow/tuft tint, `13` flower, `14` dry, `15` weed). `Grass.vert` then needs no trig except one sqrt.
    - Survivors take a slot per LOD with one atomic per round. A full region drops the rest (`dropped0..2`). The draw never reads past its region.
 
@@ -58,10 +58,10 @@ All shader numbers are relative to the grid corner or the eye (computed in doubl
 - Normal: across the twisted blade, mixed with the ground normal of the tile (`groundNormalBlend`), and converging further toward the ground normal over 12..70 m (`lookModern`) for soft field shading. Spine tangent is forwarded to `Grass.frag` for anisotropic sheen.
 - Tip flutter: two fast sines, amplitude grows with `t^2`.
 - The fragment shader flips the normal toward the viewer (two-sided without relying on winding).
-- Shadow caster (`GrassShadow.vert`): 3 vertices per blade (`v = 0` root-left, `v = 1` root-right, `v = 2` curved tip), sharing `GrassBladeWidth` and `GrassBladePosition`, base width clamped to at least `shadowWidthScale * texelWorld[c]`, shifted along `sunDir` by `shadowBiasTexels * texelWorld[c]`, and projected by `cascadeVpRel = cascadeVP * Translation(eye)` computed in `double` on the CPU. Secondary LOD cross-fade copies early-exit before rasterization so shadow cascades never double-count blades.
+- Shadow caster (`GrassShadow.vert`): 3 vertices per blade (`v = 0` root-left, `v = 1` root-right, `v = 2` curved tip), sharing `GrassBladeWidth` and `GrassBladePosition`, base width clamped to at least `shadowWidthScale * texelWorld[c]`, shifted along `sunDir` by `shadowBiasTexels * texelWorld[c]`, and projected by `cascadeVpRel = cascadeVP * Translation(eye)` computed in `double` on the CPU.
 ## Lighting (`Grass.frag`)
 Linear HDR, same energy scale as the lit materials (`kDirectScale` 0.65).
-Blades inside `lodFadeBand` (default 6 m) around `lod0Distance` and `lod1Distance` are written to both adjacent LOD regions in `Grass.Cull` and early-discarded in `Grass.frag` with complementary 4x4 Bayer + interleaved-gradient screen-space dither so mesh LOD transitions do not pop while depth writes stay consistent.
+Pure opaque shading (no fragment `discard`, keeping early-Z intact); LOD transitions are chosen stochastically per blade in `Grass.Cull`.
 With `lookModern=1` (default; `0` restores the legacy shading model for A/B comparison), blades use distance-flattened root-to-tip gradient and root AO (`farFlatten`..140 m, default 25 m), mild midrib darkening, wrap front diffuse, two-sided yellow-green leaf transmission (`back` underside + forward sun glow), Kajiya-Kay-like tangent sheen, sky Fresnel rim and a subtle wind brightness wave (`windShade`, default 0.25) where gusts flatten the grass. Beyond ~100 m (75..125 m ramp), lit grass colour is scaled by `farLuminance` (default 1.15) to match the distant terrain luminance.
 Albedo: de-neoned linear root-to-tip palette (`colorRoot` / `colorTip`), shifted across meadows and tufts toward olive (`patchTint`), with cooler broadleaf weeds, straw-coloured dry blades and a 4-colour LOD0 wildflower table (white, yellow, violet, pink), then pulled toward the **terrain colour** of the ground under the blade (`terrainTint`, strongest at the root). Far blades converge to the terrain colour (`farTerrainBlend`, from 0.2 to 0.9 of `lod2Distance`), so the field melts into the ground. The sun term fades on ground that faces away from the sun (`selfShadow`, ground normal dot sun).
 Sun and its tint come from `ResolveActiveDirectionalLight` and the Atmosphere sun light record. Ambient uses the SceneLighting defaults times the Atmosphere ambient scale.
@@ -131,7 +131,7 @@ Sanitized on write (`SanitizeGrassSettings`). NaN and infinity become the defaul
 | `alpineHeight` / `alpineFade` | 450 / 150 | -1000..100000 / 0..5000 | World Y where grass starts to thin out (rock, snow) and the band to zero |
 | `lod0Distance` / `lod1Distance` / `lod2Distance` | 40 / 120 / 300 | ordered, lod2 up to 360 | LOD ends. Over `lod2Distance` nothing is drawn |
 | `edgeFade` / `farHeightFade` | 0.2 / 0.15 | 0.01..1 / 0..0.6 | Share of the last LOD where blades thin out, and where they shrink to nothing |
-| `lodFadeBand` | 6 | 0..30 | Dithered cross-fade band width around `lod0Distance` and `lod1Distance` in metres (`0` = hard switch) |
+| `lodFadeBand` | 6 | 0..30 | Stochastic per-blade LOD transition band width around `lod0Distance` and `lod1Distance` in metres (`0` = hard switch) |
 | `windBend` / `gustStrength` | 1 / 0.5 | 0..4 / 0..3 | Wind push and gust |
 | `flutterSpeed` / `flutterStrength` | 9 / 1 | 0..60 rad/s / 0..4 | Tip flutter |
 | `windWaveLengthM` / `windGustLengthM` | 28 / 14 | 2..400 | Pattern sizes |
@@ -191,7 +191,7 @@ Name for `/feature_debug`: `Grass`. Every setting above is writable: `/feature_d
 |---|---|
 | `status` | `NotRendered`, `Ok`, `Disabled`, `NoValidCamera`, `NoTile`, `ShadersNotReady`, `TargetFailed`, `PassDisabled` |
 | `hizUsed`, `windShared`, `shadow.cascades`, `shadow.cloud`, `shadow.castCascades`, `shadow.castBlades`, `gridCells`, `instanceBytes`, `tileRevision` | What this frame used |
-| `stats.*` | Counters from the GPU, two frames old: `chunksInGrid`, `chunksCulledDistance / NoData / Water / Frustum / Hiz`, `chunksLod0..2`, `candidates`, `accepted0..2`, `rejectNoData / LodStep / Water / Slope / Noise`, `dropped0..2`, `slot0..2`, `shadowSlot0..1`, `requested0..2` |
+| `stats.*` | Counters from the GPU, two frames old: `chunksInGrid`, `chunksCulledDistance / NoData / Water / Frustum / Hiz`, `chunksLod0..2`, `candidates`, `accepted0..2`, `rejectNoData / LodStep / Water / Slope / Noise`, `dropped0..2`, `slot0..2`, `requested0..2` |
 
 Also `tile.*` (size, origin, sea level, revision), `source.*` (tile provider), `game.wind.*` (direction, speed and pattern offset the blades used), `synthetic.enabled`, `eye`.
 Short routes: `GET /grass/tile`, `GET /grass/probe?x=&z=`, `GET /grass/probe_batch?n=&radius=&seed=`.
@@ -260,7 +260,7 @@ Cull and draw (GPU ms, `ground`): Lean 0.54 / 0.65, Medium 0.75 / 1.73, Big 1.38
 ## Limits
 - Sun cascade and cloud shadows are evaluated once per blade root in `Grass.Cull` (8-bit visibility per blade, not per fragment along the blade). Because `Grass.Cull` reads the cascades before `Grass.Shadow.*` writes into them, grass casts contact shadows onto the terrain without self-shadowing through the cascade map.
 - While `Grass.Cull` runs in `PreOpaque`, scene depth does not exist yet, so `hizCulling` is off by default and ignored if set.
-- Adjacent mesh LODs cross-fade over `lodFadeBand` (default 6 m) around `lod0Distance` and `lod1Distance` via complementary Bayer + interleaved-gradient screen-space dither (`0` restores the hard switch).
+- Adjacent mesh LODs transition stochastically per blade over `lodFadeBand` (default 6 m) around `lod0Distance` and `lod1Distance` in `Grass.Cull` using a stable per-blade hash (`0` restores the hard switch), emitting each blade once with no fragment `discard`.
 - Sub-pixel shimmer on distant LOD1 and LOD2 blades is suppressed by clamping blade width to `minPixelWidth` (default 1.1 px); single-triangle LOD2 blades still benefit from TAA.
 - The terrain camera near plane shrinks with the height above ground (0.1 x the height, between 0.15 m and 3 m, `TerrainWorld::AdaptCameraNear`), so you can stand 1.7 m above the grass. The far plane is still 5 to 13.5 km: depth precision at very long range is lower at ground level (not seen as artefacts in the test views). The free camera still keeps 3 m of clearance; use `/terrain/flight` with `minAlt` or `/terrain/cam?mode=script&alt=1.7`.
 - Grass takes the terrain colour from the node vertex colours. Biome limits are still settings: `sandHeight` (7 m, like the terrain `sandMaxHeight`), `alpineHeight` / `alpineFade` (450 m and 150 m, below the terrain snow line at 0.55 x heightScale), `maxSlopeDeg` (50, terrain grass slope is 32 to 42).
