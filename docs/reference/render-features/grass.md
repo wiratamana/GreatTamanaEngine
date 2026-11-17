@@ -121,7 +121,7 @@ Sanitized on write (`SanitizeGrassSettings`). NaN and infinity become the defaul
 | `heightVariation` / `lean` / `maxBend` | 0.35 / 0.25 / 1.2 | 0..0.9 / 0..1.2 / 0.1..1.5 | Variation, rest lean (rad), largest tip angle (rad) |
 | `widthCompensation` / `maxWidthScale` | 0.45 / 5 | 0..1 / 1..16 | Thinned blades widen by (full density / density) to this power, at most this much |
 | `lod0Segments` | 4 | 3..6 | Quads of a near blade |
-| `maxSlopeDeg` / `slopeFadeDeg` | 40 / 8 | 1..89 / 0..45 | No grass on steeper ground, thinning before it |
+| `maxSlopeDeg` / `slopeFadeDeg` | 50 / 12 | 1..89 / 0..45 | No grass on steeper ground, thinning before it |
 | `waterMargin` / `waterFadeBand` | 0.6 / 1.5 | -2..20 / 0..20 | Metres above the water where grass starts, and its fade |
 | `sandHeight` | 7 | 0..200 | Metres above the ocean that stay bare (beach), fades in over 3 m. Matches the terrain `sandMaxHeight` |
 | `alpineHeight` / `alpineFade` | 450 / 150 | -1000..100000 / 0..5000 | World Y where grass starts to thin out (rock, snow) and the band to zero |
@@ -134,7 +134,7 @@ Sanitized on write (`SanitizeGrassSettings`). NaN and infinity become the defaul
 | `windSpeedFallback` / `windDirectionDegFallback` | 4 / 45 | 0..100 / any | Own wind (0 deg = +X, 90 = +Z) |
 | `translucency` / `rootAo` / `tintVariation` / `sunVisibility` | 0.6 / 0.35 / 0.5 / 1 | | Look |
 | `receiveSunShadow` / `receiveCloudShadow` | true / true | bool | Sample sun cascades (`Shadow.Receiver`) and cloud shadow (`VolumetricCloud.ShadowMap`) in `Grass.Cull` |
-| `shadowStrength` / `cloudFill` | 1 / 0.35 | 0..1 / 0..1 | Shadow darkening strength and diffuse sky fill added to shadowed blades |
+| `shadowStrength` / `cloudFill` | 1 / 0.6 | 0..1 / 0..1 | Shadow darkening strength and diffuse sky fill added to shadowed blades |
 | `castShadows` | true | bool | Draw depth-only L0 and L1 shadow blades into eligible sun cascades in `Grass.Prepare` |
 | `shadowMaxTexelM` | 0.40 | 0.01..4 | Skip cascades whose `texelWorld` exceeds this size (m) |
 | `shadowBiasTexels` | 1.0 | -4..8 | Caster shift along the sun direction in cascade texels |
@@ -255,7 +255,7 @@ Cull and draw (GPU ms, `ground`): Lean 0.54 / 0.65, Medium 0.75 / 1.73, Big 1.38
 - The mesh LOD still switches at `lod0Distance` / `lod1Distance` (5 or 4 segments to 2 to 1 triangle). The blade count no longer jumps there, the blade shape does.
 - LOD2 blades are single flat triangles. They shimmer without TAA.
 - The terrain camera near plane shrinks with the height above ground (0.1 x the height, between 0.15 m and 3 m, `TerrainWorld::AdaptCameraNear`), so you can stand 1.7 m above the grass. The far plane is still 5 to 13.5 km: depth precision at very long range is lower at ground level (not seen as artefacts in the test views). The free camera still keeps 3 m of clearance; use `/terrain/flight` with `minAlt` or `/terrain/cam?mode=script&alt=1.7`.
-- Grass takes the terrain colour from the node vertex colours. Biome limits are still settings: `sandHeight` (7 m, like the terrain `sandMaxHeight`), `alpineHeight` / `alpineFade` (450 m and 150 m, below the terrain snow line at 0.55 x heightScale), `maxSlopeDeg` (40, terrain grass slope is 32 to 42).
+- Grass takes the terrain colour from the node vertex colours. Biome limits are still settings: `sandHeight` (7 m, like the terrain `sandMaxHeight`), `alpineHeight` / `alpineFade` (450 m and 150 m, below the terrain snow line at 0.55 x heightScale), `maxSlopeDeg` (50, terrain grass slope is 32 to 42).
 - The pipelined frame mode (`PipelinedDeferredReadback`) refuses every CPU parameter upload, so no feature with `GpuParams` draws in it. Grass is the same.
 - `GrassCull.comp` returns early for a whole group before its barriers. All 64 threads of a group take the same path. Keep it so.
 - Validation: core and synchronization validation ran clean for Grass (see [Troubleshooting](../../troubleshooting.md), "Vulkan validation messages"). Not verified: the Frame Debugger replay of the indirect draws, one event at a time.

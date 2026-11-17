@@ -264,8 +264,8 @@ struct GrassSettings {
     float maxWidthScale = 5.0f;      // Largest widening.
     std::uint32_t lod0Segments = 4;  // Quads along a near blade (3..6); 6 list vertices each.
 
-    float maxSlopeDeg = 40.0f;
-    float slopeFadeDeg = 8.0f;
+    float maxSlopeDeg = 50.0f;
+    float slopeFadeDeg = 12.0f;
     float waterMargin = 0.6f;    // Metres above the water level where grass starts.
     float waterFadeBand = 1.5f;
     float sandHeight = 7.0f;     // Metres above the ocean that stay bare (beach sand); fades out over 3 m.
@@ -319,7 +319,7 @@ struct GrassSettings {
     bool receiveSunShadow = true;
     bool receiveCloudShadow = true;
     float shadowStrength = 1.0f;    // Fraction of cascade and cloud shadow applied to the blade sun term.
-    float cloudFill = 0.35f;        // Diffuse sky fill added to shadowed blades so they are not black.
+    float cloudFill = 0.6f;         // Diffuse sky fill added to shadowed blades so they are not black.
     bool castShadows = true;
     float shadowMaxTexelM = 0.40f;  // Skip cascades coarser than this texel size (m).
     float shadowBiasTexels = 1.0f;  // Shift shadow blades toward the sun (texels).

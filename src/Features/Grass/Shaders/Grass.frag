@@ -39,7 +39,7 @@ void main()
     float distanceM = length(inPosRel);
     float lookModern = params.variety2.y;
     float far = smoothstep(25.0, 140.0, distanceM) * lookModern;
-    float tEff = mix(t, 0.55, far);
+    float tEff = mix(t, 0.7, far);
 
     bool isFlower = (inPatch == kGrassKindFlower);
     bool isDry = (inPatch == kGrassKindDry);
@@ -136,24 +136,25 @@ void main()
 
     // Modern shading: distance-flattened AO, two-sided leaf transmission, Kajiya-Kay sheen, sky Fresnel and wind brightness wave.
     float aoNear = mix(params.colorRoot.w, 1.0, pow(max(smoothstep(0.0, 0.5, t), 1e-4), 0.8));
-    float ao = mix(aoNear, 0.78, far);
+    float ao = mix(aoNear, 0.92, far);
     float back = clamp(-nl, 0.0, 1.0);
     vec3 transTint = mix(vec3(1.05, 1.15, 0.45), vec3(1.0), flowerMask);
     vec3 leaf = albedo * transTint;
     float vs = pow(clamp(dot(viewDir, -sunDir), 0.0, 1.0), 4.0);
     float thin = mix(0.55, 1.0, t);
-    vec3 trans = leaf * sun * (params.sunDir.w * thin * (0.30 * back + 1.20 * vs) * ao);
+    vec3 trans = leaf * sun * (params.sunDir.w * thin * (0.45 * back + 2.0 * vs) * ao);
 
     vec3 halfSum = sunDir + viewDir;
     float halfLen2 = dot(halfSum, halfSum);
     vec3 H = halfLen2 > 1e-6 ? halfSum * inversesqrt(halfLen2) : vec3(0.0, 1.0, 0.0);
     float th = clamp(dot(tangent, H), -1.0, 1.0);
     float sinTH = sqrt(max(1.0 - th * th, 0.0));
-    float spec = (halfLen2 > 1e-4 ? pow(sinTH, 48.0) : 0.0) * 0.12 * (1.0 - far);
-    float fres = pow(1.0 - clamp(dot(normal, viewDir), 0.0, 1.0), 4.0) * 0.25;
+    // Sheen and rim stay green-tinted and weak so blades never turn grey.
+    float spec = (halfLen2 > 1e-4 ? pow(sinTH, 48.0) : 0.0) * 0.05 * (1.0 - far);
+    float fres = pow(1.0 - clamp(dot(normal, viewDir), 0.0, 1.0), 4.0) * 0.06;
 
     vec3 colorModern = albedo * (ambient * ao + sun * front * sqrt(ao)) + trans
-        + sun * spec + params.skyAmbient.rgb * (fres * ao * (1.0 - far));
+        + sun * spec * vec3(0.9, 1.0, 0.6) + params.skyAmbient.rgb * vec3(0.5, 0.9, 0.35) * (fres * ao * (1.0 - far));
     float windWave = clamp(inInfo.z / 0.9 - 0.4, -0.4, 0.6);
     colorModern *= 1.0 + 0.25 * windWave * (1.0 - far);
 
