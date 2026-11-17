@@ -22,8 +22,10 @@ namespace {
 
 TEST(GrassMathTest, ParamsBlockLayoutIsPinned)
 {
-    EXPECT_EQ(sizeof(GrassParamsGpu), 656u);
+    EXPECT_EQ(sizeof(GrassParamsGpu), 688u);
     EXPECT_EQ(offsetof(GrassParamsGpu, densityLog), 640u);
+    EXPECT_EQ(offsetof(GrassParamsGpu, variety), 656u);
+    EXPECT_EQ(offsetof(GrassParamsGpu, variety2), 672u);
     EXPECT_EQ(offsetof(GrassParamsGpu, look), 608u);
     EXPECT_EQ(offsetof(GrassParamsGpu, extra), 624u);
     EXPECT_EQ(offsetof(GrassParamsGpu, planes), 128u);
@@ -60,6 +62,20 @@ TEST(GrassMathTest, DefaultsSurviveSanitizing)
     EXPECT_FLOAT_EQ(d.shadowBiasTexels, 1.0f);
     EXPECT_FLOAT_EQ(d.shadowWidthScale, 1.5f);
     EXPECT_FLOAT_EQ(d.shadowPadM, 0.0f);
+    EXPECT_FLOAT_EQ(d.colorRoot[0], 0.022f);
+    EXPECT_FLOAT_EQ(d.colorRoot[1], 0.060f);
+    EXPECT_FLOAT_EQ(d.colorRoot[2], 0.009f);
+    EXPECT_FLOAT_EQ(d.colorTip[0], 0.10f);
+    EXPECT_FLOAT_EQ(d.colorTip[1], 0.20f);
+    EXPECT_FLOAT_EQ(d.colorTip[2], 0.035f);
+    EXPECT_FLOAT_EQ(d.jitterStrength, 0.6f);
+    EXPECT_FLOAT_EQ(d.clumpStrength, 0.6f);
+    EXPECT_FLOAT_EQ(d.minPatchDensity, 0.22f);
+    EXPECT_FLOAT_EQ(d.patchTint, 1.0f);
+    EXPECT_FLOAT_EQ(d.weedShare, 0.06f);
+    EXPECT_FLOAT_EQ(d.dryShare, 0.08f);
+    EXPECT_FLOAT_EQ(d.flowerShare, 0.004f);
+    EXPECT_FLOAT_EQ(d.lookModern, 1.0f);
 
     const GrassSettings s = SanitizeGrassSettings(d);
     EXPECT_EQ(s.hizCulling, d.hizCulling);
@@ -77,6 +93,16 @@ TEST(GrassMathTest, DefaultsSurviveSanitizing)
     EXPECT_FLOAT_EQ(s.shadowBiasTexels, d.shadowBiasTexels);
     EXPECT_FLOAT_EQ(s.shadowWidthScale, d.shadowWidthScale);
     EXPECT_FLOAT_EQ(s.shadowPadM, d.shadowPadM);
+    EXPECT_FLOAT_EQ(s.colorRoot[0], d.colorRoot[0]);
+    EXPECT_FLOAT_EQ(s.colorTip[1], d.colorTip[1]);
+    EXPECT_FLOAT_EQ(s.jitterStrength, d.jitterStrength);
+    EXPECT_FLOAT_EQ(s.clumpStrength, d.clumpStrength);
+    EXPECT_FLOAT_EQ(s.minPatchDensity, d.minPatchDensity);
+    EXPECT_FLOAT_EQ(s.patchTint, d.patchTint);
+    EXPECT_FLOAT_EQ(s.weedShare, d.weedShare);
+    EXPECT_FLOAT_EQ(s.dryShare, d.dryShare);
+    EXPECT_FLOAT_EQ(s.flowerShare, d.flowerShare);
+    EXPECT_FLOAT_EQ(s.lookModern, d.lookModern);
     EXPECT_FLOAT_EQ(MakeGrassParams(s, GrassFrameInputs{}).skyAmbient[3], d.cloudFill);
     GrassSettings debug = d;
     debug.debugView = GrassDebugView::SunVis;
@@ -117,6 +143,14 @@ TEST(GrassMathTest, NonFiniteValuesFallBackToDefaults)
     in.shadowBiasTexels = -std::numeric_limits<float>::infinity();
     in.shadowWidthScale = std::numeric_limits<float>::infinity();
     in.shadowPadM = std::numeric_limits<float>::quiet_NaN();
+    in.jitterStrength = std::numeric_limits<float>::quiet_NaN();
+    in.clumpStrength = std::numeric_limits<float>::infinity();
+    in.minPatchDensity = -std::numeric_limits<float>::infinity();
+    in.patchTint = std::numeric_limits<float>::quiet_NaN();
+    in.weedShare = std::numeric_limits<float>::quiet_NaN();
+    in.dryShare = std::numeric_limits<float>::infinity();
+    in.flowerShare = std::numeric_limits<float>::quiet_NaN();
+    in.lookModern = -std::numeric_limits<float>::infinity();
     const GrassSettings d;
     const GrassSettings s = SanitizeGrassSettings(in);
     EXPECT_FLOAT_EQ(s.bladeHeight, d.bladeHeight);
@@ -126,6 +160,14 @@ TEST(GrassMathTest, NonFiniteValuesFallBackToDefaults)
     EXPECT_FLOAT_EQ(s.shadowBiasTexels, d.shadowBiasTexels);
     EXPECT_FLOAT_EQ(s.shadowWidthScale, d.shadowWidthScale);
     EXPECT_FLOAT_EQ(s.shadowPadM, d.shadowPadM);
+    EXPECT_FLOAT_EQ(s.jitterStrength, d.jitterStrength);
+    EXPECT_FLOAT_EQ(s.clumpStrength, d.clumpStrength);
+    EXPECT_FLOAT_EQ(s.minPatchDensity, d.minPatchDensity);
+    EXPECT_FLOAT_EQ(s.patchTint, d.patchTint);
+    EXPECT_FLOAT_EQ(s.weedShare, d.weedShare);
+    EXPECT_FLOAT_EQ(s.dryShare, d.dryShare);
+    EXPECT_FLOAT_EQ(s.flowerShare, d.flowerShare);
+    EXPECT_FLOAT_EQ(s.lookModern, d.lookModern);
 }
 
 TEST(GrassMathTest, ShadowCastSettingsClampToBounds)
@@ -150,6 +192,73 @@ TEST(GrassMathTest, ShadowCastSettingsClampToBounds)
     EXPECT_FLOAT_EQ(s.shadowBiasTexels, 8.0f);
     EXPECT_FLOAT_EQ(s.shadowWidthScale, 8.0f);
     EXPECT_FLOAT_EQ(s.shadowPadM, 32.0f);
+}
+
+TEST(GrassMathTest, RealismVarietySettingsClampAndPackIntoParams)
+{
+    GrassSettings low;
+    low.jitterStrength = -1.0f;
+    low.clumpStrength = -1.0f;
+    low.minPatchDensity = -1.0f;
+    low.patchTint = -1.0f;
+    low.weedShare = -1.0f;
+    low.dryShare = -1.0f;
+    low.flowerShare = -1.0f;
+    low.lookModern = -1.0f;
+    const GrassSettings sLow = SanitizeGrassSettings(low);
+    EXPECT_FLOAT_EQ(sLow.jitterStrength, 0.0f);
+    EXPECT_FLOAT_EQ(sLow.clumpStrength, 0.0f);
+    EXPECT_FLOAT_EQ(sLow.minPatchDensity, 0.0f);
+    EXPECT_FLOAT_EQ(sLow.patchTint, 0.0f);
+    EXPECT_FLOAT_EQ(sLow.weedShare, 0.0f);
+    EXPECT_FLOAT_EQ(sLow.dryShare, 0.0f);
+    EXPECT_FLOAT_EQ(sLow.flowerShare, 0.0f);
+    EXPECT_FLOAT_EQ(sLow.lookModern, 0.0f);
+
+    GrassSettings high;
+    high.jitterStrength = 9.0f;
+    high.clumpStrength = 9.0f;
+    high.minPatchDensity = 9.0f;
+    high.patchTint = 9.0f;
+    high.weedShare = 9.0f;
+    high.dryShare = 9.0f;
+    high.flowerShare = 9.0f;
+    high.lookModern = 9.0f;
+    const GrassSettings sHigh = SanitizeGrassSettings(high);
+    EXPECT_FLOAT_EQ(sHigh.jitterStrength, 1.5f);
+    EXPECT_FLOAT_EQ(sHigh.clumpStrength, 1.0f);
+    EXPECT_FLOAT_EQ(sHigh.minPatchDensity, 1.0f);
+    EXPECT_FLOAT_EQ(sHigh.patchTint, 1.0f);
+    EXPECT_FLOAT_EQ(sHigh.weedShare, 0.5f);
+    EXPECT_FLOAT_EQ(sHigh.dryShare, 0.5f);
+    EXPECT_FLOAT_EQ(sHigh.flowerShare, 0.1f);
+    EXPECT_FLOAT_EQ(sHigh.lookModern, 1.0f);
+
+    GrassSettings custom;
+    custom.clumpStrength = 0.75f;
+    custom.minPatchDensity = 0.30f;
+    custom.weedShare = 0.09f;
+    custom.dryShare = 0.12f;
+    custom.flowerShare = 0.01f;
+    custom.lookModern = 0.4f;
+    custom.jitterStrength = 0.9f;
+    custom.patchTint = 0.65f;
+    const GrassParamsGpu p = MakeGrassParams(SanitizeGrassSettings(custom), GrassFrameInputs{});
+    EXPECT_FLOAT_EQ(p.variety[0], 0.75f);
+    EXPECT_FLOAT_EQ(p.variety[1], 0.30f);
+    EXPECT_FLOAT_EQ(p.variety[2], 0.09f);
+    EXPECT_FLOAT_EQ(p.variety[3], 0.12f);
+    EXPECT_FLOAT_EQ(p.variety2[0], 0.01f);
+    EXPECT_FLOAT_EQ(p.variety2[1], 0.4f);
+    EXPECT_FLOAT_EQ(p.variety2[2], 0.9f);
+    EXPECT_FLOAT_EQ(p.variety2[3], 0.65f);
+
+    ApplyGrassPreset(custom, GrassPreset::Lean);
+    EXPECT_FLOAT_EQ(custom.clumpStrength, 0.75f);
+    EXPECT_FLOAT_EQ(custom.flowerShare, 0.01f);
+    EXPECT_FLOAT_EQ(custom.lookModern, 0.4f);
+    EXPECT_FLOAT_EQ(custom.jitterStrength, 0.9f);
+    EXPECT_FLOAT_EQ(custom.patchTint, 0.65f);
 }
 
 TEST(GrassMathTest, GridCoversTheFarthestLod)
@@ -810,6 +919,56 @@ TEST(GrassEndpointTest, ExposesShadowSettingsSunVisAndReadOnlyShadowState)
     EXPECT_TRUE(std::get<bool>(FindField(reset, "receiveSunShadow")->value));
     EXPECT_TRUE(std::get<bool>(FindField(reset, "castShadows")->value));
     EXPECT_EQ(std::get<std::string>(FindField(reset, "debugView")->value), "Normal");
+}
+
+TEST(GrassEndpointTest, ExposesAndAbsRealismLookAndVarietySettings)
+{
+    GrassFeature feature;
+    fx::IFeatureDebugEndpoint* endpoint = feature.DebugEndpoint();
+    ASSERT_NE(endpoint, nullptr);
+
+    const fx::FeatureDebugResult initial = endpoint->GetState();
+    ASSERT_TRUE(initial.ok);
+    for (const char* key : { "jitterStrength", "clumpStrength", "minPatchDensity", "patchTint", "weedShare",
+             "dryShare", "flowerShare", "lookModern", "colorRoot", "colorTip" }) {
+        ASSERT_NE(FindField(initial, key), nullptr) << key;
+    }
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "jitterStrength")->value), 0.6);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "clumpStrength")->value), 0.6);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "minPatchDensity")->value), 0.22);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "patchTint")->value), 1.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "weedShare")->value), 0.06);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "dryShare")->value), 0.08);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "flowerShare")->value), 0.004);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "lookModern")->value), 1.0);
+
+    // Every realism technique can be turned off cleanly for live A/B testing.
+    const std::vector<fx::FeatureDebugArg> allOff{
+        { "jitterStrength", "0" },
+        { "clumpStrength", "0" },
+        { "minPatchDensity", "0" },
+        { "patchTint", "0" },
+        { "weedShare", "0" },
+        { "dryShare", "0" },
+        { "flowerShare", "0" },
+        { "lookModern", "0" },
+    };
+    const fx::FeatureDebugResult disabled = endpoint->Set(allOff);
+    ASSERT_TRUE(disabled.ok);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(disabled, "jitterStrength")->value), 0.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(disabled, "clumpStrength")->value), 0.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(disabled, "minPatchDensity")->value), 0.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(disabled, "patchTint")->value), 0.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(disabled, "weedShare")->value), 0.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(disabled, "dryShare")->value), 0.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(disabled, "flowerShare")->value), 0.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(disabled, "lookModern")->value), 0.0);
+
+    const fx::FeatureDebugResult reset = endpoint->Invoke("reset_defaults", {});
+    ASSERT_TRUE(reset.ok);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(reset, "clumpStrength")->value), 0.6);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(reset, "flowerShare")->value), 0.004);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(reset, "lookModern")->value), 1.0);
 }
 TEST(GrassCallbackTest, DrawPassHandlesSkippedAndBailedPrepareCleanly)
 {

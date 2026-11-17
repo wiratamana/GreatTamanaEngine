@@ -36,13 +36,14 @@ Per chunk (16 m, a grid of `gridCells` x `gridCells` around the camera). A dense
 5. Frustum test (6 planes, eye-relative, box padded by 0.9 x blade height for lean and wind, plus `shadowPadM` when casting shadows so blades just outside the view still cast into it).
 6. Hi-Z test (skipped while `Grass.Cull` runs in `PreOpaque`, where scene depth does not exist yet).
 7. Blade loop. Candidate `i` of a chunk:
-   - Position from a low-discrepancy sequence plus a per-chunk shift. Every prefix of the sequence covers the chunk evenly, so a lower density keeps a subset of the same blades.
-   - Bilinear height and exact gradient from the tile. The 3D distance `d` of the blade gives its density `GrassDensityAt(d)`: `densityLod0` close up, falling smoothly (geometric, smoothstep) to `densityLod1` at `lod0Distance` and to `densityLod2` at `lod1Distance`; `densityBlend` is the share of a LOD range the fall takes. `i >= candidates(density)` drops the blade. Lower densities are index prefixes of higher ones, so blades only leave, never move. Thinned blades widen by `(densityLod0 / density) ^ widthCompensation`, at most `maxWidthScale`. Near the far edge they shrink to nothing over the last `farHeightFade` of `lod2Distance`.
+   - Position from a low-discrepancy R2 sequence plus a per-chunk shift, broken up for accepted blades by a candidate-intrinsic hash jitter (`jitterStrength`) and pulled toward 0.55 m tuft centres (`clumpStrength`) that share tuft height, tint and outward fountain lean without drifting as the camera moves.
+   - Bilinear height and exact gradient from the tile (re-sampled at the shifted root so sloped blades stay on the mesh and dry). The 3D distance `d` of the blade gives its density `GrassDensityAt(d)`: `densityLod0` close up, falling smoothly (geometric, smoothstep) to `densityLod1` at `lod0Distance` and to `densityLod2` at `lod1Distance`; `densityBlend` is the share of a LOD range the fall takes. `i >= candidates(density)` drops the blade. Lower densities are index prefixes of higher ones, so blades only leave, never move. Thinned blades widen by `(densityLod0 / density) ^ widthCompensation`, at most `maxWidthScale`. Near the far edge they shrink to nothing over the last `farHeightFade` of `lod2Distance`.
    - Water: dropped when the tile flag is set or the height is under `seaLevel + waterMargin`.
    - Slope: dropped over `maxSlopeDeg` (angle of the tile gradient).
-   - Density multiplier from meadow noise, slope fade, waterline fade and far edge fade. A stable per-blade hash decides.
+   - Density multiplier from meadow noise (floored by `minPatchDensity`, with shorter grass in poor soil instead of bare ground), slope fade, waterline fade and far edge fade. A stable per-blade hash decides.
+   - Blade species (`flowerShare`, `weedShare`, `dryShare`): broadleaf rosette weeds widen and bend lower, dry blades shorten and droop more, and wildflowers stand slightly taller.
    - The LOD of the mesh is still chosen by distance (`lod0Distance`, `lod1Distance`), but the blade count no longer jumps there.
-   - The survivor does all wind and shadow work here (wave, gust, bend direction, tip angle, flutter, cascade + cloud sun visibility) and writes a packed 32 byte instance: root, height and width (half), yaw and bend direction (snorm8), ground normal, sin of the tip angle and sun visibility (unorm8), flutter (half), terrain colour (rgb 8 bit) and a random byte. `Grass.vert` then needs no trig except one sqrt.
+   - The survivor does all wind and shadow work here (wave, gust, bend direction, tip angle, flutter, cascade + cloud sun visibility) and writes a packed 32 byte instance: root, height and width (half), yaw and bend direction (snorm8), ground normal, sin of the tip angle and sun visibility (unorm8), flutter (half), terrain colour (rgb 8 bit), a 4-bit blade random (`bits 4..7`) and a 4-bit patch/species nibble (`bits 0..3`: `0..12` meadow/tuft tint, `13` flower, `14` dry, `15` weed). `Grass.vert` then needs no trig except one sqrt.
    - Survivors take a slot per LOD with one atomic per round. A full region drops the rest (`dropped0..2`). The draw never reads past its region.
 
 Placement uses the integer world chunk index as the hash seed, so blades do not move when the grid scrolls with the camera.
@@ -51,16 +52,16 @@ All shader numbers are relative to the grid corner or the eye (computed in doubl
 - Shared quadratic curve + tip flutter live in `GrassBlade.glsl` (`GrassBladeSample` and `GrassBladePosition`).
 - No vertex input. In `Grass.vert`, vertex `v` of the list is mapped to a strip vertex: side = `v & 1`, row = `v >> 1`, `t` = row / segments.
 - LOD0: `lod0Segments` quads (default 4, 24 list vertices; 3 shows kinks, 5 to 6 costs 0.3 to 0.5 ms more). LOD1: 2 segments (12). LOD2: one triangle (3), widened by the density rule.
-- Width tapers with `t^1.5`. The curve is quadratic from the root to the tip: the control point is straight above the root, so the base stays upright.
-- Bend direction = rest lean + wind push. Random yaw per blade. The cull computes them; the vertex shader only reads the instance and walks the curve.
-- Normal: across the blade, then mixed with the ground normal of the tile (`groundNormalBlend`).
+- Width tapers with `t^1.5`; near LOD0 wildflowers thin the stalk and flare the top row x3 into a blossom head before fading into standard blades near `lod0Distance`. The curve is quadratic from the root to the tip: the control point is straight above the root, so the base stays upright.
+- Bend direction = rest lean + outward tuft lean + wind push. Random yaw per blade. The cull computes them; the vertex shader only reads the instance and walks the curve.
+- Normal: across the blade, mixed with the ground normal of the tile (`groundNormalBlend`), and converging further toward the ground normal over 12..70 m (`lookModern`) for soft field shading. Spine tangent is forwarded to `Grass.frag` for anisotropic sheen.
 - Tip flutter: two fast sines, amplitude grows with `t^2`.
 - The fragment shader flips the normal toward the viewer (two-sided without relying on winding).
 - Shadow caster (`GrassShadow.vert`): 3 vertices per blade (`v = 0` root-left, `v = 1` root-right, `v = 2` curved tip), base width clamped to at least `shadowWidthScale * texelWorld[c]` so thin blades do not sub-sample out of the shadow map, shifted along `sunDir` by `shadowBiasTexels * texelWorld[c]`, and projected by `cascadeVpRel = cascadeVP * Translation(eye)` computed in `double` on the CPU.
 ## Lighting (`Grass.frag`)
 Linear HDR, same energy scale as the lit materials (`kDirectScale` 0.65).
-`colour = albedo * (hemisphere ambient * ao + sun * wrap diffuse * sqrt(ao))` plus a fake translucency term when the sun is behind the blade.
-Albedo: root to tip colour with per-blade tint, then pulled toward the **terrain colour** of the ground under the blade (`terrainTint`, strongest at the root). Far blades converge to the terrain colour (`farTerrainBlend`, from 0.2 to 0.9 of `lod2Distance`), so the field melts into the ground. The sun term fades on ground that faces away from the sun (`selfShadow`, ground normal dot sun).
+With `lookModern=1` (default; `0` restores the legacy shading model for A/B comparison), blades use distance-flattened root-to-tip gradient and root AO (25..140 m), mild midrib darkening, wrap front diffuse, two-sided yellow-green leaf transmission (`back` underside + forward sun glow), Kajiya-Kay-like tangent sheen, sky Fresnel rim and a subtle wind brightness wave where gusts flatten the grass.
+Albedo: de-neoned linear root-to-tip palette (`colorRoot` / `colorTip`), shifted across meadows and tufts toward olive (`patchTint`), with cooler broadleaf weeds, straw-coloured dry blades and a 4-colour LOD0 wildflower table (white, yellow, violet, pink), then pulled toward the **terrain colour** of the ground under the blade (`terrainTint`, strongest at the root). Far blades converge to the terrain colour (`farTerrainBlend`, from 0.2 to 0.9 of `lod2Distance`), so the field melts into the ground. The sun term fades on ground that faces away from the sun (`selfShadow`, ground normal dot sun).
 Sun and its tint come from `ResolveActiveDirectionalLight` and the Atmosphere sun light record. Ambient uses the SceneLighting defaults times the Atmosphere ambient scale.
 Sun cascade shadows (`SunShadowReceiver`) and cloud shadows (`CloudShadowMap`) are sampled per accepted blade in `Grass.Cull` (with normal and sunward offset, slope-aware bias and rotated spiral PCF), packed into the fourth byte of `ground`, and forwarded flat from `Grass.vert` to `Grass.frag`. `Grass.frag` scales the direct sun and subsurface terms by `sunVis` and adds `cloudFill * (1 - sunVis)` diffuse sky fill so shadowed blades are not black; when no shadow data is published or `applyInMaterials` is off, `sunVis` stays 1. GTAO runs before grass so screen-space AO does not darken blades.
 
@@ -113,7 +114,9 @@ Sanitized on write (`SanitizeGrassSettings`). NaN and infinity become the defaul
 | `preset` | - | `Lean`, `Medium`, `Big`, `Huge` | Write-only shortcut: sets density, distances, capacities and tile size. Defaults are `Big` |
 | `densityLod0` / `densityLod1` / `densityLod2` | 40 / 6 / 0.8 | 0..200, non-increasing | Blades per m2 close up, at `lod0Distance`, at `lod1Distance` |
 | `densityBlend` | 0.5 | 0.05..1 | Share of a LOD range over which the density falls |
-| `patchiness` / `patchScaleM` / `bareThreshold` | 0.6 / 45 / 0.35 | 0..1 / 2..500 / 0..1 | Meadow patches and bare ground |
+| `patchiness` / `patchScaleM` / `bareThreshold` | 0.6 / 45 / 0.35 | 0..1 / 2..500 / 0..1 | Meadow patches and poor-soil threshold |
+| `minPatchDensity` | 0.22 | 0..1 | Minimum density floor in poor meadow patches, paired with shorter grass (`0` = bare patches) |
+| `jitterStrength` / `clumpStrength` | 0.6 / 0.6 | 0..1.5 / 0..1 | R2 lattice jitter radius (`1/sqrt(density)`) and 0.55 m tuft clumping (`0` = off) |
 | `bladeHeight` / `bladeWidth` / `bladeTaper` | 0.6 / 0.045 / 0.85 | 0.05..3 / 0.002..0.5 / 0..1 | Blade size |
 | `heightVariation` / `lean` / `maxBend` | 0.35 / 0.25 / 1.2 | 0..0.9 / 0..1.2 / 0.1..1.5 | Variation, rest lean (rad), largest tip angle (rad) |
 | `widthCompensation` / `maxWidthScale` | 0.45 / 5 | 0..1 / 1..16 | Thinned blades widen by (full density / density) to this power, at most this much |
@@ -139,7 +142,10 @@ Sanitized on write (`SanitizeGrassSettings`). NaN and infinity become the defaul
 | `shadowPadM` | 0.0 | 0..32 | Extra camera-frustum chunk padding while casting shadows (m). Colour draws pay for the extra blades (+0.4 ms at 3 m), chunks are 16 m so 0 already keeps edge chunks |
 | `terrainTint` / `farTerrainBlend` | 0.6 / 0.8 | 0..1 | Pull toward the terrain colour (near, far) |
 | `groundNormalBlend` / `selfShadow` | 0.5 / 0.7 | 0..1 | Ground normal in the blade normal; sun fade on ground facing away |
-| `colorRoot` / `colorTip` | dark / light green | `r,g,b` 0..2 | Linear albedo |
+| `lookModern` | 1.0 | 0..1 | Blend from legacy shading (`0`) to two-sided translucent + sheen + distance flatten (`1`) |
+| `patchTint` | 1.0 | 0..1 | Meadow and tuft hue shift toward olive (`0` = uniform palette) |
+| `weedShare` / `dryShare` / `flowerShare` | 0.06 / 0.08 / 0.004 | 0..0.5 / 0..0.5 / 0..0.1 | Shares of broadleaf weeds, dry straw blades and LOD0 wildflowers (`0` = off) |
+| `colorRoot` / `colorTip` | `0.022,0.06,0.009` / `0.1,0.2,0.035` | `r,g,b` 0..2 | De-neoned linear root and tip albedo |
 | `gridCells` | 41 | 2..48 | Chunks per side. Raised on its own to cover `lod2Distance`; it never shrinks by itself |
 | `heightTileTexels` / `heightTileTexelSize` | 512 / 2.0 | 64..512 / 0.5..4 | Tile the editor layer should build |
 | `instanceCapLod0/1/2` | 250k / 220k / 180k | 1k..2M, 4M in total | Blades per LOD region (32 bytes each, 19.8 MiB by default) |

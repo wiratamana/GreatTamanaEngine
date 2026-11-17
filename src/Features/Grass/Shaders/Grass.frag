@@ -1,6 +1,6 @@
 #version 450
 
-// Opaque blade shading: root-to-tip colour, root AO, wrap diffuse, hemisphere ambient, fake translucency.
+// Opaque blade shading: patch/species palette, two-sided leaf transmission, tangent sheen, sky Fresnel and distance flatten.
 // Linear HDR radiance with the same energy scale as DirectionalLighting.glsl (kDirectScale 0.65).
 #include "GrassCommon.glsl"
 
@@ -17,6 +17,8 @@ layout(location = 1) in vec4 inInfo;
 layout(location = 2) in vec3 inPosRel;
 layout(location = 3) flat in vec4 inGround; // rgb = terrain colour, a = ground normal . sun.
 layout(location = 4) flat in float inSunVis;
+layout(location = 5) in vec3 inTangent;
+layout(location = 6) flat in uint inPatch;
 
 layout(location = 0) out vec4 outColor;
 
@@ -30,17 +32,68 @@ void main()
     if (dot(normal, viewDir) < 0.0) {
         normal = -normal;
     }
+    vec3 tangent = normalize(inTangent);
 
     float t = inInfo.x;
     float rnd = inInfo.y;
-    float tint = params.colorTip.w;
-    vec3 albedo = mix(params.colorRoot.rgb, params.colorTip.rgb, smoothstep(0.0, 1.0, t));
-    albedo *= 1.0 + tint * (rnd * 2.0 - 1.0) * 0.6;
-    albedo = mix(albedo, albedo * vec3(1.35, 1.1, 0.55), tint * smoothstep(0.6, 1.0, rnd));
-    // Roots take the terrain colour; tips keep more of the blade colour.
     float distanceM = length(inPosRel);
+    float lookModern = params.variety2.y;
+    float far = smoothstep(25.0, 140.0, distanceM) * lookModern;
+    float tEff = mix(t, 0.55, far);
+
+    bool isFlower = (inPatch == kGrassKindFlower);
+    bool isDry = (inPatch == kGrassKindDry);
+    bool isWeed = (inPatch == kGrassKindWeed);
+    float pt = (inPatch <= kGrassPatchMax) ? (float(inPatch) * (1.0 / float(kGrassPatchMax))) : 0.5;
+    float oliveMix = smoothstep(0.25, 0.80, pt) * params.variety2.w;
+
+    vec3 baseRoot = params.colorRoot.rgb;
+    vec3 baseTip = params.colorTip.rgb;
+    vec3 oliveScale = vec3(1.60, 1.00, 1.43);
+    vec3 rootCol = mix(baseRoot, baseRoot * oliveScale, oliveMix);
+    vec3 tipCol = mix(baseTip, baseTip * oliveScale, oliveMix);
+
+    if (isWeed) {
+        rootCol = baseRoot * vec3(0.85, 0.92, 1.15);
+        tipCol = baseTip * vec3(0.72, 0.88, 1.25);
+    } else if (isDry) {
+        float tipLuma = max(dot(baseTip, vec3(0.2126, 0.7152, 0.0722)) / 0.1668, 0.25);
+        tipCol = vec3(0.30, 0.22, 0.070) * tipLuma;
+        rootCol = tipCol * vec3(0.32, 0.34, 0.30);
+    }
+
+    float tint = params.colorTip.w;
+    vec3 albedo = mix(rootCol, tipCol, smoothstep(0.0, 1.0, tEff));
+    float varModern = 1.0 + tint * (rnd * 2.0 - 1.0) * 0.36;
+    float varLegacy = 1.0 + tint * (rnd * 2.0 - 1.0) * 0.60;
+    albedo *= mix(varLegacy, varModern, lookModern);
+    albedo = mix(albedo, albedo * vec3(1.35, 1.1, 0.55), (1.0 - lookModern) * tint * smoothstep(0.6, 1.0, rnd));
+
+    // Mild darker midrib and slightly lighter blade edges.
+    float mid = smoothstep(0.0, 0.25, abs(inInfo.w));
+    albedo *= mix(1.0, mix(0.88, 1.06, mid), lookModern);
+
+    float flowerMask = 0.0;
+    if (isFlower && pc.lod == 0u) {
+        float flowerVis = 1.0 - smoothstep(0.65 * params.lodDist.x, 0.95 * params.lodDist.x, distanceM);
+        flowerMask = smoothstep(0.86, 0.91, t) * flowerVis;
+        uint flowerIdx = uint(clamp(rnd * 15.0 + 0.5, 0.0, 15.0)) & 3u;
+        vec3 blossom = vec3(0.80, 0.80, 0.75);
+        if (flowerIdx == 1u) {
+            blossom = vec3(0.90, 0.70, 0.05);
+        } else if (flowerIdx == 2u) {
+            blossom = vec3(0.35, 0.15, 0.60);
+        } else if (flowerIdx == 3u) {
+            blossom = vec3(0.75, 0.28, 0.42);
+        }
+        blossom *= mix(0.75, 1.05, smoothstep(0.88, 0.98, t));
+        albedo = mix(albedo, blossom, flowerMask);
+    }
+
+    // Roots take the terrain colour; tips and flower petals keep more of their own colour.
     float farBlend = params.extra.z * smoothstep(0.2 * params.lodDist.z, 0.9 * params.lodDist.z, distanceM);
-    albedo = mix(albedo, inGround.rgb, max(params.look.x * mix(0.9, 0.4, t), farBlend));
+    float nearTerrainMix = params.look.x * mix(0.9, 0.4, tEff) * (1.0 - 0.85 * flowerMask);
+    albedo = mix(albedo, inGround.rgb, max(nearTerrainMix, farBlend));
 
     uint debugMode = params.misc.x;
     if (debugMode == 1u) {
@@ -62,23 +115,48 @@ void main()
         return;
     }
 
-    float ao = mix(params.colorRoot.w, 1.0, smoothstep(0.0, 0.45, t));
     vec3 sunDir = normalize(params.sunDir.xyz);
     float sunUp = smoothstep(-0.05, 0.1, sunDir.y);
     float groundLit = mix(1.0, smoothstep(-0.1, 0.3, inGround.a), params.look.z);
     float sunVis = clamp(inSunVis, 0.0, 1.0);
     vec3 sun = params.sunRadiance.rgb * (kDirectScale * params.sunRadiance.w * sunUp * groundLit * sunVis);
 
-    float wrap = clamp((dot(normal, sunDir) + 0.35) / 1.35, 0.0, 1.0);
+    float nl = dot(normal, sunDir);
+    float front = clamp((nl + 0.35) / 1.35, 0.0, 1.0);
     float hemi = normal.y * 0.5 + 0.5;
     vec3 skyFill = params.sunRadiance.rgb
         * (0.3 * kDirectScale * params.sunRadiance.w * sunUp * max(sunDir.y, 0.0) * params.skyAmbient.w * (1.0 - sunVis) * hemi);
     vec3 ambient = mix(params.groundAmbient.rgb, params.skyAmbient.rgb, hemi) + skyFill;
-    vec3 color = albedo * (ambient * ao + sun * wrap * sqrt(ao));
 
-    // Fake subsurface: light through the blade when the sun is behind it, stronger toward the thin tip.
-    float through = pow(clamp(dot(viewDir, -sunDir), 0.0, 1.0), 3.0);
-    color += albedo * vec3(1.1, 1.2, 0.5) * sun * (through * params.sunDir.w * mix(0.5, 1.0, t) * ao);
+    // Legacy lighting model for A/B comparison (lookModern = 0).
+    float aoLegacy = mix(params.colorRoot.w, 1.0, smoothstep(0.0, 0.45, t));
+    float throughLegacy = pow(clamp(dot(viewDir, -sunDir), 0.0, 1.0), 3.0);
+    vec3 colorLegacy = albedo * (ambient * aoLegacy + sun * front * sqrt(aoLegacy))
+        + albedo * vec3(1.1, 1.2, 0.5) * sun * (throughLegacy * params.sunDir.w * mix(0.5, 1.0, t) * aoLegacy);
 
+    // Modern shading: distance-flattened AO, two-sided leaf transmission, Kajiya-Kay sheen, sky Fresnel and wind brightness wave.
+    float aoNear = mix(params.colorRoot.w, 1.0, pow(max(smoothstep(0.0, 0.5, t), 1e-4), 0.8));
+    float ao = mix(aoNear, 0.78, far);
+    float back = clamp(-nl, 0.0, 1.0);
+    vec3 transTint = mix(vec3(1.05, 1.15, 0.45), vec3(1.0), flowerMask);
+    vec3 leaf = albedo * transTint;
+    float vs = pow(clamp(dot(viewDir, -sunDir), 0.0, 1.0), 4.0);
+    float thin = mix(0.55, 1.0, t);
+    vec3 trans = leaf * sun * (params.sunDir.w * thin * (0.30 * back + 1.20 * vs) * ao);
+
+    vec3 halfSum = sunDir + viewDir;
+    float halfLen2 = dot(halfSum, halfSum);
+    vec3 H = halfLen2 > 1e-6 ? halfSum * inversesqrt(halfLen2) : vec3(0.0, 1.0, 0.0);
+    float th = clamp(dot(tangent, H), -1.0, 1.0);
+    float sinTH = sqrt(max(1.0 - th * th, 0.0));
+    float spec = (halfLen2 > 1e-4 ? pow(sinTH, 48.0) : 0.0) * 0.12 * (1.0 - far);
+    float fres = pow(1.0 - clamp(dot(normal, viewDir), 0.0, 1.0), 4.0) * 0.25;
+
+    vec3 colorModern = albedo * (ambient * ao + sun * front * sqrt(ao)) + trans
+        + sun * spec + params.skyAmbient.rgb * (fres * ao * (1.0 - far));
+    float windWave = clamp(inInfo.z / 0.9 - 0.4, -0.4, 0.6);
+    colorModern *= 1.0 + 0.25 * windWave * (1.0 - far);
+
+    vec3 color = mix(colorLegacy, colorModern, lookModern);
     outColor = vec4(color, 1.0);
 }

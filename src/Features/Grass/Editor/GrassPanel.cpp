@@ -108,6 +108,9 @@ bool BuildGrassPanel(GrassSettings& edit, const GrassViewSnapshot& game, const G
         changed |= ImGui::SliderFloat("Patchiness", &edit.patchiness, 0.0f, 1.0f);
         changed |= ImGui::SliderFloat("Patch size (m)", &edit.patchScaleM, 5.0f, 300.0f);
         changed |= ImGui::SliderFloat("Bare threshold", &edit.bareThreshold, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Min patch density", &edit.minPatchDensity, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Placement jitter", &edit.jitterStrength, 0.0f, 1.5f);
+        changed |= ImGui::SliderFloat("Clump strength", &edit.clumpStrength, 0.0f, 1.0f);
     }
     if (ImGui::CollapsingHeader("Blade", ImGuiTreeNodeFlags_DefaultOpen)) {
         changed |= ImGui::SliderFloat("Height (m)", &edit.bladeHeight, 0.05f, 2.0f);
@@ -156,7 +159,12 @@ bool BuildGrassPanel(GrassSettings& edit, const GrassViewSnapshot& game, const G
     if (ImGui::CollapsingHeader("Look")) {
         changed |= ImGui::ColorEdit3("Root colour", edit.colorRoot, ImGuiColorEditFlags_Float);
         changed |= ImGui::ColorEdit3("Tip colour", edit.colorTip, ImGuiColorEditFlags_Float);
+        changed |= ImGui::SliderFloat("Modern shading", &edit.lookModern, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Patch olive tint", &edit.patchTint, 0.0f, 1.0f);
         changed |= ImGui::SliderFloat("Tint variation", &edit.tintVariation, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Weed share", &edit.weedShare, 0.0f, 0.5f, "%.3f");
+        changed |= ImGui::SliderFloat("Dry blade share", &edit.dryShare, 0.0f, 0.5f, "%.3f");
+        changed |= ImGui::SliderFloat("Flower share", &edit.flowerShare, 0.0f, 0.1f, "%.4f");
         changed |= ImGui::SliderFloat("Root darkening", &edit.rootAo, 0.0f, 1.0f);
         changed |= ImGui::SliderFloat("Terrain colour tint", &edit.terrainTint, 0.0f, 1.0f);
         changed |= ImGui::SliderFloat("Far terrain colour blend", &edit.farTerrainBlend, 0.0f, 1.0f);

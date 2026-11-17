@@ -116,6 +116,14 @@ GrassSettings SanitizeGrassSettings(const GrassSettings& in, bool enforceOrder) 
         s.colorRoot[i] = Clamp(in.colorRoot[i], d.colorRoot[i], 0.0f, 2.0f);
         s.colorTip[i] = Clamp(in.colorTip[i], d.colorTip[i], 0.0f, 2.0f);
     }
+    s.jitterStrength = Clamp(in.jitterStrength, d.jitterStrength, 0.0f, 1.5f);
+    s.clumpStrength = Clamp(in.clumpStrength, d.clumpStrength, 0.0f, 1.0f);
+    s.minPatchDensity = Clamp(in.minPatchDensity, d.minPatchDensity, 0.0f, 1.0f);
+    s.patchTint = Clamp(in.patchTint, d.patchTint, 0.0f, 1.0f);
+    s.weedShare = Clamp(in.weedShare, d.weedShare, 0.0f, 0.5f);
+    s.dryShare = Clamp(in.dryShare, d.dryShare, 0.0f, 0.5f);
+    s.flowerShare = Clamp(in.flowerShare, d.flowerShare, 0.0f, 0.1f);
+    s.lookModern = Clamp(in.lookModern, d.lookModern, 0.0f, 1.0f);
     s.sunVisibility = Clamp(in.sunVisibility, d.sunVisibility, 0.0f, 2.0f);
     s.shadowStrength = Clamp(in.shadowStrength, d.shadowStrength, 0.0f, 1.0f);
     s.cloudFill = Clamp(in.cloudFill, d.cloudFill, 0.0f, 1.0f);
@@ -357,6 +365,8 @@ GrassParamsGpu MakeGrassParams(const GrassSettings& s, const GrassFrameInputs& i
     Set4(p.extra, s.densityBlend, s.farHeightFade, s.farTerrainBlend, static_cast<float>(GrassSlicesPerChunk(s.densityLod0)));
     Set4(p.densityLog, std::log(std::max(s.densityLod0, 1e-4f)), std::log(std::max(s.densityLod1, 1e-4f)),
         std::log(std::max(s.densityLod2, 1e-4f)), s.densityLod0 > 0.0f ? 1.0f : 0.0f);
+    Set4(p.variety, s.clumpStrength, s.minPatchDensity, s.weedShare, s.dryShare);
+    Set4(p.variety2, s.flowerShare, s.lookModern, s.jitterStrength, s.patchTint);
     return p;
 }
 GrassShadowParamsGpu MakeGrassShadowParams(const SunShadowReceiver* receiver, const CloudShadowMap* cloud,

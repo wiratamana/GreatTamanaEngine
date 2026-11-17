@@ -97,7 +97,7 @@ struct GrassInstanceGpu {
     std::uint32_t frame;      // 4 x snorm8: sin(yaw), cos(yaw), bend dir x, bend dir z.
     std::uint32_t ground;     // 4 x unorm8: ground normal x, z (* 0.5 + 0.5), sin(tip angle), sun visibility.
     std::uint32_t flutter;    // 2 x half: tip flutter along the blade side and along the bend.
-    std::uint32_t colorRnd;   // Terrain colour r, g, b (bits 24..31, 16..23, 8..15), blade random (bits 0..7).
+    std::uint32_t colorRnd;   // Terrain colour r, g, b (bits 24..31, 16..23, 8..15), blade random (bits 4..7), patch/type (bits 0..3).
 };
 static_assert(sizeof(GrassInstanceGpu) == kGrassInstanceBytes);
 
@@ -159,8 +159,10 @@ struct GrassParamsGpu {
     float look[4];                // 608  x = terrain tint strength, y = ground normal blend, z = self shadow strength, w = LOD0 segments.
     float extra[4];               // 624  x = density blend share, y = far height fade share, z = far terrain colour blend, w = workgroups per chunk.
     float densityLog[4];          // 640  xyz = ln of the three densities (floored at 1e-4), w = 1 when LOD0 density is above 0.
+    float variety[4];             // 656  x = clump strength, y = min patch density, z = weed share, w = dry share.
+    float variety2[4];            // 672  x = flower share, y = modern shading blend, z = jitter strength, w = patch tint.
 };
-static_assert(sizeof(GrassParamsGpu) == 656);
+static_assert(sizeof(GrassParamsGpu) == 688);
 static_assert(std::is_trivially_copyable_v<GrassParamsGpu>);
 static_assert(offsetof(GrassParamsGpu, drawViewProjection) == 64);
 static_assert(offsetof(GrassParamsGpu, planes) == 128);
@@ -191,6 +193,8 @@ static_assert(offsetof(GrassParamsGpu, depthMap) == 592);
 static_assert(offsetof(GrassParamsGpu, look) == 608);
 static_assert(offsetof(GrassParamsGpu, extra) == 624);
 static_assert(offsetof(GrassParamsGpu, densityLog) == 640);
+static_assert(offsetof(GrassParamsGpu, variety) == 656);
+static_assert(offsetof(GrassParamsGpu, variety2) == 672);
 
 // Number of candidate blades per chunk for a density. Same rounding as CandidateCount() in GrassCull.comp.
 inline std::uint32_t GrassCandidatesPerChunk(float bladesPerM2) noexcept
@@ -291,8 +295,16 @@ struct GrassSettings {
     float farTerrainBlend = 0.8f;   // Far blades converge to the terrain colour so the field melts into the ground.
     float groundNormalBlend = 0.5f; // Share of the ground normal in the blade normal.
     float selfShadow = 0.7f;        // Sun fades on ground facing away from the sun.
-    float colorRoot[3] = {0.025f, 0.06f, 0.012f};
-    float colorTip[3] = {0.17f, 0.30f, 0.05f};
+    float colorRoot[3] = { 0.022f, 0.060f, 0.009f };
+    float colorTip[3] = { 0.10f, 0.20f, 0.035f };
+    float jitterStrength = 0.6f;    // R2 lattice jitter radius in 1/sqrt(density) units (0 = regular R2 lattice).
+    float clumpStrength = 0.6f;     // Tuft pull, shared tuft height and outward fountain lean (0 = off).
+    float minPatchDensity = 0.22f;  // Minimum density floor in poor meadow patches, paired with shorter grass (0 = bare patches).
+    float patchTint = 1.0f;         // Meadow and tuft hue shift toward olive (0 = uniform palette).
+    float weedShare = 0.06f;        // Share of broadleaf rosette weeds (0 = off).
+    float dryShare = 0.08f;         // Base share of dry straw blades, weighted toward poor patches (0 = off).
+    float flowerShare = 0.004f;     // Share of rare wildflowers in near LOD0 grass (0 = off).
+    float lookModern = 1.0f;        // Blend from legacy shading (0) to two-sided translucent + sheen + distance flatten (1).
 
     std::uint32_t gridCells = 41;        // Chunks per side (at most kGrassMaxGridCells); must cover 2 x (lod2 + 16 m).
     std::uint32_t heightTileTexels = 512; // Texels per side of the height tile the editor layer should build (at most 512).

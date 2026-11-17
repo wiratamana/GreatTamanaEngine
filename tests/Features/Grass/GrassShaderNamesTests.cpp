@@ -203,6 +203,13 @@ TEST(GrassShaderNamesTest, ShaderTextCarriesTheSharedConstants)
     EXPECT_LT(text.find("vec4 sunRadiance;", block), text.find("vec4 depthMap;", block));
     EXPECT_LT(text.find("vec4 depthMap;", block), text.find("vec4 look;", block));
     EXPECT_LT(text.find("vec4 look;", block), text.find("vec4 extra;", block));
+    EXPECT_LT(text.find("vec4 extra;", block), text.find("vec4 densityLog;", block));
+    EXPECT_LT(text.find("vec4 densityLog;", block), text.find("vec4 variety;", block));
+    EXPECT_LT(text.find("vec4 variety;", block), text.find("vec4 variety2;", block));
+    EXPECT_NE(text.find("const uint kGrassPatchMax = 12u;"), std::string::npos);
+    EXPECT_NE(text.find("const uint kGrassKindFlower = 13u;"), std::string::npos);
+    EXPECT_NE(text.find("const uint kGrassKindDry = 14u;"), std::string::npos);
+    EXPECT_NE(text.find("const uint kGrassKindWeed = 15u;"), std::string::npos);
 }
 
 } // namespace

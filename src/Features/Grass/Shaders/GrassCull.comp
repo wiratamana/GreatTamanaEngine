@@ -334,7 +334,7 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
     float scale = max(params.slope.z, 1.0);
     float nz = 0.65 * GrassValueNoise(worldXz / scale) + 0.35 * GrassValueNoise(worldXz / (scale * 0.37) + vec2(17.3, 5.9));
     float patchMask = smoothstep(params.slope.w - 0.1, params.slope.w + 0.15, nz);
-    float m = mix(1.0, patchMask, params.density.w);
+    float m = mix(1.0, mix(params.variety.y, 1.0, patchMask), params.density.w);
     m *= 1.0 - smoothstep(params.slope.x - max(params.slope.y, 0.01), params.slope.x, slopeDeg);
     m *= smoothstep(waterTop, waterTop + max(params.water.z, 1e-3), ts.height);
     m *= smoothstep(params.water.x + params.water.w, params.water.x + params.water.w + 3.0, ts.height);
@@ -346,17 +346,69 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
         return kRejectNoise;
     }
 
+    // Break the R2 quasi-lattice using candidate-intrinsic spacing so world roots never drift with camera motion.
+    float candDensity = max(float(idx + 1u) / (params.camRel.w * params.camRel.w), 0.5);
+    float jr = min(params.variety2.z * inversesqrt(candDensity), 0.75);
+    vec2 jit = (vec2(GrassUnit(GrassHash2(hb, 11u)), GrassUnit(GrassHash2(hb, 12u))) - 0.5) * (2.0 * jr);
+
+    // Tuft clumping on a 0.55 m lattice: pull roots toward tuft centres, share tuft height/tint and lean outward.
+    vec2 wxz = worldXz + jit;
+    ivec2 cc = ivec2(floor(wxz / 0.55));
+    vec2 cJit = vec2(GrassCellHash(cc), GrassCellHash(cc + ivec2(7, 13)));
+    vec2 centre = (vec2(cc) + 0.2 + 0.6 * cJit) * 0.55;
+    float clumpStr = params.variety.x;
+    float clumpActive = clamp(clumpStr / 0.6, 0.0, 1.0);
+    vec2 shifted = mix(wxz, centre, 0.55 * clumpStr);
+    vec2 deltaXz = shifted - worldXz;
+    if (dot(deltaXz, deltaXz) > 1e-8) {
+        vec2 pgShifted = gChunkLoGrid + local + deltaXz;
+        TileSample tsShifted;
+        if (SampleTile(pgShifted, tsShifted) && tsShifted.flag <= 0.5 && tsShifted.height > waterTop) {
+            local += deltaXz;
+            pg = pgShifted;
+            ts = tsShifted;
+            normal = normalize(vec3(-ts.gradient.x, 1.0, -ts.gradient.y));
+            eye = vec3(pg.x - params.camRel.x, ts.height - params.camRel.y, pg.y - params.camRel.z);
+        }
+    }
+    uint cid = GrassHash2(uint(cc.x), uint(cc.y));
+    float cHeight = mix(1.0, mix(0.75, 1.2, GrassUnit(cid)), clumpActive);
+    float cTint = mix(0.5, GrassUnit(GrassPcg(cid ^ 0x51ED270Bu)), clumpActive);
+    vec2 toBlade = (gChunkWorldLo + local) - centre;
+    vec2 outward = dot(toBlade, toBlade) > 1e-8 ? normalize(toBlade) : vec2(0.0);
+
     float r1 = GrassUnit(GrassHash2(hb, 1u));
     float r2 = GrassUnit(GrassHash2(hb, 2u));
     float r3 = GrassUnit(GrassHash2(hb, 3u));
     float r4 = GrassUnit(GrassHash2(hb, 4u));
     float r5 = GrassUnit(GrassHash2(hb, 5u));
     float farShrink = 1.0 - smoothstep(params.lodDist.z * (1.0 - params.extra.y), params.lodDist.z, dist);
-    float height = params.blade.x * (1.0 + params.blade.w * (2.0 * r1 - 1.0)) * (0.85 + 0.3 * nz) * farShrink;
+    float poorSoilScale = clamp(params.variety.y / 0.22, 0.0, 1.0) * smoothstep(0.0, 0.2, params.density.w);
+    float patchHeight = mix(1.0, mix(0.45, 1.0, patchMask), poorSoilScale);
+    float height = params.blade.x * (1.0 + params.blade.w * (2.0 * r1 - 1.0)) * (0.85 + 0.3 * nz) * cHeight * patchHeight * farShrink;
     // Thinned blades widen so the cover stays even.
     float widthScale = min(exp(params.bladeB.y * max(params.densityLog.x - logDensity, 0.0)), params.bladeB.z);
     float width = params.blade.y * (0.8 + 0.4 * r2) * widthScale;
     float lean = params.bladeB.x * (0.3 + 0.7 * r4);
+
+    // Blade species: rare flowers, broadleaf rosette weeds and dry straw blades.
+    float patchDry = 1.0 - patchMask;
+    float kind = GrassUnit(GrassHash2(hb, 21u));
+    float flowerShare = params.variety2.x;
+    float weedShare = params.variety.z;
+    float dryShare = params.variety.w;
+    bool isFlower = kind < flowerShare;
+    bool isWeed = !isFlower && (kind < flowerShare + weedShare);
+    bool isDry = !isFlower && !isWeed && (kind > 1.0 - dryShare * (0.4 + patchDry));
+    if (isWeed) {
+        width *= 2.2;
+        height *= 0.5;
+    } else if (isDry) {
+        height *= 0.8;
+    } else if (isFlower) {
+        height *= 1.05;
+        lean *= 0.65;
+    }
 
     // Wind: slow wave plus gusts at a pattern position that drifts with the shared wind offset.
     float yaw = r3 * 6.2831853;
@@ -368,10 +420,14 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
     float gust = params.wind1.x * GrassValueNoise(pattern / max(params.wind2.w, 1.0));
     float windAngle = 0.6 * params.wind1.w * speedFactor * (0.25 + 0.5 * wave + 0.9 * gust);
 
-    // Rest lean along the blade face plus the wind push: the sum sets the tip angle and the bend direction.
-    vec2 bend = faceXz * lean + windDir * windAngle;
+    // Rest lean (plus outward tuft fountain lean) and wind push set the tip angle and bend direction.
+    vec2 bend = faceXz * lean + outward * (0.25 * lean * clumpStr) + windDir * windAngle;
+    if (isWeed) {
+        bend *= 1.6;
+    }
     float bendLength = length(bend);
-    float angle = min(bendLength, params.bladeB.w);
+    float extraDroop = isDry ? 0.25 : 0.0;
+    float angle = min(bendLength + extraDroop, params.bladeB.w);
     vec2 bendDir = bendLength > 1e-4 ? bend / bendLength : faceXz;
 
     // Tip flutter: fast and small; the vertex shader scales it by t^2.
@@ -386,13 +442,23 @@ uint EvalBlade(uint idx, out uint lod, out GrassInstance result)
     float sunVis = GrassSunVisibility(worldRoot, normal, r6);
 
     uvec3 rgb = uvec3(clamp(SampleTileColor(pg) * 255.0 + 0.5, vec3(0.0), vec3(255.0)));
-    uint rnd8 = uint(clamp(r5 * 255.0 + 0.5, 0.0, 255.0));
+    float meadowHue = abs(fract(nz * 2.1 + 0.15) * 2.0 - 1.0);
+    float hueVal = clamp(0.45 * patchDry + 0.30 * meadowHue + 0.45 * cTint - 0.10, 0.0, 1.0);
+    uint rnd4 = uint(clamp(r5 * 15.0 + 0.5, 0.0, 15.0));
+    uint patch4 = uint(clamp(hueVal * float(kGrassPatchMax) + 0.5, 0.0, float(kGrassPatchMax)));
+    if (isFlower) {
+        patch4 = kGrassKindFlower;
+    } else if (isDry) {
+        patch4 = kGrassKindDry;
+    } else if (isWeed) {
+        patch4 = kGrassKindWeed;
+    }
     result.root = eye;
     result.heightWidth = packHalf2x16(vec2(height, width));
     result.frame = packSnorm4x8(vec4(faceXz.x, faceXz.y, bendDir.x, bendDir.y));
     result.ground = packUnorm4x8(vec4(normal.x * 0.5 + 0.5, normal.z * 0.5 + 0.5, sin(angle), sunVis));
     result.flutter = packHalf2x16(vec2(flutterA * flutterAmp, flutterB * 0.6 * flutterAmp));
-    result.colorRnd = (rgb.x << 24u) | (rgb.y << 16u) | (rgb.z << 8u) | rnd8;
+    result.colorRnd = (rgb.x << 24u) | (rgb.y << 16u) | (rgb.z << 8u) | (rnd4 << 4u) | patch4;
     return kRejectNone;
 }
 
@@ -478,7 +544,7 @@ void main()
     }
 
     // 5. 3D distance and LOD of the chunk (its nearest point). Blades pick their own LOD below.
-    float maxBladeHeight = params.blade.x * (1.0 + params.blade.w) * 1.15;
+    float maxBladeHeight = params.blade.x * (1.0 + params.blade.w) * mix(1.15, 1.25, clamp(params.variety.x / 0.6, 0.0, 1.0));
     vec3 boxMin = vec3(lo2.x, hMin - params.camRel.y, lo2.y);
     vec3 boxMax = vec3(lo2.x + cs, hMax + maxBladeHeight - params.camRel.y, lo2.y + cs);
     float dist = length(max(max(boxMin, -boxMax), vec3(0.0)));
@@ -489,10 +555,11 @@ void main()
     uint lodMin = dist < params.lodDist.x ? 0u : (dist < params.lodDist.y ? 1u : 2u);
     float chunkDensity = GrassDensityAt(dist);
 
-    // 6. Frustum (further padded when casting shadows) and Hi-Z with the box padded for blade lean and wind.
-    float pad = 0.9 * maxBladeHeight;
-    vec3 padMin = boxMin - vec3(pad, 0.0, pad);
-    vec3 padMax = boxMax + vec3(pad, 0.0, pad);
+    // 6. Frustum (further padded when casting shadows) and Hi-Z with the box padded for blade lean, wind and jitter/clump shift.
+    float shiftPad = min(params.variety2.z * 1.1, 0.85) + 0.30 * params.variety.x;
+    float pad = 0.9 * maxBladeHeight + shiftPad;
+    vec3 padMin = boxMin - vec3(pad, shiftPad, pad);
+    vec3 padMax = boxMax + vec3(pad, shiftPad, pad);
     float shadowPad = max(params.groundAmbient.w, 0.0);
     if (BoxOutsideFrustum(padMin - vec3(shadowPad), padMax + vec3(shadowPad))) {
         if (counter) { atomicAdd(stats.words[kStatChunksCulledFrustum], 1u); }

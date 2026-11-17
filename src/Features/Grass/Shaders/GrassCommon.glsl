@@ -1,5 +1,5 @@
 // Shared by every grass shader: params block, instance record, hash and noise.
-// NOTE: the params block must match GrassParamsGpu in GrassTypes.h (656 bytes, std430 = std140 here).
+// NOTE: the params block must match GrassParamsGpu in GrassTypes.h (688 bytes, std430 = std140 here).
 #ifndef GRASS_COMMON_GLSL
 #define GRASS_COMMON_GLSL
 
@@ -10,7 +10,7 @@ struct GrassInstance {
     uint frame;   // 4 x snorm8: sin(yaw), cos(yaw), bend direction x, bend direction z.
     uint ground;  // 4 x unorm8: ground normal x, z (* 0.5 + 0.5), sin(tip angle), sun visibility.
     uint flutter; // 2 x half: tip flutter along the blade side, along the bend.
-    uint colorRnd; // Terrain colour r, g, b in bits 24..31, 16..23, 8..15; blade random in bits 0..7.
+    uint colorRnd; // Terrain colour r, g, b in bits 24..31, 16..23, 8..15; blade random bits 4..7; patch/type bits 0..3.
 };
 
 // All space is eye-relative except where a name says "grid" (grid-relative, small floats) or "world".
@@ -45,7 +45,15 @@ layout(std430, binding = 0) readonly buffer GrassParamsBlock {
     vec4 look;                // x = terrain tint strength, y = ground normal blend, z = self shadow strength, w = LOD0 segments.
     vec4 extra;               // x = density blend share, y = far height fade share, z = far terrain colour blend, w = groups per chunk.
     vec4 densityLog;          // xyz = ln of the three densities, w = 1 when the LOD0 density is above 0.
+    vec4 variety;             // x = clump strength, y = min patch density, z = weed share, w = dry share.
+    vec4 variety2;            // x = flower share, y = modern shading blend, z = jitter strength, w = patch tint.
 } params;
+
+// Low nibble of GrassInstance::colorRnd: 0..12 = meadow/tuft tint, 13..15 = special blade kinds.
+const uint kGrassPatchMax = 12u;
+const uint kGrassKindFlower = 13u;
+const uint kGrassKindDry = 14u;
+const uint kGrassKindWeed = 15u;
 
 const uint kGrassFlagHiz = 1u;           // Hi-Z pyramid is valid and bound.
 const uint kGrassFlagStats = 4u;         // Count rejections into the stats words.
