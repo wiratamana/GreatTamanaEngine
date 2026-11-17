@@ -82,13 +82,19 @@ int main(int argc, char* argv[])
     try {
         int winW = 1280;
         int winH = 720;
-        for (int i = 1; i < argc; ++i) { // local screenshot helper: --window-size=WxH
+        int httpPort = 8080;
+        for (int i = 1; i < argc; ++i) {
             const std::string_view arg(argv[i]);
             if (arg.substr(0, 14) == "--window-size=") {
                 std::sscanf(std::string(arg.substr(14)).c_str(), "%dx%d", &winW, &winH);
+            } else if (arg.substr(0, 12) == "--http-port=") {
+                int parsed = 0;
+                if (std::sscanf(std::string(arg.substr(12)).c_str(), "%d", &parsed) == 1 && parsed >= 0 && parsed <= 65535) {
+                    httpPort = parsed;
+                }
             }
         }
-        gte::EditorHost host("Great Tamana Engine", winW, winH, forceValidation, presentPolicy, framesInFlight);
+        gte::EditorHost host("Great Tamana Engine", winW, winH, forceValidation, presentPolicy, framesInFlight, httpPort);
         return host.Run();
     } catch (const std::exception& e) {
         std::fprintf(stderr, "Fatal error: %s\n", e.what());

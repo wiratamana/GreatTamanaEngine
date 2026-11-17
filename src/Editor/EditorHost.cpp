@@ -423,7 +423,7 @@ EditorHost::SdlContext::~SdlContext()
 }
 
 EditorHost::EditorHost(const std::string& title, int width, int height, bool forceGpuValidation,
-    PresentPolicy presentPolicy, std::uint32_t offscreenFramesInFlight)
+    PresentPolicy presentPolicy, std::uint32_t offscreenFramesInFlight, int httpPort)
     : m_sdlContext()
     , m_window(title, width, height)
     // m_core is built from m_window (ISurfaceProvider) and m_hostServices (IHostServices); both exist by now.
@@ -511,8 +511,8 @@ EditorHost::EditorHost(const std::string& title, int width, int height, bool for
     m_sceneIOCapability = &s_editorSceneIOCapability;
 
 #if GTE_ENABLE_NETWORK
-    // Loopback only, port 8080. A bind failure (e.g. another instance running) is logged by the server and is non-fatal.
-    m_networkServer.Start(8080);
+    // Loopback only. A bind failure (e.g. another instance running) is logged by the server and is non-fatal.
+    m_networkServer.Start(httpPort);
 #endif
 
     // Proves logging is reachable once every other subsystem is up.

@@ -39,12 +39,10 @@ namespace gte {
 // and the embedded HTTP server. Run() is the main loop.
 class EditorHost {
 public:
-    // `forceGpuValidation` turns the GPU API validation on in any build type.
-    // `presentPolicy` Uncapped removes the vsync cap (benchmarks).
-    // `offscreenFramesInFlight` above 1 lets the CPU build the next frame while the GPU draws the main views.
+    // `forceGpuValidation` enables API validation; `presentPolicy` Uncapped disables vsync; `httpPort` binds loopback HTTP.
     EditorHost(const std::string& title, int width, int height, bool forceGpuValidation,
         PresentPolicy presentPolicy = PresentPolicy::Capped,
-        std::uint32_t offscreenFramesInFlight = kDefaultOffscreenFramesInFlight);
+        std::uint32_t offscreenFramesInFlight = kDefaultOffscreenFramesInFlight, int httpPort = 8080);
     ~EditorHost() = default;
 
     EditorHost(const EditorHost&) = delete;
