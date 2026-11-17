@@ -320,5 +320,55 @@ TEST(PlanFullscreenAttachmentsTest, UnknownDepthFormatFallsBackToTheRenderersDep
     EXPECT_EQ(plan.key.depthFormat, PixelFormat::D24_UNorm_S8_UInt);
 }
 
+TEST(PlanFullscreenAttachmentsTest, DepthOnlyWriteWithNoColorTargetsIsAccepted)
+{
+    TextureDesc depthOnly{};
+    depthOnly.width = 1024;
+    depthOnly.height = 1024;
+    depthOnly.hasColor = false;
+    depthOnly.hasDepth = true;
+    depthOnly.depthFormat = PixelFormat::D32_Float;
+
+    FullscreenDepthRequest depth;
+    depth.enabled = true;
+    depth.desc = depthOnly;
+    depth.compare = CompareOp::Less;
+    depth.write = true;
+
+    const FullscreenAttachmentPlan plan =
+        PlanFullscreenAttachments({}, depth, PixelFormat::D32_Float, BlendMode::Opaque);
+    ASSERT_TRUE(plan.Ok()) << plan.error;
+    EXPECT_EQ(plan.key.colorCount, 0u);
+    EXPECT_TRUE(plan.key.depthTest);
+    EXPECT_TRUE(plan.key.depthWrite);
+    EXPECT_EQ(plan.key.depthCompare, CompareOp::Less);
+    EXPECT_EQ(plan.key.depthFormat, PixelFormat::D32_Float);
+}
+
+TEST(PlanFullscreenAttachmentsTest, DepthOnlyWithoutWriteOrWithZeroExtentIsRefused)
+{
+    TextureDesc depthOnly{};
+    depthOnly.width = 512;
+    depthOnly.height = 512;
+    depthOnly.hasColor = false;
+    depthOnly.hasDepth = true;
+    depthOnly.depthFormat = PixelFormat::D32_Float;
+
+    FullscreenDepthRequest noWrite;
+    noWrite.enabled = true;
+    noWrite.desc = depthOnly;
+    noWrite.compare = CompareOp::Less;
+    noWrite.write = false;
+    EXPECT_FALSE(PlanFullscreenAttachments({}, noWrite, PixelFormat::D32_Float, BlendMode::Opaque).Ok());
+
+    depthOnly.width = 0;
+    FullscreenDepthRequest zeroExtent;
+    zeroExtent.enabled = true;
+    zeroExtent.desc = depthOnly;
+    zeroExtent.compare = CompareOp::Less;
+    zeroExtent.write = true;
+    EXPECT_FALSE(PlanFullscreenAttachments({}, zeroExtent, PixelFormat::D32_Float, BlendMode::Opaque).Ok());
+}
+
 } // namespace
 } // namespace gte::rg

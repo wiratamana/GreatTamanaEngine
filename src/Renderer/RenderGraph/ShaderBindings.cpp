@@ -318,8 +318,8 @@ FullscreenAttachmentPlan PlanFullscreenAttachments(std::span<const std::optional
     const FullscreenDepthRequest& depth, PixelFormat rendererDepthFormat, BlendMode blend)
 {
     FullscreenAttachmentPlan result;
-    if (targets.empty()) {
-        result.error = "no color target was set";
+    if (targets.empty() && (!depth.enabled || !depth.write)) {
+        result.error = "no color target was set; a depth-only pass must write depth";
         return result;
     }
     if (targets.size() > FullscreenKey::kMaxTargets) {
@@ -348,11 +348,21 @@ FullscreenAttachmentPlan PlanFullscreenAttachments(std::span<const std::optional
             result.error = "the depth test texture is missing or has no depth aspect";
             return result;
         }
-        if (depth.desc->width != targets[0]->width || depth.desc->height != targets[0]->height) {
+        if (depth.desc->width == 0 || depth.desc->height == 0) {
+            result.error = "the depth test texture has a zero extent";
+            return result;
+        }
+        if (!targets.empty() && (depth.desc->width != targets[0]->width || depth.desc->height != targets[0]->height)) {
             result.error = "the depth test texture has a different extent than the color targets";
             return result;
         }
-        key.depthFormat = depth.desc->depthFormat != PixelFormat::Undefined ? depth.desc->depthFormat : rendererDepthFormat;
+        const PixelFormat resolvedFormat =
+            depth.desc->depthFormat != PixelFormat::Undefined ? depth.desc->depthFormat : rendererDepthFormat;
+        if (resolvedFormat == PixelFormat::Undefined) {
+            result.error = "the depth test texture format is Undefined";
+            return result;
+        }
+        key.depthFormat = resolvedFormat;
         key.depthTest = true;
         key.depthWrite = depth.write;
         key.depthCompare = depth.compare;
