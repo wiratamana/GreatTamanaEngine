@@ -1,10 +1,11 @@
 #include "GamePanel.h"
 
 #include "../EditorContext.h"
+#include "../EditorFeatureHooks.h"
 #include "../EditorFrame.h"
 #include "OverlayLabel.h"
-#include "../../Features/Terrain/Editor/TerrainViewOverlay.h"
-#include "../../Features/Water/Editor/WaterGizmoOverlay.h"
+#include "../../Game/Game.h"
+#include "../../Game/RenderSystem.h"
 
 #include <imgui.h>
 
@@ -30,16 +31,16 @@ void GamePanel::OnGui(EditorFrame& frame)
         ImGui::Image(static_cast<ImTextureID>(static_cast<std::uint64_t>(ctx.gameViewDescriptor)), avail);
         const ImVec2 imageMin = ImGui::GetItemRectMin();
         const ImVec2 imageSize = ImGui::GetItemRectSize();
-        const bool imageHovered = ImGui::IsItemHovered();
-        TerrainUiBridge& terrainUi = ctx.extensions.Get<TerrainUiBridge>();
-        WaterUiBridge& waterUi = ctx.extensions.Get<WaterUiBridge>();
-        GatherTerrainCameraInput(terrainUi, imageHovered && !waterUi.handleHot);
-        if (terrainUi.snapshot.hasViewProjection) {
-            const Vec2 rectMin(imageMin.x, imageMin.y);
-            const Vec2 rectMax(imageMin.x + imageSize.x, imageMin.y + imageSize.y);
-            DrawTerrainBoundsOverlay(terrainUi, terrainUi.snapshot.viewProjection, rectMin, rectMax);
-            DrawWaterGizmos(waterUi, terrainUi.snapshot.viewProjection, rectMin, rectMax, imageHovered);
-        }
+
+        EditorViewContext view;
+        view.kind = EditorViewKind::Game;
+        view.rectMin = Vec2(imageMin.x, imageMin.y);
+        view.rectMax = Vec2(imageMin.x + imageSize.x, imageMin.y + imageSize.y);
+        view.viewProjection = RenderSystem::ResolveActiveCameraViewProjection(frame.game.GetRegistry(), avail.x / avail.y);
+        view.hovered = ImGui::IsItemHovered();
+        const EditorFeatureHooks& hooks = ctx.extensions.Get<EditorFeatureHooks>();
+        hooks.RunViewInput(view);
+        hooks.RunViewOverlay(view);
         if (ctx.hizDemo.active && ctx.hizDemo.geometryOnly) {
             DrawViewOverlayLabel(ImGui::GetItemRectMin(), ImGui::GetItemRectSize(), kHizDemoOverlayLabel, 0);
         }

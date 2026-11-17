@@ -3,6 +3,7 @@
 #include "TerrainCommands.h"
 #include "TerrainPanel.h"
 #include "TerrainUiBridge.h"
+#include "TerrainViewOverlay.h"
 #include "../../../Core/Core.h"
 #include "../../../Core/Plugins/BuiltinFeatureModuleRegistry.h"
 #include "../../../Editor/BuiltinFeatureEditorPanelRegistry.h"
@@ -38,6 +39,10 @@ void TerrainModule::OnAttach(const EditorModuleAttach& attach)
 {
     m_modules = &attach.modules;
     m_ui = attach.extensions != nullptr ? &attach.extensions->Get<TerrainUiBridge>() : nullptr;
+    m_hooks = attach.hooks;
+    if (m_hooks != nullptr) {
+        m_hooks->AddViewHook(this);
+    }
 }
 
 void TerrainModule::OnUiRequests()
@@ -82,8 +87,25 @@ std::optional<ModuleCommandResult> TerrainModule::OnCommand(const ModuleCommandR
     return ExecuteTerrainCommand(*m_world, request);
 }
 
+void TerrainModule::OnViewInput(const EditorViewContext& view)
+{
+    if (m_ui != nullptr && view.kind == EditorViewKind::Game) {
+        GatherTerrainCameraInput(*m_ui, view.pointerFree);
+    }
+}
+
+void TerrainModule::OnViewOverlay(const EditorViewContext& view)
+{
+    if (m_ui != nullptr) {
+        DrawTerrainBoundsOverlay(*m_ui, view.viewProjection, view.rectMin, view.rectMax);
+    }
+}
+
 void TerrainModule::OnShutdown()
 {
+    if (m_hooks != nullptr) {
+        m_hooks->RemoveViewHook(this);
+    }
     m_world.reset();
 }
 

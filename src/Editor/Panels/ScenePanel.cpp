@@ -5,12 +5,11 @@
 #include "../CameraFrustumOverlay.h"
 #include "../EditorCamera.h"
 #include "../EditorContext.h"
+#include "../EditorFeatureHooks.h"
 #include "../EditorFrame.h"
 #include "../SceneCameraFrustum.h"
 #include "../SceneOverlay.h"
 #include "../TransformGizmo.h"
-#include "../../Features/Terrain/Editor/TerrainViewOverlay.h"
-#include "../../Features/Water/Editor/WaterGizmoOverlay.h"
 #include "../../ECS/Components/Camera.h"
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"
@@ -208,8 +207,13 @@ void ScenePanel::OnGui(EditorFrame& frame)
     }
     BuildCameraOverlay(registry, ctx, camera, imageMin, imageSize, hovered);
     if (ctx.sceneCamera.rendered) {
-        DrawTerrainBoundsOverlay(ctx.extensions.Get<TerrainUiBridge>(), ctx.sceneCamera.viewProjection, ctx.sceneCamera.rectMin, ctx.sceneCamera.rectMax);
-        DrawWaterGizmos(ctx.extensions.Get<WaterUiBridge>(), ctx.sceneCamera.viewProjection, ctx.sceneCamera.rectMin, ctx.sceneCamera.rectMax, hovered);
+        EditorViewContext view;
+        view.kind = EditorViewKind::Scene;
+        view.rectMin = ctx.sceneCamera.rectMin;
+        view.rectMax = ctx.sceneCamera.rectMax;
+        view.viewProjection = ctx.sceneCamera.viewProjection;
+        view.hovered = hovered;
+        ctx.extensions.Get<EditorFeatureHooks>().RunViewOverlay(view);
     }
 
     // Transform gizmo of the selected entity, drawn with the Scene camera.

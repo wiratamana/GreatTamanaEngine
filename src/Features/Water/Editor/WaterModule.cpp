@@ -1,9 +1,11 @@
 #include "WaterModule.h"
 
 #include "WaterCommands.h"
+#include "WaterGizmoOverlay.h"
 #include "WaterPanel.h"
 #include "WaterUiBridge.h"
 #include "../../Terrain/Editor/TerrainModule.h"
+#include "../../Terrain/Editor/TerrainUiBridge.h"
 #include "../../../Core/Plugins/BuiltinFeatureModuleRegistry.h"
 #include "../../../Editor/BuiltinFeatureEditorPanelRegistry.h"
 #include "../../../Editor/EditorExtensions.h"
@@ -33,6 +35,11 @@ void WaterModule::OnAttach(const EditorModuleAttach& attach)
 {
     m_modules = &attach.modules;
     m_ui = attach.extensions != nullptr ? &attach.extensions->Get<WaterUiBridge>() : nullptr;
+    m_terrainUi = attach.extensions != nullptr ? &attach.extensions->Get<TerrainUiBridge>() : nullptr;
+    m_hooks = attach.hooks;
+    if (m_hooks != nullptr) {
+        m_hooks->AddViewHook(this);
+    }
 }
 
 void WaterModule::OnFrameTick(const EditorFrameTick& tick)
@@ -46,6 +53,24 @@ void WaterModule::OnFrameTick(const EditorFrameTick& tick)
     m_world->Tick(tick.nowSeconds);
 }
 
+bool WaterModule::ClaimsPointer() const noexcept
+{
+    return m_ui != nullptr && m_ui->handleHot;
+}
+
+void WaterModule::OnViewOverlay(const EditorViewContext& view)
+{
+    if (m_ui == nullptr) {
+        return;
+    }
+    // The Game view shows the gizmos only over an open landscape.
+    if (view.kind == EditorViewKind::Game && (m_terrainUi == nullptr || !m_terrainUi->snapshot.open)) {
+        m_ui->handleHot = false;
+        return;
+    }
+    DrawWaterGizmos(*m_ui, view.viewProjection, view.rectMin, view.rectMax, view.hovered);
+}
+
 std::optional<ModuleCommandResult> WaterModule::OnCommand(const ModuleCommandRequest& request)
 {
     if (m_world == nullptr) {
@@ -56,6 +81,9 @@ std::optional<ModuleCommandResult> WaterModule::OnCommand(const ModuleCommandReq
 
 void WaterModule::OnShutdown()
 {
+    if (m_hooks != nullptr) {
+        m_hooks->RemoveViewHook(this);
+    }
     if (m_ui != nullptr) {
         m_ui->world = nullptr;
     }

@@ -1,5 +1,7 @@
 #include "EditorFeatureModule.h"
 
+#include "EditorExtensions.h"
+#include "EditorFeatureHooks.h"
 #include "../Core/FeatureKit/FeatureRegistration.h"
 #include "../Core/Logging.h"
 
@@ -39,7 +41,7 @@ void EditorModuleSet::Attach(const std::vector<std::unique_ptr<IEngineFeatureMod
     }
     std::stable_sort(m_ordered.begin(), m_ordered.end(),
         [](const IEditorFeatureModule* a, const IEditorFeatureModule* b) { return a->TickOrder() < b->TickOrder(); });
-    const EditorModuleAttach attach{ *this, extensions };
+    const EditorModuleAttach attach{ *this, extensions, extensions != nullptr ? &extensions->Get<EditorFeatureHooks>() : nullptr };
     for (IEditorFeatureModule* module : m_ordered) {
         module->OnAttach(attach);
     }

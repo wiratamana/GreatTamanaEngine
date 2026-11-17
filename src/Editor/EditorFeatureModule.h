@@ -16,6 +16,7 @@
 namespace gte {
 
 class EditorExtensions;
+class EditorFeatureHooks;
 
 namespace fx { class Feature; }
 
@@ -42,6 +43,7 @@ public:
 struct EditorModuleAttach {
     const IEditorModuleDirectory& modules;
     EditorExtensions* extensions = nullptr; // Null when there is no editor UI.
+    EditorFeatureHooks* hooks = nullptr;    // View and menu hooks; null when there is no editor UI.
 };
 
 struct EditorFrameTick {

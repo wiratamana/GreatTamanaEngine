@@ -1,9 +1,10 @@
 #pragma once
 
-// Owns the live terrain world of the editor and drives it once per frame; also serves the terrain panel mailbox
-// and the terrain HTTP commands.
+// Owns the live terrain world of the editor and drives it once per frame; also serves the terrain panel mailbox,
+// the terrain HTTP commands and the terrain camera input and bounds overlay over the view images.
 
 #include "TerrainWorld.h"
+#include "../../../Editor/EditorFeatureHooks.h"
 #include "../../../Editor/EditorFeatureModule.h"
 
 #include <memory>
@@ -15,7 +16,7 @@ struct TerrainUiBridge;
 
 inline constexpr const char* kTerrainModuleName = "TerrainWorld";
 
-class TerrainModule final : public IEditorFeatureModule {
+class TerrainModule final : public IEditorFeatureModule, private IEditorViewHook {
 public:
     explicit TerrainModule(Core& core);
     ~TerrainModule() override;
@@ -32,10 +33,13 @@ public:
     terrain::ITerrainWorld* World() noexcept { return m_world.get(); }
 
 private:
+    void OnViewInput(const EditorViewContext& view) override;
+    void OnViewOverlay(const EditorViewContext& view) override;
     TerrainWorldServices MakeServices();
 
     Core& m_core;
     const IEditorModuleDirectory* m_modules = nullptr;
+    EditorFeatureHooks* m_hooks = nullptr;
     TerrainUiBridge* m_ui = nullptr;
     std::unique_ptr<TerrainWorld> m_world;
 };
