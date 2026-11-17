@@ -303,7 +303,7 @@ void BigWorldDemo::LoseTerrain()
 {
     if (m_state.phase == Phase::Ready) {
         Cleanup();
-        m_phaseWarnings.push_back("the terrain scene was replaced");
+        m_phaseWarnings.push_back(kSceneReplacedNote);
         m_state.warnings = m_phaseWarnings;
         Enter(Phase::Idle, "the scene was replaced; the Big World is closed");
         return;

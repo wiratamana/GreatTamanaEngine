@@ -114,7 +114,11 @@ void BigWorldModule::LogPhaseChange()
         GTE_LOG_INFO(kLogCategory, text);
     }
     for (const std::string& warning : state.warnings) {
-        GTE_LOG_WARNING(kLogCategory, warning);
+        if (warning == bigworld::kSceneReplacedNote) {
+            GTE_LOG_INFO(kLogCategory, warning);
+        } else {
+            GTE_LOG_WARNING(kLogCategory, warning);
+        }
     }
 }
 

@@ -26,6 +26,9 @@ enum class Phase {
 
 const char* PhaseName(Phase phase) noexcept;
 
+// Expected end of a demo whose scene another scene replaced; hosts may log it below warning level.
+inline constexpr const char* kSceneReplacedNote = "the terrain scene was replaced";
+
 struct GrassHealth {
     bool available = false;
     std::string status;      // Grass render status, "Ok" when it draws.
