@@ -7,18 +7,18 @@
 
 namespace gte {
 
-// One /terrain/<action> call: the action name plus the raw query pairs, parsed on the main thread.
-struct TerrainCommandRequest {
+// One module HTTP call (/terrain/<action>, /water/<action>): the action name plus the raw query pairs, parsed on the main thread.
+struct ModuleCommandRequest {
     std::string action;
     std::vector<std::pair<std::string, std::string>> params;
 };
 
-struct TerrainCommandResult {
+struct ModuleCommandResult {
     int httpStatus = 200;
     std::string contentType = "application/json";
     std::string body;
 };
 
-class TerrainCommandBridge : public SyncCommandBridge<TerrainCommandRequest, TerrainCommandResult> {};
+class ModuleCommandBridge : public SyncCommandBridge<ModuleCommandRequest, ModuleCommandResult> {};
 
 } // namespace gte

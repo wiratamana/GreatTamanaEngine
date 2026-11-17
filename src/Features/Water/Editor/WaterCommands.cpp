@@ -34,22 +34,22 @@ std::string JsonEscape(const std::string& text)
     return out;
 }
 
-TerrainCommandResult Fail(int status, const std::string& message)
+ModuleCommandResult Fail(int status, const std::string& message)
 {
-    TerrainCommandResult r;
+    ModuleCommandResult r;
     r.httpStatus = status;
     r.body = "{\"success\":false,\"error\":\"" + JsonEscape(message) + "\"}";
     return r;
 }
 
-TerrainCommandResult Json(const std::string& body)
+ModuleCommandResult Json(const std::string& body)
 {
-    TerrainCommandResult r;
+    ModuleCommandResult r;
     r.body = body;
     return r;
 }
 
-TerrainCommandResult Done(const water::WaterResult& outcome)
+ModuleCommandResult Done(const water::WaterResult& outcome)
 {
     if (!outcome.ok) {
         return Fail(409, outcome.message);
@@ -180,7 +180,7 @@ std::string BodySummary(const water::WaterBody& b)
         + "\",\"level\":" + std::to_string(b.level) + "}";
 }
 
-TerrainCommandResult StateCommand(water::IWaterWorld& world)
+ModuleCommandResult StateCommand(water::IWaterWorld& world)
 {
     const water::WaterStats s = world.Stats();
     std::string body = "{\"success\":true,\"revision\":" + std::to_string(s.revision) + ",\"bodyCount\":" + std::to_string(s.bodyCount)
@@ -201,7 +201,7 @@ TerrainCommandResult StateCommand(water::IWaterWorld& world)
     return Json(body);
 }
 
-TerrainCommandResult SetCommand(water::IWaterWorld& world, const Pairs& params)
+ModuleCommandResult SetCommand(water::IWaterWorld& world, const Pairs& params)
 {
     water::WaterSettings next = world.Settings();
     std::optional<double> debounce;
@@ -248,7 +248,7 @@ void ReadCommonBodyOptions(Query& q, water::WaterBody& b)
     if (const auto v = q.Flag("seal")) { b.sealRim = *v; }
 }
 
-TerrainCommandResult AddLake(water::IWaterWorld& world, const Pairs& params)
+ModuleCommandResult AddLake(water::IWaterWorld& world, const Pairs& params)
 {
     Query q(params);
     q.Allow({ "name", "cx", "cz", "sx", "sz", "points", "level", "depth", "shoreWidth", "bankWidth", "rimHeight", "waveScale", "carve", "seal", "auto_level" });
@@ -280,7 +280,7 @@ TerrainCommandResult AddLake(water::IWaterWorld& world, const Pairs& params)
     return Done(world.AddBody(b));
 }
 
-TerrainCommandResult AddRiver(water::IWaterWorld& world, const Pairs& params)
+ModuleCommandResult AddRiver(water::IWaterWorld& world, const Pairs& params)
 {
     Query q(params);
     q.Allow({ "name", "points", "width", "depth", "bankWidth", "waveScale", "carve", "level", "auto_level", "freeboard" });
@@ -323,7 +323,7 @@ TerrainCommandResult AddRiver(water::IWaterWorld& world, const Pairs& params)
     return Done(world.AddBody(b));
 }
 
-TerrainCommandResult SetBody(water::IWaterWorld& world, const Pairs& params)
+ModuleCommandResult SetBody(water::IWaterWorld& world, const Pairs& params)
 {
     Query q(params);
     q.Allow({ "id", "name", "level", "depth", "shoreWidth", "bankWidth", "rimHeight", "waveScale", "carve", "seal" });
@@ -344,7 +344,7 @@ TerrainCommandResult SetBody(water::IWaterWorld& world, const Pairs& params)
     return Done(world.UpdateBody(b));
 }
 
-TerrainCommandResult PointCommand(water::IWaterWorld& world, const Pairs& params, const std::string& action)
+ModuleCommandResult PointCommand(water::IWaterWorld& world, const Pairs& params, const std::string& action)
 {
     Query q(params);
     q.Allow({ "id", "index", "x", "z", "y", "w" });
@@ -377,7 +377,7 @@ TerrainCommandResult PointCommand(water::IWaterWorld& world, const Pairs& params
         w ? std::optional<float>(static_cast<float>(*w)) : std::nullopt));
 }
 
-TerrainCommandResult ProbeCommand(water::IWaterWorld& world, const Pairs& params)
+ModuleCommandResult ProbeCommand(water::IWaterWorld& world, const Pairs& params)
 {
     Query q(params);
     q.Allow({ "x", "z" });
@@ -404,7 +404,7 @@ TerrainCommandResult ProbeCommand(water::IWaterWorld& world, const Pairs& params
     return Json(body);
 }
 
-TerrainCommandResult MapCommand(water::IWaterWorld& world, const Pairs& params)
+ModuleCommandResult MapCommand(water::IWaterWorld& world, const Pairs& params)
 {
     Query q(params);
     q.Allow({ "size", "cx", "cz", "range", "outlines", "shore" });
@@ -429,7 +429,7 @@ TerrainCommandResult MapCommand(water::IWaterWorld& world, const Pairs& params)
             return h ? static_cast<float>(h->carvedHeight) : 0.0f;
         }, view, options);
         const std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(image.rgba.data(), image.size, image.size);
-        TerrainCommandResult result;
+        ModuleCommandResult result;
         result.contentType = "image/png";
         result.body.assign(reinterpret_cast<const char*>(png.data()), png.size());
         return result;
@@ -438,7 +438,7 @@ TerrainCommandResult MapCommand(water::IWaterWorld& world, const Pairs& params)
     }
 }
 
-TerrainCommandResult FileCommand(water::IWaterWorld& world, const Pairs& params, bool save)
+ModuleCommandResult FileCommand(water::IWaterWorld& world, const Pairs& params, bool save)
 {
     Query q(params);
     q.Allow({ "path" });
@@ -449,7 +449,7 @@ TerrainCommandResult FileCommand(water::IWaterWorld& world, const Pairs& params,
     return Done(save ? world.SaveFile(*path) : world.LoadFile(*path));
 }
 
-TerrainCommandResult LeakCommand(water::IWaterWorld& world, const Pairs& params)
+ModuleCommandResult LeakCommand(water::IWaterWorld& world, const Pairs& params)
 {
     Query q(params);
     q.Allow({ "id" });
@@ -473,7 +473,7 @@ TerrainCommandResult LeakCommand(water::IWaterWorld& world, const Pairs& params)
 
 } // namespace
 
-TerrainCommandResult ExecuteWaterCommand(water::IWaterWorld& world, const TerrainCommandRequest& request)
+ModuleCommandResult ExecuteWaterCommand(water::IWaterWorld& world, const ModuleCommandRequest& request)
 {
     const std::string action = request.action.rfind("water.", 0) == 0 ? request.action.substr(6) : request.action;
     const Pairs& params = request.params;

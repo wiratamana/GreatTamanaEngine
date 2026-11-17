@@ -36,20 +36,20 @@ std::string JsonEscape(const std::string& text)
     return out;
 }
 
-TerrainCommandResult Fail(int status, const std::string& message)
+ModuleCommandResult Fail(int status, const std::string& message)
 {
-    TerrainCommandResult result;
+    ModuleCommandResult result;
     result.httpStatus = status;
     result.body = "{\"success\":false,\"error\":\"" + JsonEscape(message) + "\"}";
     return result;
 }
 
-TerrainCommandResult Done(const terrain::TerrainResult& outcome)
+ModuleCommandResult Done(const terrain::TerrainResult& outcome)
 {
     if (!outcome.ok) {
         return Fail(409, outcome.message);
     }
-    TerrainCommandResult result;
+    ModuleCommandResult result;
     result.body = "{\"success\":true,\"message\":\"" + JsonEscape(outcome.message) + "\"}";
     return result;
 }
@@ -121,9 +121,9 @@ bool ApplyRuntimeKey(terrain::TerrainRuntimeOptions& options, const std::string&
     return false;
 }
 
-TerrainCommandResult StateCommand(terrain::ITerrainWorld& world)
+ModuleCommandResult StateCommand(terrain::ITerrainWorld& world)
 {
-    TerrainCommandResult result;
+    ModuleCommandResult result;
     const terrain::TerrainRuntimeOptions& runtime = world.RuntimeOptions();
     std::string body = terrain::TerrainStatsToJson(world.Stats());
     body.pop_back();
@@ -139,7 +139,7 @@ TerrainCommandResult StateCommand(terrain::ITerrainWorld& world)
 }
 
 // One call applies every key: settings and runtime options together, preview and debug flags last.
-TerrainCommandResult SetCommand(terrain::ITerrainWorld& world, const Pairs& params)
+ModuleCommandResult SetCommand(terrain::ITerrainWorld& world, const Pairs& params)
 {
     terrain::TerrainSettings settings = world.Settings();
     terrain::TerrainRuntimeOptions runtime = world.RuntimeOptions();
@@ -210,12 +210,12 @@ TerrainCommandResult SetCommand(terrain::ITerrainWorld& world, const Pairs& para
     if (debugAabb.has_value()) {
         world.SetDebugAabb(*debugAabb);
     }
-    TerrainCommandResult result;
+    ModuleCommandResult result;
     result.body = "{\"success\":true,\"message\":\"" + JsonEscape(message) + "\"}";
     return result;
 }
 
-TerrainCommandResult OpenCommand(terrain::ITerrainWorld& world, const Pairs& params)
+ModuleCommandResult OpenCommand(terrain::ITerrainWorld& world, const Pairs& params)
 {
     terrain::TerrainOpenOptions options;
     for (const auto& [key, value] : params) {
@@ -248,7 +248,7 @@ TerrainCommandResult OpenCommand(terrain::ITerrainWorld& world, const Pairs& par
     return Done(world.Open(options));
 }
 
-TerrainCommandResult FlightCommand(terrain::ITerrainWorld& world, const Pairs& params)
+ModuleCommandResult FlightCommand(terrain::ITerrainWorld& world, const Pairs& params)
 {
     terrain::FlightSpec spec;
     for (const auto& [key, value] : params) {
@@ -294,7 +294,7 @@ TerrainCommandResult FlightCommand(terrain::ITerrainWorld& world, const Pairs& p
     return Done(world.StartFlight(spec));
 }
 
-TerrainCommandResult PathCommand(terrain::ITerrainWorld& world, const Pairs& params, bool save)
+ModuleCommandResult PathCommand(terrain::ITerrainWorld& world, const Pairs& params, bool save)
 {
     std::string path;
     for (const auto& [key, value] : params) {
@@ -311,7 +311,7 @@ TerrainCommandResult PathCommand(terrain::ITerrainWorld& world, const Pairs& par
 }
 
 // Top-down PNG of the resident nodes, the camera and its view wedge (colours explained in docs/debugging/terrain.md).
-TerrainCommandResult MapCommand(terrain::ITerrainWorld& world, const Pairs& params)
+ModuleCommandResult MapCommand(terrain::ITerrainWorld& world, const Pairs& params)
 {
     terrain::MapOptions options;
     for (const auto& [key, value] : params) {
@@ -369,7 +369,7 @@ TerrainCommandResult MapCommand(terrain::ITerrainWorld& world, const Pairs& para
     try {
         const terrain::MapImage image = terrain::RenderTerrainMap(nodes, camera, options);
         const std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(image.rgba.data(), image.width, image.height);
-        TerrainCommandResult result;
+        ModuleCommandResult result;
         result.contentType = "image/png";
         result.body.assign(reinterpret_cast<const char*>(png.data()), png.size());
         return result;
@@ -378,7 +378,7 @@ TerrainCommandResult MapCommand(terrain::ITerrainWorld& world, const Pairs& para
     }
 }
 
-TerrainCommandResult CameraCommand(terrain::ITerrainWorld& world, const Pairs& params)
+ModuleCommandResult CameraCommand(terrain::ITerrainWorld& world, const Pairs& params)
 {
     terrain::TerrainCameraPose pose;
     std::optional<terrain::CameraMode> mode;
@@ -434,7 +434,7 @@ TerrainCommandResult CameraCommand(terrain::ITerrainWorld& world, const Pairs& p
 }
 
 // Scripted input for tests: the same CameraInput the mouse and keys make, repeated for `frames` frames.
-TerrainCommandResult CameraInputCommand(terrain::ITerrainWorld& world, const Pairs& params)
+ModuleCommandResult CameraInputCommand(terrain::ITerrainWorld& world, const Pairs& params)
 {
     terrain::CameraInput input;
     int frames = 1;
@@ -476,7 +476,7 @@ TerrainCommandResult CameraInputCommand(terrain::ITerrainWorld& world, const Pai
     return Done(world.QueueCameraInput(input, frames));
 }
 
-TerrainCommandResult HeightCommand(terrain::ITerrainWorld& world, const Pairs& params)
+ModuleCommandResult HeightCommand(terrain::ITerrainWorld& world, const Pairs& params)
 {
     double x = 0.0;
     double z = 0.0;
@@ -499,13 +499,13 @@ TerrainCommandResult HeightCommand(terrain::ITerrainWorld& world, const Pairs& p
     if (!probe) {
         return Fail(409, "open the terrain first");
     }
-    TerrainCommandResult result;
+    ModuleCommandResult result;
     result.body = "{\"success\":true,\"baseHeight\":" + std::to_string(probe->baseHeight) + ",\"carvedHeight\":"
         + std::to_string(probe->carvedHeight) + ",\"carveDelta\":" + std::to_string(probe->carvedHeight - probe->baseHeight) + "}";
     return result;
 }
 
-TerrainCommandResult OceanQuadCommand(terrain::ITerrainWorld& world, const Pairs& params)
+ModuleCommandResult OceanQuadCommand(terrain::ITerrainWorld& world, const Pairs& params)
 {
     for (const auto& [key, value] : params) {
         bool flag = false;
@@ -514,21 +514,21 @@ TerrainCommandResult OceanQuadCommand(terrain::ITerrainWorld& world, const Pairs
         }
         world.SetOceanQuadVisible(flag);
     }
-    TerrainCommandResult result;
+    ModuleCommandResult result;
     result.body = std::string("{\"success\":true,\"oceanQuadVisible\":") + (world.OceanQuadVisible() ? "true" : "false") + "}";
     return result;
 }
 
 } // namespace
 
-TerrainCommandResult ExecuteTerrainCommand(terrain::ITerrainWorld& world, const TerrainCommandRequest& request)
+ModuleCommandResult ExecuteTerrainCommand(terrain::ITerrainWorld& world, const ModuleCommandRequest& request)
 {
     const std::string& action = request.action;
     if (action == "state") {
         return StateCommand(world);
     }
     if (action == "settings") {
-        TerrainCommandResult result;
+        ModuleCommandResult result;
         result.body = terrain::SettingsToJson(world.Settings());
         return result;
     }

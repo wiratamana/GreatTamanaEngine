@@ -16,7 +16,7 @@
 #include "../Application/FrameCaptureBridge.h"
 #include "../Application/FrameDebuggerCommandBridge.h"
 #include "../Application/PhysicsDebugCommandBridge.h"
-#include "../Application/TerrainCommandBridge.h"
+#include "../Application/ModuleCommandBridge.h"
 #include "../Application/RenderGraphControlCommandBridge.h"
 #include "../Core/EditorCapabilities.h" // ILogQueryCapability.
 #include "../Core/Logging.h"
@@ -869,7 +869,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     RenderGraphControlCommandBridge* renderGraphControlCommandBridge, IHotReloadDebugCapability* hotReloadDebugCapability,
     IProjectLifecycleCapability* projectLifecycleCapability, IAssetScaffoldingCapability* assetScaffoldingCapability,
     FeatureDebugCommandBridge* featureDebugCommandBridge, ProfilerSnapshotBridge* profilerSnapshotBridge,
-    PhysicsDebugCommandBridge* physicsDebugCommandBridge, TerrainCommandBridge* terrainCommandBridge)
+    PhysicsDebugCommandBridge* physicsDebugCommandBridge, ModuleCommandBridge* terrainCommandBridge)
 {
     server.Get("/http_hello_world", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(HandleHelloWorld(), "text/plain; charset=utf-8");
@@ -2540,7 +2540,7 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     RenderGraphControlCommandBridge* renderGraphControlCommandBridge, IHotReloadDebugCapability* hotReloadDebugCapability,
     IProjectLifecycleCapability* projectLifecycleCapability, IAssetScaffoldingCapability* assetScaffoldingCapability,
     FeatureDebugCommandBridge* featureDebugCommandBridge, ProfilerSnapshotBridge* profilerSnapshotBridge,
-    PhysicsDebugCommandBridge* physicsDebugCommandBridge, TerrainCommandBridge* terrainCommandBridge)
+    PhysicsDebugCommandBridge* physicsDebugCommandBridge, ModuleCommandBridge* terrainCommandBridge)
     : m_impl(std::make_unique<Impl>())
     , m_captureBridge(captureBridge)
     , m_commandBridge(commandBridge)

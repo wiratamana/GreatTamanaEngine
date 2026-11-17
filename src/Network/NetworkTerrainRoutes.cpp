@@ -2,7 +2,7 @@
 
 #include "NetworkRoutes.h"
 
-#include "../Application/TerrainCommandBridge.h"
+#include "../Application/ModuleCommandBridge.h"
 
 #include <httplib.h>
 
@@ -30,12 +30,12 @@ void Respond(httplib::Response& res, int status, const std::string& body, const 
 
 } // namespace
 
-void RegisterTerrainRoutes(httplib::Server& server, TerrainCommandBridge* bridge, TerrainBrowserRefusal refuseBrowser)
+void RegisterTerrainRoutes(httplib::Server& server, ModuleCommandBridge* bridge, TerrainBrowserRefusal refuseBrowser)
 {
     // One main-thread executor serves both families; /water/<action> arrives as the action "water.<action>".
     const auto handler = [bridge, refuseBrowser](const char* prefix) {
         return [bridge, refuseBrowser, prefix](const httplib::Request& req, httplib::Response& res) {
-        TerrainCommandRequest request;
+        ModuleCommandRequest request;
         request.action = prefix + req.matches[1].str();
         if (!IsReadOnlyAction(request.action) && refuseBrowser(req, res)) {
             return;
@@ -47,7 +47,7 @@ void RegisterTerrainRoutes(httplib::Server& server, TerrainCommandBridge* bridge
         for (const auto& [key, value] : req.params) {
             request.params.emplace_back(key, value);
         }
-        TerrainCommandBridge::SubmitResult submit = bridge->SubmitAndWait(std::move(request), kTimeoutMilliseconds);
+        ModuleCommandBridge::SubmitResult submit = bridge->SubmitAndWait(std::move(request), kTimeoutMilliseconds);
         if (submit.alreadyPending) {
             Respond(res, 503, BuildGenericErrorResponseJson("another terrain command is running, retry"));
             return;

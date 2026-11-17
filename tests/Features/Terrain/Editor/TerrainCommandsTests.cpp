@@ -12,10 +12,10 @@ namespace {
 
 using FakeWorld = FakeTerrainWorld;
 
-TerrainCommandResult Exec(FakeWorld& world, const std::string& action,
+ModuleCommandResult Exec(FakeWorld& world, const std::string& action,
     std::vector<std::pair<std::string, std::string>> params = {})
 {
-    return ExecuteTerrainCommand(world, TerrainCommandRequest{ action, std::move(params) });
+    return ExecuteTerrainCommand(world, ModuleCommandRequest{ action, std::move(params) });
 }
 
 } // namespace
@@ -23,7 +23,7 @@ TerrainCommandResult Exec(FakeWorld& world, const std::string& action,
 TEST(TerrainCommandsTest, StateReportsStatsRuntimeAndSettings)
 {
     FakeWorld world;
-    const TerrainCommandResult result = Exec(world, "state");
+    const ModuleCommandResult result = Exec(world, "state");
     EXPECT_EQ(result.httpStatus, 200);
     EXPECT_NE(result.body.find("\"runtime\":{"), std::string::npos);
     EXPECT_NE(result.body.find("\"settings\":{"), std::string::npos);
@@ -34,7 +34,7 @@ TEST(TerrainCommandsTest, StateReportsStatsRuntimeAndSettings)
 TEST(TerrainCommandsTest, SetAppliesAllKeysInOneSettingsCall)
 {
     FakeWorld world;
-    const TerrainCommandResult result =
+    const ModuleCommandResult result =
         Exec(world, "set", { { "heightScale", "800" }, { "seed", "5" }, { "maxVisibleNodes", "200" }, { "livePreview", "true" } });
     EXPECT_EQ(result.httpStatus, 200);
     EXPECT_FLOAT_EQ(world.settings.heightScale, 800.0f);
@@ -47,7 +47,7 @@ TEST(TerrainCommandsTest, SetAppliesAllKeysInOneSettingsCall)
 TEST(TerrainCommandsTest, SetRejectsUnknownKeysWithoutChangingAnything)
 {
     FakeWorld world;
-    const TerrainCommandResult result = Exec(world, "set", { { "heightScale", "800" }, { "bogus", "1" } });
+    const ModuleCommandResult result = Exec(world, "set", { { "heightScale", "800" }, { "bogus", "1" } });
     EXPECT_EQ(result.httpStatus, 400);
     EXPECT_NE(result.body.find("bogus"), std::string::npos);
     EXPECT_EQ(world.settingsCalls, 0);
@@ -56,7 +56,7 @@ TEST(TerrainCommandsTest, SetRejectsUnknownKeysWithoutChangingAnything)
 TEST(TerrainCommandsTest, OpenParsesProfileSlotsWaterAndBudget)
 {
     FakeWorld world;
-    const TerrainCommandResult result =
+    const ModuleCommandResult result =
         Exec(world, "open", { { "profile", "geometry_only" }, { "poolSlots", "300" }, { "water", "false" }, { "budget", "false" } });
     EXPECT_EQ(result.httpStatus, 200);
     EXPECT_TRUE(world.open);
@@ -72,7 +72,7 @@ TEST(TerrainCommandsTest, OpenParsesProfileSlotsWaterAndBudget)
 TEST(TerrainCommandsTest, FlightMapsEveryOption)
 {
     FakeWorld world;
-    const TerrainCommandResult result = Exec(world, "flight",
+    const ModuleCommandResult result = Exec(world, "flight",
         { { "kind", "line" }, { "x", "10" }, { "z", "-20" }, { "heading", "40" }, { "speed", "300" }, { "alt", "120" },
             { "lookDown", "5" }, { "fixedStep", "0.016" }, { "duration", "30" } });
     EXPECT_EQ(result.httpStatus, 200);
@@ -115,7 +115,7 @@ TEST(TerrainCommandsTest, MapIsAPngAndNeedsAnOpenWorld)
     world.nodes.back().maxX = 100.0;
     world.nodes.back().minZ = -100.0;
     world.nodes.back().maxZ = 100.0;
-    const TerrainCommandResult result = Exec(world, "map", { { "size", "128" }, { "mode", "state" } });
+    const ModuleCommandResult result = Exec(world, "map", { { "size", "128" }, { "mode", "state" } });
     ASSERT_EQ(result.httpStatus, 200);
     EXPECT_EQ(result.contentType, "image/png");
     ASSERT_GT(result.body.size(), 8u);
@@ -128,7 +128,7 @@ TEST(TerrainCommandsTest, MapIsAPngAndNeedsAnOpenWorld)
 TEST(TerrainCommandsTest, CameraSetsModeAndPose)
 {
     FakeWorld world;
-    const TerrainCommandResult result =
+    const ModuleCommandResult result =
         Exec(world, "cam", { { "mode", "orbit" }, { "x", "100" }, { "alt", "250" }, { "yaw", "45" }, { "pitch", "20" }, { "dist", "800" } });
     EXPECT_EQ(result.httpStatus, 200);
     EXPECT_EQ(world.cameraMode, terrain::CameraMode::Orbit);
@@ -145,7 +145,7 @@ TEST(TerrainCommandsTest, CameraSetsModeAndPose)
 TEST(TerrainCommandsTest, CameraInputQueuesFramesOfInput)
 {
     FakeWorld world;
-    const TerrainCommandResult result =
+    const ModuleCommandResult result =
         Exec(world, "cam_input", { { "fwd", "1" }, { "boost", "true" }, { "lookx", "12" }, { "frames", "30" } });
     EXPECT_EQ(result.httpStatus, 200);
     EXPECT_FLOAT_EQ(world.queued.moveForward, 1.0f);

@@ -2,11 +2,11 @@
 
 // Runs one /terrain/<action> HTTP command on the main thread against the terrain world.
 
-#include "../../../Application/TerrainCommandBridge.h"
+#include "../../../Application/ModuleCommandBridge.h"
 #include "../TerrainControl.h"
 
 namespace gte {
 
-TerrainCommandResult ExecuteTerrainCommand(terrain::ITerrainWorld& world, const TerrainCommandRequest& request);
+ModuleCommandResult ExecuteTerrainCommand(terrain::ITerrainWorld& world, const ModuleCommandRequest& request);
 
 } // namespace gte

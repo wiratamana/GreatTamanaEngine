@@ -41,8 +41,6 @@
 #include "Panels/ProjectPanel.h"
 #endif
 #include "Panels/ScenePanel.h"
-#include "../Features/Terrain/Editor/TerrainPanel.h"
-#include "../Features/Water/Editor/WaterPanel.h"
 #include "SceneCameraAdapter.h"
 #include "TransformGizmo.h"
 #include "../Game/Game.h"
@@ -545,8 +543,7 @@ public:
     {
         return { &m_ctx.instanceGrid, &m_ctx.hizDemo, &m_ctx.hizDemoMenuAction, &m_ctx.hizDemoMenuResult };
     }
-    TerrainUiBridge* TerrainUi() noexcept override { return &m_ctx.terrainUi; }
-    WaterUiBridge* WaterUi() noexcept override { return &m_ctx.waterUi; }
+    EditorExtensions* Extensions() noexcept override { return &m_ctx.extensions; }
     void OnMeshCloneFinished(const std::string& createdPathUtf8, bool openViewer) override
     {
         if (openViewer) {
@@ -814,8 +811,6 @@ private:
         visit(m_boneViewer);
 #endif
         visit(m_clusterViewer);
-        visit(m_terrainPanel);
-    visit(m_waterPanel);
     }
 
     void ReleaseGameViewDescriptor()
@@ -915,8 +910,6 @@ private:
 #endif
 
     ClusterViewerWindow m_clusterViewer;
-    TerrainPanel m_terrainPanel;
-    WaterPanel m_waterPanel;
 
     // HTTP access to the Scene panel's cameras; refreshed every BuildUI().
     SceneCameraAdapter m_sceneCameraAdapter;

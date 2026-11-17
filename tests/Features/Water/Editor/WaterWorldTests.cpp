@@ -65,9 +65,9 @@ struct Rig {
     Rig() { terrain.open = true; }
 };
 
-TerrainCommandResult Exec(Rig& rig, const std::string& action, std::vector<std::pair<std::string, std::string>> params = {})
+ModuleCommandResult Exec(Rig& rig, const std::string& action, std::vector<std::pair<std::string, std::string>> params = {})
 {
-    TerrainCommandRequest request;
+    ModuleCommandRequest request;
     request.action = "water." + action;
     request.params = std::move(params);
     return ExecuteWaterCommand(rig.world, request);
@@ -245,7 +245,7 @@ TEST(WaterWorldTests, ProbeReportsDepthAndShoreDistance)
 TEST(WaterCommandsTests, AddListProbeMoveRemoveThroughTheRoutes)
 {
     Rig rig;
-    TerrainCommandResult r = Exec(rig, "add_lake", { { "cx", "100" }, { "cz", "100" }, { "sx", "120" }, { "sz", "80" }, { "level", "7" }, { "name", "Pond" } });
+    ModuleCommandResult r = Exec(rig, "add_lake", { { "cx", "100" }, { "cz", "100" }, { "sx", "120" }, { "sz", "80" }, { "level", "7" }, { "name", "Pond" } });
     ASSERT_EQ(r.httpStatus, 200) << r.body;
     EXPECT_TRUE(Contains(r.body, "\"id\":2"));
 
@@ -300,7 +300,7 @@ TEST(WaterCommandsTests, AddListProbeMoveRemoveThroughTheRoutes)
 TEST(WaterCommandsTests, SetStateMapAndLeaks)
 {
     Rig rig;
-    TerrainCommandResult r = Exec(rig, "set", { { "waveHeight", "2.5" }, { "ssrEnabled", "true" }, { "shallowColor", "0.1,0.2,0.3" }, { "carveDebounce", "0.1" } });
+    ModuleCommandResult r = Exec(rig, "set", { { "waveHeight", "2.5" }, { "ssrEnabled", "true" }, { "shallowColor", "0.1,0.2,0.3" }, { "carveDebounce", "0.1" } });
     ASSERT_EQ(r.httpStatus, 200) << r.body;
     EXPECT_FLOAT_EQ(rig.world.Settings().waveHeight, 2.5f);
     EXPECT_TRUE(rig.world.Settings().ssrEnabled);
@@ -336,7 +336,7 @@ TEST(WaterCommandsTests, SetStateMapAndLeaks)
 TEST(WaterCommandsTests, AddLakeCanPickItsLevelFromTheGround)
 {
     Rig rig;
-    const TerrainCommandResult r = Exec(rig, "add_lake", { { "cx", "0" }, { "cz", "0" }, { "sx", "100" }, { "sz", "100" }, { "auto_level", "true" } });
+    const ModuleCommandResult r = Exec(rig, "add_lake", { { "cx", "0" }, { "cz", "0" }, { "sx", "100" }, { "sz", "100" }, { "auto_level", "true" } });
     ASSERT_EQ(r.httpStatus, 200) << r.body;
     // The lowest outline ground of the fake slope is at (-50, -50): 100 - 0.5 - 1.0 = 98.5.
     EXPECT_NEAR(rig.world.Bodies()->Find(2)->level, 98.5f, 1.0f);

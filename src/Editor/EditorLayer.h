@@ -36,8 +36,7 @@ namespace gte {
 class Window;
 class Renderer;
 class Game;
-struct TerrainUiBridge;
-struct WaterUiBridge;
+class EditorExtensions;
 
 namespace rg {
 class RenderGraph;
@@ -387,11 +386,8 @@ public:
     // Editor state the Hi-Z demo works on. All null for NullEditorLayer.
     virtual HizDemoEditorHandles HizDemoHandles() noexcept = 0;
 
-    // Mailbox of the Terrain panel (see Terrain/TerrainUiBridge.h). nullptr for NullEditorLayer.
-    virtual TerrainUiBridge* TerrainUi() noexcept { return nullptr; }
-
-    // State of the Water panel and gizmos (see Water/WaterUiBridge.h). nullptr for NullEditorLayer.
-    virtual WaterUiBridge* WaterUi() noexcept { return nullptr; }
+    // Per-type UI state shared by feature modules and their windows. nullptr for NullEditorLayer.
+    virtual EditorExtensions* Extensions() noexcept { return nullptr; }
 };
 
 // Creates the real ImGui-backed editor layer (defined in src/Editor/ImGuiEditorLayer.cpp).

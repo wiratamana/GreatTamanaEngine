@@ -1,10 +1,6 @@
 #include "EditorHost.h"
 
 #include "Logger.h"
-#include "../Features/Terrain/Editor/TerrainCommands.h"
-#include "../Features/Water/Editor/WaterCommands.h"
-#include "../Features/Water/Editor/WaterUiBridge.h"
-#include "../Features/Terrain/Editor/TerrainUiBridge.h"
 #include "../Game/RenderSystem.h"
 #include "EditorSceneIOCapability.h"
 #include "EditorLogQueryCapability.h"
@@ -443,7 +439,7 @@ EditorHost::EditorHost(const std::string& title, int width, int height, bool for
     , m_networkServer(&m_captureBridge, &m_commandBridge, &m_uiCommandBridge, &m_frameDebuggerCommandBridge,
           &m_assetImportCommandBridge, &s_editorLogQueryCapability, &m_renderGraphControlCommandBridge,
           &s_editorHotReloadDebugCapability, &s_editorProjectLifecycleCapability, &s_editorProjectLifecycleCapability,
-          &m_featureDebugCommandBridge, &m_profilerBridge, &m_physicsDebugCommandBridge, &m_terrainCommandBridge)
+          &m_featureDebugCommandBridge, &m_profilerBridge, &m_physicsDebugCommandBridge, &m_moduleCommandBridge)
 {
     m_renderer.LogValidationState();
 
@@ -504,6 +500,7 @@ EditorHost::EditorHost(const std::string& title, int width, int height, bool for
     // Feature windows register after the built-in and project windows, so they come last.
     m_builtinFeatureModules = BuiltinFeatureModuleRegistry::Instance().CreateAll(m_core);
     m_editorLayer->AttachBuiltinFeatureModules(m_builtinFeatureModules, m_renderer, m_renderGraph);
+    m_editorModules.Attach(m_builtinFeatureModules, m_editorLayer->Extensions());
 
     // Scene IO for the engine command dispatch. One process-lifetime instance; the demo handles are resolved per call.
     static EditorSceneIOCapability s_editorSceneIOCapability;
@@ -600,49 +597,6 @@ HizDemoServices EditorHost::MakeHizDemoServices()
         fx::Feature* feature = module ? fx::FindFeature(*module) : nullptr;
         if (feature != nullptr && std::string_view(feature->Name()) == "GpuDrivenScene") {
             services.gpuDrivenScene = feature->DebugEndpoint();
-            break;
-        }
-    }
-    return services;
-}
-
-TerrainWorldServices EditorHost::MakeTerrainWorldServices()
-{
-    TerrainWorldServices services;
-    services.game = &m_game;
-    services.renderer = &m_renderer;
-    services.sceneServicesSetLayout = m_core.GetSceneServicesDescriptorSet().LayoutHandle();
-    services.compositor = m_core.GetRenderFeatureCompositor();
-    services.findEndpoint = [this](std::string_view name) -> fx::IFeatureDebugEndpoint* {
-        for (const std::unique_ptr<IEngineFeatureModule>& module : m_builtinFeatureModules) {
-            fx::Feature* feature = module ? fx::FindFeature(*module) : nullptr;
-            if (feature != nullptr && std::string_view(feature->Name()) == name) {
-                return feature->DebugEndpoint();
-            }
-        }
-        return nullptr;
-    };
-    services.gpuDrivenScene = services.findEndpoint("GpuDrivenScene");
-    return services;
-}
-
-WaterWorldServices EditorHost::MakeWaterWorldServices()
-{
-    WaterWorldServices services;
-    services.terrain = &m_terrainWorld;
-    services.waterFeature = MakeTerrainWorldServices().findEndpoint("Water");
-    return services;
-}
-
-GrassTileServices EditorHost::MakeGrassTileServices()
-{
-    GrassTileServices services;
-    services.terrain = &m_terrainWorld;
-    services.water = &m_waterWorld;
-    for (const std::unique_ptr<IEngineFeatureModule>& module : m_builtinFeatureModules) {
-        fx::Feature* feature = module ? fx::FindFeature(*module) : nullptr;
-        if (feature != nullptr && std::string_view(feature->Name()) == kGrassFeatureName) {
-            services.grass = dynamic_cast<GrassFeature*>(feature);
             break;
         }
     }
@@ -774,18 +728,14 @@ int EditorHost::Run()
             FulfillOrLogDrop(m_physicsDebugCommandBridge, pdPending->id, pdResult, "PhysicsDebug");
         }
 
-        // The Terrain panel's edits are applied first, so an HTTP command of the same frame sees them.
-        if (TerrainUiBridge* const panelBridge = m_editorLayer->TerrainUi()) {
-            ApplyTerrainUiRequest(m_terrainWorld, *panelBridge);
-        }
+        // Panel edits of the feature modules are applied first, so an HTTP command of the same frame sees them.
+        m_editorModules.ApplyUiRequests();
 
-        // Terrain commands run on the main thread, at most one per frame.
-        if (const auto terrainPending = m_terrainCommandBridge.TryPeekPendingCommand()) {
-            GTE_PROFILE_SCOPE("EditorHost::ExecuteTerrainCommand");
-            const TerrainCommandResult terrainResult = IsWaterAction(terrainPending->request.action)
-                ? ExecuteWaterCommand(m_waterWorld, terrainPending->request)
-                : ExecuteTerrainCommand(m_terrainWorld, terrainPending->request);
-            FulfillOrLogDrop(m_terrainCommandBridge, terrainPending->id, terrainResult, "Terrain");
+        // Module commands run on the main thread, at most one per frame.
+        if (const auto modulePending = m_moduleCommandBridge.TryPeekPendingCommand()) {
+            GTE_PROFILE_SCOPE("EditorHost::ExecuteModuleCommand");
+            const ModuleCommandResult moduleResult = m_editorModules.RunCommand(modulePending->request);
+            FulfillOrLogDrop(m_moduleCommandBridge, modulePending->id, moduleResult, "ModuleCommand");
         }
 
         ServiceHizDemoMenuAction();
@@ -826,37 +776,8 @@ int EditorHost::Run()
         // Stamps log entries until the next Advance() with this frame's number; lives here because Core must not include Logger.h.
         gte::Logger::SetCurrentFrame(m_engineContext.time.FrameCount());
 
-        // Streams the terrain world (when open) right after the game update, before this frame's draw is built.
-        TerrainUiBridge* const terrainUi = m_editorLayer->TerrainUi();
-        std::optional<Mat4> terrainViewProjection;
-        if (m_terrainWorld.IsOpen()) {
-            TerrainTickContext terrainTick;
-            if (const std::optional<fx::View> primary = m_core.PrimaryCameraView(terrainTick.aspect);
-                primary.has_value() && primary->extent.width > 0 && primary->extent.height > 0) {
-                terrainTick.aspect = static_cast<float>(primary->extent.width) / static_cast<float>(primary->extent.height);
-            }
-            terrainTick.gpuFrame = m_engineContext.gpuFrame;
-            terrainTick.nowSeconds = static_cast<double>(nowTicksNs) / 1.0e9;
-            terrainTick.deltaSeconds = deltaSeconds;
-            terrainTick.frameIndex = m_engineContext.time.FrameCount();
-            m_terrainWorld.Tick(terrainTick);
-            if (terrainUi != nullptr && m_terrainWorld.IsOpen()) {
-                terrainViewProjection = RenderSystem::ResolveActiveCameraViewProjection(m_game.GetRegistry(), terrainTick.aspect);
-            }
-        }
-        if (terrainUi != nullptr) {
-            PublishTerrainSnapshot(m_terrainWorld, *terrainUi, terrainViewProjection ? &*terrainViewProjection : nullptr);
-        }
-        if (WaterUiBridge* const waterUi = m_editorLayer->WaterUi()) {
-            waterUi->world = &m_waterWorld;
-        }
-        m_waterWorld.Tick(static_cast<double>(nowTicksNs) / 1.0e9);
-        if (m_terrainWorld.IsOpen()) {
-            const Vec3 grassEye = RenderSystem::ResolveActiveCameraWorldPosition(m_game.GetRegistry());
-            m_grassTiles.Tick(static_cast<double>(nowTicksNs) / 1.0e9, static_cast<double>(grassEye.x), static_cast<double>(grassEye.z));
-        } else {
-            m_grassTiles.Tick(static_cast<double>(nowTicksNs) / 1.0e9, 0.0, 0.0);
-        }
+        // Feature modules tick right after the game update, before this frame's draw is built.
+        m_editorModules.FrameTick({ static_cast<double>(nowTicksNs) / 1.0e9, deltaSeconds });
 
         m_editorLayer->NewFrame();
 

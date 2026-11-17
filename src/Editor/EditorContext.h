@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CameraPick.h"
+#include "EditorExtensions.h"
 #include "ClusterToolUiState.h"
 #include "HizDemoState.h"
 #include "InstanceGridTestSpawner.h"
@@ -12,8 +13,6 @@
 #include "../Core/Extent.h"
 #include "../Core/UiTextureHandle.h"
 #include "TransformGizmo.h"
-#include "../Features/Terrain/Editor/TerrainUiBridge.h"
-#include "../Features/Water/Editor/WaterUiBridge.h"
 #include "../Math/Mat4.h"
 #include "../Math/Vec2.h"
 #include "RenderGraphRegimeChoice.h"
@@ -151,11 +150,8 @@ struct EditorContext {
     // Toon look state for the Inspector; filled each frame by the ToonCharacter window.
     ToonFeatureReport toonFeature;
 
-    // Terrain panel <-> terrain world mailbox, plus the state the view overlays read.
-    TerrainUiBridge terrainUi;
-
-    // Water panel state and the handles of the view gizmos.
-    WaterUiBridge waterUi;
+    // Per-type UI state that feature modules and their windows share.
+    EditorExtensions extensions;
 };
 
 } // namespace gte

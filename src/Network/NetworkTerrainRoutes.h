@@ -7,7 +7,7 @@ struct Response;
 } // namespace httplib
 
 namespace gte {
-class TerrainCommandBridge;
+class ModuleCommandBridge;
 } // namespace gte
 
 namespace gte::Network {
@@ -16,6 +16,6 @@ namespace gte::Network {
 using TerrainBrowserRefusal = bool (*)(const httplib::Request&, httplib::Response&);
 
 // Registers /terrain/<action>. A null bridge answers 503. Every action except state and map refuses browser requests.
-void RegisterTerrainRoutes(httplib::Server& server, TerrainCommandBridge* bridge, TerrainBrowserRefusal refuseBrowser);
+void RegisterTerrainRoutes(httplib::Server& server, ModuleCommandBridge* bridge, TerrainBrowserRefusal refuseBrowser);
 
 } // namespace gte::Network

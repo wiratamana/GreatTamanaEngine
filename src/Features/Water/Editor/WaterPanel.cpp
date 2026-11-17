@@ -1,6 +1,7 @@
 #include "WaterPanel.h"
 
 #include "WaterUiBridge.h"
+#include "../../Terrain/Editor/TerrainUiBridge.h"
 #include "../../../Editor/EditorContext.h"
 #include "../../../Editor/EditorFrame.h"
 #include "../../../Editor/ImGuiUniqueId.h"
@@ -62,7 +63,7 @@ const char* KindLabel(water::WaterBodyKind kind)
 
 void WaterPanel::OnGui(EditorFrame& frame)
 {
-    WaterUiBridge& ui = frame.ctx.waterUi;
+    WaterUiBridge& ui = frame.ctx.extensions.Get<WaterUiBridge>();
     if (ui.world == nullptr) {
         ImGui::TextUnformatted("The water world is not ready yet ...");
         return;
@@ -101,9 +102,9 @@ void WaterPanel::DrawStatus(WaterUiBridge& ui)
     ImGui::PopStyleColor();
 }
 
-void WaterPanel::AddBodyHere(WaterUiBridge& ui, const EditorContext& ctx, bool river)
+void WaterPanel::AddBodyHere(WaterUiBridge& ui, EditorContext& ctx, bool river)
 {
-    const terrain::TerrainStats& cam = ctx.terrainUi.snapshot.stats;
+    const terrain::TerrainStats& cam = ctx.extensions.Get<TerrainUiBridge>().snapshot.stats;
     const double yaw = cam.cameraYawDegrees * kDegToRad;
     const double fx = std::sin(yaw);
     const double fz = std::cos(yaw);
@@ -137,7 +138,7 @@ void WaterPanel::AddBodyHere(WaterUiBridge& ui, const EditorContext& ctx, bool r
     }
 }
 
-void WaterPanel::DrawBodyList(WaterUiBridge& ui, const EditorContext& ctx)
+void WaterPanel::DrawBodyList(WaterUiBridge& ui, EditorContext& ctx)
 {
     ImGui::SeparatorText("Bodies");
     const auto set = ui.world->Bodies();

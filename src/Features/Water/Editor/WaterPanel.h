@@ -22,10 +22,10 @@ protected:
 private:
     void DrawStatus(WaterUiBridge& ui);
     void DrawSettings(WaterUiBridge& ui);
-    void DrawBodyList(WaterUiBridge& ui, const EditorContext& ctx);
+    void DrawBodyList(WaterUiBridge& ui, EditorContext& ctx);
     void DrawSelectedBody(WaterUiBridge& ui);
     void DrawFile(WaterUiBridge& ui);
-    void AddBodyHere(WaterUiBridge& ui, const EditorContext& ctx, bool river);
+    void AddBodyHere(WaterUiBridge& ui, EditorContext& ctx, bool river);
 
     std::array<char, 512> m_path{};
     bool m_pathInitialised = false;

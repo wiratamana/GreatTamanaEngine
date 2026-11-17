@@ -31,12 +31,14 @@ void GamePanel::OnGui(EditorFrame& frame)
         const ImVec2 imageMin = ImGui::GetItemRectMin();
         const ImVec2 imageSize = ImGui::GetItemRectSize();
         const bool imageHovered = ImGui::IsItemHovered();
-        GatherTerrainCameraInput(ctx.terrainUi, imageHovered && !ctx.waterUi.handleHot);
-        if (ctx.terrainUi.snapshot.hasViewProjection) {
+        TerrainUiBridge& terrainUi = ctx.extensions.Get<TerrainUiBridge>();
+        WaterUiBridge& waterUi = ctx.extensions.Get<WaterUiBridge>();
+        GatherTerrainCameraInput(terrainUi, imageHovered && !waterUi.handleHot);
+        if (terrainUi.snapshot.hasViewProjection) {
             const Vec2 rectMin(imageMin.x, imageMin.y);
             const Vec2 rectMax(imageMin.x + imageSize.x, imageMin.y + imageSize.y);
-            DrawTerrainBoundsOverlay(ctx.terrainUi, ctx.terrainUi.snapshot.viewProjection, rectMin, rectMax);
-            DrawWaterGizmos(ctx.waterUi, ctx.terrainUi.snapshot.viewProjection, rectMin, rectMax, imageHovered);
+            DrawTerrainBoundsOverlay(terrainUi, terrainUi.snapshot.viewProjection, rectMin, rectMax);
+            DrawWaterGizmos(waterUi, terrainUi.snapshot.viewProjection, rectMin, rectMax, imageHovered);
         }
         if (ctx.hizDemo.active && ctx.hizDemo.geometryOnly) {
             DrawViewOverlayLabel(ImGui::GetItemRectMin(), ImGui::GetItemRectSize(), kHizDemoOverlayLabel, 0);

@@ -7,13 +7,11 @@
 #include "../Core/EditorCapabilities.h"
 #include "../Core/EngineContext.h"
 #include "../Core/Plugins/IEngineFeatureModule.h"
+#include "EditorFeatureModule.h"
 #include "EditorHostServices.h"
 #include "EditorLayer.h"
 #include "FurinaShowcaseSceneOpener.h"
 #include "HizDemoSceneOpener.h"
-#include "../Features/Grass/Editor/GrassTileProvider.h"
-#include "../Features/Terrain/Editor/TerrainWorld.h"
-#include "../Features/Water/Editor/WaterWorld.h"
 #include "../Game/Game.h"
 #include "../Network/NetworkServer.h"
 #include "../Renderer/DeviceIdleGuard.h"
@@ -28,7 +26,7 @@
 #include "../Application/FrameCaptureBridge.h"
 #include "../Application/FrameDebuggerCommandBridge.h"
 #include "../Application/PhysicsDebugCommandBridge.h"
-#include "../Application/TerrainCommandBridge.h"
+#include "../Application/ModuleCommandBridge.h"
 #include "../Application/RenderGraphControlCommandBridge.h"
 #include "../Application/ProjectAssemblyHotReloadCommandBridge.h"
 #include "../Application/ProjectLifecycleLoadCommandBridge.h"
@@ -63,15 +61,6 @@ private:
 
     // Handles to what the Hi-Z demo scene works through, resolved fresh on every call.
     HizDemoServices MakeHizDemoServices();
-
-    // Handles to what the terrain world works through, resolved fresh on every call.
-    TerrainWorldServices MakeTerrainWorldServices();
-
-    // Handles the water world works through (terrain world and the Water render feature), resolved fresh on every call.
-    WaterWorldServices MakeWaterWorldServices();
-
-    // Handles the Grass tile provider works through (terrain, water and the Grass render feature), resolved fresh on every call.
-    GrassTileServices MakeGrassTileServices();
 
     // Handles to what the Furina showcase scene works through, resolved fresh on every call.
     FurinaShowcaseServices MakeFurinaShowcaseServices();
@@ -126,16 +115,12 @@ private:
     ProfilerSnapshotBridge m_profilerBridge;
     // Backs the /physics_debug/* routes.
     PhysicsDebugCommandBridge m_physicsDebugCommandBridge;
-    // Backs the /terrain/* routes.
-    TerrainCommandBridge m_terrainCommandBridge;
+    // Backs the HTTP routes served by feature modules.
+    ModuleCommandBridge m_moduleCommandBridge;
 
-    // The streamed terrain world. Declared after Core, the renderer and the feature modules it works through, and
-    // before the network server, so the server (and later its routes) is gone before the world.
-    TerrainWorld m_terrainWorld{ [this] { return MakeTerrainWorldServices(); } };
-    // Water bodies; feeds the terrain carve and the Water render feature. Served by the /water/* routes.
-    WaterWorld m_waterWorld{ [this] { return MakeWaterWorldServices(); } };
-    // Builds the Grass height tile from the live terrain and water on a worker thread.
-    GrassTileProvider m_grassTiles{ [this] { return MakeGrassTileServices(); } };
+    // Ordered editor modules among the built-in ones. Declared after Core, the module list and the editor layer, and
+    // before the network server, so the server is gone first and the modules shut down before anything they use.
+    EditorModuleSet m_editorModules;
     // Cross-thread hand-off for project assembly hot reload; not passed to NetworkServer's constructor.
     ProjectAssemblyHotReloadCommandBridge m_hotReloadCommandBridge;
 

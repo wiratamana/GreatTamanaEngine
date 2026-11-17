@@ -208,8 +208,8 @@ void ScenePanel::OnGui(EditorFrame& frame)
     }
     BuildCameraOverlay(registry, ctx, camera, imageMin, imageSize, hovered);
     if (ctx.sceneCamera.rendered) {
-        DrawTerrainBoundsOverlay(ctx.terrainUi, ctx.sceneCamera.viewProjection, ctx.sceneCamera.rectMin, ctx.sceneCamera.rectMax);
-        DrawWaterGizmos(ctx.waterUi, ctx.sceneCamera.viewProjection, ctx.sceneCamera.rectMin, ctx.sceneCamera.rectMax, hovered);
+        DrawTerrainBoundsOverlay(ctx.extensions.Get<TerrainUiBridge>(), ctx.sceneCamera.viewProjection, ctx.sceneCamera.rectMin, ctx.sceneCamera.rectMax);
+        DrawWaterGizmos(ctx.extensions.Get<WaterUiBridge>(), ctx.sceneCamera.viewProjection, ctx.sceneCamera.rectMin, ctx.sceneCamera.rectMax, hovered);
     }
 
     // Transform gizmo of the selected entity, drawn with the Scene camera.

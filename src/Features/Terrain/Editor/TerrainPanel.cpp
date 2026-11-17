@@ -168,7 +168,7 @@ void TerrainPanel::CommitEdits(TerrainUiBridge& bridge, const TerrainUiSnapshot&
 
 void TerrainPanel::OnGui(EditorFrame& frame)
 {
-    TerrainUiBridge& bridge = frame.ctx.terrainUi;
+    TerrainUiBridge& bridge = frame.ctx.extensions.Get<TerrainUiBridge>();
     const TerrainUiSnapshot& snap = bridge.snapshot;
     if (!snap.valid) {
         ImGui::TextUnformatted("Waiting for the first frame ...");
