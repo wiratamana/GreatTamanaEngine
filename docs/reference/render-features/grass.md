@@ -91,7 +91,7 @@ grassFeature->SubmitHeightTile(std::make_shared<const GrassHeightTile>(...));   
 - Blades outside the tile are dropped. That is not an error.
 
 ## Real terrain tile (`GrassTileProvider`)
-`src/Features/Grass/Editor/GrassTileProvider.*` and `GrassTileBuilder.*` feed the tile while the terrain is open. `EditorHost` ticks it after the water world.
+`src/Features/Grass/Editor/GrassTileProvider.*` and `GrassTileBuilder.*` feed the tile while the terrain is open. The `GrassTiles` editor module (`GrassTilesModule`) owns the provider and ticks it after the terrain and water modules.
 - **Heights** come from the resident terrain node meshes (`ITerrainWorld::SnapshotSurface`, `src/Features/Terrain/TerrainSurface.*`). The drawn quad is split along the (0,0)-(1,1) diagonal, and the sampler uses the same split, so tile height equals the drawn surface. Where no node is resident it falls back to the noise field.
 - **Water flag** is `ground <= SampleAt(x, z).surfaceY + waterMargin` from the live `WaterBodySet` (ocean, lakes, rivers). The tile `seaLevel` is the ocean body level, or a very low value when there is no ocean.
 - **Worker thread.** The main thread only collects the node list (about 0.01 ms). One `std::jthread` builds the tile (default 512 x 512 at 2 m, about 50 ms) and the main thread submits the finished tile. Where no node is resident (behind the camera, far away) the noise field is read on every 4th texel and interpolated: that cut a 512 tile from 440 ms to 53 ms.

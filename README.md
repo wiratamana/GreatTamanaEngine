@@ -1,4 +1,4 @@
-﻿# GreatTamanaEngine
+# GreatTamanaEngine
 > A game engine and editor written from scratch in C++20 on Vulkan 1.3. For developers who build, extend or debug it.
 > Verified against code: 2026-10-30
 
@@ -7,6 +7,7 @@
 - Hand-written ECS, math, render graph, job system and profiler.
 - GPU-driven mesh rendering with cluster culling and a Hi-Z pyramid.
 - Render features: Atmosphere, Shadow, Gtao, Ssgi, VolumetricLight, SceneLighting, ToneMapping, GpuDrivenScene, Water, VolumetricCloud, Grass.
+- Procedural landscape, each in its own `src/Features/` folder: Terrain (streamed world), Water (ocean, lakes, rivers), Grass (GPU driven). `File > Open Big World` opens all of them with sky and clouds. See [Big World demo](docs/guides/big-world-demo.md).
 - Own asset container `*.gta`. Imports PNG/JPG, glTF, MMD (`.pmx`, `.vmd`) and STL. Scenes are JSON (`*.gtscene`).
 - Per-developer game projects built as DLLs and hot reloaded.
 - A loopback HTTP server on port 8080 for debugging, including image capture.
@@ -39,7 +40,8 @@ Only `src/Renderer/` may name Vulkan. Features use the Feature Kit. See [Overvie
 |---|---|
 | `src/` | All engine and editor code. One folder per subsystem |
 | `src/Renderer/` | Vulkan, render graph, GPU memory and timing |
-| `src/Features/` | Built-in render features, one folder each |
+| `src/Features/` | Built-in features, one folder each. `Terrain`, `Water`, `Grass` and `BigWorld` keep their world code, panels (`Editor/`) and HTTP routes inside their own folder |
+| `src/Game/BigWorld/` | Big World demo orchestrator: plan, ports and state machine. No ImGui, no Vulkan |
 | `src/Editor/` | Everything ImGui: panels, frame debugger, project windows |
 | `src/Network/` | The HTTP debug server and its routes |
 | `tests/` | GoogleTest suite. Mirrors `src/` |
