@@ -59,7 +59,7 @@ TEST(GrassMathTest, DefaultsSurviveSanitizing)
     EXPECT_FLOAT_EQ(d.shadowMaxTexelM, 0.40f);
     EXPECT_FLOAT_EQ(d.shadowBiasTexels, 1.0f);
     EXPECT_FLOAT_EQ(d.shadowWidthScale, 1.5f);
-    EXPECT_FLOAT_EQ(d.shadowPadM, 3.0f);
+    EXPECT_FLOAT_EQ(d.shadowPadM, 0.0f);
 
     const GrassSettings s = SanitizeGrassSettings(d);
     EXPECT_EQ(s.hizCulling, d.hizCulling);
@@ -767,7 +767,7 @@ TEST(GrassEndpointTest, ExposesShadowSettingsSunVisAndReadOnlyShadowState)
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "shadowMaxTexelM")->value), 0.4);
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "shadowBiasTexels")->value), 1.0);
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "shadowWidthScale")->value), 1.5);
-    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "shadowPadM")->value), 3.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "shadowPadM")->value), 0.0);
     EXPECT_EQ(std::get<std::int64_t>(FindField(initial, "game.shadow.cascades")->value), 0);
     EXPECT_FALSE(std::get<bool>(FindField(initial, "game.shadow.cloud")->value));
     EXPECT_EQ(std::get<std::int64_t>(FindField(initial, "game.shadow.castCascades")->value), 0);

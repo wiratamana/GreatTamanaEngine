@@ -312,7 +312,7 @@ struct GrassSettings {
     float shadowMaxTexelM = 0.40f;  // Skip cascades coarser than this texel size (m).
     float shadowBiasTexels = 1.0f;  // Shift shadow blades toward the sun (texels).
     float shadowWidthScale = 1.5f;  // Minimum shadow blade width (texels).
-    float shadowPadM = 3.0f;        // Extra camera-frustum chunk padding while casting shadows (m).
+    float shadowPadM = 0.0f;        // Extra camera-frustum chunk padding while casting shadows (m); colour draws pay for it too.
 };
 
 // Named starting points for the settings. They only change density, distances and buffer sizes.

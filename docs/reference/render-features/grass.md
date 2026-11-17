@@ -136,7 +136,7 @@ Sanitized on write (`SanitizeGrassSettings`). NaN and infinity become the defaul
 | `shadowMaxTexelM` | 0.40 | 0.01..4 | Skip cascades whose `texelWorld` exceeds this size (m) |
 | `shadowBiasTexels` | 1.0 | -4..8 | Caster shift along the sun direction in cascade texels |
 | `shadowWidthScale` | 1.5 | 0..8 | Minimum shadow blade base width in cascade texels |
-| `shadowPadM` | 3.0 | 0..32 | Extra camera-frustum chunk padding while casting shadows (m) |
+| `shadowPadM` | 0.0 | 0..32 | Extra camera-frustum chunk padding while casting shadows (m). Colour draws pay for the extra blades (+0.4 ms at 3 m), chunks are 16 m so 0 already keeps edge chunks |
 | `terrainTint` / `farTerrainBlend` | 0.6 / 0.8 | 0..1 | Pull toward the terrain colour (near, far) |
 | `groundNormalBlend` / `selfShadow` | 0.5 / 0.7 | 0..1 | Ground normal in the blade normal; sun fade on ground facing away |
 | `colorRoot` / `colorTip` | dark / light green | `r,g,b` 0..2 | Linear albedo |
