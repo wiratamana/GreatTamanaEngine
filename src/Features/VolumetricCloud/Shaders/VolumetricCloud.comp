@@ -79,7 +79,7 @@ const vec2 kFarWeatherOffset = vec2(0.37, 0.61);
 const float kFineDetailScale = 3.1;
 const float kShapeWorleyMean = 0.5;
 // The large lobe octave reads the shape volume at this multiple of the shape tile, shifted so it is not a copy of the mid octave.
-const float kLargeShapeScale = 1.75;
+const float kLargeShapeScale = 2.0;
 const vec3 kLargeShapeOffset = vec3(0.17, 0.31, 0.43);
 const float kStepBudgetShare = 0.85;
 const float kMinStepShare = 0.2;
@@ -112,7 +112,7 @@ const float kWeatherLodEndM = 45000.0;
 const float kWeatherLodMax = 0.8;
 const float kZoomStartM = 20000.0;
 const float kZoomEndM = 50000.0;
-const float kFarZoom = 2.8;
+const float kFarZoom = 2.5;
 const vec3 kFarZoomOffset = vec3(0.21, 0.0, 0.58);
 
 float Saturate(float v)
@@ -249,7 +249,9 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
         return 0.0;
     }
     float wCov = Saturate(coverage * weatherCoverage);
-    float hMax = mix(0.16, 0.96, smoothstep(0.05, 0.62, wCov) * (0.42 + 0.58 * gCloudSize));
+    float massGate = smoothstep(0.22, 0.82, gCloudSize);
+    float hMax = mix(0.16, 0.94, pow(smoothstep(0.12, 0.70, wCov), 1.35) * (0.25 + 0.75 * massGate));
+    hMax = max(hMax, params.density.z * 0.8);
     float hNorm = heightFraction / max(hMax, 0.16);
     if (hNorm >= 1.05) {
         gWeatherClear = true;
@@ -293,7 +295,8 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
 
     // Flat condensation base with convex 3D-modulated dome tops across all cloud sizes.
     float baseShift = clamp((shapeSample.r - 0.635) * 0.025, -0.008, 0.012);
-    float roundBottom = smoothstep(baseShift, baseShift + params.heightShape.x, heightFraction);
+    float shiftedBase = baseShift * clamp(params.structure2.z / 0.18, 0.0, 4.0);
+    float roundBottom = smoothstep(shiftedBase, shiftedBase + params.heightShape.x, heightFraction);
     float localTop = hMax * clamp(0.72 + 0.38 * shapeMid, 0.50, 1.04) * mix(1.0, kFarTopScale, farStreak);
     float roundTop = 1.0 - smoothstep(localTop * 0.42, localTop, heightFraction);
 
@@ -301,10 +304,11 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float rampTop = Saturate(Remap(heightFraction, params.heightShape.w, 1.0, 1.0, 0.0));
     densityFactor = params.density.x * rampBottom * rampTop * wm.a * 2.0;
 
-    // Linear body; CloudDetail erodes it before CloudCurve() shapes the density profile.
+    // Linear body; pyramidal base pedestal widens shared flat bottoms while dome taper sculpts turrets.
     hNorm = Saturate(heightFraction / max(localTop, 0.12));
-    float domeTaper = 1.0 - 0.50 * smoothstep(0.18, 1.0, hNorm);
-    float effCoverage = wCov * domeTaper;
+    float basePedestal = 1.0 + 0.20 * (1.0 - smoothstep(0.06, 0.32, heightFraction));
+    float domeTaper = 1.0 - 0.55 * smoothstep(0.20, 1.0, hNorm);
+    float effCoverage = Saturate(wCov * basePedestal * domeTaper);
     float threshold = max(1.0 - effCoverage, params.structure3.y);
     float rampEnd = params.structure3.w > 0.0 ? min(threshold + params.structure3.w, 1.0) : 1.0;
     return Saturate(Remap(shape * roundBottom * roundTop, threshold, rampEnd, 0.0, 1.0));
@@ -346,8 +350,9 @@ float CloudDetail(vec3 position, float heightFraction, float shape, float densit
         vec4 fn = textureLod(detailVolume, world * kFineDetailScale / params.noise.y + 0.31, 0.0);
         erosion = mix(erosion, 1.0 - (fn.g * 0.5 + fn.a * 0.5), fineWeight * 0.5);
     }
-    // Outer shells receive full detailStrength * detailAmount erosion while the core keeps structure2.x.
-    erosion *= params.noise.z * detailAmount * mix(params.structure2.x, 1.0, 1.0 - shape);
+    // Restrict subtractive erosion to the outer shell so dense cloud cores stay solid.
+    float shellMask = mix(params.structure2.x, 1.0, 1.0 - smoothstep(0.12, 0.62, shape));
+    erosion *= params.noise.z * detailAmount * shellMask;
     return CloudCurve(Saturate(Remap(shape, erosion, 1.0, 0.0, 1.0))) * densityFactor;
 }
 
@@ -421,6 +426,7 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
                 coarse = false;
                 emptyRun = 0u;
                 coarseHitT = t;
+                lightPrimed = false;
                 if (i > 0u) {
                     float tMid = max(t - 0.5 * coarseLength, tStart);
                     vec3 midPos = eye + rd * tMid;
@@ -483,8 +489,10 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
                 sunDepthB = needSun ? SunOpticalDepth(nextPosition, sunDirection) : 0.0;
                 skyVisibilityB = needSky ? SkyVisibility(nextPosition) : 1.0;
             }
-            float blend = float(lightAge) / float(lightStride);
-            sunOpticalDepth = mix(sunDepthA, sunDepthB, blend);
+            float blend = smoothstep(0.0, 1.0, float(lightAge) / float(lightStride));
+            float minSunDepth = min(sunDepthA, sunDepthB);
+            float sunTrans = mix(exp(-(sunDepthA - minSunDepth)), exp(-(sunDepthB - minSunDepth)), blend);
+            sunOpticalDepth = minSunDepth - log(max(sunTrans, 1e-6));
             skyVisibility = mix(skyVisibilityA, skyVisibilityB, blend);
             lightAge++;
         }
@@ -527,13 +535,12 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
 const int kShadowMaxSteps = 24;
 const float kShadowMinSunY = 0.03;
 const int kShadowNearScale = 8;
-const float kNearShadowBlurScale = 0.4;
+const vec2 kShadowRgss[4] = vec2[4](
+    vec2(-0.45, -0.18),
+    vec2(0.18, -0.45),
+    vec2(-0.18, 0.45),
+    vec2(0.45, 0.18));
 const float kNearShadowDetail = 0.4;
-
-float ShadowNoise(vec2 p)
-{
-    return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
-}
 
 vec4 ShadowHistoryAt(vec2 uv, int rowOffset, int side)
 {
@@ -552,7 +559,7 @@ vec4 ShadowHistoryAt(vec2 uv, int rowOffset, int side)
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
-// Near shadow density: same base density as CloudLightDensity(), modulated by bounded curl/billow/wisp detail.
+// Near shadow density: base shape density with band-limited outer-fringe billow modulation.
 float CloudNearShadowDensity(vec3 position)
 {
     vec2 offset = position.xz - params.eyeAndPlanetRadius.xz;
@@ -567,15 +574,11 @@ float CloudNearShadowDensity(vec3 position)
     vec2 shear = params.structure.zw * h;
     vec3 world = vec3(position.x + wind.x + shear.x, altitude / params.structure2.y, position.z + wind.y + shear.y);
     vec3 curl = textureLod(curlMap, world.xz / params.detailShape.y, 0.0).rgb * 2.0 - 1.0;
-    world += vec3(curl.x, curl.z * 0.5, curl.y) * (params.detailShape.x * (1.0 - 0.5 * h));
-    vec4 dn = textureLod(detailVolume, world / params.noise.y, 0.0);
-    float billow = dn.r * 0.6 + dn.g * 0.4;
-    float wisp = dn.b * 0.6 + dn.a * 0.4;
-    float billowErosion = 1.0 - billow;
-    float wispErosion = 1.0 - wisp;
-    float wispShare = params.detailShape.z * Saturate(1.2 - 1.6 * shape + 0.5 * Saturate((h - 0.7) * 3.0));
-    float rawErosion = mix(billowErosion, wispErosion, wispShare);
-    float modulation = clamp(1.0 + (0.5 - rawErosion) * 2.0 * kNearShadowDetail, 0.6, 1.4);
+    world += vec3(curl.x, curl.z * 0.5, curl.y) * (0.25 * params.detailShape.x * (1.0 - 0.5 * h));
+    vec4 dn = textureLod(detailVolume, world / (params.noise.y * 2.5), 0.0);
+    float rawErosion = mix(1.0 - dn.r, 1.0 - dn.b, params.detailShape.z * 0.35);
+    float edgeWeight = (1.0 - smoothstep(0.15, 0.55, shape)) * 0.35;
+    float modulation = clamp(1.0 + (0.5 - rawErosion) * 2.0 * kNearShadowDetail * edgeWeight, 0.85, 1.15);
     return CloudCurve(shape) * factor * modulation;
 }
 
@@ -615,13 +618,10 @@ void WriteCloudShadow()
         imageStore(lowAuxOut, texel, vec4(vec3(carried.r), 1.0));
         return;
     }
-    // Far history gets ~0.5 texel smoothing; near history uses a tighter filter to preserve 100..300 m features.
+    float softness = max(params.shadowTune.x, 0.0);
     vec4 previous = vec4(1.0, 0.0, 0.0, 1.0);
-    float softness = isNear ? (params.shadowTune.x * kNearShadowBlurScale) : params.shadowTune.x;
     if (haveHistory) {
-        float tentTexels = isNear
-            ? (0.2 * clamp(softness, 0.0, 1.0))
-            : (0.5 * clamp(params.shadowTune.x / 1.5, 0.0, 2.0));
+        float tentTexels = 0.35 * clamp(softness, 0.0, 2.0);
         vec2 o = vec2(tentTexels / float(side));
         previous = 0.25 * (ShadowHistoryAt(historyUv + vec2(o.x, o.y), rowOffset, side)
             + ShadowHistoryAt(historyUv + vec2(-o.x, o.y), rowOffset, side)
@@ -629,6 +629,7 @@ void WriteCloudShadow()
             + ShadowHistoryAt(historyUv + vec2(-o.x, -o.y), rowOffset, side));
     }
 
+    // Deterministic midpoint integration with a 4-point rotated grid gives smooth noise-free shadows in both tiles.
     vec3 sun = params.sunDirectionAndIntensity.xyz;
     float sunY = max(sun.y, kShadowMinSunY);
     float base = params.layer.x;
@@ -637,30 +638,32 @@ void WriteCloudShadow()
     float sBottom = (base - mid) / sunY;
     float sTop = (top - mid) / sunY;
     int steps = clamp(int(params.shadowTune.z + 0.5), 1, kShadowMaxSteps);
+    int raySteps = isNear ? max(steps, 12) : steps;
     float span = sTop - sBottom;
-    float frame = float(params.counts.y & 1023u);
-    vec2 noiseSeed = vec2(regionTexel) + frame * vec2(5.588238, 3.1416);
-    float along = ShadowNoise(noiseSeed);
+    float segment = span / float(raySteps);
+    float along = 0.5;
+    int tapCount = softness > 1e-4 ? 4 : 1;
+    float blurScale = softness * texelM;
     float opticalDepth = 0.0;
-    if (isNear) {
-        int nearSteps = max(steps, 12);
-        float segment = span / float(nearSteps);
-        for (int i = 0; i < nearSteps; ++i) {
-            float s = sBottom + (float(i) + along) * segment;
-            vec3 position = vec3(xz.x + sun.x * s, mid + sun.y * s, xz.y + sun.z * s);
-            opticalDepth += CloudNearShadowDensity(position) * segment;
+    for (int tap = 0; tap < tapCount; ++tap) {
+        vec2 tapXz = xz + (tapCount > 1 ? kShadowRgss[tap] * blurScale : vec2(0.0));
+        float tapDepth = 0.0;
+        if (isNear) {
+            for (int i = 0; i < raySteps; ++i) {
+                float s = sBottom + (float(i) + along) * segment;
+                vec3 position = vec3(tapXz.x + sun.x * s, mid + sun.y * s, tapXz.y + sun.z * s);
+                tapDepth += CloudNearShadowDensity(position) * segment;
+            }
+        } else {
+            for (int i = 0; i < raySteps; ++i) {
+                float s = sBottom + (float(i) + along) * segment;
+                vec3 position = vec3(tapXz.x + sun.x * s, mid + sun.y * s, tapXz.y + sun.z * s);
+                tapDepth += CloudLightDensity(position) * segment;
+            }
         }
-    } else {
-        float angle = 6.2831853 * ShadowNoise(noiseSeed + 17.0);
-        vec2 blur = vec2(cos(angle), sin(angle)) * sqrt(ShadowNoise(noiseSeed + 41.0)) * softness * texelM;
-        float segment = span / float(steps);
-        for (int i = 0; i < steps; ++i) {
-            float s = sBottom + (float(i) + along) * segment;
-            vec3 position = vec3(xz.x + blur.x + sun.x * s, mid + sun.y * s, xz.y + blur.y + sun.z * s);
-            opticalDepth += CloudLightDensity(position) * segment;
-        }
+        opticalDepth += tapDepth;
     }
-    opticalDepth *= params.density.y * params.shadowShift.w;
+    opticalDepth = (opticalDepth / float(tapCount)) * params.density.y * params.shadowShift.w;
     float transmittance = exp(-opticalDepth);
     vec4 current = vec4(transmittance, opticalDepth, 0.0, 1.0);
     vec4 result = haveHistory ? mix(previous, current, blend) : current;

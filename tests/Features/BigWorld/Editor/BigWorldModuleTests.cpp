@@ -134,7 +134,7 @@ TEST(BigWorldModuleTest, FeatureAdapterSnapshotsAndRestoresPlanTweaksRoundTrip)
         { "sunRaysContrast", 1.0 },
         { "sunRaysDecay", 1.5 },
         { "sunRaysLength", 1.2 },
-        { "maxSteps", 96.0 },
+        { "maxSteps", 128.0 },
         { "resolutionDivisor", 0.0 },
         { "shadowSteps", 10.0 },
         { "shadowUpdate", 3.0 },
@@ -156,15 +156,15 @@ TEST(BigWorldModuleTest, FeatureAdapterSnapshotsAndRestoresPlanTweaksRoundTrip)
         ASSERT_TRUE(adapter.Set(tweak.feature, tweak.values).ok);
     }
 
-    EXPECT_EQ(clouds.ValueText("coverage"), "0.56");
+    EXPECT_EQ(clouds.ValueText("coverage"), "0.55");
     EXPECT_EQ(clouds.ValueText("shadowRangeKm"), "16");
-    EXPECT_EQ(clouds.ValueText("shadowSoftness"), "0.5");
-    EXPECT_EQ(clouds.ValueText("shadowFill"), "0.2");
+    EXPECT_EQ(clouds.ValueText("shadowSoftness"), "0.75");
+    EXPECT_EQ(clouds.ValueText("shadowFill"), "0.1");
     EXPECT_EQ(clouds.ValueText("sunRays"), "0.55");
     EXPECT_EQ(clouds.ValueText("sunRaysContrast"), "1.65");
     EXPECT_EQ(clouds.ValueText("sunRaysDecay"), "0.98");
     EXPECT_EQ(clouds.ValueText("sunRaysLength"), "1.25");
-    EXPECT_EQ(clouds.ValueText("maxSteps"), "68");
+    EXPECT_EQ(clouds.ValueText("maxSteps"), "96");
     EXPECT_EQ(bloom.ValueText("threshold"), "2");
     EXPECT_EQ(bloom.ValueText("intensity"), "0.2");
 
@@ -180,7 +180,7 @@ TEST(BigWorldModuleTest, FeatureAdapterSnapshotsAndRestoresPlanTweaksRoundTrip)
     EXPECT_DOUBLE_EQ(number(clouds, "sunRaysContrast"), 1.0);
     EXPECT_DOUBLE_EQ(number(clouds, "sunRaysDecay"), 1.5);
     EXPECT_DOUBLE_EQ(number(clouds, "sunRaysLength"), 1.2);
-    EXPECT_DOUBLE_EQ(number(clouds, "maxSteps"), 96.0);
+    EXPECT_DOUBLE_EQ(number(clouds, "maxSteps"), 128.0);
     EXPECT_DOUBLE_EQ(number(bloom, "threshold"), 1.0);
     EXPECT_DOUBLE_EQ(number(bloom, "intensity"), 0.3);
 }
@@ -227,8 +227,8 @@ TEST(BigWorldModuleTest, OpenCommandParsesCoverageOverrideAndStateSerializesNewK
     EXPECT_NE(state->body.find("\"terrainProfile\":\"lean\""), std::string::npos);
     EXPECT_NE(state->body.find("\"cloudCoverage\":0.33"), std::string::npos);
     EXPECT_NE(state->body.find("\"cloudShadowRangeKm\":16"), std::string::npos);
-    EXPECT_NE(state->body.find("\"cloudShadowSoftness\":0.5"), std::string::npos);
-    EXPECT_NE(state->body.find("\"cloudShadowFill\":0.2"), std::string::npos);
+    EXPECT_NE(state->body.find("\"cloudShadowSoftness\":0.75"), std::string::npos);
+    EXPECT_NE(state->body.find("\"cloudShadowFill\":0.1"), std::string::npos);
     EXPECT_NE(state->body.find("\"cloudSunRays\":0.55"), std::string::npos);
     EXPECT_NE(state->body.find("\"cloudSunRaysContrast\":1.65"), std::string::npos);
     EXPECT_NE(state->body.find("\"cloudSunRaysDecay\":0.98"), std::string::npos);

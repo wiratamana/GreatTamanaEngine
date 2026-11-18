@@ -414,6 +414,32 @@ void main()
     imageStore(historyColorOut, pixel, cloud);
     imageStore(historyAuxOut, pixel, vec4(cloudDistanceKm, pixelEndKm, newCount, 0.0));
 
+    // Gentle 3x3 transmittance-weighted spatial filter on unconverged fringe pixels to prevent single-ray stipple.
+    if (newCount < 3.0 && cloud.a > 0.05 && cloud.a < 0.95) {
+        vec4 fringeSum = vec4(0.0);
+        float fringeWeight = 0.0;
+        for (int k = 0; k < 9; ++k) {
+            ivec2 offset = ivec2(k % 3 - 1, k / 3 - 1);
+            ivec2 c = clamp(lowNearest + offset, ivec2(0), lowSize - 1);
+            vec4 tapColor = texelFetch(lowColor, c, 0);
+            vec4 tapAux = texelFetch(lowAux, c, 0);
+            if (!TapUsable(tapColor, tapAux, pixelEndKm)) {
+                continue;
+            }
+            float tentW = (offset.x == 0 ? 2.0 : 1.0) * (offset.y == 0 ? 2.0 : 1.0);
+            float transW = exp(-abs(tapColor.a - cloud.a) * 6.0);
+            float hdrW = 1.0 / (1.0 + CloudLuma(tapColor.rgb) * 0.5);
+            float w = tentW * transW * hdrW;
+            fringeSum += tapColor * w;
+            fringeWeight += w;
+        }
+        if (fringeWeight > 1e-5) {
+            float freshFade = 1.0 - smoothstep(0.0, 3.0, newCount);
+            float fringeGate = smoothstep(0.05, 0.15, cloud.a) * (1.0 - smoothstep(0.85, 0.95, cloud.a));
+            cloud = mix(cloud, fringeSum / fringeWeight, 0.65 * freshFade * fringeGate);
+        }
+    }
+
     cloud.rgb = CompressCloudShoulder(cloud.rgb);
     vec3 color = SceneBehindCloud(scene, cloud.a) + cloud.rgb;
     vec4 shaftCenter = textureLod(sunShafts, uv, 0.0);

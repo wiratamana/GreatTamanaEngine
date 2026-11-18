@@ -374,19 +374,19 @@ TEST(VolumetricCloudLayerTest, MaxDistanceCutsTheSegment)
 
 TEST(VolumetricCloudLayerTest, TheRangeReachesTheHorizonOfAGroundCamera)
 {
-    // The default range holds the whole 1500..4000 m layer seen along the horizon (~226 km exit, inside 250 km).
+    // The default range holds the whole 1500..3600 m layer seen along the horizon (~214 km exit, inside 250 km).
     const VolumetricCloudSettings safe = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
     EXPECT_GE(safe.maxDistanceM, 250000.0f);
     const float r = safe.planetRadiusKm * 1000.0f;
     const CloudShellSegment horizon = ComputeCloudShellSegment(2.0f, 0.0f, r, safe.layerBaseM, safe.layerTopM, safe.maxDistanceM);
     ASSERT_TRUE(horizon.hit);
     EXPECT_NEAR(horizon.tStart, 138200.0f, 500.0f);
-    EXPECT_NEAR(horizon.tEnd, 225740.0f, 500.0f);
+    EXPECT_NEAR(horizon.tEnd, 214150.0f, 500.0f);
     // One degree up the whole segment is inside the range too.
     const CloudShellSegment oneDegree = ComputeCloudShellSegment(2.0f, 0.017452f, r, safe.layerBaseM, safe.layerTopM, safe.maxDistanceM);
     ASSERT_TRUE(oneDegree.hit);
     EXPECT_NEAR(oneDegree.tStart, 66200.0f, 500.0f);
-    EXPECT_NEAR(oneDegree.tEnd, 140450.0f, 500.0f);
+    EXPECT_NEAR(oneDegree.tEnd, 130100.0f, 500.0f);
     // The fade only starts near the end of the range.
     EXPECT_GE(safe.fadeStart, 0.9f);
 }
@@ -443,32 +443,34 @@ TEST(VolumetricCloudParamsTest, TheDetailAndStepSettingsReachTheBlockWithTheShip
 {
     const VolumetricCloudSettings defaults = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
     EXPECT_FLOAT_EQ(defaults.layerBaseM, 1500.0f);
-    EXPECT_FLOAT_EQ(defaults.layerTopM, 4000.0f);
-    EXPECT_FLOAT_EQ(defaults.detailScaleM, 280.0f);
-    EXPECT_FLOAT_EQ(defaults.detailStrength, 0.78f);
+    EXPECT_FLOAT_EQ(defaults.layerTopM, 3600.0f);
+    EXPECT_FLOAT_EQ(defaults.detailScaleM, 350.0f);
+    EXPECT_FLOAT_EQ(defaults.detailStrength, 0.74f);
     EXPECT_FLOAT_EQ(defaults.detailFadeDistM, 48000.0f);
     EXPECT_FLOAT_EQ(defaults.curlAmountM, 95.0f);
-    EXPECT_FLOAT_EQ(defaults.curlScaleM, 3000.0f);
-    EXPECT_FLOAT_EQ(defaults.wispiness, 0.42f);
+    EXPECT_FLOAT_EQ(defaults.curlScaleM, 3500.0f);
+    EXPECT_FLOAT_EQ(defaults.wispiness, 0.38f);
     EXPECT_FLOAT_EQ(defaults.fineDetail, 0.15f);
-    EXPECT_FLOAT_EQ(defaults.stepBaseM, 20.0f);
-    EXPECT_FLOAT_EQ(defaults.maxSteps, 68.0f);
-    EXPECT_FLOAT_EQ(defaults.sunSteps, 5.0f);
+    EXPECT_FLOAT_EQ(defaults.stepBaseM, 14.0f);
+    EXPECT_FLOAT_EQ(defaults.stepGrowth, 0.007f);
+    EXPECT_FLOAT_EQ(defaults.maxSteps, 96.0f);
+    EXPECT_FLOAT_EQ(defaults.sunSteps, 6.0f);
     EXPECT_FLOAT_EQ(defaults.minTransmittance, 0.012f);
-    EXPECT_FLOAT_EQ(defaults.jitter, 0.60f);
-    EXPECT_FLOAT_EQ(defaults.lightStride, 3.0f);
+    EXPECT_FLOAT_EQ(defaults.jitter, 1.0f);
+    EXPECT_FLOAT_EQ(defaults.lightStride, 2.0f);
     EXPECT_FLOAT_EQ(defaults.maxStepDepth, 0.4f);
     EXPECT_FLOAT_EQ(defaults.lightDetail, 1.0f);
     EXPECT_FLOAT_EQ(defaults.inScatter, 0.45f);
-    EXPECT_FLOAT_EQ(defaults.sunIntensity, 5.8f);
+    EXPECT_FLOAT_EQ(defaults.sunIntensity, 6.3f);
     EXPECT_FLOAT_EQ(defaults.ambientBottom, 0.42f);
     EXPECT_FLOAT_EQ(defaults.coverage, 0.8f);
     EXPECT_FLOAT_EQ(defaults.density, 1.50f);
     EXPECT_FLOAT_EQ(defaults.extinction, 0.048f);
-    EXPECT_FLOAT_EQ(defaults.densityCurve, 1.15f);
+    EXPECT_FLOAT_EQ(defaults.densityRamp, 0.28f);
+    EXPECT_FLOAT_EQ(defaults.densityCurve, 0.95f);
     EXPECT_FLOAT_EQ(defaults.shapeLow, 0.45f);
     EXPECT_FLOAT_EQ(defaults.shapeHigh, 1.0f);
-    EXPECT_FLOAT_EQ(defaults.peakMin, 0.6f);
+    EXPECT_FLOAT_EQ(defaults.peakMin, 0.20f);
     VolumetricCloudSettings s = defaults;
     s.curlAmountM = 120.0f;
     s.curlScaleM = 4500.0f;
@@ -559,18 +561,19 @@ TEST(VolumetricCloudLayerTest, WindKeepsSubMetreResolutionAfterTenHours)
 TEST(VolumetricCloudParamsTest, TheStructureSettingsReachTheBlockWithTheShippedDefaults)
 {
     const VolumetricCloudSettings defaults = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
-    EXPECT_FLOAT_EQ(defaults.largeShapeMix, 0.4f);
+    EXPECT_FLOAT_EQ(defaults.shapeScaleM, 7000.0f);
+    EXPECT_FLOAT_EQ(defaults.largeShapeMix, 0.56f);
     EXPECT_FLOAT_EQ(defaults.sizeVariation, 0.5f);
     EXPECT_FLOAT_EQ(defaults.shapeWorley, 0.62f);
-    EXPECT_FLOAT_EQ(defaults.windShearM, 800.0f);
-    EXPECT_FLOAT_EQ(defaults.bodyErosion, 0.32f);
-    EXPECT_FLOAT_EQ(defaults.verticalStretch, 0.85f);
-    EXPECT_FLOAT_EQ(defaults.baseVariation, 0.5f);
-    EXPECT_FLOAT_EQ(defaults.baseRoundness, 0.09f);
+    EXPECT_FLOAT_EQ(defaults.windShearM, 280.0f);
+    EXPECT_FLOAT_EQ(defaults.bodyErosion, 0.0f);
+    EXPECT_FLOAT_EQ(defaults.verticalStretch, 0.58f);
+    EXPECT_FLOAT_EQ(defaults.baseVariation, 0.18f);
+    EXPECT_FLOAT_EQ(defaults.baseRoundness, 0.12f);
     EXPECT_FLOAT_EQ(defaults.farSoftening, 0.7f);
-    EXPECT_FLOAT_EQ(defaults.bodyThresholdMin, 0.0f);
+    EXPECT_FLOAT_EQ(defaults.bodyThresholdMin, 0.15f);
     EXPECT_FLOAT_EQ(defaults.baseRagged, 0.0f);
-    EXPECT_FLOAT_EQ(defaults.bodyWidth, 0.34f);
+    EXPECT_FLOAT_EQ(defaults.bodyWidth, 0.38f);
     VolumetricCloudSettings s = defaults;
     s.largeShapeMix = 0.2f;
     s.sizeVariation = 0.9f;
@@ -610,17 +613,19 @@ TEST(VolumetricCloudParamsTest, TheStructureSettingsReachTheBlockWithTheShippedD
 TEST(VolumetricCloudParamsTest, TheLightTuningSettingsReachTheBlockWithTheShippedDefaults)
 {
     const VolumetricCloudSettings defaults = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
-    EXPECT_FLOAT_EQ(defaults.ambientIntensity, 0.42f);
-    EXPECT_FLOAT_EQ(defaults.ambientSaturation, 1.18f);
-    EXPECT_FLOAT_EQ(defaults.msBlueShift, 0.85f);
+    EXPECT_FLOAT_EQ(defaults.ambientIntensity, 0.40f);
+    EXPECT_FLOAT_EQ(defaults.ambientSaturation, 1.22f);
+    EXPECT_FLOAT_EQ(defaults.msBlueShift, 0.88f);
     EXPECT_FLOAT_EQ(defaults.msDiffuse, 0.5f);
     EXPECT_FLOAT_EQ(defaults.msGlow, 0.30f);
+    EXPECT_FLOAT_EQ(defaults.backwardG, -0.40f);
+    EXPECT_FLOAT_EQ(defaults.backwardMix, 0.46f);
     EXPECT_FLOAT_EQ(defaults.silverIntensity, 0.12f);
     EXPECT_FLOAT_EQ(defaults.silverG, 0.85f);
-    EXPECT_FLOAT_EQ(defaults.powder, 0.22f);
-    EXPECT_FLOAT_EQ(defaults.sunWarmth, 0.58f);
+    EXPECT_FLOAT_EQ(defaults.powder, 0.32f);
+    EXPECT_FLOAT_EQ(defaults.sunWarmth, 0.26f);
     EXPECT_FLOAT_EQ(defaults.groundBounce, 1.5f);
-    EXPECT_FLOAT_EQ(defaults.shadowDensity, 1.35f);
+    EXPECT_FLOAT_EQ(defaults.shadowDensity, 1.12f);
     VolumetricCloudSettings s = defaults;
     s.ambientSaturation = 0.4f;
     s.msDiffuse = 2.0f;
@@ -1074,18 +1079,18 @@ TEST(VolumetricCloudTemporalTest, DivisorRoundsToOneThroughSix)
     EXPECT_EQ(divisorOf(99.0f), 6u);
 }
 
-TEST(VolumetricCloudTemporalTest, TheAutomaticDivisorKeepsTheMarchGridAboutSixHundredThirtyTwoTexelsWide)
+TEST(VolumetricCloudTemporalTest, TheAutomaticDivisorKeepsTheMarchGridAboutFourHundredTwentyTexelsWide)
 {
     const VolumetricCloudSettings automatic = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
     EXPECT_FLOAT_EQ(automatic.resolutionDivisor, 0.0f);
-    EXPECT_FLOAT_EQ(kCloudAutoMarchTexels, 632.0f);
+    EXPECT_FLOAT_EQ(kCloudAutoMarchTexels, 420.0f);
     EXPECT_EQ(CloudResolutionDivisor(automatic, 0), 4u);
-    EXPECT_EQ(CloudResolutionDivisor(automatic, 632), 1u);
-    EXPECT_EQ(CloudResolutionDivisor(automatic, 949), 2u);
-    EXPECT_EQ(CloudResolutionDivisor(automatic, 1264), 2u);
-    EXPECT_EQ(CloudResolutionDivisor(automatic, 1280), 2u);
-    EXPECT_EQ(CloudResolutionDivisor(automatic, 1920), 3u);
-    EXPECT_EQ(CloudResolutionDivisor(automatic, 2560), 4u);
+    EXPECT_EQ(CloudResolutionDivisor(automatic, 420), 1u);
+    EXPECT_EQ(CloudResolutionDivisor(automatic, 840), 2u);
+    EXPECT_EQ(CloudResolutionDivisor(automatic, 1264), 3u);
+    EXPECT_EQ(CloudResolutionDivisor(automatic, 1280), 3u);
+    EXPECT_EQ(CloudResolutionDivisor(automatic, 1920), 5u);
+    EXPECT_EQ(CloudResolutionDivisor(automatic, 2560), 6u);
     EXPECT_EQ(CloudResolutionDivisor(automatic, 3840), 6u);
     VolumetricCloudSettings fixed = automatic;
     fixed.resolutionDivisor = 3.0f;
@@ -1209,7 +1214,7 @@ TEST(VolumetricCloudTemporalTest, ResolveParamsCarryTheTemporalSettings)
     EXPECT_EQ(march.lowRes[2], o.y);
     EXPECT_EQ(march.fullSize[0], 884u);
     // The sub-pixel jitter travels in percent of a pixel.
-    EXPECT_EQ(march.lowRes[3], 100u);
+    EXPECT_EQ(march.lowRes[3], 25u);
     s.subpixelJitter = 0.5f;
     EXPECT_EQ(MakeVolumetricCloudParams(s, facts).lowRes[3], 50u);
     s.subpixelJitter = 0.0f;
@@ -1219,14 +1224,14 @@ TEST(VolumetricCloudTemporalTest, ResolveParamsCarryTheTemporalSettings)
 TEST(VolumetricCloudTemporalTest, TheTemporalDefaultsAreTheSampleAveragingOnes)
 {
     const VolumetricCloudSettings d = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
-    EXPECT_FLOAT_EQ(d.freshBlend, 0.1f);
+    EXPECT_FLOAT_EQ(d.freshBlend, 0.04f);
     EXPECT_FLOAT_EQ(d.motionBlend, 0.10f);
-    EXPECT_FLOAT_EQ(d.clampExpand, 0.50f);
-    EXPECT_FLOAT_EQ(d.jitter, 0.60f);
+    EXPECT_FLOAT_EQ(d.clampExpand, 0.85f);
+    EXPECT_FLOAT_EQ(d.jitter, 1.0f);
     EXPECT_FLOAT_EQ(d.historyBlend, 0.0f);
     EXPECT_FLOAT_EQ(d.historySharp, 1.0f);
     EXPECT_FLOAT_EQ(d.adaptiveBlend, 1.0f);
-    EXPECT_FLOAT_EQ(d.subpixelJitter, 1.0f);
+    EXPECT_FLOAT_EQ(d.subpixelJitter, 0.25f);
     EXPECT_FLOAT_EQ(d.resolutionDivisor, 0.0f);
     // Divisor 3 walks a 9 frame cycle: the own-sample index advances every 9 frames.
     EXPECT_EQ(CloudOwnSampleIndex(9 * 5, 3), 5u);
@@ -1455,7 +1460,7 @@ TEST(VolumetricCloudShaderTest, MarchShaderUsesTheOwnSampleJitterAndBlendsTheLig
     EXPECT_NE(march.find("texelFetch(blueNoise, pixel & 127, 0).r"), std::string::npos);
     EXPECT_NE(march.find("uint cycle = (params.counts.y / max(params.lowRes.x * params.lowRes.x, 1u)) & 255u;"), std::string::npos);
     EXPECT_NE(march.find("fract(bn + float(cycle) * 0.61803398875)"), std::string::npos);
-    EXPECT_NE(march.find("mix(sunDepthA, sunDepthB, blend)"), std::string::npos);
+    EXPECT_NE(march.find("mix(exp(-(sunDepthA - minSunDepth)), exp(-(sunDepthB - minSunDepth)), blend)"), std::string::npos);
     EXPECT_NE(march.find("mix(skyVisibilityA, skyVisibilityB, blend)"), std::string::npos);
 }
 
@@ -1485,17 +1490,17 @@ TEST(VolumetricCloudShaderTest, DetailIsCurlWarpedBillowAndWispErosionAndTheCurv
 TEST(VolumetricCloudShaderTest, TheShapeHasTwoScalesWindShearAndSoftBases)
 {
     const std::string march = gte::ReadShaderText("VolumetricCloud.comp");
-    // The big lobe octave: same volume at 1.75 x the tile (the CPU twin is kCloudLargeShapeScale).
-    EXPECT_NE(march.find("const float kLargeShapeScale = 1.75;"), std::string::npos);
-    EXPECT_FLOAT_EQ(kCloudLargeShapeScale, 1.75f);
+    // The big lobe octave: same volume at 2 x the tile (the CPU twin is kCloudLargeShapeScale).
+    EXPECT_NE(march.find("const float kLargeShapeScale = 2.0;"), std::string::npos);
+    EXPECT_FLOAT_EQ(kCloudLargeShapeScale, 2.0f);
     EXPECT_NE(march.find("shapeUv / kLargeShapeScale + kLargeShapeOffset"), std::string::npos);
     EXPECT_NE(march.find("float ShapeValue(vec4 sn)"), std::string::npos);
     // Wind shear: the noise and weather lookups move with the height fraction.
     EXPECT_NE(march.find("vec2 shear = params.structure.zw * heightFraction;"), std::string::npos);
     EXPECT_NE(march.find("params.structure.zw"), std::string::npos);
-    // Hanging bases and the erosion kept in the core.
+    // Hanging bases and the outer-shell erosion mask.
     EXPECT_NE(march.find("float baseShift = clamp((shapeSample.r - 0.635) * 0.025, -0.008, 0.012);"), std::string::npos);
-    EXPECT_NE(march.find("mix(params.structure2.x, 1.0, 1.0 - shape)"), std::string::npos);
+    EXPECT_NE(march.find("float shellMask = mix(params.structure2.x, 1.0, 1.0 - smoothstep(0.12, 0.62, shape));"), std::string::npos);
     EXPECT_NE(march.find("params.structure3.x"), std::string::npos);
 }
 
@@ -2085,6 +2090,9 @@ TEST(VolumetricCloudShadowNearTest, ShaderLookupAndShadowPassMatchCppConstants)
     EXPECT_NE(march.find("CloudNearShadowDensity"), std::string::npos);
     EXPECT_NE(march.find("CloudCurve(shape) * factor * modulation"), std::string::npos);
     EXPECT_NE(march.find("float transmittance = exp(-opticalDepth);"), std::string::npos);
+    EXPECT_NE(march.find("float along = 0.5;"), std::string::npos);
+    EXPECT_NE(march.find("kShadowRgss"), std::string::npos);
+    EXPECT_EQ(march.find("ShadowNoise"), std::string::npos);
     EXPECT_EQ(march.find("kNearShadowMsWeight"), std::string::npos);
     EXPECT_EQ(march.find("kNearShadowMsDecay"), std::string::npos);
 }
@@ -2508,7 +2516,10 @@ TEST(VolumetricCloudLightingTest, ResolveSoftHdrShoulderPreservesChromaAndCapsSm
 TEST(VolumetricCloudShadowNearTest, ShadowHistoryInvalidatesOnSunCoverageOrShadowDensityChange)
 {
     const VolumetricCloudSettings defaults = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
-    EXPECT_FLOAT_EQ(defaults.shadowDensity, 1.35f);
+    EXPECT_FLOAT_EQ(defaults.shadowDensity, 1.12f);
+    EXPECT_FLOAT_EQ(defaults.shadowSoftness, 0.75f);
+    EXPECT_FLOAT_EQ(defaults.shadowUpdate, 1.0f);
+    EXPECT_FLOAT_EQ(defaults.shadowSteps, 12.0f);
     EXPECT_DOUBLE_EQ(kCloudWindPeriodM, 350000.0);
 
     const Vec3 sunA = Normalize(Vec3(0.3f, 0.8f, -0.5f));
@@ -2539,6 +2550,7 @@ TEST(VolumetricCloudShaderTest, ResolveShaderHasKarisUpsampleDilatedReprojection
     EXPECT_NE(resolve.find("float clampWeight = smoothstep(0.15, 1.25, length(reprojectionShift));"), std::string::npos);
     EXPECT_NE(resolve.find("kept = mix(history, clamped, clampWeight);"), std::string::npos);
     EXPECT_NE(resolve.find("if (pixelEndKm < 50.0 && aux.y > pixelEndKm * 1.08 + 0.15)"), std::string::npos);
+    EXPECT_NE(resolve.find("if (newCount < 3.0 && cloud.a > 0.05 && cloud.a < 0.95)"), std::string::npos);
     EXPECT_NE(resolve.find("cloud.rgb = CompressCloudShoulder(cloud.rgb);"), std::string::npos);
     EXPECT_NE(resolve.find("float shaftCloudWeight = mix(0.06, 1.0, cloud.a * cloud.a);"), std::string::npos);
 }
@@ -2551,12 +2563,15 @@ TEST(VolumetricCloudShaderTest, MarchShaderRemovesSkinNormalAndSuppressesVertica
     EXPECT_EQ(march.find("exp(-params.weather.w * 0.75)"), std::string::npos);
     EXPECT_EQ(march.find("0.5 * stepLength"), std::string::npos);
     EXPECT_NE(march.find("weatherCoverage *= smoothstep(0.05, 0.16, massAverage);"), std::string::npos);
-    EXPECT_NE(march.find("float hMax = mix(0.16, 0.96, smoothstep(0.05, 0.62, wCov) * (0.42 + 0.58 * gCloudSize));"),
+    EXPECT_NE(march.find("float massGate = smoothstep(0.22, 0.82, gCloudSize);"), std::string::npos);
+    EXPECT_NE(march.find("float hMax = mix(0.16, 0.94, pow(smoothstep(0.12, 0.70, wCov), 1.35) * (0.25 + 0.75 * massGate));"),
         std::string::npos);
     EXPECT_NE(march.find("if (hNorm >= 1.05)"), std::string::npos);
     EXPECT_NE(march.find("float localTop = hMax * clamp(0.72 + 0.38 * shapeMid, 0.50, 1.04) * mix(1.0, kFarTopScale, farStreak);"),
         std::string::npos);
-    EXPECT_NE(march.find("float domeTaper = 1.0 - 0.50 * smoothstep(0.18, 1.0, hNorm);"), std::string::npos);
+    EXPECT_NE(march.find("float basePedestal = 1.0 + 0.20 * (1.0 - smoothstep(0.06, 0.32, heightFraction));"), std::string::npos);
+    EXPECT_NE(march.find("float domeTaper = 1.0 - 0.55 * smoothstep(0.20, 1.0, hNorm);"), std::string::npos);
+    EXPECT_NE(march.find("float effCoverage = Saturate(wCov * basePedestal * domeTaper);"), std::string::npos);
     EXPECT_NE(march.find("float billowErosion = 1.0 - billow;"), std::string::npos);
     EXPECT_NE(march.find("float tMid = max(t - 0.5 * coarseLength, tStart);"), std::string::npos);
     EXPECT_NE(march.find("detailAmount *= 1.0 - smoothstep(12000.0, 48000.0, fromEyeLength);"), std::string::npos);
@@ -2565,6 +2580,28 @@ TEST(VolumetricCloudShaderTest, MarchShaderRemovesSkinNormalAndSuppressesVertica
     EXPECT_NE(lighting.find("smoothstep(0.0, 0.08, s.density)"), std::string::npos);
     EXPECT_NE(lighting.find("smoothstep(0.3, 2.0, s.sunOpticalDepth)"), std::string::npos);
     EXPECT_NE(lighting.find("float glowDecay = mix(0.45, 0.30, Saturate(cosTheta));"), std::string::npos);
+    EXPECT_NE(lighting.find("smoothstep(0.42, 0.90, s.heightFraction) * exp(-s.sunOpticalDepth * 0.45) * 0.22"), std::string::npos);
+    EXPECT_NE(lighting.find("EffectiveSunWarmth(params.lightTune2.x, s.sunDirection.y)"), std::string::npos);
+}
+
+TEST(VolumetricCloudLightingTest, LowSunWarmthCrownLiftAndOpticalDepthInterpolationBehaveSmoothly)
+{
+    EXPECT_FLOAT_EQ(CloudEffectiveSunWarmth(0.0f, 0.10f), 0.0f);
+    EXPECT_FLOAT_EQ(CloudEffectiveSunWarmth(0.26f, 0.50f), 0.26f);
+    EXPECT_FLOAT_EQ(CloudEffectiveSunWarmth(0.26f, 0.34f), 0.26f);
+    const float warmth12Deg = CloudEffectiveSunWarmth(0.26f, 0.2079f);
+    EXPECT_GT(warmth12Deg, 0.50f);
+    EXPECT_LE(warmth12Deg, 1.0f);
+
+    EXPECT_FLOAT_EQ(CloudCrownScatterLift(0.30f, 0.0f), 0.0f);
+    EXPECT_NEAR(CloudCrownScatterLift(0.95f, 0.0f), 0.22f, 1e-6f);
+    EXPECT_LT(CloudCrownScatterLift(0.95f, 3.0f), CloudCrownScatterLift(0.95f, 0.2f));
+
+    EXPECT_NEAR(CloudInterpolateOpticalDepth(0.1f, 5.0f, 0.0f), 0.1f, 1e-5f);
+    EXPECT_NEAR(CloudInterpolateOpticalDepth(0.1f, 5.0f, 1.0f), 5.0f, 1e-5f);
+    EXPECT_NEAR(CloudInterpolateOpticalDepth(35.0f, 35.0f, 0.5f), 35.0f, 1e-4f);
+    const float midTau = CloudInterpolateOpticalDepth(0.1f, 4.0f, 0.5f);
+    EXPECT_NEAR(std::exp(-midTau), 0.5f * (std::exp(-0.1f) + std::exp(-4.0f)), 1e-5f);
 }
 
 } // namespace

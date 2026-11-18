@@ -82,8 +82,8 @@ TEST(BigWorldPlanTest, DemoCloudAndBloomDefaultsMatchPlanConstants)
     EXPECT_DOUBLE_EQ(kBloomThreshold, 2.0);
     EXPECT_DOUBLE_EQ(kBloomIntensity, 0.2);
     EXPECT_DOUBLE_EQ(kCloudShadowRangeKm, 16.0);
-    EXPECT_DOUBLE_EQ(kCloudShadowSoftness, 0.50);
-    EXPECT_DOUBLE_EQ(kCloudShadowFill, 0.20);
+    EXPECT_DOUBLE_EQ(kCloudShadowSoftness, 0.75);
+    EXPECT_DOUBLE_EQ(kCloudShadowFill, 0.10);
     EXPECT_DOUBLE_EQ(kCloudSunRays, 0.55);
     EXPECT_DOUBLE_EQ(kCloudSunRaysContrast, 1.65);
     EXPECT_DOUBLE_EQ(kCloudSunRaysDecay, 0.98);
@@ -94,8 +94,8 @@ TEST(BigWorldPlanTest, DemoCloudAndBloomDefaultsMatchPlanConstants)
         const FeatureTweak* clouds = FindTweak(plan, "VolumetricCloud");
         ASSERT_NE(clouds, nullptr);
         EXPECT_EQ(ValueOf(*clouds, "shadowRangeKm"), "16");
-        EXPECT_EQ(ValueOf(*clouds, "shadowSoftness"), "0.5");
-        EXPECT_EQ(ValueOf(*clouds, "shadowFill"), "0.2");
+        EXPECT_EQ(ValueOf(*clouds, "shadowSoftness"), "0.75");
+        EXPECT_EQ(ValueOf(*clouds, "shadowFill"), "0.1");
         EXPECT_EQ(ValueOf(*clouds, "sunRays"), "0.55");
         EXPECT_EQ(ValueOf(*clouds, "sunRaysContrast"), "1.65");
         EXPECT_EQ(ValueOf(*clouds, "sunRaysDecay"), "0.98");
@@ -106,8 +106,8 @@ TEST(BigWorldPlanTest, DemoCloudAndBloomDefaultsMatchPlanConstants)
 TEST(BigWorldPlanTest, CloudCoverageFollowsTierConstantsAndOverridesCleanly)
 {
     EXPECT_DOUBLE_EQ(kLeanCloudCoverage, 0.50);
-    EXPECT_DOUBLE_EQ(kMediumCloudCoverage, 0.56);
-    EXPECT_DOUBLE_EQ(kBigCloudCoverage, 0.56);
+    EXPECT_DOUBLE_EQ(kMediumCloudCoverage, 0.55);
+    EXPECT_DOUBLE_EQ(kBigCloudCoverage, 0.55);
 
     const BigWorldPlan lean = MakeBigWorldPlan(Quality::Lean);
     const BigWorldPlan medium = MakeBigWorldPlan(Quality::Medium);
@@ -116,8 +116,8 @@ TEST(BigWorldPlanTest, CloudCoverageFollowsTierConstantsAndOverridesCleanly)
     EXPECT_DOUBLE_EQ(medium.cloudCoverage, kMediumCloudCoverage);
     EXPECT_DOUBLE_EQ(big.cloudCoverage, kBigCloudCoverage);
     EXPECT_EQ(ValueOf(*FindTweak(lean, "VolumetricCloud"), "coverage"), "0.5");
-    EXPECT_EQ(ValueOf(*FindTweak(medium, "VolumetricCloud"), "coverage"), "0.56");
-    EXPECT_EQ(ValueOf(*FindTweak(big, "VolumetricCloud"), "coverage"), "0.56");
+    EXPECT_EQ(ValueOf(*FindTweak(medium, "VolumetricCloud"), "coverage"), "0.55");
+    EXPECT_EQ(ValueOf(*FindTweak(big, "VolumetricCloud"), "coverage"), "0.55");
 
     BigWorldPlan custom = MakeBigWorldPlan(Quality::Big);
     SetCloudCoverage(custom, 0.32);
@@ -175,13 +175,13 @@ TEST(BigWorldPlanTest, LowerTiersMarchTheCloudsWithFewerStepsAndAtLowerResolutio
     ASSERT_NE(lean, nullptr);
     ASSERT_NE(medium, nullptr);
     ASSERT_NE(big, nullptr);
-    EXPECT_EQ(ValueOf(*lean, "maxSteps"), "48");
-    EXPECT_EQ(ValueOf(*medium, "maxSteps"), "56");
-    EXPECT_EQ(ValueOf(*big, "maxSteps"), "68");
+    EXPECT_EQ(ValueOf(*lean, "maxSteps"), "56");
+    EXPECT_EQ(ValueOf(*medium, "maxSteps"), "76");
+    EXPECT_EQ(ValueOf(*big, "maxSteps"), "96");
     EXPECT_EQ(ValueOf(*lean, "resolutionDivisor"), "4");
     EXPECT_EQ(ValueOf(*medium, "resolutionDivisor"), "3");
     EXPECT_EQ(ValueOf(*lean, "shadowSteps"), "8");
-    EXPECT_EQ(ValueOf(*lean, "shadowUpdate"), "4");
+    EXPECT_EQ(ValueOf(*lean, "shadowUpdate"), "2");
     for (const char* key : { "resolutionDivisor", "shadowSteps", "shadowUpdate" }) {
         EXPECT_EQ(ValueOf(*big, key), "") << key; // the full tier keeps the feature default
     }

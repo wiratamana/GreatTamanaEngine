@@ -62,7 +62,7 @@ void AdvanceCloudWind(double (&offset)[2], double (&step)[2], float speed, float
 inline constexpr float kCloudFarWeatherTileScale = 2.8f;
 
 // The big lobe octave reads the shape volume at this multiple of the shape tile (VolumetricCloud.comp kLargeShapeScale).
-inline constexpr float kCloudLargeShapeScale = 1.75f;
+inline constexpr float kCloudLargeShapeScale = 2.0f;
 
 // Distance (m) the resolve pass assumes for a pixel that has no fresh cloud distance. Fixed: it is not tied to the
 // march range, which reaches the horizon (250 km and more).
@@ -100,8 +100,22 @@ inline constexpr float kCloudSunScatterShoulder = 1.85f;
 // Smooth luminance ceiling on a cloud sample (VolumetricCloudLighting.glsl kMaxSourceLuma).
 inline constexpr float kCloudMaxSourceLuma = 12.0f;
 
+// Low-sun warmth ramp constants matching EffectiveSunWarmth() in VolumetricCloudLighting.glsl.
+inline constexpr float kCloudLowSunWarmthStart = 0.14f;
+inline constexpr float kCloudLowSunWarmthEnd = 0.31f;
+inline constexpr float kCloudLowSunWarmthGain = 1.85f;
+
 // Sun light reaching a sample: sum over octaves plus the thin-optical-depth gated silver lobe.
 float CloudSunScatter(const VolumetricCloudSettings& safe, float cosTheta, float opticalDepth) noexcept;
+
+// Effective sun warmth for `sunUp` (sine of elevation), boosting warmth smoothly below 18 degrees.
+float CloudEffectiveSunWarmth(float sunWarmth, float sunUp) noexcept;
+
+// Sunlit upper-crown multi-scattering lift matching CloudSourceRadiance() in VolumetricCloudLighting.glsl.
+float CloudCrownScatterLift(float heightFraction, float sunOpticalDepth) noexcept;
+
+// Transmittance-space interpolation of optical depth between two strided sun-march endpoints.
+float CloudInterpolateOpticalDepth(float depthA, float depthB, float t) noexcept;
 
 // Smoothly bounds the luminance of `radiance` below `maxLuma` while preserving RGB hue.
 Vec3 BoundCloudLuma(const Vec3& radiance, float maxLuma = kCloudMaxSourceLuma) noexcept;
@@ -192,7 +206,7 @@ struct CloudShadowStrengths {
 CloudShadowStrengths ComputeCloudShadowStrengths(const VolumetricCloudSettings& safe, float sunUp) noexcept;
 
 // Width in texels of the march grid when the divisor is automatic (setting 0).
-inline constexpr float kCloudAutoMarchTexels = 632.0f;
+inline constexpr float kCloudAutoMarchTexels = 420.0f;
 inline constexpr std::uint32_t kCloudMaxResolutionDivisor = 6;
 
 // The march resolution divisor in use: the setting rounded to 1..6; 0 picks it from `viewWidth` (4 when it is unknown).

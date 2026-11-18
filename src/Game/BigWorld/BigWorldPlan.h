@@ -13,13 +13,13 @@ enum class Quality { Lean, Medium, Big };
 
 // Default cloud coverage per tier: lower than the 0.8 feature default so clouds leave sunlit gaps.
 inline constexpr double kLeanCloudCoverage = 0.50;
-inline constexpr double kMediumCloudCoverage = 0.56;
-inline constexpr double kBigCloudCoverage = 0.56;
+inline constexpr double kMediumCloudCoverage = 0.55;
+inline constexpr double kBigCloudCoverage = 0.55;
 
 // Cloud shadow and screen-space sun-shaft defaults for the demo.
 inline constexpr double kCloudShadowRangeKm = 16.0;     // Covers +/-8 km terrain; nested 1/8 near map spans 2 km (~15.6 m/texel).
-inline constexpr double kCloudShadowSoftness = 0.50;    // Crisp foreground cumulus dapples without blocky shadow texels.
-inline constexpr double kCloudShadowFill = 0.20;        // Balanced diffuse sky fill on cloud-shaded ground.
+inline constexpr double kCloudShadowSoftness = 0.75;    // Smooth 5-tap shadow edges without grain across near and far maps.
+inline constexpr double kCloudShadowFill = 0.10;        // Crisp diffuse sky fill on cloud-shaded ground and mountains.
 inline constexpr double kCloudSunRays = 0.55;           // Subtle screen-space sun shafts through cloud gaps without glare.
 inline constexpr double kCloudSunRaysContrast = 1.65;   // Suppresses uniform sky veil so partial cloud gaps form beams.
 inline constexpr double kCloudSunRaysDecay = 0.98;      // Radial falloff of sun-shaft taps away from the sun.

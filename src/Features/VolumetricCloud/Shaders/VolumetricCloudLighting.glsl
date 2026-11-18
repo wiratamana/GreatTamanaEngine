@@ -13,6 +13,9 @@ const float kMaxSourceLuma = 12.0;
 const vec3 kCloudLumaWeights = vec3(0.2126, 0.7152, 0.0722);
 // Share of its segment a sun sample may move (1 = anywhere inside).
 const float kLightJitterSpan = 0.9;
+const float kLowSunWarmthStart = 0.14;
+const float kLowSunWarmthEnd = 0.31;
+const float kLowSunWarmthGain = 1.85;
 
 struct CloudLightInput {
     vec3 position;          // World position of the sample, metres.
@@ -140,6 +143,17 @@ float InScatterProbability(float lodDensity, float h, float cosTheta)
     return mix(Saturate(depthP * vertP), 1.0, rimLift);
 }
 
+// Keeps daytime clouds warm-ivory while boosting golden warmth when the sun sits below 18 degrees.
+float EffectiveSunWarmth(float baseWarmth, float sunUp)
+{
+    float base = Saturate(baseWarmth);
+    if (base <= 0.0) {
+        return 0.0;
+    }
+    float lowSunBoost = 1.0 - smoothstep(kLowSunWarmthStart, kLowSunWarmthEnd, sunUp);
+    return Saturate(base * (1.0 + kLowSunWarmthGain * lowSunBoost));
+}
+
 // Radiance a sample scatters toward the eye per unit of absorbed light.
 vec3 CloudSourceRadiance(CloudLightInput s)
 {
@@ -160,7 +174,11 @@ vec3 CloudSourceRadiance(CloudLightInput s)
         float glowDecay = mix(0.45, 0.30, Saturate(cosTheta));
         float glowDepthGate = smoothstep(0.3, 2.0, s.sunOpticalDepth);
         vec3 glow = vec3(params.lightTune.z * s.lodDensity * glowDepthGate * exp(-tau * glowDecay) * HenyeyGreenstein(cosTheta, kGlowEccentricity));
-        sun = s.sunRadiance * mix(vec3(1.0), kSunWarmTint, params.lightTune2.x) * (scatter + diffuse + glow);
+        // Sunlit upper-crown multi-scatter lift makes cauliflower dome tops gleam cleanly.
+        float crownLift = smoothstep(0.42, 0.90, s.heightFraction) * exp(-s.sunOpticalDepth * 0.45) * 0.22;
+        vec3 crown = vec3(crownLift / (4.0 * kPi));
+        float warmth = EffectiveSunWarmth(params.lightTune2.x, s.sunDirection.y);
+        sun = s.sunRadiance * mix(vec3(1.0), kSunWarmTint, warmth) * (scatter + diffuse + glow + crown);
     }
     float skyShare = mix(params.lightMisc.y, 1.0, pow(max(s.heightFraction, 1e-5), 0.7)) * s.skyVisibility;
     // Light bounced up from the ground reaches the low part of the cloud where ground is sunlit.

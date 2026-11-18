@@ -338,6 +338,34 @@ float CloudSunScatter(const VolumetricCloudSettings& safe, float cosTheta, float
     return scatter / (1.0f + scatter / kCloudSunScatterShoulder);
 }
 
+float CloudEffectiveSunWarmth(float sunWarmth, float sunUp) noexcept
+{
+    const float base = Saturate(sunWarmth);
+    if (base <= 0.0f) {
+        return 0.0f;
+    }
+    const float safeSunUp = std::isfinite(sunUp) ? sunUp : 0.0f;
+    const float lowSunBoost = 1.0f - SmoothStep(kCloudLowSunWarmthStart, kCloudLowSunWarmthEnd, safeSunUp);
+    return Saturate(base * (1.0f + kCloudLowSunWarmthGain * lowSunBoost));
+}
+
+float CloudCrownScatterLift(float heightFraction, float sunOpticalDepth) noexcept
+{
+    return SmoothStep(0.42f, 0.90f, heightFraction) * CloudBeer(sunOpticalDepth * 0.45f) * 0.22f;
+}
+
+float CloudInterpolateOpticalDepth(float depthA, float depthB, float t) noexcept
+{
+    const float a = std::isfinite(depthA) ? std::max(depthA, 0.0f) : 0.0f;
+    const float b = std::isfinite(depthB) ? std::max(depthB, 0.0f) : 0.0f;
+    const float blend = SmoothStep(0.0f, 1.0f, t);
+    const float minDepth = std::min(a, b);
+    const float transA = CloudBeer(a - minDepth);
+    const float transB = CloudBeer(b - minDepth);
+    const float trans = transA + (transB - transA) * blend;
+    return minDepth - std::log(std::max(trans, 1e-6f));
+}
+
 Vec3 BoundCloudLuma(const Vec3& radiance, float maxLuma) noexcept
 {
     const float r = std::isfinite(radiance.x) ? std::max(radiance.x, 0.0f) : 0.0f;

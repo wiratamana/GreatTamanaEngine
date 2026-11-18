@@ -562,11 +562,13 @@ void main()
     vec3 refractTint = mix(vec3(0.86, 0.94, 1.04), vec3(1.0), cloudVis);
     vec3 under = seabed * (transmit * refractTint) + bodyColor * (1.0 - transmit);
 
-    // Reflection: clear-sky LUT has no clouds, so shift shadowed water reflection to cooler sapphire/slate.
+    // Reflection: clouds occlude solar Mie sky glare, leaving cool diffuse sky-dome radiance over shadowed water.
     float shoreFresnel = smoothstep(0.0, 0.35, verticalDepth);
     float reflectWeight = fresnel * shoreFresnel;
     vec3 refl = ReflectionColor(hit, dir, normal, p, fullSize, reflectWeight);
-    refl *= mix(vec3(0.58, 0.66, 0.78), vec3(1.0), cloudVis);
+    float reflPeak = max(refl.r, max(refl.g, refl.b));
+    vec3 shadowedRefl = (refl / (1.0 + reflPeak * 0.75)) * vec3(0.45, 0.56, 0.72);
+    refl = mix(shadowedRefl, refl, cloudVis);
     vec3 color = mix(under, refl * params.surfaceInfo.w, reflectWeight);
 
     // Sun glint vanishes rapidly as cloud optical depth scatters the solar disk cone.
