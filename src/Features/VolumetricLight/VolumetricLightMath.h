@@ -80,6 +80,16 @@ struct VolumetricLightSliceIntegral {
 VolumetricLightSliceIntegral VolumetricLightIntegrateSlice(
     const Vec3& scattering, float extinction, float thickness) noexcept;
 
+// Plain-fog sky distance in world units; stays inside fogMaxDistance when mist stretches maxDistance.
+float VolumetricLightSkyPlainDistance(float maxDistance, float fogMaxDistance, float skyDistanceFraction) noexcept;
+
+// Caps plain-fog sky opacity so near fog cannot darken sky transmittance below kVolumetricLightMinSkyTransmittance.
+VolumetricLightSliceIntegral VolumetricLightClampSkyPlainFog(const VolumetricLightSliceIntegral& fog) noexcept;
+
+// Appends mist beyond fogMaxDistance on sky pixels while keeping transmittance above the sky floor.
+VolumetricLightSliceIntegral VolumetricLightCombineSkyMistFog(const VolumetricLightSliceIntegral& plainFog,
+    const VolumetricLightSliceIntegral& fogEnd, const VolumetricLightSliceIntegral& fogFar) noexcept;
+
 // smoothstep(-2 deg, 5 deg, sun elevation). A non-finite direction counts as straight up.
 float VolumetricLightSunFade(const Vec3& directionTowardSun) noexcept;
 

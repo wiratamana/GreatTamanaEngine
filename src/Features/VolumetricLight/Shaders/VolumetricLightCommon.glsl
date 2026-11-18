@@ -64,4 +64,33 @@ float ValueNoise3(vec3 p)
                mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y), f.z);
 }
 
+const float kMinSkyTransmittance = 0.85;
+
+// Caps plain-fog sky opacity so near fog cannot darken or blow out the sky.
+vec4 ClampSkyPlainFog(vec4 fog)
+{
+    if (HasNonFinite(fog)) {
+        return vec4(0.0, 0.0, 0.0, 1.0);
+    }
+    fog.rgb = max(fog.rgb, vec3(0.0));
+    fog.a = clamp(fog.a, 0.0, 1.0);
+    if (fog.a < kMinSkyTransmittance) {
+        float scale = (1.0 - kMinSkyTransmittance) / max(1.0 - fog.a, 1e-5);
+        fog.rgb *= scale;
+        fog.a = kMinSkyTransmittance;
+    }
+    return fog;
+}
+
+// Appends mist beyond fogRange on sky pixels while keeping transmittance above kMinSkyTransmittance.
+vec4 CombineSkyMistFog(vec4 plainFog, vec4 fogEnd, vec4 fogFar)
+{
+    float endT = clamp(fogEnd.a, 0.0, 1.0);
+    float farT = clamp(fogFar.a, 0.0, 1.0);
+    float unattenuate = smoothstep(0.05, 0.2, endT) / max(endT, 0.05);
+    vec3 mistIn = max(fogFar.rgb - fogEnd.rgb, vec3(0.0)) * unattenuate;
+    float mistT = endT > 0.05 ? clamp(farT / endT, 0.0, 1.0) : 1.0;
+    return vec4(plainFog.rgb + plainFog.a * mistIn, max(plainFog.a * mistT, kMinSkyTransmittance));
+}
+
 #endif

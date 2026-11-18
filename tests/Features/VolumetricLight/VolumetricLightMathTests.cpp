@@ -510,5 +510,63 @@ TEST(VolumetricLightMathTest, LightingKeyChangesWithTheLightMode)
     EXPECT_NE(VolumetricLightLightingKey(base, true), VolumetricLightLightingKey(base, false));
 }
 
+TEST(VolumetricLightMathTest, SkyPlainDistanceStaysWithinPlainFogRangeWhenMistStretchesVolume)
+{
+    EXPECT_FLOAT_EQ(VolumetricLightSkyPlainDistance(400.0f, 0.0f, 0.3f), 120.0f);
+    EXPECT_FLOAT_EQ(VolumetricLightSkyPlainDistance(4000.0f, 400.0f, 0.3f), 120.0f);
+    EXPECT_FLOAT_EQ(VolumetricLightSkyPlainDistance(400.0f, 400.0f, 0.3f), 120.0f);
+    EXPECT_FLOAT_EQ(VolumetricLightSkyPlainDistance(4000.0f, 400.0f, 2.0f), 400.0f);
+    EXPECT_FLOAT_EQ(VolumetricLightSkyPlainDistance(4000.0f, 400.0f, -1.0f), 0.0f);
+    EXPECT_FLOAT_EQ(VolumetricLightSkyPlainDistance(kNaN, 400.0f, 0.3f), 0.0f);
+    EXPECT_FLOAT_EQ(VolumetricLightSkyPlainDistance(-10.0f, 400.0f, 0.3f), 0.0f);
+}
+
+TEST(VolumetricLightMathTest, ClampSkyPlainFogEnforcesTransmittanceFloorAndScalesInScatter)
+{
+    const VolumetricLightSliceIntegral thin = VolumetricLightClampSkyPlainFog({ Vec3{ 0.02f, 0.03f, 0.04f }, 0.94f });
+    EXPECT_FLOAT_EQ(thin.transmittance, 0.94f);
+    EXPECT_FLOAT_EQ(thin.inScatter.x, 0.02f);
+
+    const VolumetricLightSliceIntegral thick = VolumetricLightClampSkyPlainFog({ Vec3{ 0.4f, 0.8f, 1.2f }, 0.60f });
+    EXPECT_FLOAT_EQ(thick.transmittance, kVolumetricLightMinSkyTransmittance);
+    const float scale = (1.0f - kVolumetricLightMinSkyTransmittance) / 0.40f;
+    EXPECT_NEAR(thick.inScatter.x, 0.4f * scale, 1e-6f);
+    EXPECT_NEAR(thick.inScatter.y, 0.8f * scale, 1e-6f);
+    EXPECT_NEAR(thick.inScatter.z, 1.2f * scale, 1e-6f);
+
+    const VolumetricLightSliceIntegral bad = VolumetricLightClampSkyPlainFog({ Vec3{ kNaN, 0.0f, 0.0f }, 0.5f });
+    EXPECT_FLOAT_EQ(bad.transmittance, 1.0f);
+    EXPECT_FLOAT_EQ(bad.inScatter.x, 0.0f);
+}
+
+TEST(VolumetricLightMathTest, CombineSkyMistFogExtractsMistInScatterWithoutDarkeningPastFloor)
+{
+    const VolumetricLightSliceIntegral nearFog =
+        VolumetricLightIntegrateSlice(Vec3{ 0.0002f, 0.0003f, 0.0004f }, 0.004f, 120.0f);
+    const VolumetricLightSliceIntegral fogEnd =
+        VolumetricLightIntegrateSlice(Vec3{ 0.0002f, 0.0003f, 0.0004f }, 0.004f, 340.0f);
+    const VolumetricLightSliceIntegral mistOnly =
+        VolumetricLightIntegrateSlice(Vec3{ 0.0004f, 0.0005f, 0.0006f }, 0.00015f, 800.0f);
+    const VolumetricLightSliceIntegral fogFar{
+        fogEnd.inScatter + mistOnly.inScatter * fogEnd.transmittance,
+        fogEnd.transmittance * mistOnly.transmittance,
+    };
+    const VolumetricLightSliceIntegral clampedNear = VolumetricLightClampSkyPlainFog(nearFog);
+    const VolumetricLightSliceIntegral sky = VolumetricLightCombineSkyMistFog(clampedNear, fogEnd, fogFar);
+    EXPECT_GE(sky.transmittance, kVolumetricLightMinSkyTransmittance);
+    EXPECT_NEAR(sky.inScatter.x, clampedNear.inScatter.x + mistOnly.inScatter.x * clampedNear.transmittance, 1e-5f);
+    EXPECT_GT(sky.inScatter.x, clampedNear.inScatter.x);
+
+    const VolumetricLightSliceIntegral opaque = VolumetricLightCombineSkyMistFog(
+        { Vec3{ 0.1f, 0.1f, 0.1f }, 0.9f }, { Vec3{ 1.0f, 1.0f, 1.0f }, 0.0f }, { Vec3{ 2.0f, 2.0f, 2.0f }, 0.0f });
+    EXPECT_TRUE(std::isfinite(opaque.inScatter.x));
+    EXPECT_GE(opaque.transmittance, kVolumetricLightMinSkyTransmittance);
+
+    const VolumetricLightSliceIntegral heavyMist = VolumetricLightCombineSkyMistFog(
+        { Vec3::Zero(), 0.95f }, { Vec3::Zero(), 0.9f }, { Vec3{ 0.5f, 0.5f, 0.5f }, 0.18f });
+    EXPECT_FLOAT_EQ(heavyMist.transmittance, kVolumetricLightMinSkyTransmittance);
+    EXPECT_GT(heavyMist.inScatter.x, 0.5f);
+}
+
 } // namespace
 } // namespace gte

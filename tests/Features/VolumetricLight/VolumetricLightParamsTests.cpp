@@ -8,6 +8,7 @@
 #include <bit>
 #include <cmath>
 #include <cstddef>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <sstream>
@@ -274,6 +275,39 @@ TEST(VolumetricLightParamsTest, CompositePushCarriesTheResultAndSettings)
     EXPECT_EQ(p.frameAndDebug[0], 5u);
     EXPECT_EQ(p.frameAndDebug[1], 2u);
     EXPECT_EQ(std::bit_cast<float>(p.frameAndDebug[2]), 0.25f);
+
+    result.maxDistance = 4000.0f;
+    result.fogMaxDistance = 400.0f;
+    const VolumetricLightCompositePush stretched =
+        MakeVolumetricLightCompositePush(s, Mat4::Identity(), Vec3::Zero(), result, 6);
+    EXPECT_FLOAT_EQ(stretched.eyeAndMaxDistance[3], 4000.0f);
+    EXPECT_FLOAT_EQ(stretched.strengthExponentReserved[2], 400.0f);
+
+    result.fogMaxDistance = std::numeric_limits<float>::quiet_NaN();
+    EXPECT_FLOAT_EQ(MakeVolumetricLightCompositePush(s, Mat4::Identity(), Vec3::Zero(), result, 7)
+                        .strengthExponentReserved[2],
+        0.0f);
+}
+
+TEST(VolumetricLightParamsTest, CompositeSkyFloorMatchesShaderConstantAndHelpers)
+{
+    const auto readFile = [](const std::filesystem::path& path) {
+        std::ifstream file(path, std::ios::binary);
+        std::stringstream text;
+        text << file.rdbuf();
+        return text.str();
+    };
+    const std::filesystem::path dir(GTE_TEST_VOLUMETRIC_SHADER_DIR);
+    const std::string common = readFile(dir / "VolumetricLightCommon.glsl");
+    const std::string composite = readFile(dir / "VolumetricLightComposite.comp");
+    ASSERT_FALSE(common.empty());
+    ASSERT_FALSE(composite.empty());
+    EXPECT_NE(common.find("kMinSkyTransmittance = 0.85"), std::string::npos);
+    EXPECT_FLOAT_EQ(kVolumetricLightMinSkyTransmittance, 0.85f);
+    EXPECT_NE(common.find("vec4 ClampSkyPlainFog(vec4 fog)"), std::string::npos);
+    EXPECT_NE(common.find("vec4 CombineSkyMistFog("), std::string::npos);
+    EXPECT_NE(composite.find("ClampSkyPlainFog("), std::string::npos);
+    EXPECT_NE(composite.find("CombineSkyMistFog("), std::string::npos);
 }
 
 TEST(VolumetricLightParamsTest, SunDirectScaleMatchesTheMaterialLighting)

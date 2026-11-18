@@ -23,12 +23,13 @@ inline constexpr double kCloudSunRays = 0.6;           // Screen-space sun glare
 inline constexpr double kLeanCloudShaftMist = 0.0;     // Off on lean because volumetric light is disabled.
 inline constexpr double kScenicCloudShaftMist = 0.15;  // Thin near-field mist when volumetric light stays on.
 
-// Bloom threshold for the demo: above 1.0 white so sunlit clouds do not veil the sky.
+// Bloom defaults for the demo: threshold above 1.0 white and softer intensity so sunlit clouds do not veil the sky.
 inline constexpr double kBloomThreshold = 2.0;
+inline constexpr double kBloomIntensity = 0.2;
 
 // VolumetricLight budget for tiers that use the "scenic" terrain profile.
 inline constexpr double kVolumetricMaxDistance = 400.0; // Metres; clamped to the farthest sun shadow cascade.
-inline constexpr double kVolumetricDensity = 0.004;     // Extinction per metre over the 400 m range.
+inline constexpr double kVolumetricDensity = 0.0003;    // Thin extinction per metre so sky transmittance stays clean.
 inline constexpr double kVolumetricAnisotropyG = 0.75;  // Forward scattering toward the sun.
 inline constexpr int kVolumetricShadowSamples = 2;      // Shadow taps per froxel.
 inline constexpr bool kVolumetricTemporal = true;
@@ -64,6 +65,7 @@ struct BigWorldPlan {
     double cloudSunRays = kCloudSunRays;
     double cloudShaftMist = kScenicCloudShaftMist;
     double bloomThreshold = kBloomThreshold;
+    double bloomIntensity = kBloomIntensity;
 
     bool volumetricLight = true; // True on medium and big ("scenic"); false on lean ("lean").
     double volumetricMaxDistance = kVolumetricMaxDistance;

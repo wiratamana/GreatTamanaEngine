@@ -229,6 +229,7 @@ protected:
     {
         features.values["Bloom"]["enabled"] = "true";
         features.values["Bloom"]["threshold"] = "1";
+        features.values["Bloom"]["intensity"] = "0.3";
         features.values["VolumetricCloud"]["enabled"] = "false";
         features.values["VolumetricCloud"]["coverage"] = "0.8";
         features.values["VolumetricCloud"]["shadowRangeKm"] = "24";
@@ -368,8 +369,9 @@ TEST_F(BigWorldDemoTest, SuccessPathReachesReadyAndSwitchesFeaturesOn)
     EXPECT_EQ(features.values["VolumetricCloud"]["sunRays"], "0.6");
     EXPECT_EQ(features.values["VolumetricCloud"]["shaftMist"], "0.15");
     EXPECT_EQ(features.values["Bloom"]["threshold"], "2");
+    EXPECT_EQ(features.values["Bloom"]["intensity"], "0.2");
     EXPECT_EQ(features.values["VolumetricLight"]["maxDistance"], "400");
-    EXPECT_EQ(features.values["VolumetricLight"]["density"], "0.004");
+    EXPECT_EQ(features.values["VolumetricLight"]["density"], "0.0003");
     EXPECT_EQ(features.values["VolumetricLight"]["anisotropyG"], "0.75");
     EXPECT_EQ(features.values["VolumetricLight"]["shadowSamples"], "2");
     EXPECT_EQ(features.values["Grass"]["preset"], "Big");
@@ -397,6 +399,7 @@ TEST_F(BigWorldDemoTest, EachTierAppliesItsSettingsAndRestoresRoundTripOnClose)
         EXPECT_EQ(features.values["VolumetricCloud"]["sunRays"], "0.6") << QualityName(c.quality);
         EXPECT_EQ(features.values["VolumetricCloud"]["shaftMist"], c.mist) << QualityName(c.quality);
         EXPECT_EQ(features.values["Bloom"]["threshold"], "2") << QualityName(c.quality);
+        EXPECT_EQ(features.values["Bloom"]["intensity"], "0.2") << QualityName(c.quality);
         EXPECT_EQ(features.values["VolumetricLight"]["maxDistance"], c.vlMaxDist) << QualityName(c.quality);
         ASSERT_TRUE(demo.Close().ok);
         EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], "0.8") << QualityName(c.quality);
@@ -406,6 +409,7 @@ TEST_F(BigWorldDemoTest, EachTierAppliesItsSettingsAndRestoresRoundTripOnClose)
         EXPECT_EQ(features.values["VolumetricCloud"]["sunRays"], "0");
         EXPECT_EQ(features.values["VolumetricCloud"]["shaftMist"], "0");
         EXPECT_EQ(features.values["Bloom"]["threshold"], "1");
+        EXPECT_EQ(features.values["Bloom"]["intensity"], "0.3");
         EXPECT_EQ(features.values["VolumetricLight"]["maxDistance"], "60");
         EXPECT_EQ(features.values["VolumetricLight"]["density"], "0.01");
         EXPECT_EQ(features.values["VolumetricLight"]["anisotropyG"], "0.7");
@@ -623,6 +627,7 @@ TEST_F(BigWorldDemoTest, ASceneReplacedWhileReadyRestoresEverythingAndGoesIdle)
     EXPECT_EQ(features.values["VolumetricCloud"]["enabled"], "false");
     EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], "0.8");
     EXPECT_EQ(features.values["Bloom"]["threshold"], "1");
+    EXPECT_EQ(features.values["Bloom"]["intensity"], "0.3");
     EXPECT_EQ(features.values["VolumetricLight"]["maxDistance"], "60");
     EXPECT_EQ(features.values["Grass"]["densityLod0"], "16");
     ASSERT_EQ(demo.State().warnings.size(), 1u); // no stale "no height tile" from the last poll
@@ -640,6 +645,7 @@ TEST_F(BigWorldDemoTest, CloseUndoesEveryChange)
     EXPECT_EQ(features.values["VolumetricCloud"]["enabled"], "false");
     EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], "0.8");
     EXPECT_EQ(features.values["Bloom"]["threshold"], "1");
+    EXPECT_EQ(features.values["Bloom"]["intensity"], "0.3");
     EXPECT_EQ(features.values["VolumetricLight"]["maxDistance"], "60");
     EXPECT_EQ(features.values["Grass"]["densityLod0"], "16");
     EXPECT_TRUE(demo.State().waterBodyIds.empty());
@@ -896,9 +902,10 @@ TEST_F(BigWorldDemoTest, JsonCarriesPhasePlanKeysShadowKeysAndEscapesText)
     EXPECT_NE(json.find("\"cloudSunRays\":0.6"), std::string::npos);
     EXPECT_NE(json.find("\"cloudShaftMist\":0.15"), std::string::npos);
     EXPECT_NE(json.find("\"bloomThreshold\":2"), std::string::npos);
+    EXPECT_NE(json.find("\"bloomIntensity\":0.2"), std::string::npos);
     EXPECT_NE(json.find("\"volumetricLight\":true"), std::string::npos);
     EXPECT_NE(json.find("\"volumetricMaxDistance\":400"), std::string::npos);
-    EXPECT_NE(json.find("\"volumetricDensity\":0.004"), std::string::npos);
+    EXPECT_NE(json.find("\"volumetricDensity\":0.0003"), std::string::npos);
     EXPECT_NE(json.find("\"volumetricAnisotropyG\":0.75"), std::string::npos);
     EXPECT_NE(json.find("\"volumetricShadowSamples\":2"), std::string::npos);
     EXPECT_NE(json.find("\"volumetricTemporal\":true"), std::string::npos);

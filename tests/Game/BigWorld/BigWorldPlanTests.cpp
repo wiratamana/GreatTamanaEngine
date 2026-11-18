@@ -57,6 +57,7 @@ TEST(BigWorldPlanTest, EveryTierSwitchesCloudsBloomAndGrassOn)
         EXPECT_EQ(ValueOf(*clouds, "enabled"), "true");
         EXPECT_EQ(ValueOf(*bloom, "enabled"), "true");
         EXPECT_EQ(ValueOf(*bloom, "threshold"), "2");
+        EXPECT_EQ(ValueOf(*bloom, "intensity"), "0.2");
         EXPECT_EQ(ValueOf(*grass, "enabled"), "true");
         EXPECT_FALSE(ValueOf(*grass, "preset").empty());
     }
@@ -83,7 +84,7 @@ TEST(BigWorldPlanTest, TerrainProfileAndVolumetricLightFollowTheTier)
         ASSERT_NE(vl, nullptr);
         EXPECT_EQ(ValueOf(*vl, "enabled"), "true");
         EXPECT_EQ(ValueOf(*vl, "maxDistance"), "400");
-        EXPECT_EQ(ValueOf(*vl, "density"), "0.004");
+        EXPECT_EQ(ValueOf(*vl, "density"), "0.0003");
         EXPECT_EQ(ValueOf(*vl, "anisotropyG"), "0.75");
         EXPECT_EQ(ValueOf(*vl, "shadowSamples"), "2");
         EXPECT_EQ(ValueOf(*vl, "temporal"), "true");
@@ -94,11 +95,12 @@ TEST(BigWorldPlanTest, TerrainProfileAndVolumetricLightFollowTheTier)
 TEST(BigWorldPlanTest, DemoCloudAndBloomDefaultsMatchPlanConstants)
 {
     EXPECT_DOUBLE_EQ(kBloomThreshold, 2.0);
+    EXPECT_DOUBLE_EQ(kBloomIntensity, 0.2);
     EXPECT_DOUBLE_EQ(kCloudShadowRangeKm, 8.0);
     EXPECT_DOUBLE_EQ(kCloudShadowSoftness, 0.6);
     EXPECT_DOUBLE_EQ(kCloudSunRays, 0.6);
     EXPECT_DOUBLE_EQ(kVolumetricMaxDistance, 400.0);
-    EXPECT_DOUBLE_EQ(kVolumetricDensity, 0.004);
+    EXPECT_DOUBLE_EQ(kVolumetricDensity, 0.0003);
     EXPECT_DOUBLE_EQ(kVolumetricAnisotropyG, 0.75);
     EXPECT_EQ(kVolumetricShadowSamples, 2);
     EXPECT_TRUE(kVolumetricTemporal);
@@ -211,6 +213,7 @@ TEST(BigWorldPlanTest, SanitizeReplacesNonFiniteValuesAndClampsRanges)
     plan.cloudSunRays = -1.0;
     plan.cloudShaftMist = 9.0;
     plan.bloomThreshold = 99.0;
+    plan.bloomIntensity = 99.0;
     plan.volumetricMaxDistance = 5000.0;
     plan.volumetricDensity = -0.2;
     plan.volumetricAnisotropyG = 2.0;
@@ -229,6 +232,7 @@ TEST(BigWorldPlanTest, SanitizeReplacesNonFiniteValuesAndClampsRanges)
     EXPECT_DOUBLE_EQ(safe.cloudSunRays, 0.0);
     EXPECT_DOUBLE_EQ(safe.cloudShaftMist, 4.0);
     EXPECT_DOUBLE_EQ(safe.bloomThreshold, 16.0);
+    EXPECT_DOUBLE_EQ(safe.bloomIntensity, 4.0);
     EXPECT_DOUBLE_EQ(safe.volumetricMaxDistance, 2000.0);
     EXPECT_DOUBLE_EQ(safe.volumetricDensity, 0.0);
     EXPECT_DOUBLE_EQ(safe.volumetricAnisotropyG, 0.95);
@@ -237,6 +241,7 @@ TEST(BigWorldPlanTest, SanitizeReplacesNonFiniteValuesAndClampsRanges)
     EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricCloud"), "coverage"), "0.28");
     EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricCloud"), "shadowRangeKm"), "4");
     EXPECT_EQ(ValueOf(*FindTweak(safe, "Bloom"), "threshold"), "16");
+    EXPECT_EQ(ValueOf(*FindTweak(safe, "Bloom"), "intensity"), "4");
     EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricLight"), "maxDistance"), "2000");
     EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricLight"), "shadowSamples"), "4");
     EXPECT_TRUE(std::isfinite(safe.spotX));

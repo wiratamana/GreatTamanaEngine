@@ -271,7 +271,8 @@ void VolumetricLightFeature::VolumePass(fx::PostOpaqueFrame& f)
     snap.textureBytes += kVolumeBytes;
 
     // Published only after the integrate dispatch was declared.
-    m_result.Publish(f, VolumetricLightResult{ integrated.texture, facts.maxDistance, cfg.depthExponent },
+    m_result.Publish(f,
+        VolumetricLightResult{ integrated.texture, facts.maxDistance, cfg.depthExponent, facts.fogMaxDistance },
         { integrated.texture });
     snap.status = VolumetricLightFrameStatus::Ok;
     view.snapshot = snap;

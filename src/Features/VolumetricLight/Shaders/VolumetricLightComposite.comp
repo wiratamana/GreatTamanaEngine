@@ -8,7 +8,7 @@ layout(local_size_x = 16, local_size_y = 16) in;
 layout(push_constant) uniform PushConstants {
     mat4 invViewProjection;
     vec4 eyeAndMaxDistance;
-    vec4 strengthExponentReserved;      // x strength, y exponent, z and w reserved.
+    vec4 strengthExponentReserved;      // x strength, y exponent, z fog max distance (0 = all), w reserved.
     uvec4 frameAndDebug;                // x frame index, y debug view (0 off, 1 in-scatter, 2 transmittance), z sky distance fraction (float bits).
 } pc;
 
@@ -16,6 +16,20 @@ layout(binding = 0) uniform sampler2D sourceColor;
 layout(binding = 1) uniform sampler2D sourceDepth;
 layout(binding = 2) uniform sampler3D integratedVolume;
 layout(binding = 3, rgba16f) uniform writeonly image2D destinationImage;
+
+vec4 SampleIntegratedVolume(vec2 uv, float rayDistance, float maxDistance, float exponent, float rangeFade)
+{
+    float sliceCount = float(textureSize(integratedVolume, 0).z);
+    float slice = ViewDepthToFroxelSlice(rayDistance, sliceCount, maxDistance, exponent);
+    // A slice holds the value at its far boundary, but texel centres sit half a texel inside.
+    float halfTexel = 0.5 / sliceCount;
+    float sliceUv = clamp(slice / sliceCount - halfTexel, halfTexel, 1.0 - halfTexel);
+    vec4 fog = texture(integratedVolume, vec3(uv, sliceUv));
+    if (HasNonFinite(fog)) {
+        fog = vec4(0.0, 0.0, 0.0, 1.0);
+    }
+    return mix(vec4(0.0, 0.0, 0.0, 1.0), fog, clamp(slice, 0.0, 1.0) * rangeFade); // Fade in over the first slice.
+}
 
 void main()
 {
@@ -28,29 +42,29 @@ void main()
     float depth = texture(sourceDepth, uv).r;
     vec3 scene = texture(sourceColor, uv).rgb;
 
-    // Sky pixels see a fraction of the fog column. The fog exists only inside the volume, so a surface beyond its
-    // range gets less of it the farther it lies (up to twice the range) and none after that.
     float maxDistance = pc.eyeAndMaxDistance.w;
-    float distance = maxDistance * uintBitsToFloat(pc.frameAndDebug.z);
-    float rangeFade = 1.0;
+    float exponent = pc.strengthExponentReserved.y;
+    vec4 fog;
     if (depth < kClearDepthThreshold) {
+        // Surfaces beyond maxDistance fade the volume out up to twice the range and get none after that.
         vec4 w = pc.invViewProjection * vec4(uv * 2.0 - 1.0, depth, 1.0);
         float surfaceDistance = length(w.xyz / w.w - pc.eyeAndMaxDistance.xyz);
-        distance = min(surfaceDistance, maxDistance);
-        rangeFade = 1.0 - smoothstep(maxDistance, 2.0 * maxDistance, surfaceDistance);
+        float rangeFade = 1.0 - smoothstep(maxDistance, 2.0 * maxDistance, surfaceDistance);
+        fog = SampleIntegratedVolume(uv, min(surfaceDistance, maxDistance), maxDistance, exponent, rangeFade);
+    } else {
+        // Sky pixels keep plain fog within its own range and clamp transmittance so near fog cannot darken the sky.
+        float rawSkyFraction = uintBitsToFloat(pc.frameAndDebug.z);
+        float skyFraction = (isnan(rawSkyFraction) || isinf(rawSkyFraction)) ? 0.0 : clamp(rawSkyFraction, 0.0, 1.0);
+        float fogRange = pc.strengthExponentReserved.z;
+        float plainRange = (fogRange > 0.0 && fogRange < maxDistance) ? fogRange : maxDistance;
+        fog = ClampSkyPlainFog(SampleIntegratedVolume(uv, plainRange * skyFraction, maxDistance, exponent, 1.0));
+        float mistSkyDistance = maxDistance * skyFraction;
+        if (fogRange > 0.0 && mistSkyDistance > fogRange) {
+            vec4 fogEnd = SampleIntegratedVolume(uv, fogRange, maxDistance, exponent, 1.0);
+            vec4 fogFar = SampleIntegratedVolume(uv, mistSkyDistance, maxDistance, exponent, 1.0);
+            fog = CombineSkyMistFog(fog, fogEnd, fogFar);
+        }
     }
-
-    float sliceCount = float(textureSize(integratedVolume, 0).z);
-    float slice = ViewDepthToFroxelSlice(distance, sliceCount, maxDistance, pc.strengthExponentReserved.y);
-
-    // A slice holds the value at its far boundary, but texel centres sit half a texel inside.
-    float halfTexel = 0.5 / sliceCount;
-    float sliceUv = clamp(slice / sliceCount - halfTexel, halfTexel, 1.0 - halfTexel);
-    vec4 fog = texture(integratedVolume, vec3(uv, sliceUv));
-    if (HasNonFinite(fog)) {
-        fog = vec4(0.0, 0.0, 0.0, 1.0);
-    }
-    fog = mix(vec4(0.0, 0.0, 0.0, 1.0), fog, clamp(slice, 0.0, 1.0) * rangeFade); // Fade in over the first slice.
 
     float strength = pc.strengthExponentReserved.x;
     vec3 inScatter = fog.rgb * strength;

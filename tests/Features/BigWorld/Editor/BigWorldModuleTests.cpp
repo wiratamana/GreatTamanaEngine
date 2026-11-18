@@ -146,7 +146,7 @@ TEST(BigWorldModuleTest, FeatureAdapterSnapshotsAndRestoresPlanTweaksRoundTrip)
         { "shadowUpdate", 3.0 },
     };
     FakeDebugFeature bloom("Bloom");
-    bloom.fields = { { "enabled", true }, { "threshold", 1.0 } };
+    bloom.fields = { { "enabled", true }, { "threshold", 1.0 }, { "intensity", 0.3 } };
     FakeDebugFeature vl("VolumetricLight");
     vl.fields = {
         { "enabled", true },
@@ -178,8 +178,9 @@ TEST(BigWorldModuleTest, FeatureAdapterSnapshotsAndRestoresPlanTweaksRoundTrip)
     EXPECT_EQ(clouds.ValueText("sunRays"), "0.6");
     EXPECT_EQ(clouds.ValueText("shaftMist"), "0.15");
     EXPECT_EQ(bloom.ValueText("threshold"), "2");
+    EXPECT_EQ(bloom.ValueText("intensity"), "0.2");
     EXPECT_EQ(vl.ValueText("maxDistance"), "400");
-    EXPECT_EQ(vl.ValueText("density"), "0.004");
+    EXPECT_EQ(vl.ValueText("density"), "0.0003");
     EXPECT_EQ(vl.ValueText("anisotropyG"), "0.75");
     EXPECT_EQ(vl.ValueText("shadowSamples"), "2");
     EXPECT_EQ(vl.ValueText("temporal"), "true");
@@ -195,6 +196,7 @@ TEST(BigWorldModuleTest, FeatureAdapterSnapshotsAndRestoresPlanTweaksRoundTrip)
     EXPECT_DOUBLE_EQ(number(clouds, "sunRays"), 0.0);
     EXPECT_DOUBLE_EQ(number(clouds, "shaftMist"), 0.0);
     EXPECT_DOUBLE_EQ(number(bloom, "threshold"), 1.0);
+    EXPECT_DOUBLE_EQ(number(bloom, "intensity"), 0.3);
     EXPECT_DOUBLE_EQ(number(vl, "maxDistance"), 60.0);
     EXPECT_DOUBLE_EQ(number(vl, "density"), 0.01);
     EXPECT_DOUBLE_EQ(number(vl, "anisotropyG"), 0.7);
@@ -218,7 +220,7 @@ TEST(BigWorldModuleTest, OpenCommandParsesCoverageOverrideAndStateSerializesNewK
     FakeDebugFeature clouds("VolumetricCloud");
     clouds.fields = { { "enabled", false }, { "coverage", 0.8 } };
     FakeDebugFeature bloom("Bloom");
-    bloom.fields = { { "enabled", true }, { "threshold", 1.0 } };
+    bloom.fields = { { "enabled", true }, { "threshold", 1.0 }, { "intensity", 0.3 } };
     FakeDebugFeature vl("VolumetricLight");
     vl.fields = { { "enabled", true }, { "game.status", std::string("Ok") } };
 
@@ -252,6 +254,8 @@ TEST(BigWorldModuleTest, OpenCommandParsesCoverageOverrideAndStateSerializesNewK
     EXPECT_NE(state->body.find("\"cloudSunRays\":0.6"), std::string::npos);
     EXPECT_NE(state->body.find("\"cloudShaftMist\":0"), std::string::npos);
     EXPECT_NE(state->body.find("\"bloomThreshold\":2"), std::string::npos);
+    EXPECT_NE(state->body.find("\"bloomIntensity\":0.2"), std::string::npos);
+    EXPECT_NE(state->body.find("\"volumetricDensity\":0.0003"), std::string::npos);
     EXPECT_NE(state->body.find("\"volumetricLight\":false"), std::string::npos);
     EXPECT_NE(state->body.find("\"volumetricMaxDistance\":400"), std::string::npos);
     EXPECT_NE(state->body.find("\"receivesSunShadow\":true"), std::string::npos);

@@ -22,9 +22,9 @@
 | `big` (menu default) | `scenic` (no SSGI, GTAO) | Big | `0.5` (`kBigCloudCoverage`) | on (`shaftMist` `0.15`) | feature defaults (`maxSteps` 96) | yes |
 
 Every tier snapshots and restores the render settings it touches:
-- `Bloom`: `enabled` `true`, `threshold` `2.0` (`kBloomThreshold`) so sunlit clouds do not veil the sky.
+- `Bloom`: `enabled` `true`, `threshold` `2.0` (`kBloomThreshold`), `intensity` `0.2` (`kBloomIntensity`) so sunlit clouds do not veil the sky.
 - `VolumetricCloud`: `coverage` (`0.45`–`0.5`), `shadowRangeKm` `8` (~62.5 m per 128x128 texel so cloud shadows dapple the meadow), `shadowSoftness` `0.6`, `sunRays` `0.6`, `shaftMist` (`0` on `lean`, `0.15` on `medium` and `big`), plus the tier march levers above.
-- `VolumetricLight` (`medium` and `big` only): `maxDistance` `400` m (clamped to the farthest sun shadow cascade), `density` `0.004`, `anisotropyG` `0.75`, `shadowSamples` `2`, `temporal` `true`, `strength` `1`.
+- `VolumetricLight` (`medium` and `big` only): `maxDistance` `400` m (clamped to the farthest sun shadow cascade), `density` `0.0003`, `anisotropyG` `0.75`, `shadowSamples` `2`, `temporal` `true`, `strength` `1`.
 - `Grass`: `enabled` `true` and the tier preset.
 
 ## Open and close over HTTP
@@ -37,7 +37,7 @@ Every tier snapshots and restores the render settings it touches:
 `open` returns at once. The terrain opens in that frame; the rest runs in the next frames. Poll `/bigworld/state` until `phase` is `Ready` (about 1.5 s on this machine). `open` and `close` are refused for browser requests. `state` is allowed.
 
 The state has these blocks:
-- `plan`: camera placement, `terrainProfile`, `lake`, `river`, `cloudCoverage`, `cloudShadowRangeKm`, `cloudShadowSoftness`, `cloudSunRays`, `cloudShaftMist`, `bloomThreshold`, and the `volumetricLight` budget fields.
+- `plan`: camera placement, `terrainProfile`, `lake`, `river`, `cloudCoverage`, `cloudShadowRangeKm`, `cloudShadowSoftness`, `cloudSunRays`, `cloudShaftMist`, `bloomThreshold`, `bloomIntensity`, and the `volumetricLight` budget fields.
 - `terrain`: `open`, `nodesResident`, `nodesPending`, `uploadQueue`, `nodesRebuilding`.
 - `water`: `featureConnected`, `bodyCount`, `hasOcean`, `oceanLevel`, `carvePending`, `carveApplies`.
 - `grass`: render `status`, `tilePresent`, `seaLevel`, `tileRevision`, `blades` (LOD0, LOD1, LOD2), `receivesSunShadow`, `receivesCloudShadow`, `castCascades`, `castBlades`.

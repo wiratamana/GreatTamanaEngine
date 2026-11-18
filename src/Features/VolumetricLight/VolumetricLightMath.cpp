@@ -275,6 +275,55 @@ VolumetricLightSliceIntegral VolumetricLightIntegrateSlice(
     return out;
 }
 
+float VolumetricLightSkyPlainDistance(float maxDistance, float fogMaxDistance, float skyDistanceFraction) noexcept
+{
+    if (!std::isfinite(maxDistance) || !(maxDistance > 0.0f) || !std::isfinite(skyDistanceFraction)) {
+        return 0.0f;
+    }
+    const float plainRange =
+        (std::isfinite(fogMaxDistance) && fogMaxDistance > 0.0f && fogMaxDistance < maxDistance) ? fogMaxDistance : maxDistance;
+    return plainRange * Saturate(skyDistanceFraction);
+}
+
+VolumetricLightSliceIntegral VolumetricLightClampSkyPlainFog(const VolumetricLightSliceIntegral& fog) noexcept
+{
+    if (!IsFinite(fog.inScatter) || !std::isfinite(fog.transmittance)) {
+        return VolumetricLightSliceIntegral{};
+    }
+    VolumetricLightSliceIntegral out;
+    out.inScatter = Vec3{ std::max(fog.inScatter.x, 0.0f), std::max(fog.inScatter.y, 0.0f), std::max(fog.inScatter.z, 0.0f) };
+    out.transmittance = Saturate(fog.transmittance);
+    if (out.transmittance < kVolumetricLightMinSkyTransmittance) {
+        const float scale = (1.0f - kVolumetricLightMinSkyTransmittance) / std::max(1.0f - out.transmittance, 1e-5f);
+        out.inScatter = out.inScatter * scale;
+        out.transmittance = kVolumetricLightMinSkyTransmittance;
+    }
+    return out;
+}
+
+VolumetricLightSliceIntegral VolumetricLightCombineSkyMistFog(const VolumetricLightSliceIntegral& plainFog,
+    const VolumetricLightSliceIntegral& fogEnd, const VolumetricLightSliceIntegral& fogFar) noexcept
+{
+    const VolumetricLightSliceIntegral base = VolumetricLightClampSkyPlainFog(plainFog);
+    if (!IsFinite(fogEnd.inScatter) || !std::isfinite(fogEnd.transmittance)
+        || !IsFinite(fogFar.inScatter) || !std::isfinite(fogFar.transmittance)) {
+        return base;
+    }
+    const float endT = Saturate(fogEnd.transmittance);
+    const float farT = Saturate(fogFar.transmittance);
+    const float unattenuate = SmoothStep(0.05f, 0.2f, endT) / std::max(endT, 0.05f);
+    const Vec3 mistIn{
+        std::max(fogFar.inScatter.x - fogEnd.inScatter.x, 0.0f) * unattenuate,
+        std::max(fogFar.inScatter.y - fogEnd.inScatter.y, 0.0f) * unattenuate,
+        std::max(fogFar.inScatter.z - fogEnd.inScatter.z, 0.0f) * unattenuate,
+    };
+    const float mistT = endT > 0.05f ? Saturate(farT / endT) : 1.0f;
+    VolumetricLightSliceIntegral out;
+    out.inScatter = base.inScatter + mistIn * base.transmittance;
+    out.transmittance = std::max(base.transmittance * mistT, kVolumetricLightMinSkyTransmittance);
+    return out;
+}
+
 float VolumetricLightSunFade(const Vec3& directionTowardSun) noexcept
 {
     const Vec3 d = SafeDirection(directionTowardSun);
@@ -486,7 +535,7 @@ VolumetricLightCompositePush MakeVolumetricLightCompositePush(const VolumetricLi
     Store(p.eyeAndMaxDistance, eye, result.maxDistance);
     p.strengthExponentReserved[0] = safe.strength;
     p.strengthExponentReserved[1] = result.depthExponent;
-    p.strengthExponentReserved[2] = 0.0f;
+    p.strengthExponentReserved[2] = std::isfinite(result.fogMaxDistance) ? std::max(result.fogMaxDistance, 0.0f) : 0.0f;
     p.strengthExponentReserved[3] = 0.0f;
     p.frameAndDebug[0] = static_cast<std::uint32_t>(frameIndex);
     p.frameAndDebug[1] = static_cast<std::uint32_t>(safe.debugView);

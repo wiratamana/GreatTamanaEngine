@@ -41,7 +41,7 @@ int NearestShadowSamples(int value) noexcept
 std::string FormatDouble(double value)
 {
     char buffer[40];
-    const auto [end, ec] = std::to_chars(buffer, buffer + sizeof(buffer), value);
+    const auto [end, ec] = std::to_chars(buffer, buffer + sizeof(buffer), value, std::chars_format::general, 12);
     return ec == std::errc{} ? std::string(buffer, end) : std::string("0.5");
 }
 
@@ -117,6 +117,7 @@ void SyncPlanTweaks(BigWorldPlan& plan)
     }
     if (FeatureTweak* const bloom = FindTweak(plan, "Bloom")) {
         UpsertTweakKey(*bloom, "threshold", FormatDouble(plan.bloomThreshold), false);
+        UpsertTweakKey(*bloom, "intensity", FormatDouble(plan.bloomIntensity), false);
     }
     if (FeatureTweak* const vl = FindTweak(plan, "VolumetricLight")) {
         UpsertTweakKey(*vl, "maxDistance", FormatDouble(plan.volumetricMaxDistance), false);
@@ -203,8 +204,12 @@ BigWorldPlan MakeBigWorldPlan(Quality quality)
 
     FeatureTweak bloom;
     bloom.feature = "Bloom";
-    bloom.restoreKeys = { "enabled", "threshold" };
-    bloom.values = { { "enabled", "true" }, { "threshold", FormatDouble(plan.bloomThreshold) } };
+    bloom.restoreKeys = { "enabled", "threshold", "intensity" };
+    bloom.values = {
+        { "enabled", "true" },
+        { "threshold", FormatDouble(plan.bloomThreshold) },
+        { "intensity", FormatDouble(plan.bloomIntensity) },
+    };
     plan.tweaks.push_back(std::move(bloom));
 
     if (plan.volumetricLight) {
@@ -250,6 +255,7 @@ BigWorldPlan SanitizeBigWorldPlan(BigWorldPlan plan)
     plan.cloudSunRays = Bounded(plan.cloudSunRays, defaults.cloudSunRays, 0.0, 3.0);
     plan.cloudShaftMist = Bounded(plan.cloudShaftMist, TierCloudShaftMist(plan.quality), 0.0, 4.0);
     plan.bloomThreshold = Bounded(plan.bloomThreshold, defaults.bloomThreshold, 0.0, 16.0);
+    plan.bloomIntensity = Bounded(plan.bloomIntensity, defaults.bloomIntensity, 0.0, 4.0);
     plan.volumetricMaxDistance = Bounded(plan.volumetricMaxDistance, defaults.volumetricMaxDistance, 1.0, 2000.0);
     plan.volumetricDensity = Bounded(plan.volumetricDensity, defaults.volumetricDensity, 0.0, 1.0);
     plan.volumetricAnisotropyG = Bounded(plan.volumetricAnisotropyG, defaults.volumetricAnisotropyG, -0.95, 0.95);

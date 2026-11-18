@@ -45,7 +45,7 @@ std::string Number(double value)
         return "0";
     }
     char buffer[40];
-    const auto [end, ec] = std::to_chars(buffer, buffer + sizeof(buffer), value);
+    const auto [end, ec] = std::to_chars(buffer, buffer + sizeof(buffer), value, std::chars_format::general, 12);
     return ec == std::errc{} ? std::string(buffer, end) : std::string("0");
 }
 
@@ -494,6 +494,7 @@ std::string BigWorldStateToJson(const BigWorldState& s)
         + ",\"cloudSunRays\":" + Number(s.plan.cloudSunRays)
         + ",\"cloudShaftMist\":" + Number(s.plan.cloudShaftMist)
         + ",\"bloomThreshold\":" + Number(s.plan.bloomThreshold)
+        + ",\"bloomIntensity\":" + Number(s.plan.bloomIntensity)
         + ",\"volumetricLight\":" + Bool(s.plan.volumetricLight)
         + ",\"volumetricMaxDistance\":" + Number(s.plan.volumetricMaxDistance)
         + ",\"volumetricDensity\":" + Number(s.plan.volumetricDensity)

@@ -40,6 +40,9 @@ inline constexpr float kVolumetricLightNightAmbientFraction = 0.15f;
 // Smallest effective max distance, world units.
 inline constexpr float kVolumetricLightMinDistance = 1.0f;
 
+// Floor on sky-pixel fog transmittance in VolumetricLightComposite.comp.
+inline constexpr float kVolumetricLightMinSkyTransmittance = 0.85f;
+
 // The CPU wind offset wraps here, world units.
 inline constexpr double kVolumetricLightNoiseWrap = 65536.0;
 
@@ -139,6 +142,7 @@ struct VolumetricLightResult {
     fx::Texture integrated; // rgb in-scatter, a transmittance, at each slice far boundary.
     float maxDistance = 0.0f;
     float depthExponent = 0.0f;
+    float fogMaxDistance = 0.0f; // Plain-fog range when mist stretches maxDistance (0 = whole range).
 };
 
 // What the endpoint reads, one per view scope.
@@ -206,7 +210,7 @@ static_assert(std::is_trivially_copyable_v<VolumetricLightIntegratePush>);
 struct VolumetricLightCompositePush {
     Mat4 invViewProjection;
     float eyeAndMaxDistance[4] = {};
-    float strengthExponentReserved[4] = {};     // x strength, y exponent, z and w reserved.
+    float strengthExponentReserved[4] = {};     // x strength, y exponent, z fog max distance (0 = all), w reserved.
     std::uint32_t frameAndDebug[4] = {};        // x frame index, y debug view, z sky distance fraction as float bits.
 };
 static_assert(sizeof(VolumetricLightCompositePush) == 112);
