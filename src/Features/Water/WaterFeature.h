@@ -6,6 +6,7 @@
 #include "WaterTypes.h"
 #include "../../Core/FeatureKit/FeatureKit.h"
 #include "../../Game/Lighting/AtmosphereSkyLuts.h"
+#include "../../Game/Lighting/CloudShadowMap.h"
 #include "../../Game/Lighting/SunLightModulation.h"
 
 #include <cstdint>
@@ -68,6 +69,7 @@ private:
     fx::ChannelReader<AtmosphereViewLuts> m_viewLuts{ kAtmosphereLutOwner, kAtmosphereViewLutsChannel };
     fx::ChannelReader<AtmosphereSharedLuts> m_sharedLuts{ kAtmosphereLutOwner, kAtmosphereSharedLutsChannel };
     fx::ChannelReader<SunLightModulation> m_sunLight{ kSunLightModulationOwner, kSunLightModulationChannel };
+    fx::ChannelReader<CloudShadowMap> m_cloudShadow{ kCloudShadowOwner, kCloudShadowChannel };
 };
 
 } // namespace gte

@@ -136,11 +136,13 @@ struct WaterShadeParamsGpu {
     float surfaceInfo[4] = {};        // x shore foam, y shore width, z roughness, w reflection strength.
     float rippleInfo[4] = {};         // x ripple strength, y wave lod scale, z absorption, w max distance.
     float wetInfo[4] = {};            // x wet band, y wet strength, z wet fade distance, w ssr max distance.
-    std::uint32_t counts[4] = {};     // x wave count, y debug view, z ssr steps, w flags (1 ssr, 2 wet, 4 sky).
+    std::uint32_t counts[4] = {};     // x wave count, y debug view, z ssr steps, w flags (1 ssr, 2 wet, 4 sky, 8 cloud).
+    float cloudShadowGrid[4] = {};    // xy map centre xz (m), z 1 / extent (m), w strength.
+    float cloudShadowLayer[4] = {};   // x layer base (m), y layer top (m), z sharpness, w map size.
     WaterRippleLayerGpu ripple[2];
     WaterWaveGpu waves[kWaterMaxWaves];
 };
-static_assert(sizeof(WaterShadeParamsGpu) == 128 + 16 * 11 + 16 + 32 + 32 * kWaterMaxWaves);
+static_assert(sizeof(WaterShadeParamsGpu) == 128 + 16 * 11 + 16 + 32 + 32 + 32 * kWaterMaxWaves);
 static_assert(std::is_trivially_copyable_v<WaterShadeParamsGpu>);
 
 // One body of the shade table; four vec4 so the std430 array stride is 64 bytes.
@@ -164,5 +166,6 @@ static_assert(std::is_trivially_copyable_v<WaterBodiesGpu>);
 inline constexpr std::uint32_t kWaterFlagSsr = 1u;
 inline constexpr std::uint32_t kWaterFlagWet = 2u;
 inline constexpr std::uint32_t kWaterFlagSky = 4u;
+inline constexpr std::uint32_t kWaterFlagCloudShadow = 8u;
 
 } // namespace gte

@@ -153,6 +153,8 @@ void WaterFeature::SurfacePass(fx::PostOpaqueFrame& f)
     const std::optional<AtmosphereViewLuts> luts = m_viewLuts.Fetch(f);
     const std::optional<AtmosphereSharedLuts> shared = m_sharedLuts.Fetch(f);
     const bool skyValid = luts.has_value() && shared.has_value() && luts->skyView.IsValid();
+    const std::optional<CloudShadowMap> cloud = m_cloudShadow.Fetch(f);
+    const bool cloudValid = cloud.has_value() && CloudShadowMapUsable(*cloud);
 
     WaterFrameInputs in;
     in.invViewProjection = v.relative.inverse;
@@ -170,14 +172,25 @@ void WaterFeature::SurfacePass(fx::PostOpaqueFrame& f)
         in.eyeHeightKm = luts->frameUniforms.cameraPositionAtmosphere.y;
         in.planetRadiusKm = shared->parameters.planetRadiusKm;
     }
+    if (cloudValid) {
+        in.cloudShadowValid = true;
+        in.cloudShadowCenterX = cloud->centerX;
+        in.cloudShadowCenterZ = cloud->centerZ;
+        in.cloudShadowExtentM = cloud->extentM;
+        in.cloudShadowStrength = cloud->strength;
+        in.cloudShadowLayerBaseM = cloud->layerBaseM;
+        in.cloudShadowLayerTopM = cloud->layerTopM;
+        in.cloudShadowMapSize = kCloudShadowMapSize;
+    }
 
-    // A sampler needs a valid image even when the sky is missing (the flag skips the read).
+    // Samplers need a valid image even when sky or cloud shadow is missing (the flags skip the reads).
     const bool shaded = f.Compute(m_shadeShader, "Water.Shade.Dispatch")
                             .Params(view.shadeParams, MakeWaterShadeParams(cfg, in))
                             .Params("bodies", view.bodyParams, bodies)
                             .Bind("sceneDepth", fx::Depth(f.SceneDepth()))
                             .Bind("sceneColor", f.SceneColor())
                             .Bind("skyViewLut", skyValid ? luts->skyView : f.SceneColor())
+                            .Bind("cloudShadowMap", cloudValid ? cloud->map : f.SceneColor())
                             .Bind("waterColorOut", color)
                             .Bind("waterDepthOut", depth)
                             .Dispatch(shadeExtent);

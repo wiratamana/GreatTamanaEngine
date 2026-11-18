@@ -178,6 +178,21 @@ WaterShadeParamsGpu MakeWaterShadeParams(const WaterSettings& safe, const WaterF
     p.counts[1] = static_cast<std::uint32_t>(safe.debugView);
     p.counts[2] = safe.ssrSteps;
     p.counts[3] = (safe.ssr ? kWaterFlagSsr : 0u) | (safe.wetShore ? kWaterFlagWet : 0u) | (in.skyValid ? kWaterFlagSky : 0u);
+    if (in.cloudShadowValid && std::isfinite(in.cloudShadowCenterX) && std::isfinite(in.cloudShadowCenterZ)
+        && std::isfinite(in.cloudShadowExtentM) && in.cloudShadowExtentM > 0.0f
+        && std::isfinite(in.cloudShadowStrength) && in.cloudShadowStrength > 0.0f
+        && std::isfinite(in.cloudShadowLayerBaseM) && std::isfinite(in.cloudShadowLayerTopM)
+        && in.cloudShadowMapSize > 0u) {
+        p.counts[3] |= kWaterFlagCloudShadow;
+        p.cloudShadowGrid[0] = in.cloudShadowCenterX;
+        p.cloudShadowGrid[1] = in.cloudShadowCenterZ;
+        p.cloudShadowGrid[2] = 1.0f / in.cloudShadowExtentM;
+        p.cloudShadowGrid[3] = std::min(in.cloudShadowStrength, 1.0f);
+        p.cloudShadowLayer[0] = in.cloudShadowLayerBaseM;
+        p.cloudShadowLayer[1] = in.cloudShadowLayerTopM;
+        p.cloudShadowLayer[2] = 1.0f;
+        p.cloudShadowLayer[3] = static_cast<float>(in.cloudShadowMapSize);
+    }
 
     // Ripple layers drift in different directions; scales are multiples of 1/8 so the lattice wraps with the eye.
     struct LayerSource {

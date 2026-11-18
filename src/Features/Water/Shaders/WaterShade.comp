@@ -4,6 +4,7 @@
 // Writes rgb + coverage and the window depth the composite draw stores into the scene depth.
 #include "ScreenSpaceCommon.glsl"
 #include "AtmosphereCommon.glsl"
+#include "CloudShadowLookup.glsl"
 layout(local_size_x = 8, local_size_y = 8) in;
 
 struct WaterWave {
@@ -15,19 +16,21 @@ struct WaterWave {
 layout(std430, binding = 0) readonly buffer WaterShadeParams {
     mat4 invViewProjection;
     mat4 viewProjection;
-    vec4 eyeTime;      // xyz eye, w time.
-    vec4 viewInfo;     // x pixel scale, yz jitter NDC, w sea level.
-    vec4 sunDirection; // xyz toward the sun, w sun specular.
-    vec4 sunRadiance;  // rgb sun illuminance, w sky intensity.
-    vec4 skyInfo;      // x eye height km, y planet radius km, z sky valid, w ambient scale.
-    vec4 shallowColor; // rgb, w clarity.
-    vec4 deepColor;    // rgb, w refraction strength.
-    vec4 foamColor;    // rgb, w crest foam.
-    vec4 surfaceInfo;  // x shore foam, y shore width, z roughness, w reflection strength.
-    vec4 rippleInfo;   // x ripple strength, y wave lod scale, z absorption, w max distance.
-    vec4 wetInfo;      // x wet band, y wet strength, z wet fade distance, w ssr max distance.
-    uvec4 counts;      // x wave count, y debug view, z ssr steps, w flags.
-    vec4 ripple[2];    // x scale, yz wrapped offset, w period.
+    vec4 eyeTime;          // xyz eye, w time.
+    vec4 viewInfo;         // x pixel scale, yz jitter NDC, w sea level.
+    vec4 sunDirection;     // xyz toward the sun, w sun specular.
+    vec4 sunRadiance;      // rgb sun illuminance, w sky intensity.
+    vec4 skyInfo;          // x eye height km, y planet radius km, z sky valid, w ambient scale.
+    vec4 shallowColor;     // rgb, w clarity.
+    vec4 deepColor;        // rgb, w refraction strength.
+    vec4 foamColor;        // rgb, w crest foam.
+    vec4 surfaceInfo;      // x shore foam, y shore width, z roughness, w reflection strength.
+    vec4 rippleInfo;       // x ripple strength, y wave lod scale, z absorption, w max distance.
+    vec4 wetInfo;          // x wet band, y wet strength, z wet fade distance, w ssr max distance.
+    uvec4 counts;          // x wave count, y debug view, z ssr steps, w flags.
+    vec4 cloudShadowGrid;  // xy map centre xz (m), z 1 / extent (m), w strength.
+    vec4 cloudShadowLayer; // x layer base (m), y layer top (m), z sharpness, w map size.
+    vec4 ripple[2];        // x scale, yz wrapped offset, w period.
     WaterWave waves[8];
 } params;
 
@@ -50,6 +53,7 @@ layout(binding = 2) uniform sampler2D sceneColor;
 layout(binding = 3) uniform sampler2D skyViewLut;
 layout(binding = 4, rgba16f) uniform writeonly image2D waterColorOut; // rgb radiance, a coverage.
 layout(binding = 5, r32f) uniform writeonly image2D waterDepthOut;    // Window depth.
+layout(set = 0, binding = 7) uniform sampler2D cloudShadowMap;
 
 const float kMaxWaterDepth = 0.99999; // Below kClearDepthThreshold so far water still counts as a surface.
 const float kDirectScale = 0.65;      // Same sun energy scale as the lit material shaders.
@@ -57,6 +61,15 @@ const vec3 kAmbient = vec3(0.95, 1.0, 1.05);
 const uint kFlagSsr = 1u;
 const uint kFlagWet = 2u;
 const uint kFlagSky = 4u;
+const uint kFlagCloudShadow = 8u;
+
+float SampleWaterCloudShadow(vec3 worldPos, vec3 sunDir)
+{
+    if ((params.counts.w & 8u) == 0u) {
+        return 1.0;
+    }
+    return CloudSunTransmittanceFast(cloudShadowMap, params.cloudShadowGrid, params.cloudShadowLayer, sunDir, worldPos);
+}
 
 float Hash21(vec2 p)
 {
@@ -438,9 +451,10 @@ void main()
             Store(p, vec4(0.0), 0.0);
             return;
         }
-        // Wet ground keeps its depth: the composite writes the scene depth back unchanged.
+        // Wet ground keeps its depth; soften porosity darkening slightly inside cloud shadows so diffuse fill stays readable.
+        float shoreCloudVis = SampleWaterCloudShadow(params.eyeTime.xyz + scenePos, params.sunDirection.xyz);
         vec3 dry = texelFetch(sceneColor, fp, 0).rgb;
-        Store(p, vec4(dry * mix(1.0, 0.45, wet), 1.0), depth);
+        Store(p, vec4(dry * mix(1.0, mix(0.55, 0.45, shoreCloudVis), wet), 1.0), depth);
         return;
     }
 
@@ -518,9 +532,13 @@ void main()
         return;
     }
 
-    // Light on the water body: hemisphere ambient plus the sun on the surface.
-    float sunUp = max(params.sunDirection.y, 0.0);
-    vec3 bodyLight = kAmbient * params.skyInfo.w + params.sunRadiance.rgb * (kDirectScale * sunUp * max(normal.y, 0.0));
+    vec3 sunDir = params.sunDirection.xyz;
+    float cloudVis = SampleWaterCloudShadow(params.eyeTime.xyz + hit, sunDir);
+
+    // Light on the water body: hemisphere ambient stays unattenuated while clouds shade direct sun scatter.
+    float sunUp = max(sunDir.y, 0.0);
+    float bodySunVis = mix(0.12, 1.0, cloudVis);
+    vec3 bodyLight = kAmbient * params.skyInfo.w + params.sunRadiance.rgb * (kDirectScale * sunUp * max(normal.y, 0.0) * bodySunVis);
 
     // Refraction: shift the seabed lookup by the surface slope, keep it only where it still lies behind the water.
     // Deep water hides the seabed, so its colour is not read at all.
@@ -536,8 +554,10 @@ void main()
         }
         seabed = texelFetch(sceneColor, p2, 0).rgb;
     }
+    // Without collimated sun beams, shallow volume scatter shifts toward deeper sapphire tones.
     float deepMix = 1.0 - exp(-verticalDepth / clarity);
-    vec3 bodyColor = mix(params.shallowColor.rgb, params.deepColor.rgb, deepMix) * bodyLight;
+    float shadowedDeepMix = mix(deepMix, 1.0, 0.4 * (1.0 - cloudVis));
+    vec3 bodyColor = mix(params.shallowColor.rgb, params.deepColor.rgb, shadowedDeepMix) * bodyLight;
     vec3 under = seabed * transmit + bodyColor * (1.0 - transmit);
 
     // Reflection: sky from the look-up table, screen-space hits when enabled.
@@ -546,8 +566,7 @@ void main()
     vec3 reflection = ReflectionColor(hit, dir, normal, p, fullSize, reflectWeight);
     vec3 color = mix(under, reflection * params.surfaceInfo.w, reflectWeight);
 
-    // Sun glint.
-    vec3 sunDir = params.sunDirection.xyz;
+    // Sun glint vanishes rapidly as cloud optical depth scatters the solar disk cone.
     float nDotL = max(dot(normal, sunDir), 0.0);
     if (nDotL > 0.0 && sunDir.y > 0.0) {
         vec3 halfVec = normalize(sunDir + viewDir);
@@ -556,9 +575,11 @@ void main()
         float f = 0.02 + 0.98 * pow(1.0 - vDotH, 5.0);
         float a = params.surfaceInfo.z;
         float vis = 0.25 / max(max(nDotL, 0.1) * max(nDotV, 0.1), 1e-3);
-        color += params.sunRadiance.rgb * (params.sunDirection.w * f * DistributionGgx(nDotH, a) * vis * nDotL * kDirectScale * 3.14159265 * clamp(sunDir.y * 8.0, 0.0, 1.0));
+        float glintVis = cloudVis * cloudVis;
+        color += params.sunRadiance.rgb * (params.sunDirection.w * f * DistributionGgx(nDotH, a) * vis * nDotL * kDirectScale * 3.14159265 * clamp(sunDir.y * 8.0, 0.0, 1.0) * glintVis);
     }
 
-    color = mix(color, params.foamColor.rgb * (kAmbient * params.skyInfo.w + params.sunRadiance.rgb * kDirectScale * sunUp), foam);
+    vec3 foamLight = kAmbient * params.skyInfo.w + params.sunRadiance.rgb * (kDirectScale * sunUp * mix(0.20, 1.0, cloudVis));
+    color = mix(color, params.foamColor.rgb * foamLight, foam);
     Store(p, vec4(min(color, vec3(60000.0)), 1.0), windowDepth);
 }

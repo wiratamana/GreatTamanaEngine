@@ -52,9 +52,11 @@ TEST(WaterMathTest, GpuBlockLayoutMatchesStd430)
     EXPECT_EQ(offsetof(WaterShadeParamsGpu, eyeTime), 128u);
     EXPECT_EQ(offsetof(WaterShadeParamsGpu, wetInfo), 128u + 16u * 10u);
     EXPECT_EQ(offsetof(WaterShadeParamsGpu, counts), 128u + 16u * 11u);
-    EXPECT_EQ(offsetof(WaterShadeParamsGpu, ripple), 128u + 16u * 12u);
-    EXPECT_EQ(offsetof(WaterShadeParamsGpu, waves), 128u + 16u * 14u);
-    EXPECT_EQ(sizeof(WaterShadeParamsGpu), 128u + 16u * 14u + 32u * kWaterMaxWaves);
+    EXPECT_EQ(offsetof(WaterShadeParamsGpu, cloudShadowGrid), 128u + 16u * 12u);
+    EXPECT_EQ(offsetof(WaterShadeParamsGpu, cloudShadowLayer), 128u + 16u * 13u);
+    EXPECT_EQ(offsetof(WaterShadeParamsGpu, ripple), 128u + 16u * 14u);
+    EXPECT_EQ(offsetof(WaterShadeParamsGpu, waves), 128u + 16u * 16u);
+    EXPECT_EQ(sizeof(WaterShadeParamsGpu), 128u + 16u * 16u + 32u * kWaterMaxWaves);
 }
 
 TEST(WaterMathTest, WaveAmplitudesSumToTheWaveHeight)
@@ -180,6 +182,38 @@ TEST(WaterMathTest, RippleLatticeWrapsWithTheEye)
         EXPECT_NEAR(pa.ripple[i].scaleOffsetPeriod[1], pb.ripple[i].scaleOffsetPeriod[1], 1e-2f);
         EXPECT_GT(pa.ripple[i].scaleOffsetPeriod[3], 0.0f);
     }
+}
+
+TEST(WaterMathTest, ParamsPackCloudShadowGridAndLayerWhenValid)
+{
+    const WaterSettings safe = SanitizeWaterSettings(WaterSettings{});
+
+    WaterFrameInputs in;
+    in.cloudShadowValid = true;
+    in.cloudShadowCenterX = 250.0f;
+    in.cloudShadowCenterZ = -125.0f;
+    in.cloudShadowExtentM = 8000.0f;
+    in.cloudShadowStrength = 0.85f;
+    in.cloudShadowLayerBaseM = 1400.0f;
+    in.cloudShadowLayerTopM = 3200.0f;
+    in.cloudShadowMapSize = 128u;
+
+    const WaterShadeParamsGpu p = MakeWaterShadeParams(safe, in);
+    EXPECT_NE(p.counts[3] & kWaterFlagCloudShadow, 0u);
+    EXPECT_FLOAT_EQ(p.cloudShadowGrid[0], 250.0f);
+    EXPECT_FLOAT_EQ(p.cloudShadowGrid[1], -125.0f);
+    EXPECT_FLOAT_EQ(p.cloudShadowGrid[2], 1.0f / 8000.0f);
+    EXPECT_FLOAT_EQ(p.cloudShadowGrid[3], 0.85f);
+    EXPECT_FLOAT_EQ(p.cloudShadowLayer[0], 1400.0f);
+    EXPECT_FLOAT_EQ(p.cloudShadowLayer[1], 3200.0f);
+    EXPECT_FLOAT_EQ(p.cloudShadowLayer[2], 1.0f);
+    EXPECT_FLOAT_EQ(p.cloudShadowLayer[3], 128.0f);
+
+    WaterFrameInputs zeroStrength = in;
+    zeroStrength.cloudShadowStrength = 0.0f;
+    const WaterShadeParamsGpu pOff = MakeWaterShadeParams(safe, zeroStrength);
+    EXPECT_EQ(pOff.counts[3] & kWaterFlagCloudShadow, 0u);
+    EXPECT_FLOAT_EQ(pOff.cloudShadowGrid[3], 0.0f);
 }
 
 } // namespace

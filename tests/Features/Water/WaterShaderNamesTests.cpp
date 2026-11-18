@@ -56,13 +56,14 @@ TEST(WaterShaderNamesTest, ShadeShaderExposesBoundNames)
     ExpectSampler(result, "sceneDepth");
     ExpectSampler(result, "sceneColor");
     ExpectSampler(result, "skyViewLut");
+    ExpectSampler(result, "cloudShadowMap");
     ExpectWriteOnlyImage(result, "waterColorOut");
     ExpectWriteOnlyImage(result, "waterDepthOut");
     const ReflectedDescriptorBinding* bodies = Find(result, "bodies");
     ASSERT_NE(bodies, nullptr);
     EXPECT_EQ(bodies->type, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     EXPECT_EQ(bodies->access, ReflectedAccess::ReadOnly);
-    EXPECT_EQ(result.descriptorBindings.size(), 7u);
+    EXPECT_EQ(result.descriptorBindings.size(), 8u);
 }
 
 TEST(WaterShaderNamesTest, CompositeFitsTheFullscreenRules)

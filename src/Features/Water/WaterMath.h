@@ -30,6 +30,14 @@ struct WaterFrameInputs {
     float planetRadiusKm = 6371.0f;
     float ambientScale = 1.0f;
     bool skyValid = false;
+    bool cloudShadowValid = false;
+    float cloudShadowCenterX = 0.0f;
+    float cloudShadowCenterZ = 0.0f;
+    float cloudShadowExtentM = 1.0f;
+    float cloudShadowStrength = 0.0f;
+    float cloudShadowLayerBaseM = 0.0f;
+    float cloudShadowLayerTopM = 1.0f;
+    std::uint32_t cloudShadowMapSize = 0;
 };
 
 using WaterWaveTable = std::array<WaterWaveGpu, kWaterMaxWaves>;
