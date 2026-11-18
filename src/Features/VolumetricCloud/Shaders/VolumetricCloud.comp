@@ -86,12 +86,12 @@ const float kMinStepShare = 0.2;
 const float kMinStepGrowth = 1e-4;
 const float kMaxStepGrowth = 0.5;
 const int kGrowthRounds = 4;
-// Weather lookup warp and the cell-size probe (L4a).
+// Weather lookup domain warp and base undulation scale.
 const float kWeatherWarpTileM = 50000.0;
 const float kWeatherWarpM = 1200.0;
 const float kMinCloudTop = 0.14;
-const float kBaseLump = 0.2;
-// Far model (L4b): beyond this distance the layer is thinner and its lobes are stretched along the wind into rolls.
+const float kBaseLump = 0.035;
+// Beyond this distance the layer thins and stretches along the wind into horizon rolls.
 const float kFarStreakStartM = 15000.0;
 const float kFarStreakEndM = 50000.0;
 const float kFarStreakAlong = 5.0;
@@ -119,13 +119,6 @@ const vec3 kFarZoomOffset = vec3(0.21, 0.0, 0.58);
 const float kDomeBase = 0.05;
 const float kDomeSpan = 0.75;
 const float kDomeSoft = 0.12;
-// Skin relief: the visible surface is shaded with a normal from the density gradient.
-const float kSkinRadiusM = 110.0;
-const float kSkinRadiusPerM = 0.01;
-const float kReliefLow = 0.4;
-const float kReliefHigh = 1.7;
-const float kReliefStrength = 0.6;
-const float kSkinTransmittance = 1.1;
 
 float Saturate(float v)
 {
@@ -239,21 +232,18 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     weatherPosition += (textureLod(curlMap, weatherPosition / kWeatherWarpTileM, 0.0).rg * 2.0 - 1.0) * kWeatherWarpM;
     vec4 wm = textureLod(weatherMap, weatherPosition / params.weather.x, 0.0);
     // Mean coverage around the point: tells an isolated small cell (low) from a big mass (high).
-    float massAverage = 1.5 * wm.g;  // the smooth fill channel is a blurred coverage: no extra fetches
+    float massAverage = 1.5 * wm.g;
     gCloudSize = smoothstep(0.15, 0.75, massAverage);
-    // Far away the weather repeats every tile and shows the same big blobs. Blend in a second sample of the map at
-    // another scale: the pattern no longer repeats and the far field gets more even, smaller clouds.
-    // The fine texture of the weather map is smaller than a pixel far away and shows as dots: from medium distance on
-    // the coarser second copy of the map takes over (world-fixed, so nothing swims).
+    // Blend a coarser world-fixed weather tile with distance so far clouds neither tile visibly nor alias into dots.
     float weatherLod = kWeatherLodMax * smoothstep(kWeatherLodStartM, kWeatherLodEndM, fromEyeLength);
     float farBlend = max(params.skyShade2.w * farRamp, weatherLod);
     if (farBlend > 0.0) {
         vec2 farUv = weatherPosition / (params.weather.x * kFarWeatherTileScale) + kFarWeatherOffset;
         wm = mix(wm, textureLod(weatherMap, farUv, 0.0), farBlend);
     }
-    float weatherCoverage = max(wm.r, Saturate(coverage - 0.5) * wm.g * 1.1);  // the high-coverage fill tops out at 0.55: no solid sheet
-    // Crisp specks of the map that stand alone are dropped; they would be hard flat flakes.
-    weatherCoverage *= smoothstep(0.03, 0.10, massAverage);
+    float weatherCoverage = max(wm.r, Saturate(coverage - 0.5) * wm.g * 1.1);
+    // Suppress isolated tiny weather specks so they never turn into stray vertical sticks.
+    weatherCoverage *= smoothstep(0.05, 0.16, massAverage);
     weatherCoverage = Saturate(weatherCoverage * mix(1.0, kCoverageGain, smoothstep(0.08, 0.3, weatherCoverage)));
     // The far deck is a band of low rolls: it fills in toward the horizon.
     weatherCoverage = Saturate(weatherCoverage + kFarFill * farStreak * smoothstep(0.0, 0.06, weatherCoverage));
@@ -267,8 +257,7 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float altitude = params.layer.x + heightFraction * (params.layer.y - params.layer.x);
     vec3 shapeUv = vec3(position.x + wind.x + shear.x, altitude / params.structure2.y, position.z + wind.y + shear.y) / params.noise.x;
     vec4 shapeSample = textureLod(shapeVolume, shapeUv, 0.0);
-    // Far away a texel of the volume is smaller than a pixel and the fine lobes alias into dots: read a zoomed copy
-    // of the same field there (world-fixed, so nothing swims) and cross-fade over the distance.
+    // Cross-fade to a zoomed world-fixed copy far away so fine shape lobes never alias into dots.
     float zoomMix = smoothstep(kZoomStartM, kZoomEndM, fromEyeLength);
     if (zoomMix > 0.0) {
         vec4 zoomSample = textureLod(shapeVolume, shapeUv / kFarZoom + kFarZoomOffset, 0.0);
@@ -278,9 +267,7 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float shapeMid = shape;
     float shapeLarge = shape;
     if (params.structure.x > 0.0 || params.structure2.w > 0.0) {
-        // Two scales of the same volume: a big lobe octave carries the body and the mid octave adds the lobes on it.
-        // Where the weather map says a cloud is big and tall (B high) the big octave dominates, small low clouds keep
-        // the mid lobes; far away the big octave takes over so a distant deck does not turn into thin stacked sheets.
+        // Big lobe octave carries broad masses and distant decks while mid lobes sculpt smaller puffs.
         shapeLarge = ShapeValue(textureLod(shapeVolume, shapeUv / kLargeShapeScale + kLargeShapeOffset, 0.0));
         float largeShare = Saturate(params.structure.x + params.structure.y * (wm.b - 0.5) * 2.0 + params.structure2.w * farRamp);
         shape = mix(shape, shapeLarge, largeShare);
@@ -302,17 +289,16 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
         shape = mix(shape, ShapeValue(textureLod(shapeVolume, farUv / kLargeShapeScale + kLargeShapeOffset, 0.0)), farStreak);
     }
 
-    float peak = mix(params.density.z, 1.0, wm.b);
-    float stop = Saturate(peak + params.heightShape.y);
-    // Small cells are low flat cumulus, big masses are tall: no thin towers.
-    // The noise lifts and lowers the top, so it is lumpy and not a flat plane.
-    stop = max(stop * mix(kMinCloudTop, 1.0, gCloudSize) + (shapeMid - 0.5) * 0.5 * (1.0 - 0.25 * gCloudSize), 0.10);
+    // Couple vertical growth strictly to both broad mass size and local coverage so small puffs stay squat.
+    float sizeGate = min(gCloudSize, smoothstep(0.12, 0.48, coverage * weatherCoverage));
+    float peak = mix(params.density.z, 1.0, wm.b * sizeGate);
+    float stop = Saturate(peak + params.heightShape.y * sizeGate);
+    stop = clamp(stop * mix(kMinCloudTop, 1.0, sizeGate) + (shapeMid - 0.5) * 0.30 * sizeGate, 0.10, mix(0.22, 1.0, sizeGate));
     stop *= mix(1.0, kFarTopScale, farStreak);
-    float topSoftStart = mix(0.15, min(params.skip.y, 0.55), gCloudSize);
-    // Hanging bases: where the big octave is high the cloud base is lower, so the underside is bumpy and not one plane.
-    float baseShift = params.structure2.z * (0.5 - shapeLarge) * 0.4 + params.structure3.z * (0.5 - shapeMid) * 0.3;
-    // Lumps of 0.5-1 km on the underside: the base is not one smooth surface.
-    baseShift += clamp((shapeSample.r - 0.635) * kBaseLump, -0.03, 0.08);
+    float topSoftStart = mix(0.20, min(params.skip.y, 0.55), sizeGate);
+    // Subtle condensation-level undulation keeps cumulus bases flat and cohesive without hanging udders.
+    float baseShift = params.structure2.z * (0.5 - shapeLarge) * 0.06 + params.structure3.z * (0.5 - shapeMid) * 0.05;
+    baseShift += clamp((shapeSample.r - 0.635) * kBaseLump, -0.008, 0.014);
     float roundBottom = Saturate(Remap(heightFraction, baseShift, baseShift + params.heightShape.x, 0.0, 1.0));
     float roundTop = Saturate(Remap(heightFraction, stop * topSoftStart, stop, 1.0, 0.0));
     float shapeGradient = roundBottom * roundTop;
@@ -321,14 +307,11 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float rampTop = Saturate(Remap(heightFraction, params.heightShape.w, 1.0, 1.0, 0.0));
     densityFactor = params.density.x * rampBottom * rampTop * wm.a * 2.0;
 
-    // Linear body; CloudDetail erodes it and applies the density curve afterwards, so the fine noise cuts into the
-    // soft part of the cloud and not into a body already raised to a power.
-    // The cut level never falls below the floor: a big mass keeps its lobes and holes instead of filling solid.
-    // Dome: the footprint shrinks with height (small cells more), so a cell is not a prism with vertical walls.
+    // Linear body; CloudDetail erodes it before CloudCurve() shapes the density profile.
     float dome = smoothstep(0.15, 1.0, heightFraction);
-    float domeLoss = mix(0.5, 0.25, gCloudSize);
+    float domeLoss = mix(0.65, 0.25, sizeGate);
     float effCoverage = coverage * weatherCoverage * (1.0 - domeLoss * dome * dome);
-    // The broad mass field must be higher the higher up we are: the footprint of a mass shrinks toward its top over km.
+    // Higher altitudes require stronger broad-mass support so cloud footprints taper into domes.
     float massNeed = kDomeBase + kDomeSpan * dome;
     effCoverage *= smoothstep(massNeed - kDomeSoft, massNeed + kDomeSoft, massAverage);
     float threshold = max(1.0 - effCoverage, params.structure3.y);
@@ -338,34 +321,40 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
 
 float CloudCurve(float body)
 {
-    return pow(body, params.ambientColor.w);
+    return pow(max(body, 0.0), params.ambientColor.w);
 }
 
-// Erodes the shape with the fine noise and applies the density factor. `shape` is the linear body of the cloud.
-// `detailAmount` is 0..1 of the strength.
+// Erodes the linear cloud body with curl-warped wispy/billowy detail and applies the density curve.
 float CloudDetail(vec3 position, float heightFraction, float shape, float densityFactor, float detailAmount)
 {
+    float fromEyeLength = length(position.xz - params.eyeAndPlanetRadius.xz);
+    detailAmount *= 1.0 - smoothstep(4000.0, 18000.0, fromEyeLength);
+    if (shape <= 0.0 || densityFactor <= 0.0) {
+        return 0.0;
+    }
     vec2 wind = params.weather.yz;
     float altitude = params.layer.x + heightFraction * (params.layer.y - params.layer.x);
     vec2 shear = params.structure.zw * heightFraction;
     vec3 world = vec3(position.x + wind.x + shear.x, altitude / params.structure2.y, position.z + wind.y + shear.y);
-    // Curl noise pushes the lookup around: the lobes get swirled and the edges ragged. Less at the top.
+    // Curl noise swirls the detail lookup near the base and calms toward the top.
     vec3 curl = textureLod(curlMap, world.xz / params.detailShape.y, 0.0).rgb * 2.0 - 1.0;
     world += vec3(curl.x, curl.z * 0.5, curl.y) * (params.detailShape.x * (1.0 - 0.5 * heightFraction));
     vec4 dn = textureLod(detailVolume, world / params.noise.y, 0.0);
     float billow = dn.r * 0.6 + dn.g * 0.4;
     float wisp = dn.b * 0.6 + dn.a * 0.4;
-    // Billows erode the cell borders (rounded lobes); wisps erode everything but thin sheets and strands.
-    float billowErosion = mix(billow, 1.0 - billow, Saturate(heightFraction * 5.0));
+    // Blend fibrous wisps near the base (h < 0.30) into cauliflower Worley billows on upper domes.
+    float billowErosion = mix(billow, 1.0 - billow, smoothstep(0.05, 0.30, heightFraction));
     float wispErosion = 1.0 - wisp;
-    float wispShare = params.detailShape.z * Saturate(1.2 - 1.6 * shape + 0.5 * Saturate((heightFraction - 0.7) * 3.0));
+    float baseWisp = 1.0 - smoothstep(0.08, 0.30, heightFraction);
+    float fringeWisp = Saturate(1.0 - 2.2 * shape) * 0.45;
+    float wispShare = params.detailShape.z * Saturate(max(baseWisp, fringeWisp));
     float erosion = mix(billowErosion, wispErosion, wispShare);
     if (params.detailShape.w > 0.0) {
         vec4 fn = textureLod(detailVolume, world * kFineDetailScale / params.noise.y + 0.31, 0.0);
         erosion = mix(erosion, 1.0 - (fn.g * 0.5 + fn.a * 0.5), params.detailShape.w * 0.5);
     }
-    // The fine erosion cuts the rim of a cloud; the core keeps only a share of it, so the body stays smooth.
-    erosion *= params.noise.z * detailAmount * exp(-params.weather.w * 0.75) * mix(params.structure2.x, 1.0, 1.0 - shape);
+    // Outer shells receive full detailStrength * detailAmount erosion while the core keeps structure2.x.
+    erosion *= params.noise.z * detailAmount * mix(params.structure2.x, 1.0, 1.0 - shape);
     return CloudCurve(Saturate(Remap(shape, erosion, 1.0, 0.0, 1.0))) * densityFactor;
 }
 
@@ -382,24 +371,6 @@ float CloudDensityAt(vec3 position, float detailAmount)
 
 #include "VolumetricCloudLighting.glsl"
 #include "VolumetricCloudAtmosphere.glsl"
-
-// Outward normal of the cloud skin at a position: minus the gradient of the smooth density (4 taps).
-vec3 SkinNormal(vec3 position, float t)
-{
-    float r = max(kSkinRadiusM, kSkinRadiusPerM * t);
-    // A loop with a run-time count keeps one copy of the density code (an unrolled copy per tap makes the shader slow).
-    vec3 g = vec3(0.0);
-    for (uint i = 0u; i < uint(params.lightMarch.x); ++i) {
-        vec3 k = vec3((i == 0u || i == 3u) ? 1.0 : -1.0, i >= 2u ? 1.0 : -1.0, (i & 1u) == 1u ? 1.0 : -1.0);
-        vec3 p = position + k * r;
-        // The raw noise keeps its relief where the density is saturated.
-        float alt = Altitude(dot(p.xz - params.eyeAndPlanetRadius.xz, p.xz - params.eyeAndPlanetRadius.xz), p.y);
-        vec3 uv = vec3(p.x + params.weather.y, alt / params.structure2.y, p.z + params.weather.z) / params.noise.x;
-        g += k * textureLod(shapeVolume, uv, 0.0).r;
-    }
-    float len = length(g);
-    return len > 1e-5 ? -g / len : vec3(0.0, -1.0, 0.0);
-}
 
 // Marches [tStart, tEnd]. Returns light in rgb and the transmittance in a; `cloudDistance` is the mean
 // distance of the cloud, weighted by how much each step adds to the picture (0 when there is none).
@@ -427,6 +398,8 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
     float transmittance = 1.0;
     bool coarse = true;
     uint emptyRun = 0u;
+    uint fineEntrySteps = 0u;
+    float coarseHitT = 0.0;
     // The sun march and the sky occlusion run every few lit samples; the samples in between blend the two
     // nearest results, so the light has no steps along the ray.
     bool sunLit = dot(sunRadiance, sunRadiance) > 0.0;
@@ -440,8 +413,6 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
     float skyVisibilityB = 1.0;
     float sunOpticalDepth = 0.0;
     float skyVisibility = 1.0;
-    bool skinKnown = false;
-    vec3 skinNormal = vec3(0.0, -1.0, 0.0);
 
     for (uint i = 0u; i < maxSteps && t < tEnd && transmittance > params.march.w; ++i) {
         stepLength = (t + stepOffset) * rayGrowth;
@@ -456,35 +427,44 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
             if (shape * factor > 0.0) {
                 coarse = false;
                 emptyRun = 0u;
-                t = max(t - coarseLength, tStart);
+                fineEntrySteps = 2u;
+                coarseHitT = t;
+                if (i > 0u) {
+                    t = max(t - coarseLength, tStart);
+                    continue;
+                }
             } else {
                 t += gWeatherClear ? coarseLength * params.skip.x : coarseLength;
+                continue;
             }
-            continue;
         }
 
         float detailAmount = 1.0 - smoothstep(0.5 * params.noise.w, params.noise.w, t);
         float d = CloudDetail(position, h, shape, factor, detailAmount);
+        float fineStep = (fineEntrySteps > 0u) ? (0.5 * stepLength) : stepLength;
         if (d <= 0.0) {
-            emptyRun++;
-            if (emptyRun >= emptyToCoarse) {
-                coarse = true;
+            if (t >= coarseHitT) {
+                emptyRun++;
+                if (emptyRun >= emptyToCoarse) {
+                    coarse = true;
+                }
             }
-            t += stepLength;
+            t += fineStep;
             continue;
         }
         emptyRun = 0u;
+        if (fineEntrySteps > 0u) {
+            fineEntrySteps--;
+        }
 
         float fade = 1.0 - smoothstep(fadeBegin, maxDistance, t);
         float extinction = d * params.density.y * fade;
-        // Standalone: a far cloud counts as less opaque, so the sky behind it shows through. With the
-        // atmosphere the air between the eye and the cloud does that, see AirInscatter().
+        // Standalone hazes distant clouds by transmittance; atmosphere mode integrates AirInscatter() instead.
         float haze = integrated ? 1.0 : exp(-t / params.lightMisc.z);
-        // A dense sample may not be more than farField.z optical depths long: the step is shortened so the ray
-        // integrates through a cloud edge instead of stopping at a jittered point inside one long step.
-        float marchStep = stepLength;
+        // Shorten dense steps whose optical depth exceeds farField.z so sharp rims integrate smoothly.
+        float marchStep = fineStep;
         if (extinction * stepLength > params.farField.z) {
-            marchStep = max(params.farField.z / extinction, stepLength * kMinStepShare);
+            marchStep = min(marchStep, max(params.farField.z / extinction, fineStep * kMinStepShare));
         }
         float opacity = (1.0 - exp(-extinction * marchStep)) * haze;
 
@@ -520,7 +500,7 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
         li.density = d;
         li.heightFraction = h;
         li.extinction = extinction;
-        li.stepLength = stepLength;
+        li.stepLength = marchStep;
         li.distanceAlongRay = t;
         li.viewDirection = rd;
         li.sunDirection = sunDirection;
@@ -531,18 +511,6 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
         li.groundRadiance = gGroundRadiance;
         li.lodDensity = Saturate(CloudCurve(shape) * factor);
         vec3 src = CloudSourceRadiance(li);
-        if (d > 0.02) {
-            // The skin is where the ray has lost part of its light; the thin fringe in front of it has no relief.
-            if (!skinKnown && transmittance < kSkinTransmittance) {
-                skinKnown = true;
-                skinNormal = SkinNormal(position, t);
-            }
-        }
-        if (skinKnown) {
-            vec3 key = normalize(sunDirection + vec3(0.0, 0.6, 0.0));
-            float relief = mix(kReliefLow, kReliefHigh, 0.5 + 0.5 * dot(skinNormal, key));
-            src *= mix(1.0, relief, kReliefStrength);
-        }
         src = BoundCloudLuma(src, kMaxSourceLuma);
         light += transmittance * src * opacity;
         float weight = transmittance * opacity;
@@ -726,15 +694,13 @@ void main()
     float rawDepth = textureLod(sourceDepth, uv, 0.0).r;
 
     vec2 ndc = uv * 2.0 - 1.0;
-    // The ray goes through a point inside the pixel that changes with every own sample of the pixel (R2 sequence,
-    // shifted per pixel by blue noise): the temporal average then covers the pixel area, which antialiases the
-    // cloud edges. The depth test below keeps using the pixel centre.
+    // Sub-pixel R2 jitter shifted per pixel by blue noise so temporal accumulation antialiases cloud edges.
     uint cycle = params.lowRes.x * params.lowRes.x;
     uint sampleIndex = (params.counts.y / cycle) & 255u;
     vec2 pixelShift = vec2(0.0);
     if (params.lowRes.w > 0u) {
-        vec2 cp = vec2(textureLod(blueNoise, (vec2(pixel) + 0.5) / kBlueNoiseSize, 0.0).r,
-            textureLod(blueNoise, (vec2(pixel) + vec2(37.5, 71.5)) / kBlueNoiseSize, 0.0).r);
+        vec2 cp = vec2(texelFetch(blueNoise, pixel & 127, 0).r,
+            texelFetch(blueNoise, (pixel + ivec2(37, 71)) & 127, 0).r);
         pixelShift = (fract(cp + float(sampleIndex + 1u) * vec2(0.7548776662, 0.5698402910)) - 0.5) * (float(params.lowRes.w) * 0.01);
     }
     vec2 rayNdc = ndc + pixelShift * 2.0 / vec2(fullSize);
@@ -766,28 +732,24 @@ void main()
         }
     }
 
-    float bn = textureLod(blueNoise, (vec2(pixel) + 0.5) / kBlueNoiseSize, 0.0).r;
-    // A pixel is marched once per block cycle, so its own samples step by the golden ratio. Counting frames
-    // would move the jitter by only 0.11 between two samples of the same pixel.
-    uint cycleLength = params.lowRes.x * params.lowRes.x;
-    uint ownSample = (params.counts.y / cycleLength) & 255u;
-    float jitter = fract(bn + kGoldenRatio * float(ownSample));
+    float bn = texelFetch(blueNoise, pixel & 127, 0).r;
+    // Full-res screen-pixel blue noise stepped every frame by the golden ratio prevents coplanar slice rings.
+    float jitter = fract(bn + float(params.counts.y & 1023u) * 0.61803398875);
     gLightJitter = fract(jitter * 1.7 + bn * 3.1);
     if (AtmosphereOn()) {
         gSkyAmbient = SkyAmbientRadiance();
         gGroundRadiance = GroundBounceRadiance(params.sunColorAndAmbient.rgb, params.sunDirectionAndIntensity.xyz);
     }
-    // Every ray gets a step growth that brings it to the end of its segment within a share of the step budget. A ray
-    // along the horizon crosses 100+ km of shell; with a fixed growth it would run out of steps long before.
-    // Steps follow t_next + c = (t + c) * (1 + g) with c = stepBaseM / g, which is step = stepBaseM + g * t. A larger g
-    // makes c smaller, so the ratio is solved by a few fixed-point rounds; the first step stays stepBaseM.
+    // Solve per-ray step growth for the horizon budget while keeping steep/overhead rays gentle at tStart.
     float stepBudget = max(kStepBudgetShare * float(params.counts.x), 4.0);
-    float rayGrowth = max(params.march.y, kMinStepGrowth);
+    float steep = smoothstep(0.25, 0.75, rd.y);
+    float rayGrowth = max(params.march.y * mix(1.0, 0.5, steep), kMinStepGrowth);
     for (int round = 0; round < kGrowthRounds; ++round) {
         float stepOffset = params.march.x / rayGrowth;
-        rayGrowth = max(rayGrowth, pow((tEnd + stepOffset) / (tStart + stepOffset), 1.0 / stepBudget) - 1.0);
+        float budgetGrowth = pow((tEnd + stepOffset) / (tStart + stepOffset), 1.0 / stepBudget) - 1.0;
+        rayGrowth = max(rayGrowth, budgetGrowth * mix(1.0, 0.55, steep));
     }
-    rayGrowth = min(rayGrowth, kMaxStepGrowth);
+    rayGrowth = min(rayGrowth, mix(kMaxStepGrowth, 0.012, steep));
     float cloudDistance;
     vec4 cloud = MarchClouds(eye, rd, tStart, tEnd, jitter, rayGrowth, cloudDistance);
     if (AtmosphereOn() && cloud.a < 1.0 && cloudDistance > 0.0) {

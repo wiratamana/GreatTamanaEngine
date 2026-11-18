@@ -131,8 +131,11 @@ void main()
     float nl = dot(normal, sunDir);
     float front = clamp((nl + 0.35) / 1.35, 0.0, 1.0);
     float hemi = normal.y * 0.5 + 0.5;
-    vec3 skyFill = params.sunRadiance.rgb
-        * (0.3 * kDirectScale * params.sunRadiance.w * sunUp * max(sunDir.y, 0.0) * params.skyAmbient.w * (1.0 - sunVis) * hemi);
+    float groundSun = max(inGround.a, 0.0) * smoothstep(0.0, 0.25, inGround.a);
+    float sunLuma = dot(params.sunRadiance.rgb, vec3(0.2126, 0.7152, 0.0722));
+    vec3 coolFill = mix(params.sunRadiance.rgb, vec3(0.82, 0.95, 1.18) * sunLuma, 0.55 * (1.0 - sunVis));
+    vec3 skyFill = coolFill
+        * (0.3 * kDirectScale * params.sunRadiance.w * sunUp * groundSun * params.skyAmbient.w * (1.0 - sunVis) * hemi);
     vec3 ambient = mix(params.groundAmbient.rgb, params.skyAmbient.rgb, hemi) + skyFill;
 
     vec3 color = vec3(0.0);
@@ -179,12 +182,13 @@ void main()
 
         vec3 colorModern = albedo * (ambient * ao + sun * front * sqrt(ao)) + trans
             + sun * spec * vec3(0.9, 1.0, 0.6) + params.skyAmbient.rgb * vec3(0.5, 0.9, 0.35) * (fres * ao * (1.0 - far));
-        float windWave = clamp(inInfo.z / 0.9 - 0.4, -0.4, 0.6);
+        float windWave = clamp(inInfo.z / 0.9 - 0.4, -0.4, 0.6) * mix(0.4, 1.0, sunVis);
         colorModern *= max(1.0 + params.shapeWind.w * windWave * (1.0 - far), 0.0);
         color += colorModern * lookModern;
     }
     if (debugMode == 0u) {
-        color *= mix(1.0, params.lodFar.z, smoothstep(75.0, 125.0, distanceM));
+        float farLuminance = mix(1.0, params.lodFar.z, sunVis);
+        color *= mix(1.0, farLuminance, smoothstep(75.0, 125.0, distanceM));
     }
     outColor = vec4(color, 1.0);
 }

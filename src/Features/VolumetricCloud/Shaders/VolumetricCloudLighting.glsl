@@ -8,8 +8,8 @@ const vec3 kOctaveTint = vec3(0.9, 0.97, 1.1);
 // Sun light at full warmth: the blue falls first, like light that crossed more air.
 const vec3 kSunWarmTint = vec3(1.0, 0.88, 0.7);
 const float kGlowEccentricity = 0.3;
-const float kSilverPhaseCap = 10.0;
-const float kMaxSourceLuma = 40.0;
+const float kSilverPhaseCap = 4.0;
+const float kMaxSourceLuma = 10.0;
 const vec3 kCloudLumaWeights = vec3(0.2126, 0.7152, 0.0722);
 // Share of its segment a sun sample may move (1 = anywhere inside).
 const float kLightJitterSpan = 0.9;
@@ -68,8 +68,7 @@ float CloudLightDensity(vec3 position)
     return CloudCurve(shape) * factor;
 }
 
-// Per-ray random number in 0..1 that changes with every own sample of the pixel; the light samples move inside
-// their segment with it, so the history averages the sampling noise instead of showing a fixed dot pattern.
+// Per-ray random number in 0..1 that steps every frame so temporal integration averages light-march noise.
 float gLightJitter = 0.5;
 
 // Optical depth from a sample toward the sun. Steps double in length, so a few samples cover the reach.
@@ -96,7 +95,6 @@ float SunOpticalDepth(vec3 position, vec3 sunDirection)
 }
 
 // Share of the sky light that is not blocked by cloud above a sample: two density samples straight up.
-// A thick cloud over the sample shades it; an open top sees the whole sky.
 float SkyVisibility(vec3 position)
 {
     float reach = params.skyShade.y;
@@ -106,8 +104,7 @@ float SkyVisibility(vec3 position)
     return mix(params.skyShade.z, 1.0, exp(-opticalDepth * params.skyShade.x));
 }
 
-// Light reaching a sample from the sun: octaves of b^i * phase_i * exp(-tau * a^i), plus the silver lobe.
-// Octave i is tinted by `octaveTint`^i, so the deep multiple scattering leans toward the sky colour.
+// Sun light reaching a sample: multiple-scattering octaves plus a thin-optical-depth silver rim lobe.
 vec3 SunScatter(float cosTheta, float opticalDepth)
 {
     uint octaves = uint(params.lightMarch.z);
@@ -126,46 +123,44 @@ vec3 SunScatter(float cosTheta, float opticalDepth)
     }
     float silverPhase = kSilverPhaseCap * (1.0 - exp(-HenyeyGreenstein(cosTheta, params.lightScatter.x) / kSilverPhaseCap));
     float silver = params.lightPhase.w * silverPhase * exp(-opticalDepth);
-    return sum + vec3(silver);
+    return sum + vec3(silver * exp(-opticalDepth * 0.85));
 }
 
-// Chance that light scattered into a sample comes out toward the eye (Nubis, Decima): low at the cloud edge and in
-// cavities (little cloud around to scatter into), low at the base, high in the core and the upper body.
-// Looking toward the sun the edges stay bright (silver lining), so the term fades to 1 there.
+// Nubis in-scatter probability: shades cavities and bases softly with a subtle thin-rim lift toward the sun.
 float InScatterProbability(float lodDensity, float h, float cosTheta)
 {
+    float d = Saturate(lodDensity);
     float expo = clamp(Remap(h, 0.3, 0.85, 0.5, 2.0), 0.5, 2.0);
-    float depthP = 0.05 + pow(Saturate(lodDensity), expo);
-    float vertP = pow(clamp(Remap(h, 0.07, 0.14, 0.1, 1.0), 0.1, 1.0), 0.8);
+    float depthP = 0.28 + 0.72 * pow(max(d, 1e-5), expo);
+    float vertP = pow(clamp(Remap(h, 0.03, 0.18, 0.45, 1.0), 0.45, 1.0), 0.7);
     float towardSun = Saturate(cosTheta);
-    return mix(Saturate(depthP * vertP), 1.0, towardSun * towardSun * 0.8);
+    float rimLift = towardSun * towardSun * (1.0 - d) * 0.20;
+    return mix(Saturate(depthP * vertP), 1.0, rimLift);
 }
 
-// Radiance a sample scatters toward the eye per unit of absorbed light. The march weights it by
-// transmittance * opacity of the step.
+// Radiance a sample scatters toward the eye per unit of absorbed light.
 vec3 CloudSourceRadiance(CloudLightInput s)
 {
     float cosTheta = dot(s.viewDirection, s.sunDirection);
     vec3 sun = vec3(0.0);
     if (dot(s.sunRadiance, s.sunRadiance) > 0.0) {
         vec3 scatter = SunScatter(cosTheta, s.sunOpticalDepth);
-        float powder = 1.0 - exp(-4.0 * s.density);
+        float powder = 0.35 + 0.65 * (1.0 - exp(-3.5 * s.density));
         float awayFromSun = Saturate(0.5 - 0.5 * cosTheta);
-        scatter *= mix(1.0, powder, params.lightMarch.w * awayFromSun);
-        // The in-scatter chance darkens edges and cavities; the strength knob is farField.w, 0 = off.
+        scatter *= mix(1.0, powder, params.lightMarch.w * awayFromSun * awayFromSun);
+        // Shades thin edges and cavities; farField.w = 0 turns it off.
         scatter *= mix(1.0, InScatterProbability(s.lodDensity, s.heightFraction, cosTheta), params.farField.w);
-        // The diffusion term is the light that bounced around inside the cloud: it decays slowly with optical depth.
+        // Slow-decaying diffusion keeps thick cloud cores softly luminous.
         float tau = s.sunOpticalDepth;
         vec3 diffuse = vec3(params.lightTune.y * (tau / (tau + 2.0)) / (1.0 + 0.15 * tau) / (4.0 * kPi));
-        // Inner glow: looking toward the sun, the deep light of a thick cloud shines through its lobes.
-        float glowDecay = mix(0.25, mix(0.25, 0.05, s.lodDensity), Saturate(cosTheta / 0.9));
+        // Forward glow decays steadily with optical depth so dense cores self-shadow instead of blowing out.
+        float glowDecay = mix(0.45, 0.30, Saturate(cosTheta));
         vec3 glow = vec3(params.lightTune.z * s.lodDensity * exp(-tau * glowDecay) * HenyeyGreenstein(cosTheta, kGlowEccentricity));
         sun = s.sunRadiance * mix(vec3(1.0), kSunWarmTint, params.lightTune2.x) * (scatter + diffuse + glow);
     }
-    float skyShare = mix(params.lightMisc.y, 1.0, pow(s.heightFraction, 0.7)) * s.skyVisibility;
-    // Light bounced up from the ground reaches the low part of the cloud.
+    float skyShare = mix(params.lightMisc.y, 1.0, pow(max(s.heightFraction, 1e-5), 0.7)) * s.skyVisibility;
+    // Light bounced up from the ground reaches the low part of the cloud where ground is sunlit.
     float groundShare = (1.0 - s.heightFraction) * (1.0 - s.heightFraction);
-    // The ground under a thick cloud is in its shadow, so it bounces little light up.
     groundShare *= mix(0.15, 1.0, exp(-0.15 * s.sunOpticalDepth));
     return sun + s.ambientRadiance * skyShare + s.groundRadiance * groundShare;
 }

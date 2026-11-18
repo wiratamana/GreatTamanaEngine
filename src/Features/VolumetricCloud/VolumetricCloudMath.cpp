@@ -332,7 +332,8 @@ float CloudSunScatter(const VolumetricCloudSettings& safe, float cosTheta, float
     }
     const float silverHg = CloudHenyeyGreenstein(cosTheta, safe.silverG);
     const float silverPhase = kCloudSilverPhaseCap * (1.0f - std::exp(-silverHg / kCloudSilverPhaseCap));
-    return sum + safe.silverIntensity * silverPhase * CloudBeer(opticalDepth);
+    const float silver = safe.silverIntensity * silverPhase * CloudBeer(opticalDepth);
+    return sum + silver * CloudBeer(opticalDepth * kCloudSilverThinDepthScale);
 }
 
 Vec3 BoundCloudLuma(const Vec3& radiance, float maxLuma) noexcept
@@ -516,6 +517,17 @@ void SetCloudShaftLookup(VolumetricCloudParamsGpu& params, const CloudShadowMap&
     params.shadowShift[2] = std::max(map.shaftSharpness, 1.0f);
 }
 
+bool CloudShadowHistoryReusable(const Vec3& lastSunDir, float lastCoverage, float lastShadowDensity,
+    const Vec3& sunDir, const VolumetricCloudSettings& safe) noexcept
+{
+    if (!std::isfinite(lastCoverage) || !std::isfinite(lastShadowDensity)) {
+        return false;
+    }
+    return Dot(lastSunDir, sunDir) >= 0.9999f
+        && std::abs(lastCoverage - safe.coverage) <= 1e-3f
+        && std::abs(lastShadowDensity - safe.shadowDensity) <= 1e-3f;
+}
+
 VolumetricCloudParamsGpu MakeVolumetricCloudShadowParams(const VolumetricCloudSettings& safe,
     const VolumetricCloudFrameFacts& facts, const VolumetricCloudShadowFacts& shadow) noexcept
 {
@@ -604,10 +616,10 @@ std::uint32_t CloudOwnSampleIndex(std::uint64_t frameIndex, std::uint32_t diviso
     return static_cast<std::uint32_t>((frameIndex / cycle) & 255u);
 }
 
-float CloudMarchJitter(float blueNoise, std::uint64_t frameIndex, std::uint32_t divisor) noexcept
+float CloudMarchJitter(float blueNoise, std::uint64_t frameIndex, std::uint32_t /*divisor*/) noexcept
 {
     constexpr double kGoldenRatio = 0.61803398875;
-    const double value = static_cast<double>(blueNoise) + kGoldenRatio * CloudOwnSampleIndex(frameIndex, divisor);
+    const double value = static_cast<double>(blueNoise) + static_cast<double>(frameIndex & 1023u) * kGoldenRatio;
     return static_cast<float>(value - std::floor(value));
 }
 
@@ -670,6 +682,22 @@ float CloudAerialComposite(float scene, float cloudTransmittance, float cloudLig
     float airLight) noexcept
 {
     return scene * cloudTransmittance + cloudLight * airTransmittance + (1.0f - cloudTransmittance) * airLight;
+}
+
+Vec3 CompressCloudResolveLuma(const Vec3& radiance) noexcept
+{
+    const float r = std::isfinite(radiance.x) ? std::max(radiance.x, 0.0f) : 0.0f;
+    const float g = std::isfinite(radiance.y) ? std::max(radiance.y, 0.0f) : 0.0f;
+    const float b = std::isfinite(radiance.z) ? std::max(radiance.z, 0.0f) : 0.0f;
+    const Vec3 clean(r, g, b);
+    const float luma = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+    if (!(luma > kCloudResolveShoulderStart)) {
+        return clean;
+    }
+    const float span = kCloudResolveShoulderCeiling - kCloudResolveShoulderStart;
+    const float excess = luma - kCloudResolveShoulderStart;
+    const float compressed = kCloudResolveShoulderStart + span * excess / (span + excess);
+    return clean * (compressed / luma);
 }
 
 Vec3 CloudSceneBehind(const Vec3& scene, float cloudTransmittance) noexcept

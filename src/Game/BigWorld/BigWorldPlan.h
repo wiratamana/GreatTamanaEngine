@@ -12,14 +12,14 @@ namespace gte::bigworld {
 enum class Quality { Lean, Medium, Big };
 
 // Default cloud coverage per tier: lower than the 0.8 feature default so clouds leave sunlit gaps.
-inline constexpr double kLeanCloudCoverage = 0.45;
-inline constexpr double kMediumCloudCoverage = 0.5;
-inline constexpr double kBigCloudCoverage = 0.5;
+inline constexpr double kLeanCloudCoverage = 0.48;
+inline constexpr double kMediumCloudCoverage = 0.52;
+inline constexpr double kBigCloudCoverage = 0.52;
 
 // Cloud shadow and screen-space sun-shaft defaults for the demo.
-inline constexpr double kCloudShadowRangeKm = 8.0;      // ~62.5 m per 128x128 shadow texel for field dappling.
-inline constexpr double kCloudShadowSoftness = 0.6;     // Tighter blur in texels to match the 8 km shadow map.
-inline constexpr double kCloudShadowFill = 0.30;        // Diffuse sun share on cloud-shaded ground.
+inline constexpr double kCloudShadowRangeKm = 24.0;     // Covers +/-12 km terrain; nested 1/8 near map spans 3 km (~23.4 m/texel).
+inline constexpr double kCloudShadowSoftness = 0.85;    // Smooth cumulus penumbra without blocky shadow texels.
+inline constexpr double kCloudShadowFill = 0.12;        // Subtle diffuse sky fill on cloud-shaded ground.
 inline constexpr double kCloudSunRays = 1.2;            // Screen-space sun shafts through cloud gaps.
 inline constexpr double kCloudSunRaysContrast = 2.5;    // Suppresses uniform sky veil so partial cloud gaps form beams.
 inline constexpr double kCloudSunRaysDecay = 1.0;       // Radial falloff of sun-shaft taps away from the sun.

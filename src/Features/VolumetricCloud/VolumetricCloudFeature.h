@@ -22,8 +22,6 @@ struct VolumetricCloudViewState {
     fx::GpuParams<VolumetricCloudSunShaftsParamsGpu> sunShaftsParams;
     fx::GpuParams<AtmosphereParametersGpu> atmosphereParams;
     VolumetricCloudViewSnapshot snapshot;
-    double windOffset[2] = {};
-    double windStep[2] = {};
     fx::TemporalHistory previous; // Valid only when the resolve pass wrote the history last frame.
 
     // Cloud shadow map: two maps ping-pong by frame index; the dispatch uses its own parameter blocks.
@@ -34,6 +32,9 @@ struct VolumetricCloudViewState {
     CloudShadowGrid shadowGrid;       // Grid of the last map.
     std::uint64_t shadowFrame = 0;    // Frame that wrote it.
     bool shadowGridValid = false;     // The last map is usable as history.
+    Vec3 lastShadowSunDir = Vec3::Zero();
+    float lastShadowCoverage = -1.0f;
+    float lastShadowDensity = -1.0f;
     CloudShadowMap shadowPublished;   // The map published in `shadowPublishedFrame`; the march reads it for the air.
     std::uint64_t shadowPublishedFrame = ~std::uint64_t{ 0 };
 
@@ -115,7 +116,7 @@ private:
     fx::ChannelReader<AtmosphereSharedLuts> m_sharedLuts{ kAtmosphereLutOwner, kAtmosphereSharedLutsChannel };
     fx::ChannelReader<AtmosphereViewLuts> m_viewLuts{ kAtmosphereLutOwner, kAtmosphereViewLutsChannel };
 
-    // Shared wind drift, advanced once per frame and never wrapped; the march keeps its own wrapped offsets.
+    // Shared wind drift, advanced once per frame and wrapped to the cloud tile period.
     double m_windOffset[2] = {};
     double m_windStep[2] = {};
     std::uint64_t m_windFrame = ~std::uint64_t{ 0 };

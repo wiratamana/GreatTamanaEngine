@@ -68,6 +68,9 @@ inline constexpr float kCloudLargeShapeScale = 1.75f;
 // march range, which reaches the horizon (250 km and more).
 inline constexpr float kCloudHistoryFallbackDistanceM = 15000.0f;
 
+// Default wind wrap period (m) matching the LCM of the shipped weather, shape and detail tiles.
+inline constexpr double kCloudWindPeriodM = 350000.0;
+
 // Length after which the weather, far weather, shape and detail lookups all repeat: the least common multiple of the
 // tile sizes in whole metres, or 0 when they have none that stays small.
 double CloudWindPeriodM(const VolumetricCloudSettings& safe) noexcept;
@@ -89,13 +92,14 @@ float CloudPhase(const VolumetricCloudSettings& safe, float cosTheta, float ecce
 // Beer-Lambert transmittance for an optical depth.
 float CloudBeer(float opticalDepth) noexcept;
 
-// Soft ceiling on the silver-lining Henyey-Greenstein phase (VolumetricCloudLighting.glsl kSilverPhaseCap).
-inline constexpr float kCloudSilverPhaseCap = 10.0f;
+// Soft ceiling and thin-optical-depth gate on the silver-lining lobe (VolumetricCloudLighting.glsl).
+inline constexpr float kCloudSilverPhaseCap = 4.0f;
+inline constexpr float kCloudSilverThinDepthScale = 0.85f;
 
 // Smooth luminance ceiling on a cloud sample (VolumetricCloudLighting.glsl kMaxSourceLuma).
-inline constexpr float kCloudMaxSourceLuma = 40.0f;
+inline constexpr float kCloudMaxSourceLuma = 10.0f;
 
-// Sun light reaching a sample: the sum over octaves of b^i * phase_i * exp(-tau * a^i), plus the soft-capped silver lobe.
+// Sun light reaching a sample: sum over octaves plus the thin-optical-depth gated silver lobe.
 float CloudSunScatter(const VolumetricCloudSettings& safe, float cosTheta, float opticalDepth) noexcept;
 
 // Smoothly bounds the luminance of `radiance` below `maxLuma` while preserving RGB hue.
@@ -157,6 +161,10 @@ struct VolumetricCloudShadowFacts {
 // Lets the march shader read `map` for the sun light of the air in front of a cloud (shaft strength 0 = off).
 void SetCloudShaftLookup(VolumetricCloudParamsGpu& params, const CloudShadowMap& map) noexcept;
 
+// True when the previous shadow map remains compatible with the active sun direction, coverage and shadow density.
+bool CloudShadowHistoryReusable(const Vec3& lastSunDir, float lastCoverage, float lastShadowDensity,
+    const Vec3& sunDir, const VolumetricCloudSettings& safe) noexcept;
+
 // The parameter block of the dispatch that writes the shadow map (the march shader in its map mode).
 VolumetricCloudParamsGpu MakeVolumetricCloudShadowParams(const VolumetricCloudSettings& safe,
     const VolumetricCloudFrameFacts& facts, const VolumetricCloudShadowFacts& shadow) noexcept;
@@ -197,12 +205,11 @@ struct CloudSampleOffset {
 };
 CloudSampleOffset CloudBayerOffset(std::uint64_t frameIndex, std::uint32_t divisor) noexcept;
 
-// How often the pixel marched on `frameIndex` was marched before. A pixel is marched once per divisor * divisor
-// frames, so its own samples are numbered by this index, wrapped at 256.
+// How often the pixel marched on `frameIndex` was marched before, wrapped at 256.
 std::uint32_t CloudOwnSampleIndex(std::uint64_t frameIndex, std::uint32_t divisor) noexcept;
 
-// Start jitter in [0, 1) of a marched pixel: the blue noise value moved by the golden ratio per own sample.
-float CloudMarchJitter(float blueNoise, std::uint64_t frameIndex, std::uint32_t divisor) noexcept;
+// Start jitter in [0, 1) of a marched pixel: full-res pixel blue noise stepped every frame by the golden ratio.
+float CloudMarchJitter(float blueNoise, std::uint64_t frameIndex, std::uint32_t divisor = 1) noexcept;
 
 // Screen-space sun rays: how far toward the sun a pixel looks (share of the way) and the radius of the sun glow.
 inline constexpr float kCloudSunRayGlowRadius = 0.18f;
@@ -234,15 +241,19 @@ VolumetricCloudResolveParamsGpu MakeVolumetricCloudResolveParams(const Volumetri
 // lies `pixelEndKm` away? `tapEndKm` is how far that march looked, `tapDistanceKm` where its cloud sits.
 bool CloudTapUsable(float tapEndKm, float tapDistanceKm, float tapTransmittance, float pixelEndKm) noexcept;
 
-// Final colour of a cloud pixel seen through air. `cloudLight` is the cloud's own light, `airTransmittance` and
-// `airLight` the air between the eye and the cloud, `cloudTransmittance` what the cloud lets through of the
-// scene behind it. A scene that already holds the air light of the same distance (the sky) comes back
-// unchanged where the cloud lets everything through.
+// Final colour of a cloud pixel seen through air; preserves sky pixels unchanged where cloud transmittance is 1.
 float CloudAerialComposite(float scene, float cloudTransmittance, float cloudLight, float airTransmittance,
     float airLight) noexcept;
 
 // Scene radiance knee above which cloud transmittance applies to the fourth power (VolumetricCloudResolve.comp).
-inline constexpr float kCloudSceneHdrKnee = 16.0f;
+inline constexpr float kCloudSceneHdrKnee = 64.0f;
+
+// Soft HDR luminance shoulder applied to resolved cloud radiance before compositing (VolumetricCloudResolve.comp).
+inline constexpr float kCloudResolveShoulderStart = 2.2f;
+inline constexpr float kCloudResolveShoulderCeiling = 5.2f;
+
+// CPU twin of CompressCloudShoulder() in VolumetricCloudResolve.comp: chroma-preserving HDR shoulder above 2.2.
+Vec3 CompressCloudResolveLuma(const Vec3& radiance) noexcept;
 
 // CPU twin of SceneBehindCloud() in VolumetricCloudResolve.comp: steepens occlusion above kCloudSceneHdrKnee.
 Vec3 CloudSceneBehind(const Vec3& scene, float cloudTransmittance) noexcept;

@@ -61,7 +61,9 @@ void VolumetricCloudFeature::PublishWind(fx::PreOpaqueFrame& f)
     // Both views call this in one frame; the drift moves once.
     if (f.FrameIndex() != m_windFrame) {
         m_windFrame = f.FrameIndex();
-        AdvanceCloudWind(m_windOffset, m_windStep, m_settings.windSpeed, m_settings.windDirection, f.DeltaSeconds(), 0.0);
+        const double periodM = CloudWindPeriodM(m_settings);
+        AdvanceCloudWind(m_windOffset, m_windStep, m_settings.windSpeed, m_settings.windDirection, f.DeltaSeconds(),
+            periodM > 0.0 ? periodM : kCloudWindPeriodM);
     }
     constexpr double kDegreesToRadians = 3.14159265358979323846 / 180.0;
     const double radians = static_cast<double>(m_settings.windDirection) * kDegreesToRadians;
@@ -195,8 +197,6 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
     const std::optional<SunLightModulation> modulation = m_sunLight.Fetch(f);
     const SunLightModulation light = modulation ? SanitizeSunLightModulation(*modulation) : SunLightModulation{};
 
-    AdvanceCloudWind(view.windOffset, view.windStep, m_settings.windSpeed, m_settings.windDirection, f.DeltaSeconds(),
-        CloudWindPeriodM(m_settings));
     VolumetricCloudFrameFacts facts;
     // Rays and reprojection are formed relative to the eye, in double precision.
     const fx::View& cameraView = f.View();
@@ -210,8 +210,8 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
     facts.sunIlluminance = sun.sunIlluminance;
     facts.sunTint = light.sunTint;
     facts.ambientScale = light.ambientScale;
-    facts.windOffset[0] = static_cast<float>(view.windOffset[0]);
-    facts.windOffset[1] = static_cast<float>(view.windOffset[1]);
+    facts.windOffset[0] = static_cast<float>(m_windOffset[0]);
+    facts.windOffset[1] = static_cast<float>(m_windOffset[1]);
     facts.frameIndex = f.FrameIndex();
     facts.viewWidth = full.width;
     facts.viewHeight = full.height;
@@ -277,8 +277,8 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
     const bool accumulate = m_settings.temporal >= 0.5f;
     VolumetricCloudResolveFacts resolveFacts;
     resolveFacts.prevViewProjection = fx::PreviousViewProjectionForShader(basis, view.previous);
-    resolveFacts.windDelta[0] = static_cast<float>(view.windStep[0]);
-    resolveFacts.windDelta[1] = static_cast<float>(view.windStep[1]);
+    resolveFacts.windDelta[0] = static_cast<float>(m_windStep[0]);
+    resolveFacts.windDelta[1] = static_cast<float>(m_windStep[1]);
     resolveFacts.historyValid = accumulate && basis.valid && fx::HistoryUsable(view.previous, basis, f.FrameIndex(), full, divisor);
     resolveFacts.lowWidth = low.width;
     resolveFacts.lowHeight = low.height;
@@ -418,8 +418,8 @@ void VolumetricCloudFeature::ShadowMapPass(fx::PreOpaqueFrame& f)
     facts.eye = f.View().eye;
     facts.sunDirection = sun.directionTowardSun;
     facts.sunIlluminance = sun.sunIlluminance;
-    facts.windOffset[0] = static_cast<float>(view.windOffset[0]);
-    facts.windOffset[1] = static_cast<float>(view.windOffset[1]);
+    facts.windOffset[0] = static_cast<float>(m_windOffset[0]);
+    facts.windOffset[1] = static_cast<float>(m_windOffset[1]);
     facts.frameIndex = f.FrameIndex();
     const std::optional<AtmosphereSharedLuts> sharedLuts = m_sharedLuts.Fetch(f);
     const std::optional<AtmosphereViewLuts> viewLuts = m_viewLuts.Fetch(f);
@@ -441,10 +441,12 @@ void VolumetricCloudFeature::ShadowMapPass(fx::PreOpaqueFrame& f)
     VolumetricCloudShadowFacts shadow;
     shadow.grid = MakeCloudShadowGrid(cfg, facts.eye, sun.directionTowardSun, kCloudShadowMapSize);
     const bool sameLattice = view.shadowGridValid && view.shadowGrid.texelM == shadow.grid.texelM
+        && CloudShadowHistoryReusable(view.lastShadowSunDir, view.lastShadowCoverage, view.lastShadowDensity,
+            sun.directionTowardSun, cfg)
         && static_cast<double>(f.FrameIndex() - view.shadowFrame) <= kShadowMaxSkipFrames && f.FrameIndex() > view.shadowFrame;
     if (sameLattice) {
-        shadow.shiftX = view.windStep[0] + (shadow.grid.centerX - view.shadowGrid.centerX);
-        shadow.shiftZ = view.windStep[1] + (shadow.grid.centerZ - view.shadowGrid.centerZ);
+        shadow.shiftX = m_windStep[0] + (shadow.grid.centerX - view.shadowGrid.centerX);
+        shadow.shiftZ = m_windStep[1] + (shadow.grid.centerZ - view.shadowGrid.centerZ);
         shadow.historyBlend = 0.3f;
     }
 
@@ -472,6 +474,9 @@ void VolumetricCloudFeature::ShadowMapPass(fx::PreOpaqueFrame& f)
     view.shadowGrid = shadow.grid;
     view.shadowFrame = f.FrameIndex();
     view.shadowGridValid = true;
+    view.lastShadowSunDir = sun.directionTowardSun;
+    view.lastShadowCoverage = cfg.coverage;
+    view.lastShadowDensity = cfg.shadowDensity;
 
     const CloudShadowStrengths strengths = ComputeCloudShadowStrengths(cfg, sunUp);
     CloudShadowMap map;

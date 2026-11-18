@@ -979,7 +979,7 @@ TEST(GrassEndpointTest, ExposesShadowSettingsSunVisAndReadOnlyShadowState)
     EXPECT_TRUE(std::get<bool>(FindField(initial, "receiveSunShadow")->value));
     EXPECT_TRUE(std::get<bool>(FindField(initial, "receiveCloudShadow")->value));
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "shadowStrength")->value), 1.0);
-    EXPECT_NEAR(std::get<double>(FindField(initial, "cloudFill")->value), 0.6, 1e-6);
+    EXPECT_NEAR(std::get<double>(FindField(initial, "cloudFill")->value), 0.16, 1e-6);
     EXPECT_TRUE(std::get<bool>(FindField(initial, "castShadows")->value));
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "shadowMaxTexelM")->value), 0.4);
     EXPECT_DOUBLE_EQ(std::get<double>(FindField(initial, "shadowBiasTexels")->value), 1.0);

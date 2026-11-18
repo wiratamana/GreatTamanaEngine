@@ -52,6 +52,16 @@ vec3 LinearToSrgb(vec3 c)
 
 #ifdef DIRECTIONAL_LIGHTING_NO_SHADOWS
 
+float CascadeShadowAmount(vec3 position, vec3 normal, float nDotL)
+{
+    return 0.0;
+}
+
+float CloudSunVisibility(vec3 position)
+{
+    return 1.0;
+}
+
 float SunShadowAmount(vec3 position, vec3 normal, float nDotL)
 {
     return 0.0;
@@ -183,14 +193,18 @@ float SunShadowAmount(vec3 position, vec3 normal, float nDotL)
     return 1.0 - (1.0 - cascade) * CloudSunVisibility(position);
 }
 
-// Diffuse light of the sky under a cloud: a share of the sun that the layer blocked, spread over the upper hemisphere.
+// Cool-balanced multi-scattered sky fill under clouds, gated by nDotL so back-facing slopes never brighten.
 vec3 CloudDiffuseFill(vec3 position, vec3 normal, vec3 sunDirection, vec3 sunIlluminance)
 {
     float fill = uSceneLighting.cloudShadowLayer.z;
-    if (fill <= 0.0 || uSceneLighting.cloudShadowGrid.w <= 0.0) { return vec3(0.0); }
+    float nDotL = max(dot(normal, sunDirection), 0.0);
+    if (fill <= 0.0 || uSceneLighting.cloudShadowGrid.w <= 0.0 || nDotL <= 0.0) { return vec3(0.0); }
     float blocked = 1.0 - CloudSunTransmittanceFast(uCloudShadow, uSceneLighting.cloudShadowGrid,
         vec4(uSceneLighting.cloudShadowLayer.xy, 1.0, uSceneLighting.cloudShadowLayer.w), sunDirection, position);
-    return sunIlluminance * (kDirectScale * max(sunDirection.y, 0.0) * fill * blocked * (normal.y * 0.5 + 0.5));
+    float receiver = nDotL * (0.65 + 0.35 * max(normal.y, 0.0)) * smoothstep(0.0, 0.25, nDotL);
+    float sunLuma = dot(sunIlluminance, vec3(0.2126, 0.7152, 0.0722));
+    vec3 coolScatter = mix(sunIlluminance, vec3(0.82, 0.95, 1.18) * sunLuma, 0.55 * blocked);
+    return coolScatter * (kDirectScale * fill * blocked * receiver);
 }
 
 #endif // DIRECTIONAL_LIGHTING_NO_SHADOWS
@@ -222,8 +236,10 @@ vec3 ShadeDirectionalLinear(vec3 baseColorLinear, vec3 worldNormal, bool useShad
     vec3 ambient = SceneHemisphereAmbient(n);
 
     if (useShadow && written) { ambient += CloudDiffuseFill(worldPosition, n, sunDirection, sunIlluminance); }
-    float shadow = (useShadow && written && ndotl > 0.0) ? SunShadowAmount(worldPosition, n, ndotl) : 0.0;
-    float sunVisibility = 1.0 - uSceneLighting.shadowParams.y * shadow;
+    float cascadeVis = (useShadow && written && ndotl > 0.0)
+        ? (1.0 - uSceneLighting.shadowParams.y * CascadeShadowAmount(worldPosition, n, ndotl)) : 1.0;
+    float cloudVis = (useShadow && written) ? CloudSunVisibility(worldPosition) : 1.0;
+    float sunVisibility = cascadeVis * cloudVis;
 
     // Ambient does not depend on the sun, so a dark sun still leaves a lit scene.
     return baseColorLinear * (ambient + sunIlluminance * (ndotl * kDirectScale * sunVisibility));

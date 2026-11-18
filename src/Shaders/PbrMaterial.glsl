@@ -58,12 +58,16 @@ vec3 ShadePbrLinear(PbrSurface s, vec3 worldPosition)
     vec3 diffuseColor = s.baseColor * (1.0 - s.metallic);
 
     vec3 sunDirection = SceneSunDirection();
+    bool written = SceneSunWritten();
     float nDotL = max(dot(n, sunDirection), 0.0);
     float geometricNDotL = dot(s.geometricNormal, sunDirection);
     float horizon = clamp(geometricNDotL * kHorizonFadeScale, 0.0, 1.0);
-    float shadow = (SceneSunWritten() && nDotL > 0.0 && horizon > 0.0)
-        ? SunShadowAmount(worldPosition, s.geometricNormal, geometricNDotL) : 0.0;
-    float sunVisibility = 1.0 - uSceneLighting.shadowParams.y * shadow;
+    bool sunLit = written && nDotL > 0.0 && horizon > 0.0;
+    float cascadeVis = sunLit
+        ? (1.0 - uSceneLighting.shadowParams.y * CascadeShadowAmount(worldPosition, s.geometricNormal, geometricNDotL))
+        : 1.0;
+    float cloudVis = sunLit ? CloudSunVisibility(worldPosition) : 1.0;
+    float sunVisibility = cascadeVis * cloudVis;
     vec3 sunTerm = SceneSunIlluminance() * (nDotL * sunVisibility * horizon);
 
     vec3 h = SafeNormalize(sunDirection + v, n);
@@ -76,7 +80,8 @@ vec3 ShadePbrLinear(PbrSurface s, vec3 worldPosition)
     vec3 reflected = reflect(-v, n);
     vec3 specularAmbient = SceneHemisphereAmbient(reflected) * EnvBrdfApprox(f0, roughness, nDotV)
         * SpecularOcclusion(nDotV, s.occlusion, roughness);
-    vec3 skyFill = SceneSunWritten() ? CloudDiffuseFill(worldPosition, n, sunDirection, SceneSunIlluminance()) : vec3(0.0);
+    vec3 skyFill = (written && horizon > 0.0)
+        ? CloudDiffuseFill(worldPosition, n, sunDirection, SceneSunIlluminance()) * horizon : vec3(0.0);
     vec3 diffuseAmbient = diffuseColor * (SceneHemisphereAmbient(n) + skyFill) * s.occlusion;
     return min(diffuseAmbient + specularAmbient + direct, vec3(kMaxSceneRadiance));
 }
