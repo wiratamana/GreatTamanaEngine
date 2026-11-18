@@ -12,7 +12,7 @@ namespace gte {
 namespace {
 
 constexpr std::array<const char*, kMaterialDebugViewCount> kDebugViewLabels{ "Off", "Shading normal", "Roughness",
-    "Metallic", "Occlusion", "Tangent", "Handedness", "Facing", "Base color" };
+    "Metallic", "Occlusion", "Tangent", "Handedness", "Facing", "Base color", "Cloud shadow region" };
 
 bool EditColor(const char* label, float& r, float& g, float& b)
 {

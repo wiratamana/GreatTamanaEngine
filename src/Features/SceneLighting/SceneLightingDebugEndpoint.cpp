@@ -94,7 +94,7 @@ fx::FeatureDebugResult SceneLightingDebugEndpoint::Set(std::span<const fx::Featu
         if (arg.key == kMaterialDebugViewKey) {
             const auto view = fx::ParseDebugUnsigned(arg.value);
             if (!view || *view >= static_cast<std::uint64_t>(kMaterialDebugViewCount)) {
-                return Fail(arg.key, "must be 0..8");
+                return Fail(arg.key, "must be 0..9");
             }
             candidate.materialDebugView = static_cast<MaterialDebugView>(*view);
             continue;

@@ -70,7 +70,7 @@ Sun plus hemisphere ambient. There is no environment map. Code: `src/Shaders/Pbr
 - `SceneLighting` writes the eye position for every view. With `sceneLightFollowsAtmosphere` on, sun and ambient are already multiplied by the atmosphere record. The shader does not know the atmosphere.
 
 ## Material debug views
-`SceneLighting` has `materialDebugView` (0 to 8). The shader writes `SrgbToLinear(value)`. With tone mapping `Clamp`, exposure 1, saturation 1 and dither 0, a capture shows the value exactly. Turn off Atmosphere, Gtao and VolumetricLight first. They change scene color after the mesh pass.
+`SceneLighting` has `materialDebugView` (0 to 9). The shader writes `SrgbToLinear(value)`. With tone mapping `Clamp`, exposure 1, saturation 1 and dither 0, a capture shows the value exactly. Turn off Atmosphere, Gtao and VolumetricLight first. They change scene color after the mesh pass.
 
 | Value | View | Value | View |
 |---|---|---|---|
@@ -78,9 +78,9 @@ Sun plus hemisphere ambient. There is no environment map. Code: `src/Shaders/Pbr
 | 1 | shading normal | 6 | handedness w (green +1, red -1) |
 | 2 | roughness | 7 | facing (green front, red back) |
 | 3 | metallic | 8 | base color (unlit) |
-| 4 | occlusion | | |
+| 4 | occlusion | 9 | cloud shadow region (R near weight, G far T, B near T) |
 
-A value of 9 or more, a negative value or a non-integer gives `400`. Quick check (details in the [HTTP cheat sheet](../debugging/http-cheat-sheet.md)):
+A value of 10 or more, a negative value or a non-integer gives `400`. Quick check (details in the [HTTP cheat sheet](../debugging/http-cheat-sheet.md)):
 
 ```cmd
 curl.exe "http://127.0.0.1:8080/feature_debug/set?name=SceneLighting&materialDebugView=2"

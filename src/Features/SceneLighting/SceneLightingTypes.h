@@ -21,9 +21,9 @@ inline constexpr const char* kSceneLightingFeatureName = "SceneLighting";
 
 // Material debug views; 0 = off. The shader reads the value as an integer.
 enum class MaterialDebugView : std::int32_t {
-    Off, ShadingNormal, Roughness, Metallic, Occlusion, Tangent, Handedness, Facing, BaseColor
+    Off, ShadingNormal, Roughness, Metallic, Occlusion, Tangent, Handedness, Facing, BaseColor, CloudShadowRegion
 };
-inline constexpr std::int32_t kMaterialDebugViewCount = 9;
+inline constexpr std::int32_t kMaterialDebugViewCount = 10;
 
 // Tunable lighting values; the debug endpoint reflects them.
 // Ambient is added to the sun term, not scaled by it.

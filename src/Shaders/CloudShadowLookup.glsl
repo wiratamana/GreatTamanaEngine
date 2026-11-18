@@ -132,4 +132,22 @@ vec2 CloudAirHazeSunVisibility(sampler2D shadowMap, vec4 grid, vec4 layer, vec3 
     return mix(vec2(1.0), vec2(max(shadow, kAirShadowFloor), max(shadow, kHazeShadowFloor)), low);
 }
 
+// Debug channels: r = near blend weight, g = far-only transmittance, b = near-only transmittance (0 outside near).
+vec3 CloudShadowRegionChannels(sampler2D shadowMap, vec4 grid, vec4 layer, vec3 sun, vec3 position)
+{
+    int nearRow = int(layer.w);
+    if (grid.w <= 0.0 || nearRow <= 0) { return vec3(0.0, 1.0, 0.0); }
+    float along = (0.5 * (layer.x + layer.y) - position.y) / max(sun.y, 0.02);
+    vec2 delta = position.xz + sun.xz * along - grid.xy;
+    vec2 uv = delta * grid.z + 0.5;
+    vec2 nuv = delta * (grid.z * kCloudShadowNearScale) + 0.5;
+    float nedge = min(min(nuv.x, 1.0 - nuv.x), min(nuv.y, 1.0 - nuv.y));
+    float size = layer.w;
+    bool hasNear = textureSize(shadowMap, 0).y >= 2 * nearRow;
+    float nfade = (sun.y > 0.02 && hasNear) ? smoothstep(0.0, kCloudShadowNearFade, nedge) : 0.0;
+    float farT = CloudShadowRegionBilinear(shadowMap, uv, 0, size);
+    float nearT = nfade > 0.0 ? CloudShadowRegionBilinear(shadowMap, nuv, nearRow, size) : 0.0;
+    return vec3(nfade, farT, nearT);
+}
+
 #endif // CLOUD_SHADOW_LOOKUP_GLSL

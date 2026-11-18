@@ -62,6 +62,11 @@ vec3 CloudDiffuseFill(vec3 position, vec3 normal, vec3 sunDirection, vec3 sunIll
     return vec3(0.0);
 }
 
+vec3 CloudShadowRegionDebug(vec3 position)
+{
+    return vec3(0.0, 1.0, 0.0);
+}
+
 #else
 
 // Cascade depth maps: scene slots 0..3.
@@ -126,6 +131,13 @@ float CloudSunVisibility(vec3 position)
 {
     return CloudSunTransmittance(uCloudShadow, uSceneLighting.cloudShadowGrid, uSceneLighting.cloudShadowLayer,
         uSceneLighting.sunDirectionAndValid.xyz, position);
+}
+
+// Material debug view 9: r = near blend weight, g = far transmittance, b = near transmittance.
+vec3 CloudShadowRegionDebug(vec3 position)
+{
+    return SrgbToLinear(CloudShadowRegionChannels(uCloudShadow, uSceneLighting.cloudShadowGrid,
+        uSceneLighting.cloudShadowLayer, uSceneLighting.sunDirectionAndValid.xyz, position));
 }
 
 // 0 = fully lit, 1 = fully shadowed by the cascades. Cascade pick, blend and distance fade as in the mask pass.
@@ -220,6 +232,7 @@ vec3 ShadeDirectionalLinear(vec3 baseColorLinear, vec3 worldNormal, bool useShad
 // Linear HDR sun and ambient lighting with cascade shadows at worldPosition.
 vec3 ApplyDirectionalLightShadowed(vec3 baseColorLinear, vec3 worldNormal, vec3 worldPosition)
 {
+    if (SceneMaterialDebugView() == 9) { return CloudShadowRegionDebug(worldPosition); }
     return ShadeDirectionalLinear(baseColorLinear, worldNormal, true, worldPosition);
 }
 

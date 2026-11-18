@@ -243,7 +243,7 @@ curl.exe "http://127.0.0.1:8080/feature_debug/set?name=Shadow&debugView=CascadeC
 curl.exe http://127.0.0.1:8080/get_game_view -o shadow.png
 curl.exe "http://127.0.0.1:8080/feature_debug/invoke?name=Shadow&action=reset_defaults"
 ```
-- `debugView` values: `Shadow` = `Off` `CascadeColors` `Mask`. `Gtao` = `Off` `AoOnly`. `Ssgi` = `Off` `GiOnly` `Normals`. `VolumetricLight` = `Off` `InScatterOnly` `Transmittance`. `SceneLighting` uses `materialDebugView` `0..8`.
+- `debugView` values: `Shadow` = `Off` `CascadeColors` `Mask`. `Gtao` = `Off` `AoOnly`. `Ssgi` = `Off` `GiOnly` `Normals`. `VolumetricLight` = `Off` `InScatterOnly` `Transmittance`. `SceneLighting` uses `materialDebugView` `0..9`.
 - Values are clamped, not rejected. Read the returned `fields` to see what was applied.
 - Settings and ranges: [Render features](../reference/render-features/README.md), [Shadow](../reference/render-features/shadow.md), [GTAO](../reference/render-features/gtao.md), [SSGI](../reference/render-features/ssgi.md), [Volumetric light](../reference/render-features/volumetric-light.md), [Atmosphere](../reference/render-features/atmosphere.md), [Tone mapping](../reference/render-features/tone-mapping.md), [Scene lighting](../reference/render-features/scene-lighting.md).
 

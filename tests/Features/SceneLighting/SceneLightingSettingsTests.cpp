@@ -2,6 +2,7 @@
 
 #include "Features/SceneLighting/SceneLightingDebugEndpoint.h"
 #include "Features/SceneLighting/SceneLightingTypes.h"
+#include "../../Support/Std140Block.h"
 
 #include <gtest/gtest.h>
 
@@ -167,7 +168,7 @@ TEST(SceneLightingSettingsTest, SanitizeClampsTheMaterialDebugView)
     s.materialDebugView = static_cast<MaterialDebugView>(-5);
     EXPECT_EQ(SanitizeSceneLightingSettings(s).materialDebugView, MaterialDebugView::Off);
     s.materialDebugView = static_cast<MaterialDebugView>(99);
-    EXPECT_EQ(SanitizeSceneLightingSettings(s).materialDebugView, MaterialDebugView::BaseColor);
+    EXPECT_EQ(SanitizeSceneLightingSettings(s).materialDebugView, MaterialDebugView::CloudShadowRegion);
     s.materialDebugView = MaterialDebugView::Tangent;
     EXPECT_EQ(SanitizeSceneLightingSettings(s).materialDebugView, MaterialDebugView::Tangent);
 }
@@ -293,11 +294,15 @@ TEST(SceneLightingDebugEndpointTest, SetMaterialDebugViewIsReportedAsInteger)
         }
     }
     EXPECT_TRUE(found);
+    const std::vector<FeatureDebugArg> cloudArgs{ { "materialDebugView", "9" } };
+    const FeatureDebugResult cloudResult = endpoint.Set(cloudArgs);
+    ASSERT_TRUE(cloudResult.ok);
+    EXPECT_EQ(settings.materialDebugView, MaterialDebugView::CloudShadowRegion);
 }
 
 TEST(SceneLightingDebugEndpointTest, BadMaterialDebugViewFailsAndLeavesStateUnchanged)
 {
-    for (const char* bad : { "9", "-1", "2.5", "x", "" }) {
+    for (const char* bad : { "10", "-1", "2.5", "x", "" }) {
         SceneLightingSettings settings;
         settings.materialDebugView = MaterialDebugView::Roughness;
         SceneLightingDebugEndpoint endpoint(settings);
@@ -418,6 +423,23 @@ TEST(SceneLightingDebugEndpointTest, EndpointWithoutTheRecordHasNoSuchKeys)
     const FeatureDebugResult result = endpoint.Set(args);
     EXPECT_FALSE(result.ok);
     EXPECT_EQ(result.message, "unknown key");
+}
+
+TEST(SceneLightingSettingsTest, CloudShadowRegionDebugViewIsWiredInShaders)
+{
+    EXPECT_EQ(kMaterialDebugViewCount, 10);
+    EXPECT_EQ(static_cast<std::int32_t>(MaterialDebugView::CloudShadowRegion), 9);
+
+    const std::string pbr = test_support::ReadTextFile(GTE_TEST_PBR_MATERIAL_GLSL_PATH);
+    EXPECT_NE(pbr.find("if (debugView == 9) { return CloudShadowRegionDebug(f.worldPosition); }"), std::string::npos);
+
+    const std::string lighting = test_support::ReadTextFile(GTE_TEST_LIGHTING_GLSL_PATH);
+    EXPECT_NE(lighting.find("CloudShadowRegionDebug"), std::string::npos);
+    EXPECT_NE(lighting.find("if (SceneMaterialDebugView() == 9)"), std::string::npos);
+
+    const std::string lookupPath = std::string(GTE_TEST_SHADERS_DIR) + "/CloudShadowLookup.glsl";
+    const std::string lookup = test_support::ReadTextFile(lookupPath.c_str());
+    EXPECT_NE(lookup.find("CloudShadowRegionChannels"), std::string::npos);
 }
 
 } // namespace

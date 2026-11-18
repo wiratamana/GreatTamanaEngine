@@ -110,6 +110,7 @@ vec3 ShadePbrMaterial(vec3 base, PbrFragmentInput f)
     if (debugView == 6) { return f.worldTangent.w > 0.0 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0); }
     if (debugView == 7) { return side > 0.0 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0); }
     if (debugView == 8) { return base; }
+    if (debugView == 9) { return CloudShadowRegionDebug(f.worldPosition); }
 
     PbrSurface surface;
     surface.baseColor = base;

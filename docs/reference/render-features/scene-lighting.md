@@ -42,13 +42,14 @@
 | `skyAmbientR`, `G`, `B` | 1.26, 1.31, 1.40 | 0..4 | Ambient from above |
 | `groundAmbientR`, `G`, `B` | 0.66, 0.57, 0.46 | 0..4 | Ambient from below |
 | `ambientIntensity` | 0.35 | 0..8 | Ambient multiplier. Added to the sun term |
-| `materialDebugView` | 0 | 0..8 (integer) | Shows one material value. 9 or more is HTTP 400 |
+| `materialDebugView` | 0 | 0..9 (integer) | Shows one material value. 10 or more is HTTP 400 |
 
 | `materialDebugView` | Shows |
 |---|---|
 | 0 | Off |
 | 1, 2, 3, 4 | Shading normal, roughness, metallic, occlusion |
 | 5, 6, 7, 8 | Tangent, handedness (green +, red -), facing (green front), base color |
+| 9 | Cloud shadow region (R near weight, G far transmittance, B near transmittance) |
 
 - Values are written as `SrgbToLinear(value)`. ToneMapping encodes them back.
 - To read exact values: ToneMapping `mode=Clamp exposure=1 saturation=1 dither=0`, and turn off Atmosphere, Gtao, VolumetricLight.
