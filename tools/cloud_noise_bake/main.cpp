@@ -334,7 +334,7 @@ FVol BlurPeriodic2D(const FVol& src, int n, int radius, float sigma) {
     return dst;
 }
 
-// Weather 512^2: R multi-scale cumulus coverage, G spatially blurred R mass (~900 m radius), B peak type, A density.
+// Weather 512^2: R broken-cumulus coverage, G wide-blurred R mass (~1.27 km radius), B dome peak, A core density.
 Volume BakeWeather(std::uint32_t size) {
     const int n = static_cast<int>(size);
     const std::size_t total = static_cast<std::size_t>(n) * static_cast<std::size_t>(n);
@@ -358,7 +358,7 @@ Volume BakeWeather(std::uint32_t size) {
         for (float& f : v) f = (f - mean) * invSd;
     };
 
-    // Moderate 2-octave periodic warp (<= 0.07 tile) bends cloud streets organically without folding contours.
+    // Gentle 2-octave periodic warp (<= 0.05 tile) keeps cumulus footprints rounded without folding contours.
     const FVol warpX = pf(3, 2, 201u), warpY = pf(3, 2, 211u);
     auto warped = [&](int base, int oct, std::uint32_t seed, float warp) {
         FVol v(total);
@@ -375,45 +375,50 @@ Volume BakeWeather(std::uint32_t size) {
         return v;
     };
 
-    // Multi-scale broken cumulus: macro streets (3), hero clusters (7), cumulus cells (15), fair-weather puffs (26).
-    FVol macroF = warped(3, 2, 401u, 0.07f);
-    for (float& f : macroF) f = 1.6f * std::tanh(f * (1.0f / 1.6f));
-    const FVol mesoF = warped(7, 3, 411u, 0.055f);
-    const FVol cellF = warped(15, 2, 421u, 0.04f);
-    const FVol puffF = warped(26, 2, 431u, 0.025f);
+    // Multi-scale cumulus: gentle macro variety (3), rounded meso & cumulus cells (7, 14, 24), and companion cells (16).
+    FVol macroF = warped(3, 2, 401u, 0.045f);
+    for (float& f : macroF) f = 1.35f * std::tanh(f * (1.0f / 1.35f));
+    FVol mesoF = warped(7, 2, 411u, 0.040f);
+    for (float& f : mesoF) f = 1.85f * std::tanh(f * (1.0f / 1.85f));
+    const FVol cellF = warped(14, 2, 421u, 0.032f);
+    const FVol puffF = warped(24, 2, 431u, 0.022f);
+    const FVol compF = warped(16, 2, 441u, 0.030f);
     const FVol cap = pf(5, 3, 111u), pt = pf(4, 3, 131u), pd = pf(7, 3, 141u);
 
-    FVol combined(total);
-    for (std::size_t i = 0; i < total; ++i)
-        combined[i] = 0.22f * macroF[i] + 0.34f * mesoF[i] + 0.28f * cellF[i] + 0.16f * puffF[i];
+    FVol combined(total), compMix(total);
+    for (std::size_t i = 0; i < total; ++i) {
+        combined[i] = 0.14f * macroF[i] + 0.32f * mesoF[i] + 0.34f * cellF[i] + 0.20f * puffF[i];
+        compMix[i] = 0.55f * compF[i] + 0.58f * cellF[i] + 0.60f * puffF[i];
+    }
     normalize(combined);
+    normalize(compMix);
 
     FVol rRaw(total);
     for (std::size_t i = 0; i < total; ++i) {
         const float z = combined[i];
-        const float shoulder = Smoothstep(0.04f, 0.90f, z);
-        const float core = Smoothstep(0.70f, 2.35f, z);
-        const float peakCap = 0.83f + 0.09f * cap[i];
-        const float mainCloud = peakCap * (0.62f * shoulder + 0.38f * core);
-        // Companion puffs keep macro clearings dappled so foreground shadow maps never go completely blank.
-        const float puffMix = 0.808f * puffF[i] + 0.589f * cellF[i];
-        const float companion = Smoothstep(1.40f, 2.35f, puffMix) * (1.0f - Smoothstep(-0.80f, 0.50f, macroF[i])) * 0.52f;
+        const float shoulder = Smoothstep(-0.12f, 0.85f, z);
+        const float dome = Smoothstep(-0.04f, 0.54f, z);
+        const float core = Smoothstep(0.55f, 1.75f, z);
+        const float peakCap = 0.85f + 0.07f * cap[i];
+        const float mainCloud = peakCap * (0.45f * shoulder + 0.39f * dome + 0.16f * core);
+        // Fair-weather cumulus cells across all regions keep every 2.5 km patch dappled with crisp cores and sky gaps.
+        const float companion = peakCap * (0.92f * Smoothstep(0.76f, 1.44f, compMix[i]));
         rRaw[i] = std::max(mainCloud, companion);
     }
 
-    // Radius-2 periodic smoothing removes 1-2 texel spikes and stair-step texel corners from R.
-    FVol r = BlurPeriodic2D(rRaw, n, 2, 1.0f);
+    // Radius-3 periodic smoothing (~145 m) softens horizontal cloud borders into rounded cumulus gradients.
+    FVol r = BlurPeriodic2D(rRaw, n, 3, 1.4f);
 
-    // Spatially blurred R (~18 texels on 512) gives shader massAverage true cluster width without holes or sticks.
-    const int blurRadius = std::max(1, static_cast<int>(std::lround(static_cast<double>(n) * 18.0 / 512.0)));
-    const float blurSigma = static_cast<float>(blurRadius) / 3.1f;
+    // Wide periodic blur (~26 texels on 512, ~1.27 km) keeps G varying gradually without ceiling spikes.
+    const int blurRadius = std::max(1, static_cast<int>(std::lround(static_cast<double>(size) * 26.0 / 512.0)));
+    const float blurSigma = static_cast<float>(blurRadius) / 2.8f;
     const FVol blurredR = BlurPeriodic2D(r, n, blurRadius, blurSigma);
 
     FVol g(total), b(total), a(total);
     for (std::size_t i = 0; i < total; ++i) {
-        g[i] = std::clamp(blurredR[i] * 1.15f, 0.0f, 1.0f);
-        b[i] = Smoothstep(0.15f, 0.68f, g[i]) * (0.65f + 0.35f * Smoothstep(0.25f, 0.75f, pt[i]));
-        a[i] = 0.55f + 0.45f * Smoothstep(0.20f, 0.85f, 0.6f * pd[i] + 0.4f * g[i]);
+        g[i] = std::clamp(blurredR[i] * 1.25f, 0.0f, 1.0f);
+        b[i] = Smoothstep(0.18f, 0.65f, g[i]) * (0.60f + 0.40f * Smoothstep(0.25f, 0.75f, pt[i]));
+        a[i] = 0.62f + 0.38f * Smoothstep(0.15f, 0.80f, 0.5f * pd[i] + 0.5f * r[i]);
     }
     return Pack(n, n, 1, {&r, &g, &b, &a});
 }
