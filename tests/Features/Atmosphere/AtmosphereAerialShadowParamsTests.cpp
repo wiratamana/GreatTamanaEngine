@@ -75,6 +75,33 @@ TEST(AerialShadowParamsTest, CloudShaftsAreReadRelativeToTheEye)
     EXPECT_FLOAT_EQ(MakeAerialShadowParams(nullptr, 1.0f, &map, Vec3::Zero()).cloudGrid[3], 0.0f);
 }
 
+TEST(AerialShadowParamsTest, WorksWithBothZeroAndPositiveBeamHazeAtHighSun)
+{
+    CloudShadowMap map;
+    map.map = fx::Texture{ rg::TextureHandle{ 9, 1 }, 3 };
+    map.sunDirection = Vec3::Up();
+    map.extentM = 24000.0f;
+    map.layerBaseM = 1500.0f;
+    map.layerTopM = 5000.0f;
+    map.strength = 1.0f;
+    map.shaftStrength = 0.0f;
+    map.beamHazePerKm = 0.0f;
+
+    const AerialShadowParamsGpu zeroHaze = MakeAerialShadowParams(nullptr, 1.0f, &map, Vec3::Zero());
+    EXPECT_FLOAT_EQ(zeroHaze.cloudGrid[3], 0.0f);
+    EXPECT_FLOAT_EQ(zeroHaze.beamHaze[0], 0.0f);
+
+    map.beamHazePerKm = 0.25f;
+    const AerialShadowParamsGpu activeHaze = MakeAerialShadowParams(nullptr, 1.0f, &map, Vec3::Zero());
+    EXPECT_FLOAT_EQ(activeHaze.cloudGrid[3], 0.0f);
+    EXPECT_FLOAT_EQ(activeHaze.beamHaze[0], 0.25f);
+
+    map.shaftStrength = 0.4f;
+    const AerialShadowParamsGpu bothActive = MakeAerialShadowParams(nullptr, 1.0f, &map, Vec3::Zero());
+    EXPECT_FLOAT_EQ(bothActive.cloudGrid[3], 0.4f);
+    EXPECT_FLOAT_EQ(bothActive.beamHaze[0], 0.25f);
+}
+
 TEST(AerialShadowParamsTest, CopiesTheCascadeData)
 {
     const SunShadowReceiver r = MakeReceiver(3);

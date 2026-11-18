@@ -31,6 +31,16 @@ AerialScale SettingsScale(const AtmosphereSettings& safe, float shadowBlend) noe
     return AerialScale{ safe.aerialPerspectiveMaxDistanceKm, safe.aerialPerspectiveScatteringExaggeration, shadowBlend };
 }
 
+AerialScale ApplyMinReach(AerialScale scale, float minReachKm) noexcept
+{
+    if (!std::isfinite(minReachKm) || !(minReachKm > scale.maxDistanceKm)) {
+        return scale;
+    }
+    scale.maxDistanceKm = std::min(minReachKm, kMaxDistanceKm);
+    scale.exaggeration = std::clamp(kExaggerationBudgetKm / std::max(scale.maxDistanceKm, kMinDistanceKm), 1.0f, 8.0f);
+    return scale;
+}
+
 } // namespace
 
 AerialScale ComputeAerialScale(float visibleFarKm) noexcept
@@ -49,7 +59,7 @@ AerialScale ComputeAerialScale(float visibleFarKm) noexcept
 }
 
 AerialScaleResult ResolveAerialScale(AerialScaleState& state, const SunShadowReceiver* receiver,
-    const AtmosphereSettings& safe, std::uint64_t frameIndex) noexcept
+    const AtmosphereSettings& safe, std::uint64_t frameIndex, float minReachKm) noexcept
 {
     if (!safe.autoScale) {
         return AerialScaleResult{ SettingsScale(safe, 1.0f), false };
@@ -60,17 +70,17 @@ AerialScaleResult ResolveAerialScale(AerialScaleState& state, const SunShadowRec
         state.scale = ComputeAerialScale(receiver->splitFar[last] / kWorldUnitsPerKilometer);
         state.lastFittedFrame = frameIndex;
         state.valid = true;
-        return AerialScaleResult{ state.scale, false };
+        return AerialScaleResult{ ApplyMinReach(state.scale, minReachKm), false };
     }
 
     // A restarted frame counter drops the state like an expired one.
     const bool fresh = state.valid && frameIndex >= state.lastFittedFrame
         && frameIndex - state.lastFittedFrame <= kAerialScaleHoldFrames;
     if (fresh) {
-        return AerialScaleResult{ state.scale, true };
+        return AerialScaleResult{ ApplyMinReach(state.scale, minReachKm), true };
     }
     state = AerialScaleState{};
-    return AerialScaleResult{ SettingsScale(safe, 0.0f), false };
+    return AerialScaleResult{ ApplyMinReach(SettingsScale(safe, 0.0f), minReachKm), false };
 }
 
 AerialReceiverState ClassifyAerialReceiver(const SunShadowReceiver* published, const Vec3& sunDirection) noexcept

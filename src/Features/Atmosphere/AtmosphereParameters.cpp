@@ -60,6 +60,7 @@ AtmosphereSettings SanitizeAtmosphereSettings(const AtmosphereSettings& settings
     s.aerialPerspectiveStrength = Sanitize(
         settings.aerialPerspectiveStrength, 0.0f, kMaxAerialPerspectiveStrength, d.aerialPerspectiveStrength);
     s.skyIntensity = Sanitize(settings.skyIntensity, 0.0f, 50.0f, d.skyIntensity);
+    s.aerialSkyMatch = Sanitize(settings.aerialSkyMatch, 0.0f, 1.0f, d.aerialSkyMatch);
     s.sunDiskIntensity = Sanitize(settings.sunDiskIntensity, 0.0f, 100.0f, d.sunDiskIntensity);
     s.sunDiskRadiusDeg = Sanitize(settings.sunDiskRadiusDeg, 0.05f, 10.0f, d.sunDiskRadiusDeg);
     s.aerialPerspectiveMaxDistanceKm =

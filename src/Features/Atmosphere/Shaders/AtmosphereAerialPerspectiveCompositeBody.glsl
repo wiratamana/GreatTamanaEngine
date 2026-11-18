@@ -1,6 +1,5 @@
 // Aerial perspective composite (linear): geometry gets sceneColor * transmittance + in-scattering; sky only loses shaft light.
 // The includer defines AERIAL_SHAFT_DELTA: 1 reads the shaft delta image for sky pixels, 0 leaves sky untouched.
-// Out-of-range threads of the rounded-up dispatch return early.
 layout(local_size_x = 16, local_size_y = 16) in;
 
 #include "AtmosphereCommon.glsl"
@@ -14,7 +13,7 @@ layout(push_constant) uniform PushConstants {
     vec4 cameraWorldPositionAndScale;
     // x = strength (1 = physical, 0 = pass-through), y = max distance (km), z = depth exponent, w = unused.
     vec4 aerialPerspectiveStrengthAndPad;
-    // x = sky intensity (the sky background's scale), yzw = unused.
+    // x = sky intensity, y = aerial sky match (0..1), z = eye height (km), w = planet radius (km, 0 = no sky LUT).
     vec4 skyIntensityAndPad;
 } pc;
 
@@ -25,6 +24,7 @@ layout(binding = 2) uniform sampler3D aerialPerspectiveVolume;
 layout(binding = 3) uniform sampler2D aerialShaftDelta;
 #endif
 layout(binding = 4, rgba16f) uniform writeonly image2D destinationImage;
+layout(binding = 5) uniform sampler2D skyViewLut;
 
 void main()
 {
@@ -57,7 +57,8 @@ void main()
     vec4 clipPos = vec4(ndc, rawDepth, 1.0);
     vec4 worldPos4 = pc.invViewProjection * clipPos;
     vec3 worldPos = worldPos4.xyz / worldPos4.w;
-    float worldDistance = length(worldPos - pc.cameraWorldPositionAndScale.xyz);
+    vec3 toSurface = worldPos - pc.cameraWorldPositionAndScale.xyz;
+    float worldDistance = length(toSurface);
     float viewDistanceKm = worldDistance / max(pc.cameraWorldPositionAndScale.w, 1e-6);
 
     ivec3 volumeSize = textureSize(aerialPerspectiveVolume, 0);
@@ -76,12 +77,36 @@ void main()
     float firstSliceBlend = clamp(boundaryU * sliceCount, 0.0, 1.0);
     vec4 aerial = mix(vec4(0.0, 0.0, 0.0, 1.0), sampledAerial, firstSliceBlend);
 
-    // Strength scales the effect: 0 gives transmittance 1 and no in-scattering; there is no upper limit.
+    // Strength scales the effect; skyGain matches terrain haze to the sky background scale.
     float strength = pc.aerialPerspectiveStrengthAndPad.x;
-    vec3 inScattering = aerial.rgb * strength;
+    float skyMatch = clamp(pc.skyIntensityAndPad.y, 0.0, 1.0);
+    float skyGain = max(mix(1.0, pc.skyIntensityAndPad.x, skyMatch), 0.0);
     float transmittance = clamp(mix(1.0, aerial.a, strength), 0.0, 1.0);
+    vec3 attenuatedScene = sceneColor * transmittance;
 
-    vec3 finalColor = clamp(sceneColor * transmittance + inScattering, vec3(0.0), vec3(kMaxOutputLuminance));
+    vec3 horizonSky = vec3(kMaxOutputLuminance);
+    if (pc.skyIntensityAndPad.w > 0.0) {
+        float horizLen = length(toSurface.xz);
+        vec3 skyDir = horizLen > 1e-5
+            ? normalize(vec3(toSurface.x, max(toSurface.y, 0.0), toSurface.z))
+            : vec3(0.0, 0.0, 1.0);
+        ivec2 skyLutSize = textureSize(skyViewLut, 0);
+        float viewHeightKm = max(pc.skyIntensityAndPad.z, pc.skyIntensityAndPad.w);
+        vec2 skyUv = ViewDirectionToSkyViewLutUv(skyDir, skyLutSize, viewHeightKm, pc.skyIntensityAndPad.w);
+        // Stay on the sky side of the v = 0.5 horizon split so bilinear filtering never mixes ground texels.
+        float maxSkyV = (0.5 * float(skyLutSize.y) - 0.5) / max(float(skyLutSize.y), 1.0);
+        skyUv.y = min(skyUv.y, maxSkyV);
+        horizonSky = max(textureLod(skyViewLut, skyUv, 0.0).rgb, vec3(0.0)) * pc.skyIntensityAndPad.x;
+        float horizonBlend = 1.0 - smoothstep(0.0, 0.2, skyDir.y);
+        float skyLuma = dot(horizonSky, vec3(0.2126, 0.7152, 0.0722));
+        horizonSky = mix(horizonSky, vec3(skyLuma) * vec3(0.93, 0.98, 1.07), 0.6 * horizonBlend);
+    }
+
+    // Clamp in-scatter so far terrain approaches the horizon sky without exceeding it or clipping to white.
+    vec3 maxInScattering = max(horizonSky - attenuatedScene, vec3(0.0));
+    vec3 inScattering = clamp(aerial.rgb * (strength * skyGain), vec3(0.0), maxInScattering);
+
+    vec3 finalColor = clamp(attenuatedScene + inScattering, vec3(0.0), vec3(kMaxOutputLuminance));
 
     imageStore(destinationImage, texel, vec4(finalColor, 1.0));
 }

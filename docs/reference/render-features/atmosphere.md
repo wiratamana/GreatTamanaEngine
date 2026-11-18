@@ -33,43 +33,44 @@
 |---|---|---|---|
 | `aerialPerspectiveStrength` | 1 | 0..1e30 | 1 = physical. 0 = scene color unchanged |
 | `skyIntensity` | 6 | 0..50 | Linear multiplier of the sky picture. The deep blue sky look uses 3 (see volumetric-cloud.md) |
+| `aerialSkyMatch` | 1 | 0..1 | Scales geometry haze from physical (0) to `skyIntensity` (1) |
 | `sunDiskIntensity` | 8 | 0..100 | Sun disk drawn into the sky background, times the physical disk radiance. 0 = no disk. The bloom makes it glow |
 | `sunDiskRadiusDeg` | 0.5 | 0.05..10 | Angular radius of the sun disk (degrees) |
 | `autoScale` | true | bool | Picks haze range from the visible depth range |
-| `aerialPerspectiveMaxDistanceKm` | 0.5 | 0.01..50 | Haze range. Fallback when `autoScale` is on |
+| `aerialPerspectiveMaxDistanceKm` | 0.5 | 0.01..50 | Haze range when `autoScale` is off |
 | `aerialPerspectiveDepthExponent` | 2 | 1..4 | Slice distribution along depth |
 | `aerialPerspectiveSamplesPerSlice` | 8 | 1..16 | Ray-march samples per slice |
-| `aerialPerspectiveScatteringExaggeration` | 8 | 0.1..50 | Boosts haze for small scenes. Fallback with `autoScale` |
+| `aerialPerspectiveScatteringExaggeration` | 8 | 0.1..50 | Boosts haze when `autoScale` is off |
 | `sceneLightFollowsAtmosphere` | true | bool | Sun tint and ambient follow the sky |
 
 - Physical settings (panel only): planet radius 1..50000 km, thickness 1..500 km, multi-scattering 0..10, scale heights 0.01..100 km, Mie g -0.99..0.99, ozone, colors 0..1.
 - Defaults are Earth-like: planet 6371 km, atmosphere 100 km, Rayleigh scale height 8 km, Mie 1.2 km.
 - Values go through `SanitizeAtmosphereSettings()`. A non-finite value becomes the default.
-- Defaults of distance and exaggeration fit small scenes. Big scenes rely on `autoScale`.
+- Defaults of distance and exaggeration fit small manual scenes. Big scenes rely on `autoScale`.
 
 ## Auto scale
 
 | Step | Rule |
 |---|---|
 | Input | `visibleFarKm` = last cascade split / 1000, from a depth-fitted shadow receiver |
-| Max distance | `clamp(0.5 * exp2(ceil(log2(x / 0.5) * 4 - 1e-4) / 4), 0.5, 30)` with `x = visibleFarKm * 1.25` |
-| Exaggeration | `clamp(4 / maxDistanceKm, 1, 8)` |
-| Shadow blend | `smoothstep(0.5, 4, maxDistanceKm)` |
-| No fitted receiver | Last scale is held for 120 frames. Then the settings values apply with blend 0 |
+| Max distance | `max(gridKm, kAerialMinReachKm)` (`kAerialMinReachKm = 24`), with `gridKm = clamp(0.5 * exp2(ceil(log2(x / 0.5) * 4 - 1e-4) / 4), 0.5, 30)` and `x = visibleFarKm * 1.25` |
+| Exaggeration | `clamp(4 / maxDistanceKm, 1, 8)`, recomputed after the `kAerialMinReachKm` floor |
+| Shadow blend | `smoothstep(0.5, 4, gridKm)` |
+| No fitted receiver | Last scale is held for 120 frames. Then the 24 km floor applies with blend 0 |
 | `autoScale` off | The sliders apply. Shadow blend is 1 |
 
 - The grid has 4 steps per octave, so the value does not flicker inside one step.
-- A small scene gets 0.5 km, 8x and blend 0. The volume pass then does no shadow taps.
+- `kAerialMinReachKm` (24 km) keeps far terrain haze active independent of sun elevation, shadow cascades and cloud haze.
 
 ## Cloud shadows in the air
-When the cloud feature publishes its `ShadowMap` channel with a shaft strength above 0, the aerial perspective volume multiplies the sun visibility of each sample by the cloud sun transmittance (`CloudShadowLookup.glsl`). The shaft delta (light removed from the sky background) then includes the cloud shadow, so columns of sky under clouds get darker and the haze over geometry is lit only where the sun passes the layer. The beams of the cloud shadow come from the beam haze of this volume (cloud setting `shaftHaze`), which reaches at least 24 km while it is on. The near mist of VolumetricLight is a separate option (`shaftMist`, default 0).
+When the cloud feature publishes its `ShadowMap` channel with a shaft strength above 0, the aerial perspective volume multiplies the sun visibility of each sample by the cloud sun transmittance (`CloudShadowLookup.glsl`). The shaft delta (light removed from the sky background) then includes the cloud shadow, so columns of sky under clouds get darker and the haze over geometry is lit only where the sun passes the layer. The beams of the cloud shadow come from the beam haze of this volume (cloud setting `shaftHaze`), and the volume reaches at least 24 km whenever `autoScale` is on. The near mist of VolumetricLight is a separate option (`shaftMist`, default 0).
 
 ## Sun visibility of the air
 Every air sample asks `AirSunVisibilityAt` (`Shaders/AirSunVisibility.glsl`, shared with VolumetricLight): the sun cascades, with the shadow fading out over the last quarter of the last cascade, then the cloud map. Terrain shadow reaches only as far as the cascades and only if the cascade depth span holds the terrain (`terrainReliefM` in [Shadow](shadow.md)). Beyond the last cascade the air is lit. The beam haze fill light (`shaftFill`) is reduced to 30 percent in terrain shadow and stays complete in cloud shadow. The beam light a view ray collects is held under a soft ceiling (`kBeamLightCap` in `AtmosphereAerialPerspectiveVolume.comp`, in sun units per channel): the glow of lit haze around the sun direction stays bounded, so a backlit mountain is veiled but never washed out, while the thin columns of the cloud shadow stay below the knee and keep their contrast. Looking straight at the sun the ceiling shrinks to half (`kBeamForwardCapScale`, from a view-to-sun cosine of 0.6 to 0.95), so the veil toward the sun is thinner; side views keep the full ceiling.
 
 ## Debug keys
 
-Writable (`/feature_debug/set`): `sceneLightFollowsAtmosphere`, `autoScale`, `aerialPerspectiveStrength`, `aerialPerspectiveMaxDistanceKm`, `aerialPerspectiveDepthExponent`, `aerialPerspectiveSamplesPerSlice`, `aerialPerspectiveScatteringExaggeration`, `skyIntensity`, `sunDiskIntensity`, `sunDiskRadiusDeg`, `multiScatteringStrength`, `miePhaseG`, `rayleighScaleHeightKm`, `mieScaleHeightKm`.
+Writable (`/feature_debug/set`): `sceneLightFollowsAtmosphere`, `autoScale`, `aerialPerspectiveStrength`, `aerialPerspectiveMaxDistanceKm`, `aerialPerspectiveDepthExponent`, `aerialPerspectiveSamplesPerSlice`, `aerialPerspectiveScatteringExaggeration`, `skyIntensity`, `aerialSkyMatch`, `sunDiskIntensity`, `sunDiskRadiusDeg`, `multiScatteringStrength`, `miePhaseG`, `rayleighScaleHeightKm`, `mieScaleHeightKm`.
 
 Read-only, per view with prefix `game.` or `scene.`:
 
@@ -107,7 +108,7 @@ curl.exe -o game.png "http://127.0.0.1:8080/get_game_view"
 9. **One record per pass.** `AtmosphereAerialResult` carries volume, shaft delta, max distance and exponent. The composite reads them from it, not from settings.
 10. **Shadow receiver is used only if safe.** `SunShadowReceiverUsable()` is true and `dot(receiver sun, frame sun) >= 0.9999`.
 11. **Sun light follows the sky.** `ComputeAtmosphereSunLight` gives `sunTint` and `ambientScale`: 1 for a sun overhead, 0 below the horizon.
-12. **Composite output** is clamped: transmittance 0..1, color 0..65504. The push block is 112 bytes.
+12. **Composite output** scales geometry in-scatter by `mix(1, skyIntensity, aerialSkyMatch)` and clamps it to `max(horizonSky - attenuatedScene, 0)` so far terrain approaches without exceeding the horizon sky. Transmittance is clamped to 0..1 and output color to 0..65504. The push block is 112 bytes.
 
 ## Limits
 - A sun below the horizon gives black light for materials and fog. The sky can still show twilight.
@@ -115,7 +116,7 @@ curl.exe -o game.png "http://127.0.0.1:8080/get_game_view"
 - Air outside all cascades counts as lit. Shadows of far mountains do not reach sky rays.
 - The shaft delta stops at the aerial max distance.
 - Shadow lookups lose precision beyond about 100000 m from the origin.
-- First frames after start or a Shadow toggle use the settings values.
+- Without fitted cascades, `autoScale` still enforces the 24 km minimum reach with shadow blend 0.
 - GPU timing of these passes can read `Absent`.
 - Scene files save ECS components such as `DirectionalLight`. They do not save Atmosphere settings.
 

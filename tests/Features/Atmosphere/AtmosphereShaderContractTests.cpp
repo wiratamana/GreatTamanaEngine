@@ -228,6 +228,9 @@ TEST(ShaderContractTest, CompositeClampsTransmittanceAndOutput)
         std::filesystem::path(GTE_TEST_ATMOSPHERE_SHADER_DIR) / "AtmosphereAerialPerspectiveCompositeBody.glsl");
     ASSERT_FALSE(text.empty());
     EXPECT_NE(text.find("clamp(mix(1.0, aerial.a, strength), 0.0, 1.0)"), std::string::npos);
+    EXPECT_NE(text.find("mix(1.0, pc.skyIntensityAndPad.x, skyMatch)"), std::string::npos);
+    EXPECT_NE(text.find("max(horizonSky - attenuatedScene, vec3(0.0))"), std::string::npos);
+    EXPECT_NE(text.find("uniform sampler2D skyViewLut;"), std::string::npos);
     EXPECT_NE(text.find("kMaxOutputLuminance"), std::string::npos);
 }
 

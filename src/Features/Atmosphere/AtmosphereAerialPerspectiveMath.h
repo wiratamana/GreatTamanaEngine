@@ -23,6 +23,9 @@ AerialScale ComputeAerialScale(float visibleFarKm) noexcept;
 // Frames the last fitted scale stays in use while no depth-fitted cascades exist.
 inline constexpr std::uint64_t kAerialScaleHoldFrames = 120;
 
+// Minimum auto-scale range (km) of the aerial volume, independent of sun height, SDSM and cloud haze.
+inline constexpr float kAerialMinReachKm = 24.0f;
+
 // Per-view memory of the last scale derived from fitted cascades.
 struct AerialScaleState {
     bool valid = false;
@@ -35,10 +38,10 @@ struct AerialScaleResult {
     bool held = false; // The scale comes from an earlier frame.
 };
 
-// Picks this frame's scale; `receiver` is null or checked, `safe` is sanitized. Manual mode uses the settings and full
-// air shadows; otherwise fitted cascades update `state`, which is held for kAerialScaleHoldFrames, then settings apply.
+// Picks this frame's scale; `receiver` is null or checked, `safe` is sanitized. Manual mode uses settings and full
+// air shadows; autoScale floors maxDistanceKm at `minReachKm` and recomputes exaggeration after the floor.
 AerialScaleResult ResolveAerialScale(AerialScaleState& state, const SunShadowReceiver* receiver,
-    const AtmosphereSettings& safe, std::uint64_t frameIndex) noexcept;
+    const AtmosphereSettings& safe, std::uint64_t frameIndex, float minReachKm = kAerialMinReachKm) noexcept;
 
 // Missing, Rejected or Mismatch (published sun differs from `sunDirection`), otherwise Used.
 AerialReceiverState ClassifyAerialReceiver(const SunShadowReceiver* published, const Vec3& sunDirection) noexcept;

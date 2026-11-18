@@ -113,9 +113,14 @@ TEST_F(AtmosphereEndpointTest, StateReportsTheAerialValuesOfBothViews)
 
 TEST_F(AtmosphereEndpointTest, EveryWritableKeyReadsBackAfterClamping)
 {
+    const fx::FeatureDebugField* defaultMatch = Find(endpoint->GetState(), "aerialSkyMatch");
+    ASSERT_NE(defaultMatch, nullptr);
+    EXPECT_DOUBLE_EQ(std::get<double>(defaultMatch->value), 1.0);
+
     const fx::FeatureDebugResult result = Set({ { "autoScale", "false" }, { "aerialPerspectiveStrength", "0.5" },
         { "aerialPerspectiveMaxDistanceKm", "12.5" }, { "aerialPerspectiveDepthExponent", "3" },
-        { "aerialPerspectiveSamplesPerSlice", "12" }, { "aerialPerspectiveScatteringExaggeration", "2.5" } });
+        { "aerialPerspectiveSamplesPerSlice", "12" }, { "aerialPerspectiveScatteringExaggeration", "2.5" },
+        { "aerialSkyMatch", "0.35" } });
     ASSERT_TRUE(result.ok);
     const AtmosphereSettings& s = feature->Settings();
     EXPECT_FALSE(s.autoScale);
@@ -124,10 +129,16 @@ TEST_F(AtmosphereEndpointTest, EveryWritableKeyReadsBackAfterClamping)
     EXPECT_FLOAT_EQ(s.aerialPerspectiveDepthExponent, 3.0f);
     EXPECT_EQ(s.aerialPerspectiveSamplesPerSlice, 12);
     EXPECT_FLOAT_EQ(s.aerialPerspectiveScatteringExaggeration, 2.5f);
+    EXPECT_FLOAT_EQ(s.aerialSkyMatch, 0.35f);
 
-    ASSERT_TRUE(Set({ { "aerialPerspectiveMaxDistanceKm", "999" }, { "aerialPerspectiveSamplesPerSlice", "500" } }).ok);
+    ASSERT_TRUE(Set({ { "aerialPerspectiveMaxDistanceKm", "999" }, { "aerialPerspectiveSamplesPerSlice", "500" },
+        { "aerialSkyMatch", "5" } }).ok);
     EXPECT_FLOAT_EQ(feature->Settings().aerialPerspectiveMaxDistanceKm, 50.0f);
     EXPECT_EQ(feature->Settings().aerialPerspectiveSamplesPerSlice, 16);
+    EXPECT_FLOAT_EQ(feature->Settings().aerialSkyMatch, 1.0f);
+
+    ASSERT_TRUE(Set({ { "aerialSkyMatch", "-2" } }).ok);
+    EXPECT_FLOAT_EQ(feature->Settings().aerialSkyMatch, 0.0f);
 
     ASSERT_TRUE(Set({ { "aerialPerspectiveStrength", "250" } }).ok);
     EXPECT_FLOAT_EQ(feature->Settings().aerialPerspectiveStrength, 250.0f);
@@ -136,7 +147,7 @@ TEST_F(AtmosphereEndpointTest, EveryWritableKeyReadsBackAfterClamping)
 TEST_F(AtmosphereEndpointTest, BadFloatTextIsRejectedOrClamped)
 {
     for (const char* key : { "aerialPerspectiveStrength", "aerialPerspectiveMaxDistanceKm",
-             "aerialPerspectiveDepthExponent", "aerialPerspectiveScatteringExaggeration" }) {
+             "aerialPerspectiveDepthExponent", "aerialPerspectiveScatteringExaggeration", "aerialSkyMatch" }) {
         for (const char* text : { "nan", "inf", "-inf", "abc", "", "-5", "1e30" }) {
             const fx::FeatureDebugResult result = Set({ { key, text } });
             if (!result.ok) {
@@ -151,6 +162,7 @@ TEST_F(AtmosphereEndpointTest, BadFloatTextIsRejectedOrClamped)
             EXPECT_EQ(s.aerialPerspectiveScatteringExaggeration,
                 SanitizeAtmosphereSettings(s).aerialPerspectiveScatteringExaggeration)
                 << key << text;
+            EXPECT_EQ(s.aerialSkyMatch, SanitizeAtmosphereSettings(s).aerialSkyMatch) << key << text;
         }
     }
 }

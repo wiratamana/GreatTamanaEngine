@@ -12,11 +12,14 @@ namespace gte {
 namespace {
 
 const Vec3 kNoShaft = Vec3::Zero();
+const Vec3 kDefaultCeiling(
+    kAerialPerspectiveMaxOutput, kAerialPerspectiveMaxOutput, kAerialPerspectiveMaxOutput);
 
 Vec3 Color(float depth, const Vec3& scene, const Vec3& aerialRgb, float aerialA, const Vec3& shaft, float strength,
-    float skyIntensity = 1.0f)
+    float skyIntensity = 1.0f, float aerialSkyMatch = 1.0f, const Vec3& horizonSky = kDefaultCeiling)
 {
-    return ComputeAerialPerspectiveCompositeColor(depth, scene, aerialRgb, aerialA, shaft, strength, skyIntensity);
+    return ComputeAerialPerspectiveCompositeColor(
+        depth, scene, aerialRgb, aerialA, shaft, strength, skyIntensity, aerialSkyMatch, horizonSky);
 }
 
 void ExpectEqual(const Vec3& a, const Vec3& b)
@@ -69,6 +72,9 @@ TEST(AerialCompositeMathTest, ZeroStrengthPassesSkyAndGeometryThrough)
     const Vec3 shaft(-1.0f, -1.0f, -1.0f);
     ExpectEqual(Color(1.0f, scene, Vec3(1.0f, 1.0f, 1.0f), 0.2f, shaft, 0.0f, 6.0f), scene);
     ExpectEqual(Color(0.3f, scene, Vec3(1.0f, 1.0f, 1.0f), 1.0f, shaft, 0.0f, 6.0f), scene);
+    ExpectEqual(Color(0.3f, Vec3(5.0f, 5.0f, 5.0f), Vec3(1.0f, 1.0f, 1.0f), 0.2f, shaft, 0.0f, 6.0f, 1.0f,
+                    Vec3(1.0f, 1.0f, 1.0f)),
+        Vec3(5.0f, 5.0f, 5.0f));
 }
 
 TEST(AerialCompositeMathTest, GeometryFullStrengthMatchesHandComputedBlend)
@@ -130,6 +136,55 @@ TEST(AerialCompositeMathTest, GeometryIsAlwaysFiniteAndInRange)
             }
         }
     }
+}
+
+TEST(AerialCompositeMathTest, AerialSkyMatchZeroEqualsOldPhysicalBehavior)
+{
+    const Vec3 scene(0.4f, 0.5f, 0.3f);
+    const Vec3 aerial(0.1f, 0.15f, 0.25f);
+    const Vec3 oldBehavior = Color(0.3f, scene, aerial, 0.6f, kNoShaft, 1.0f, 1.0f, 0.0f);
+    const Vec3 withSkySix = Color(0.3f, scene, aerial, 0.6f, kNoShaft, 1.0f, 6.0f, 0.0f);
+    ExpectEqual(withSkySix, oldBehavior);
+}
+
+TEST(AerialCompositeMathTest, AerialSkyMatchOneMultipliesGeometryInScatterBySkyIntensity)
+{
+    const Vec3 scene(0.2f, 0.3f, 0.4f);
+    const Vec3 aerial(0.05f, 0.1f, 0.2f);
+    const Vec3 ampleSky(10.0f, 10.0f, 10.0f);
+
+    const Vec3 fullMatch = Color(0.3f, scene, aerial, 0.5f, kNoShaft, 1.0f, 6.0f, 1.0f, ampleSky);
+    EXPECT_NEAR(fullMatch.x, 0.2f * 0.5f + 0.05f * 6.0f, 1e-5f);
+    EXPECT_NEAR(fullMatch.y, 0.3f * 0.5f + 0.1f * 6.0f, 1e-5f);
+    EXPECT_NEAR(fullMatch.z, 0.4f * 0.5f + 0.2f * 6.0f, 1e-5f);
+
+    const Vec3 halfMatch = Color(0.3f, scene, aerial, 0.5f, kNoShaft, 1.0f, 6.0f, 0.5f, ampleSky);
+    EXPECT_NEAR(halfMatch.x, 0.2f * 0.5f + 0.05f * 3.5f, 1e-5f);
+    EXPECT_NEAR(halfMatch.y, 0.3f * 0.5f + 0.1f * 3.5f, 1e-5f);
+    EXPECT_NEAR(halfMatch.z, 0.4f * 0.5f + 0.2f * 3.5f, 1e-5f);
+}
+
+TEST(AerialCompositeMathTest, HorizonSkyClampApproachesAndNeverExceedsSkyColor)
+{
+    const Vec3 horizonSky(1.5f, 1.8f, 2.2f);
+    const Vec3 terrain(0.3f, 0.45f, 0.2f);
+
+    for (const float a : { 1.0f, 0.75f, 0.4f, 0.1f, 0.0f }) {
+        for (const float hazeScale : { 0.1f, 0.5f, 1.0f, 5.0f, 50.0f }) {
+            const Vec3 aerial = Vec3(0.4f, 0.5f, 0.7f) * hazeScale;
+            const Vec3 r = Color(0.5f, terrain, aerial, a, kNoShaft, 1.0f, 6.0f, 1.0f, horizonSky);
+            EXPECT_LE(r.x, horizonSky.x + 1e-5f) << a << " " << hazeScale;
+            EXPECT_LE(r.y, horizonSky.y + 1e-5f) << a << " " << hazeScale;
+            EXPECT_LE(r.z, horizonSky.z + 1e-5f) << a << " " << hazeScale;
+        }
+    }
+
+    const Vec3 converged = Color(0.9f, terrain, Vec3(2.0f, 2.0f, 2.0f), 0.0f, kNoShaft, 1.0f, 6.0f, 1.0f, horizonSky);
+    ExpectEqual(converged, horizonSky);
+
+    const Vec3 specularGlint(4.0f, 4.0f, 4.0f);
+    const Vec3 glintResult = Color(0.2f, specularGlint, Vec3(2.0f, 2.0f, 2.0f), 0.8f, kNoShaft, 1.0f, 6.0f, 1.0f, horizonSky);
+    ExpectEqual(glintResult, specularGlint * 0.8f);
 }
 
 TEST(AerialCompositeMathTest, ShaderMaxOutputLiteralEqualsTheCpuConstant)

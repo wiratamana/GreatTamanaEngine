@@ -87,39 +87,52 @@ TEST(AerialScaleTest, ManualModeUsesTheSettingsWithFullShadows)
     EXPECT_FALSE(state.valid);
 }
 
-TEST(AerialScaleTest, NoStateEverUsesTheSettingsWithoutAirShadows)
+TEST(AerialScaleTest, NoStateEverUsesTheFloorWithoutAirShadows)
 {
     const AtmosphereSettings s;
     AerialScaleState state;
-    const AerialScaleResult result = ResolveAerialScale(state, nullptr, s, 3);
-    EXPECT_FLOAT_EQ(result.scale.maxDistanceKm, s.aerialPerspectiveMaxDistanceKm);
-    EXPECT_FLOAT_EQ(result.scale.exaggeration, s.aerialPerspectiveScatteringExaggeration);
-    EXPECT_FLOAT_EQ(result.scale.shadowBlend, 0.0f);
-    EXPECT_FALSE(result.held);
+    const AerialScaleResult floored = ResolveAerialScale(state, nullptr, s, 3);
+    EXPECT_FLOAT_EQ(floored.scale.maxDistanceKm, kAerialMinReachKm);
+    EXPECT_FLOAT_EQ(floored.scale.exaggeration, 1.0f);
+    EXPECT_FLOAT_EQ(floored.scale.shadowBlend, 0.0f);
+    EXPECT_FALSE(floored.held);
+
+    const AerialScaleResult raw = ResolveAerialScale(state, nullptr, s, 3, 0.0f);
+    EXPECT_FLOAT_EQ(raw.scale.maxDistanceKm, s.aerialPerspectiveMaxDistanceKm);
+    EXPECT_FLOAT_EQ(raw.scale.exaggeration, s.aerialPerspectiveScatteringExaggeration);
+    EXPECT_FLOAT_EQ(raw.scale.shadowBlend, 0.0f);
+    EXPECT_FALSE(raw.held);
 }
 
 TEST(AerialScaleTest, FittedCascadesSetTheScaleFromTheLastSplit)
 {
     const AtmosphereSettings s;
     AerialScaleState state;
-    const SunShadowReceiver r = FittedReceiver(10000.0f);
-    const AerialScaleResult result = ResolveAerialScale(state, &r, s, 10);
-    EXPECT_NEAR(result.scale.maxDistanceKm, 13.45f, 0.01f);
-    EXPECT_FALSE(result.held);
+    const SunShadowReceiver farReceiver = FittedReceiver(25000.0f);
+    const AerialScaleResult farResult = ResolveAerialScale(state, &farReceiver, s, 10);
+    EXPECT_FLOAT_EQ(farResult.scale.maxDistanceKm, 30.0f);
+    EXPECT_FALSE(farResult.held);
     EXPECT_TRUE(state.valid);
+
+    const SunShadowReceiver midReceiver = FittedReceiver(10000.0f);
+    const AerialScaleResult unfloored = ResolveAerialScale(state, &midReceiver, s, 11, 0.0f);
+    EXPECT_NEAR(unfloored.scale.maxDistanceKm, 13.45f, 0.01f);
+    const AerialScaleResult floored = ResolveAerialScale(state, &midReceiver, s, 12);
+    EXPECT_FLOAT_EQ(floored.scale.maxDistanceKm, kAerialMinReachKm);
+    EXPECT_FLOAT_EQ(floored.scale.exaggeration, 1.0f);
 }
 
 TEST(AerialScaleTest, UnfittedCascadesDoNotUpdateTheState)
 {
     const AtmosphereSettings s;
     AerialScaleState state;
-    SunShadowReceiver r = FittedReceiver(10000.0f);
+    SunShadowReceiver r = FittedReceiver(25000.0f);
     ResolveAerialScale(state, &r, s, 10);
 
     r.depthFitted = false;
     r.splitFar = { 1.0f, 2.0f, 2.0f, 2.0f };
     const AerialScaleResult result = ResolveAerialScale(state, &r, s, 11);
-    EXPECT_NEAR(result.scale.maxDistanceKm, 13.45f, 0.01f);
+    EXPECT_FLOAT_EQ(result.scale.maxDistanceKm, 30.0f);
     EXPECT_TRUE(result.held);
 }
 
@@ -128,18 +141,19 @@ TEST(AerialScaleTest, HoldRuleLastsOneHundredTwentyFrames)
     const AtmosphereSettings s;
     for (const bool expiredCase : { false, true }) {
         AerialScaleState state;
-        const SunShadowReceiver r = FittedReceiver(10000.0f);
+        const SunShadowReceiver r = FittedReceiver(25000.0f);
         ResolveAerialScale(state, &r, s, 1000);
 
         const std::uint64_t frame = expiredCase ? 1000 + 121 : 1000 + 119;
         const AerialScaleResult result = ResolveAerialScale(state, nullptr, s, frame);
         if (expiredCase) {
             EXPECT_FALSE(result.held);
-            EXPECT_FLOAT_EQ(result.scale.maxDistanceKm, s.aerialPerspectiveMaxDistanceKm);
+            EXPECT_FLOAT_EQ(result.scale.maxDistanceKm, kAerialMinReachKm);
+            EXPECT_FLOAT_EQ(result.scale.exaggeration, 1.0f);
             EXPECT_FLOAT_EQ(result.scale.shadowBlend, 0.0f);
         } else {
             EXPECT_TRUE(result.held);
-            EXPECT_NEAR(result.scale.maxDistanceKm, 13.45f, 0.01f);
+            EXPECT_FLOAT_EQ(result.scale.maxDistanceKm, 30.0f);
         }
     }
 }
@@ -148,11 +162,32 @@ TEST(AerialScaleTest, ARestartedFrameCounterDropsTheState)
 {
     const AtmosphereSettings s;
     AerialScaleState state;
-    const SunShadowReceiver r = FittedReceiver(10000.0f);
+    const SunShadowReceiver r = FittedReceiver(25000.0f);
     ResolveAerialScale(state, &r, s, 500);
     const AerialScaleResult result = ResolveAerialScale(state, nullptr, s, 3);
     EXPECT_FALSE(result.held);
+    EXPECT_FLOAT_EQ(result.scale.maxDistanceKm, kAerialMinReachKm);
     EXPECT_FLOAT_EQ(result.scale.shadowBlend, 0.0f);
+}
+
+TEST(AerialScaleTest, HighSunAndShortCascadesReachMinimumAndRecomputeExaggeration)
+{
+    EXPECT_GE(kAerialMinReachKm, 24.0f);
+    const AtmosphereSettings s;
+    SunShadowReceiver r = FittedReceiver(800.0f);
+    for (const Vec3& sunDir : { Normalize(Vec3(0.03f, 0.999f, 0.0f)), Vec3::Up() }) {
+        r.directionTowardSun = sunDir;
+        AerialScaleState state;
+        const AerialScaleResult result = ResolveAerialScale(state, &r, s, 1);
+        EXPECT_GE(result.scale.maxDistanceKm, kAerialMinReachKm);
+        EXPECT_FLOAT_EQ(result.scale.maxDistanceKm, kAerialMinReachKm);
+        EXPECT_FLOAT_EQ(result.scale.exaggeration, 1.0f);
+    }
+
+    AerialScaleState customState;
+    const AerialScaleResult customFloor = ResolveAerialScale(customState, &r, s, 1, 2.0f);
+    EXPECT_FLOAT_EQ(customFloor.scale.maxDistanceKm, 2.0f);
+    EXPECT_FLOAT_EQ(customFloor.scale.exaggeration, 2.0f);
 }
 
 } // namespace

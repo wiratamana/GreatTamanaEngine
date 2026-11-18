@@ -22,7 +22,6 @@ constexpr std::int32_t kViewLutPriority = 0;
 constexpr std::int32_t kAerialVolumePriority = 20;
 constexpr std::int32_t kSkyBackgroundPriority = 100;
 constexpr std::int32_t kCompositePriority = -1000;
-constexpr float kBeamHazeReachKm = 24.0f; // Least range of the aerial volume while the cloud beam haze is on.
 
 constexpr Extent2D kTransmittanceSize{ 256, 256 };
 constexpr Extent2D kMultiScatteringSize{ 64, 64 };
@@ -35,7 +34,7 @@ struct CompositePush {
     Mat4 invViewProjection;
     Vec4 cameraWorldPositionAndScale; // xyz = camera position the matrix is relative to (the origin), w = world units per km.
     Vec4 strengthMaxDistanceExponent; // x = strength, y = max distance (km), z = depth exponent, w = unused.
-    Vec4 skyIntensityAndPad;          // x = sky intensity.
+    Vec4 skyIntensityAndPad;          // x = sky intensity, y = sky match, z = eye height (km), w = planet radius (km).
 };
 static_assert(sizeof(CompositePush) == 112, "layout differs from AtmosphereAerialPerspectiveComposite.comp");
 
@@ -242,10 +241,6 @@ void AtmosphereFeature::AerialVolume(fx::PostOpaqueFrame& f)
     const std::optional<CloudShadowMap> cloudPublished = m_cloudShadow.Fetch(f);
     const bool cloudShafts = cloudPublished.has_value() && CloudShadowMapUsable(*cloudPublished)
         && (cloudPublished->shaftStrength > 0.0f || cloudPublished->beamHazePerKm > 0.0f);
-    // The beam haze is lit out to several km, so the volume reaches at least that far.
-    if (cloudShafts && cloudPublished->beamHazePerKm > 0.0f) {
-        frame.aerialPerspectiveMaxDistanceKm = std::max(frame.aerialPerspectiveMaxDistanceKm, kBeamHazeReachKm);
-    }
     const AerialShadowParamsGpu shadowParams = MakeAerialShadowParams(
         receiver, resolved.scale.shadowBlend, cloudShafts ? &*cloudPublished : nullptr, v.eye);
     const bool sampled = shadowParams.counts[0] > 0 || cloudShafts;
@@ -363,6 +358,15 @@ void AtmosphereFeature::Composite(fx::CompositeFrame& f)
         return;
     }
 
+    const std::optional<AtmosphereViewLuts> luts = m_viewLuts.Fetch(f);
+    const std::optional<AtmosphereSharedLuts> shared = m_sharedLuts.Fetch(f);
+    const bool hasSkyLut = luts && shared && luts->skyView.IsValid();
+    const float skyIntensity = luts ? luts->skyIntensity : m_settings.skyIntensity;
+    const float eyeHeightKm = hasSkyLut ? luts->frameUniforms.cameraPositionAtmosphere.y : 0.0f;
+    const float planetRadiusKm = hasSkyLut ? shared->parameters.planetRadiusKm : 0.0f;
+    // A sampler needs a valid image even when the sky-view pass is off (planetRadiusKm = 0 skips the read).
+    const fx::Texture skyLut = hasSkyLut ? luts->skyView : f.SceneColor();
+
     const fx::View& view = f.View();
     CompositePush push{};
     const AtmosphereRayCamera rayCamera = MakeAtmosphereRayCamera(view.relative);
@@ -370,7 +374,7 @@ void AtmosphereFeature::Composite(fx::CompositeFrame& f)
     push.cameraWorldPositionAndScale = Vec4(rayCamera.eye, kWorldUnitsPerKilometer);
     push.strengthMaxDistanceExponent =
         Vec4(m_settings.aerialPerspectiveStrength, aerial->maxDistanceKm, aerial->depthExponent, 0.0f);
-    push.skyIntensityAndPad = Vec4(m_settings.skyIntensity, 0.0f, 0.0f, 0.0f);
+    push.skyIntensityAndPad = Vec4(skyIntensity, m_settings.aerialSkyMatch, eyeHeightKm, planetRadiusKm);
 
     // An invalid shaft delta means the volume was made without shadows, so sky pixels pass through.
     bool dispatched = false;
@@ -382,6 +386,7 @@ void AtmosphereFeature::Composite(fx::CompositeFrame& f)
                          .Bind("aerialPerspectiveVolume", aerial->volume)
                          .Bind("aerialShaftDelta", aerial->shaftDelta)
                          .Bind("destinationImage", output)
+                         .Bind("skyViewLut", skyLut)
                          .Dispatch(f.Extent());
     } else {
         dispatched = f.Compute(m_compositeUnshadowedShader, "AtmosphereAerialPerspectiveCompositePass")
@@ -390,6 +395,7 @@ void AtmosphereFeature::Composite(fx::CompositeFrame& f)
                          .Bind("sourceDepth", fx::Depth(f.SceneDepth()))
                          .Bind("aerialPerspectiveVolume", aerial->volume)
                          .Bind("destinationImage", output)
+                         .Bind("skyViewLut", skyLut)
                          .Dispatch(f.Extent());
     }
     if (!dispatched) {

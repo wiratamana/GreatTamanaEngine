@@ -26,6 +26,8 @@ TEST(AtmosphereSettingsTest, DefaultsPassThroughUnchanged)
     EXPECT_FLOAT_EQ(s.atmosphereThicknessKm, d.atmosphereThicknessKm);
     EXPECT_FLOAT_EQ(s.miePhaseG, d.miePhaseG);
     EXPECT_FLOAT_EQ(s.skyIntensity, d.skyIntensity);
+    EXPECT_FLOAT_EQ(d.aerialSkyMatch, 1.0f);
+    EXPECT_FLOAT_EQ(s.aerialSkyMatch, d.aerialSkyMatch);
     EXPECT_FLOAT_EQ(s.aerialPerspectiveMaxDistanceKm, d.aerialPerspectiveMaxDistanceKm);
     EXPECT_FLOAT_EQ(s.aerialPerspectiveScatteringExaggeration, d.aerialPerspectiveScatteringExaggeration);
     EXPECT_EQ(s.aerialPerspectiveSamplesPerSlice, d.aerialPerspectiveSamplesPerSlice);
@@ -42,6 +44,7 @@ TEST(AtmosphereSettingsTest, NonFiniteValuesBecomeTheFieldDefault)
     bad.planetRadiusKm = kNaN;
     bad.atmosphereThicknessKm = kInf;
     bad.miePhaseG = -kInf;
+    bad.aerialSkyMatch = kNaN;
     bad.aerialPerspectiveMaxDistanceKm = kNaN;
     bad.aerialPerspectiveStrength = kInf;
     bad.rayleighScattering = Vec3(kNaN, 0.5f, kInf);
@@ -50,6 +53,7 @@ TEST(AtmosphereSettingsTest, NonFiniteValuesBecomeTheFieldDefault)
     EXPECT_FLOAT_EQ(s.planetRadiusKm, d.planetRadiusKm);
     EXPECT_FLOAT_EQ(s.atmosphereThicknessKm, d.atmosphereThicknessKm);
     EXPECT_FLOAT_EQ(s.miePhaseG, d.miePhaseG);
+    EXPECT_FLOAT_EQ(s.aerialSkyMatch, d.aerialSkyMatch);
     EXPECT_FLOAT_EQ(s.aerialPerspectiveMaxDistanceKm, d.aerialPerspectiveMaxDistanceKm);
     EXPECT_FLOAT_EQ(s.aerialPerspectiveStrength, d.aerialPerspectiveStrength);
     EXPECT_FLOAT_EQ(s.rayleighScattering.x, d.rayleighScattering.x);
@@ -67,6 +71,7 @@ TEST(AtmosphereSettingsTest, OutOfRangeValuesClampToTheirRanges)
     low.miePhaseG = -9.0f;
     low.aerialPerspectiveStrength = -1.0f;
     low.skyIntensity = -1.0f;
+    low.aerialSkyMatch = -0.5f;
     low.aerialPerspectiveMaxDistanceKm = 0.0f;
     low.aerialPerspectiveDepthExponent = 0.0f;
     low.aerialPerspectiveSamplesPerSlice = -4;
@@ -80,6 +85,7 @@ TEST(AtmosphereSettingsTest, OutOfRangeValuesClampToTheirRanges)
     EXPECT_FLOAT_EQ(a.miePhaseG, -0.99f);
     EXPECT_FLOAT_EQ(a.aerialPerspectiveStrength, 0.0f);
     EXPECT_FLOAT_EQ(a.skyIntensity, 0.0f);
+    EXPECT_FLOAT_EQ(a.aerialSkyMatch, 0.0f);
     EXPECT_FLOAT_EQ(a.aerialPerspectiveMaxDistanceKm, 0.01f);
     EXPECT_FLOAT_EQ(a.aerialPerspectiveDepthExponent, 1.0f);
     EXPECT_EQ(a.aerialPerspectiveSamplesPerSlice, 1);
@@ -93,6 +99,7 @@ TEST(AtmosphereSettingsTest, OutOfRangeValuesClampToTheirRanges)
     high.miePhaseG = 5.0f;
     high.aerialPerspectiveStrength = 1e30f;
     high.skyIntensity = 1e9f;
+    high.aerialSkyMatch = 3.5f;
     high.aerialPerspectiveMaxDistanceKm = 1e9f;
     high.aerialPerspectiveDepthExponent = 99.0f;
     high.aerialPerspectiveSamplesPerSlice = 1000000;
@@ -104,10 +111,28 @@ TEST(AtmosphereSettingsTest, OutOfRangeValuesClampToTheirRanges)
     EXPECT_FLOAT_EQ(b.miePhaseG, 0.99f);
     EXPECT_FLOAT_EQ(b.aerialPerspectiveStrength, 1e30f);
     EXPECT_FLOAT_EQ(b.skyIntensity, 50.0f);
+    EXPECT_FLOAT_EQ(b.aerialSkyMatch, 1.0f);
     EXPECT_FLOAT_EQ(b.aerialPerspectiveMaxDistanceKm, 50.0f);
     EXPECT_FLOAT_EQ(b.aerialPerspectiveDepthExponent, 4.0f);
     EXPECT_EQ(b.aerialPerspectiveSamplesPerSlice, 16);
     EXPECT_FLOAT_EQ(b.aerialPerspectiveScatteringExaggeration, 50.0f);
+}
+
+TEST(AtmosphereSettingsTest, AerialSkyMatchSanitizesUnitRangeAndNonFinite)
+{
+    AtmosphereSettings s;
+    for (const float valid : { 0.0f, 0.25f, 0.5f, 1.0f }) {
+        s.aerialSkyMatch = valid;
+        EXPECT_FLOAT_EQ(SanitizeAtmosphereSettings(s).aerialSkyMatch, valid);
+    }
+    s.aerialSkyMatch = -10.0f;
+    EXPECT_FLOAT_EQ(SanitizeAtmosphereSettings(s).aerialSkyMatch, 0.0f);
+    s.aerialSkyMatch = 10.0f;
+    EXPECT_FLOAT_EQ(SanitizeAtmosphereSettings(s).aerialSkyMatch, 1.0f);
+    for (const float nonFinite : { kNaN, kInf, -kInf }) {
+        s.aerialSkyMatch = nonFinite;
+        EXPECT_FLOAT_EQ(SanitizeAtmosphereSettings(s).aerialSkyMatch, 1.0f);
+    }
 }
 
 TEST(AtmosphereSettingsTest, SunDiskSettingsStayInRangeAndNonFiniteFallsBack)
@@ -162,12 +187,14 @@ TEST(AtmosphereSettingsTest, SanitizeIsIdempotent)
     bad.planetRadiusKm = kNaN;
     bad.aerialPerspectiveSamplesPerSlice = 77;
     bad.skyIntensity = 1e9f;
+    bad.aerialSkyMatch = -2.0f;
     bad.ozoneTentCenterKm = -3.0f;
     const AtmosphereSettings once = SanitizeAtmosphereSettings(bad);
     const AtmosphereSettings twice = SanitizeAtmosphereSettings(once);
     EXPECT_FLOAT_EQ(once.planetRadiusKm, twice.planetRadiusKm);
     EXPECT_EQ(once.aerialPerspectiveSamplesPerSlice, twice.aerialPerspectiveSamplesPerSlice);
     EXPECT_FLOAT_EQ(once.skyIntensity, twice.skyIntensity);
+    EXPECT_FLOAT_EQ(once.aerialSkyMatch, twice.aerialSkyMatch);
     EXPECT_FLOAT_EQ(once.ozoneTentCenterKm, twice.ozoneTentCenterKm);
 }
 

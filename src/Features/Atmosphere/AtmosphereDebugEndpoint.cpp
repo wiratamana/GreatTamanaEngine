@@ -34,6 +34,7 @@ constexpr std::array kSettingKeys{
     SettingKey{ "aerialPerspectiveSamplesPerSlice", &AtmosphereSettings::aerialPerspectiveSamplesPerSlice },
     SettingKey{ "aerialPerspectiveScatteringExaggeration", &AtmosphereSettings::aerialPerspectiveScatteringExaggeration },
     SettingKey{ "skyIntensity", &AtmosphereSettings::skyIntensity },
+    SettingKey{ "aerialSkyMatch", &AtmosphereSettings::aerialSkyMatch },
     SettingKey{ "sunDiskIntensity", &AtmosphereSettings::sunDiskIntensity },
     SettingKey{ "sunDiskRadiusDeg", &AtmosphereSettings::sunDiskRadiusDeg },
     SettingKey{ "multiScatteringStrength", &AtmosphereSettings::multiScatteringStrength },
