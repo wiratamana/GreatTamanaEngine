@@ -1,5 +1,5 @@
 # Big World demo
-> One click opens a scene with terrain, sea, lake, river, grass, atmosphere and volumetric clouds. For developers who test or extend the landscape features.
+> One click opens a scene with terrain, sea, lake, river, grass, atmosphere, volumetric light and volumetric clouds. For developers who test or extend the landscape features.
 > Verified against code: 2026-11-17
 
 ## What it is
@@ -10,18 +10,22 @@
 ## What you see
 - The terrain around the west coast spot (x -2000, z -800), camera 6 m above the ground, looking at the sea.
 - The sea from the Water feature, an uneven lake in front of you, and a river that flows to the sea.
-- Grass on all dry land (preset from the quality tier), dappled cloud and sun shadows, sun and sky.
+- Grass on all dry land (preset from the quality tier), dappled cloud and sun shadows, sunlit air shafts on `medium` and `big`, sun and sky.
 - The camera is in free-fly mode. Right mouse drag looks, WASD moves.
 - The blue circles over the lake are the Water edit handles; in the Game view they show only while the Water window is open.
 
 ## Quality tiers
-| Tier | Grass preset | Cloud coverage | Cloud cost settings | River | Frame ms at 1264x629 (Iris Xe) |
-|---|---|---|---|---|---|
-| `lean` | Lean | `0.45` (`kLeanCloudCoverage`) | `maxSteps` 48, `resolutionDivisor` 6, `shadowSteps` 6, `shadowUpdate` 4 | no | 28 to 30 |
-| `medium` | Medium | `0.5` (`kMediumCloudCoverage`) | `maxSteps` 64, `resolutionDivisor` 6 | yes | 31 |
-| `big` (menu default) | Big | `0.5` (`kBigCloudCoverage`) | feature defaults (`maxSteps` 96) | yes | 35 |
+| Tier | Terrain profile | Grass preset | Cloud coverage | Volumetric light | Cloud cost settings | River |
+|---|---|---|---|---|---|---|
+| `lean` | `lean` (no VL, SSGI, GTAO) | Lean | `0.45` (`kLeanCloudCoverage`) | off (`shaftMist` `0`) | `maxSteps` 48, `resolutionDivisor` 6, `shadowSteps` 6, `shadowUpdate` 4 | no |
+| `medium` | `scenic` (no SSGI, GTAO) | Medium | `0.5` (`kMediumCloudCoverage`) | on (`shaftMist` `0.15`) | `maxSteps` 64, `resolutionDivisor` 6 | yes |
+| `big` (menu default) | `scenic` (no SSGI, GTAO) | Big | `0.5` (`kBigCloudCoverage`) | on (`shaftMist` `0.15`) | feature defaults (`maxSteps` 96) | yes |
 
-Numbers are medians from live sessions on an Iris Xe notebook (varies 2 to 4 ms between sessions). Clouds cost 13 to 20 ms of every tier; a coarser cloud grid (`resolutionDivisor` 6 instead of the automatic 4) saves 10 to 20 percent with slightly grainier clouds, while `maxDistanceM` stays untouched so far horizon clouds do not thin out. Each tier also lowers `VolumetricCloud` `coverage` from the `0.8` feature default to `0.45`–`0.5` (snapshotted and restored on close) because the cloud shadow map is coarse (~190 m per texel) and `0.8` puts the whole demo meadow inside a single dark shadow.
+Every tier snapshots and restores the render settings it touches:
+- `Bloom`: `enabled` `true`, `threshold` `2.0` (`kBloomThreshold`) so sunlit clouds do not veil the sky.
+- `VolumetricCloud`: `coverage` (`0.45`–`0.5`), `shadowRangeKm` `8` (~62.5 m per 128x128 texel so cloud shadows dapple the meadow), `shadowSoftness` `0.6`, `sunRays` `0.6`, `shaftMist` (`0` on `lean`, `0.15` on `medium` and `big`), plus the tier march levers above.
+- `VolumetricLight` (`medium` and `big` only): `maxDistance` `400` m (clamped to the farthest sun shadow cascade), `density` `0.004`, `anisotropyG` `0.75`, `shadowSamples` `2`, `temporal` `true`, `strength` `1`.
+- `Grass`: `enabled` `true` and the tier preset.
 
 ## Open and close over HTTP
 | Route | What it does |
@@ -33,13 +37,14 @@ Numbers are medians from live sessions on an Iris Xe notebook (varies 2 to 4 ms 
 `open` returns at once. The terrain opens in that frame; the rest runs in the next frames. Poll `/bigworld/state` until `phase` is `Ready` (about 1.5 s on this machine). `open` and `close` are refused for browser requests. `state` is allowed.
 
 The state has these blocks:
-- `plan`: camera placement, `lake`, `river` and effective `cloudCoverage`.
+- `plan`: camera placement, `terrainProfile`, `lake`, `river`, `cloudCoverage`, `cloudShadowRangeKm`, `cloudShadowSoftness`, `cloudSunRays`, `cloudShaftMist`, `bloomThreshold`, and the `volumetricLight` budget fields.
 - `terrain`: `open`, `nodesResident`, `nodesPending`, `uploadQueue`, `nodesRebuilding`.
 - `water`: `featureConnected`, `bodyCount`, `hasOcean`, `oceanLevel`, `carvePending`, `carveApplies`.
 - `grass`: render `status`, `tilePresent`, `seaLevel`, `tileRevision`, `blades` (LOD0, LOD1, LOD2), `receivesSunShadow`, `receivesCloudShadow`, `castCascades`, `castBlades`.
-- `clouds`: `enabled`.
+- `clouds`: `available`, `enabled`.
+- `volumetricLight`: `available`, `enabled`, `disabledByProfile`.
 - `info`: benign note when a check is inactive by design (for example grass shadow casting when the camera is 15 m or higher above ground).
-- `warnings`: things that work but look wrong, for example `"grass gets no sun shadow"` or `"ocean level differs from the grass sea level"`.
+- `warnings`: things that work but look wrong, for example `"VolumetricLight disabled by profile"`, `"grass gets no sun shadow"` or `"ocean level differs from the grass sea level"`.
 
 ## Phases
 ```text
@@ -49,7 +54,7 @@ Idle -> OpeningTerrain -> WaitingForNodes -> AddingWater -> WaitingForWater
 - `WaitingForNodes`: waits until the terrain nodes around the camera are resident. It fails after 90 s.
 - `AddingWater`: adds the lake and the river, with levels taken from the ground under them.
 - `WaitingForWater`: waits until the carve reached the terrain and the Water feature is connected. A timeout is a warning.
-- `EnablingFeatures`: saves the current settings, then turns the clouds on (with the tier or overridden `coverage`) and applies the grass preset.
+- `EnablingFeatures`: saves the current settings, then applies the cloud, bloom, volumetric light and grass tweaks.
 - `WaitingForGrass`: waits for the first grass frame (`status` `Ok` and a height tile). A timeout is a warning.
 - `Ready`: checks the systems every half second without delaying entry to `Ready`. If the terrain scene was replaced, the demo restores everything and goes to `Idle`.
 - `Failed`: something refused. The demo restores everything and closes the terrain it opened. `error` says why.
@@ -57,16 +62,16 @@ Idle -> OpeningTerrain -> WaitingForNodes -> AddingWater -> WaitingForWater
 ## Layers
 ```text
 src/Game/BigWorld/                  gte_core, no feature header, no ImGui, no Vulkan
-  BigWorldPlan      tiers, cloud coverage constants, camera spot, lake outline, river path (pure)
+  BigWorldPlan      tiers, cloud/bloom/volumetric constants, camera spot, lake outline, river path (pure)
   BigWorldPorts     ITerrainPort, IWaterPort, IFeaturePort and their state structs (plain data)
   BigWorldDemo      the state machine and the cross-checks
 src/Features/BigWorld/Editor/       gte_editor
-  BigWorldAdapters  the ports on top of the live terrain world, water world, active sun and feature debug endpoints
+  BigWorldAdapters  the ports on top of the live terrain world, water world, compositor, active sun and feature endpoints
   BigWorldModule    File menu items, /bigworld routes, per-frame tick (order 30, after terrain, water, grass tiles)
 ```
-- The Game layer names terrain, water, grass, shadow and clouds in words only. It includes no feature header.
+- The Game layer names terrain, water, grass, shadow, bloom, volumetric light and clouds in words only. It includes no feature header.
 - The adapters find the other modules on every call. Nothing is cached across frames.
-- The clouds and the grass are driven through their debug endpoints (`enabled`, `coverage`, `preset`, the cloud cost keys of the tier). The demo saves the keys first and puts them back on close.
+- Render features are driven through their debug endpoints. The demo saves the touched keys first and puts them back on close.
 
 ## What the demo checks across systems
 - The terrain must be resident before water is added (the carve needs the terrain).
@@ -74,6 +79,7 @@ src/Features/BigWorld/Editor/       gte_editor
 - The Water feature must be connected to the Water world.
 - The spot must be above the sea. A spot under the sea only raises a warning.
 - The sun must be above the horizon.
+- When the tier expects `VolumetricLight` (`medium` and `big`), the render feature must not be switched off by the terrain profile or compositor (else warns `"VolumetricLight disabled by profile"`).
 - Grass must draw and hold a height tile.
 - Sun shadow cascades must reach grass (`game.shadow.cascades > 0`, else warns `"grass gets no sun shadow"`).
 - Grass must cast into the cascades (`game.shadow.castCascades > 0`) while the camera is below 15 m above ground; at 15 m or higher, SDSM cascade texels exceed `shadowMaxTexelM` by design and `info` reports it without warning.
@@ -81,7 +87,7 @@ src/Features/BigWorld/Editor/       gte_editor
 - The terrain must still be open. Another scene (Open Scene, Hi-Z demo, `/terrain/open`) ends the demo cleanly.
 
 ## Tests
-- `tests/Game/BigWorld/BigWorldPlanTests.cpp` and `BigWorldDemoTests.cpp`: pure tests with fake ports covering tier cloud coverage and overrides, settings restore, the state machine, each cross-check warning/info condition, and the state JSON keys.
+- `tests/Game/BigWorld/BigWorldPlanTests.cpp` and `BigWorldDemoTests.cpp`: pure tests with fake ports covering tier defaults and overrides, settings snapshot and restore, the state machine, each cross-check warning/info condition, and the state JSON keys.
 - `tests/Features/BigWorld/Editor/BigWorldModuleTests.cpp`: adapter and `/bigworld` route tests against fake feature debug endpoints.
 - No test draws anything. Headless rendering is not possible here. The live checks use `/get_game_view` and `/get_swapchain`.
 

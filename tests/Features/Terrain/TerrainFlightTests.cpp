@@ -159,7 +159,9 @@ TEST(TerrainFlightTests, RotationLooksAlongTheHeadingAndTiltsDown)
 
 TEST(TerrainControlTests, ProfileNamesRoundTrip)
 {
-    for (const TerrainProfile p : { TerrainProfile::Full, TerrainProfile::Lean, TerrainProfile::GeometryOnly }) {
+    EXPECT_STREQ(TerrainProfileName(TerrainProfile::Scenic), "scenic");
+    for (const TerrainProfile p :
+        { TerrainProfile::Full, TerrainProfile::Scenic, TerrainProfile::Lean, TerrainProfile::GeometryOnly }) {
         TerrainProfile parsed = TerrainProfile::Full;
         ASSERT_TRUE(TryParseTerrainProfile(TerrainProfileName(p), parsed));
         EXPECT_EQ(parsed, p);

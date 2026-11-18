@@ -11,7 +11,7 @@ inline constexpr const char* kBloomFeatureName = "Bloom";
 inline constexpr std::uint32_t kBloomMinLevels = 2;
 inline constexpr std::uint32_t kBloomMaxLevels = 6;
 inline constexpr std::uint32_t kBloomMinMipSize = 2;  // Smallest side the last mip may have.
-inline constexpr float kBloomMaxRadiance = 64.0f;     // Input clamp, so a sun disc cannot flood the frame.
+inline constexpr float kBloomMaxRadiance = 24.0f;     // Soft ceiling of the prefilter HDR rolloff, so bright blobs cannot flood the frame.
 
 // Tunables. Stored only through SanitizeBloomSettings().
 struct BloomSettings {

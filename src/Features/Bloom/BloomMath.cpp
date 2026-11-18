@@ -54,6 +54,16 @@ float BloomSoftThresholdWeight(float brightness, float threshold, float absolute
     return std::max(curve, brightness - threshold) / std::max(brightness, 1e-5f);
 }
 
+float BloomPrefilterResponse(float brightness, float threshold, float absoluteKnee, float maxRadiance) noexcept
+{
+    if (!std::isfinite(brightness) || !(brightness > 0.0f) || !std::isfinite(maxRadiance) || !(maxRadiance > 0.0f)) {
+        return 0.0f;
+    }
+    const float clamped = std::min(brightness, 65504.0f);
+    const float kept = clamped * BloomSoftThresholdWeight(clamped, threshold, absoluteKnee);
+    return kept * maxRadiance / (maxRadiance + kept);
+}
+
 BloomPrefilterPush MakeBloomPrefilterPush(const BloomSettings& safe) noexcept
 {
     BloomPrefilterPush p;

@@ -224,6 +224,9 @@ void BigWorldDemo::ReadHealth()
     h.grass = f.grass;
     h.cloudsAvailable = f.cloudsAvailable;
     h.cloudsEnabled = f.cloudsEnabled;
+    h.volumetricLightAvailable = f.volumetricLightAvailable;
+    h.volumetricLightEnabled = f.volumetricLightEnabled;
+    h.volumetricLightDisabledByProfile = f.volumetricLightDisabledByProfile;
     h.sunAvailable = f.sunAvailable;
     h.sunAboveHorizon = f.sunAboveHorizon;
     h.sunElevationDegrees = f.sunElevationDegrees;
@@ -245,6 +248,11 @@ void BigWorldDemo::CheckAgreement()
     }
     if (h.sunAvailable && !h.sunAboveHorizon) {
         m_agreementWarnings.push_back("the sun is not above the horizon (elevation " + Number(h.sunElevationDegrees) + " deg)");
+    }
+    const bool profileDisablesVolumetricLight =
+        m_state.plan.terrainProfile == "lean" || m_state.plan.terrainProfile == "geometry_only";
+    if (m_state.plan.volumetricLight && (h.volumetricLightDisabledByProfile || profileDisablesVolumetricLight)) {
+        m_agreementWarnings.push_back("VolumetricLight disabled by profile");
     }
     if (m_state.plan.tweaks.empty() || !h.grass.available) {
         return;
@@ -478,8 +486,21 @@ std::string BigWorldStateToJson(const BigWorldState& s)
     }
     j += "],\"plan\":{\"spotX\":" + Number(s.plan.spotX) + ",\"spotZ\":" + Number(s.plan.spotZ)
         + ",\"heightAboveGround\":" + Number(s.plan.heightAboveGround) + ",\"headingDegrees\":" + Number(s.plan.headingDegrees)
-        + ",\"lookDownDegrees\":" + Number(s.plan.lookDownDegrees) + ",\"lake\":" + Bool(s.plan.lake)
-        + ",\"river\":" + Bool(s.plan.river) + ",\"cloudCoverage\":" + Number(s.plan.cloudCoverage) + "}";
+        + ",\"lookDownDegrees\":" + Number(s.plan.lookDownDegrees) + ",\"terrainProfile\":" + Quote(s.plan.terrainProfile)
+        + ",\"lake\":" + Bool(s.plan.lake)
+        + ",\"river\":" + Bool(s.plan.river) + ",\"cloudCoverage\":" + Number(s.plan.cloudCoverage)
+        + ",\"cloudShadowRangeKm\":" + Number(s.plan.cloudShadowRangeKm)
+        + ",\"cloudShadowSoftness\":" + Number(s.plan.cloudShadowSoftness)
+        + ",\"cloudSunRays\":" + Number(s.plan.cloudSunRays)
+        + ",\"cloudShaftMist\":" + Number(s.plan.cloudShaftMist)
+        + ",\"bloomThreshold\":" + Number(s.plan.bloomThreshold)
+        + ",\"volumetricLight\":" + Bool(s.plan.volumetricLight)
+        + ",\"volumetricMaxDistance\":" + Number(s.plan.volumetricMaxDistance)
+        + ",\"volumetricDensity\":" + Number(s.plan.volumetricDensity)
+        + ",\"volumetricAnisotropyG\":" + Number(s.plan.volumetricAnisotropyG)
+        + ",\"volumetricShadowSamples\":" + std::to_string(s.plan.volumetricShadowSamples)
+        + ",\"volumetricTemporal\":" + Bool(s.plan.volumetricTemporal)
+        + ",\"volumetricStrength\":" + Number(s.plan.volumetricStrength) + "}";
     j += std::string(",\"terrain\":{\"available\":") + Bool(h.terrain.available) + ",\"open\":" + Bool(h.terrain.open)
         + ",\"nodesResident\":" + std::to_string(h.terrain.nodesResident) + ",\"nodesPending\":" + std::to_string(h.terrain.nodesPending)
         + ",\"uploadQueue\":" + std::to_string(h.terrain.uploadQueue) + ",\"nodesRebuilding\":" + std::to_string(h.terrain.nodesRebuilding)
@@ -497,6 +518,9 @@ std::string BigWorldStateToJson(const BigWorldState& s)
         + ",\"castCascades\":" + std::to_string(h.grass.castCascades)
         + ",\"castBlades\":" + std::to_string(h.grass.castBlades) + "}";
     j += std::string(",\"clouds\":{\"available\":") + Bool(h.cloudsAvailable) + ",\"enabled\":" + Bool(h.cloudsEnabled) + "}";
+    j += std::string(",\"volumetricLight\":{\"available\":") + Bool(h.volumetricLightAvailable)
+        + ",\"enabled\":" + Bool(h.volumetricLightEnabled)
+        + ",\"disabledByProfile\":" + Bool(h.volumetricLightDisabledByProfile) + "}";
     j += "}";
     return j;
 }

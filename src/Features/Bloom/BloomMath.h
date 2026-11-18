@@ -20,6 +20,10 @@ std::uint32_t BloomActiveLevels(Extent2D source, std::uint32_t requested) noexce
 // Same curve as BloomPrefilter.comp. `absoluteKnee` is threshold * knee.
 float BloomSoftThresholdWeight(float brightness, float threshold, float absoluteKnee) noexcept;
 
+// Kept radiance after the soft threshold and Karis-style HDR rolloff (`kept * max / (max + kept)`).
+float BloomPrefilterResponse(
+    float brightness, float threshold, float absoluteKnee, float maxRadiance = kBloomMaxRadiance) noexcept;
+
 // `safe` must be sanitized.
 BloomPrefilterPush MakeBloomPrefilterPush(const BloomSettings& safe) noexcept;
 

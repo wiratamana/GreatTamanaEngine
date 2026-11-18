@@ -64,6 +64,8 @@ TEST(TerrainCommandsTest, OpenParsesProfileSlotsWaterAndBudget)
     EXPECT_EQ(world.lastOpen.poolSlots, 300u);
     EXPECT_FALSE(world.lastOpen.water);
     EXPECT_FALSE(world.lastOpen.renderBudget);
+    EXPECT_EQ(Exec(world, "open", { { "profile", "scenic" } }).httpStatus, 200);
+    EXPECT_EQ(world.lastOpen.profile, terrain::TerrainProfile::Scenic);
     EXPECT_EQ(Exec(world, "open", { { "profile", "nope" } }).httpStatus, 400);
     EXPECT_EQ(Exec(world, "close").httpStatus, 200);
     EXPECT_FALSE(world.open);

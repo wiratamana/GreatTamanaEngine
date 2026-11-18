@@ -40,7 +40,7 @@ private:
     double m_secondsSinceEdit = 0.0;
     int m_framesSinceSent = 0;
 
-    int m_profileIndex = 1;                      // Lean.
+    int m_profileIndex = 2;                      // Lean.
     bool m_budget = true;
     bool m_water = true;
     std::array<char, 512> m_path{};

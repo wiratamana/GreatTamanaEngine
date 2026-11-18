@@ -224,7 +224,7 @@ ModuleCommandResult OpenCommand(terrain::ITerrainWorld& world, const Pairs& para
         std::string error;
         if (key == "profile") {
             if (!terrain::TryParseTerrainProfile(value, options.profile)) {
-                return Fail(400, "profile must be full, lean or geometry_only");
+                return Fail(400, "profile must be full, scenic, lean or geometry_only");
             }
         } else if (key == "poolSlots") {
             if (!NumberOption(key, value, number, error) || number < 0.0) {

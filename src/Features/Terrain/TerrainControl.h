@@ -23,6 +23,7 @@ namespace gte::terrain {
 // How much of the fixed-cost render features stay on while the terrain scene is open.
 enum class TerrainProfile {
     Full,         // Nothing is switched off.
+    Scenic,       // SSGI and GTAO are off; volumetric light stays on.
     Lean,         // Volumetric light, SSGI and GTAO are off (the heavy ones on an iGPU).
     GeometryOnly, // Same set the Hi-Z demo switches off.
 };
@@ -31,7 +32,7 @@ struct TerrainOpenOptions {
     TerrainProfile profile = TerrainProfile::Lean;
     std::uint32_t poolSlots = 0; // 0 = chosen from the settings (see TerrainPoolSlotsFor).
     bool water = true;           // A flat ocean quad at sea level.
-    bool renderBudget = true;    // Lean and geometry-only profiles also lower shadow and aerial perspective quality.
+    bool renderBudget = true;    // Non-full profiles also lower shadow and aerial perspective quality.
 };
 
 // Tunables that are not part of the saved world.
@@ -242,7 +243,7 @@ public:
 // Stats as one JSON object (numbers and strings only), for the HTTP routes.
 std::string TerrainStatsToJson(const TerrainStats& stats);
 
-// Name of a profile for logs and routes ("full", "lean", "geometry_only"), and the inverse (false when unknown).
+// Name of a profile for logs and routes ("full", "scenic", "lean", "geometry_only"), and the inverse (false when unknown).
 const char* TerrainProfileName(TerrainProfile profile) noexcept;
 bool TryParseTerrainProfile(const std::string& name, TerrainProfile& out) noexcept;
 

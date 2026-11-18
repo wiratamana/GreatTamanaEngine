@@ -18,9 +18,10 @@ namespace gte {
 
 namespace {
 
-constexpr const char* kProfileNames[] = { "Full (nothing switched off)", "Lean (no volumetric light, SSGI, GTAO)", "Geometry only" };
-constexpr terrain::TerrainProfile kProfiles[] = { terrain::TerrainProfile::Full, terrain::TerrainProfile::Lean,
-    terrain::TerrainProfile::GeometryOnly };
+constexpr const char* kProfileNames[] = { "Full (nothing switched off)", "Scenic (no SSGI, GTAO)",
+    "Lean (no volumetric light, SSGI, GTAO)", "Geometry only" };
+constexpr terrain::TerrainProfile kProfiles[] = { terrain::TerrainProfile::Full, terrain::TerrainProfile::Scenic,
+    terrain::TerrainProfile::Lean, terrain::TerrainProfile::GeometryOnly };
 constexpr const char* kCameraNames[] = { "Script / scripted flight", "Free-fly", "Orbit" };
 constexpr terrain::CameraMode kCameraModes[] = { terrain::CameraMode::Script, terrain::CameraMode::FreeFly, terrain::CameraMode::Orbit };
 
@@ -214,7 +215,7 @@ void TerrainPanel::DrawWorld(TerrainUiBridge& bridge, const TerrainUiSnapshot& s
     if (!snap.open) {
         if (ImGui::Button("Open terrain world")) {
             terrain::TerrainOpenOptions options;
-            options.profile = kProfiles[std::clamp(m_profileIndex, 0, 2)];
+            options.profile = kProfiles[std::clamp(m_profileIndex, 0, static_cast<int>(std::size(kProfiles)) - 1)];
             options.renderBudget = m_budget;
             options.water = m_water;
             bridge.request.settings = terrain::Sanitize(m_working);

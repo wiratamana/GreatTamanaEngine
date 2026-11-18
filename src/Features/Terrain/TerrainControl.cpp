@@ -146,6 +146,7 @@ const char* TerrainProfileName(TerrainProfile profile) noexcept
 {
     switch (profile) {
     case TerrainProfile::Full: return "full";
+    case TerrainProfile::Scenic: return "scenic";
     case TerrainProfile::Lean: return "lean";
     case TerrainProfile::GeometryOnly: return "geometry_only";
     }
@@ -154,7 +155,8 @@ const char* TerrainProfileName(TerrainProfile profile) noexcept
 
 bool TryParseTerrainProfile(const std::string& name, TerrainProfile& out) noexcept
 {
-    for (const TerrainProfile candidate : { TerrainProfile::Full, TerrainProfile::Lean, TerrainProfile::GeometryOnly }) {
+    for (const TerrainProfile candidate :
+        { TerrainProfile::Full, TerrainProfile::Scenic, TerrainProfile::Lean, TerrainProfile::GeometryOnly }) {
         if (name == TerrainProfileName(candidate)) {
             out = candidate;
             return true;

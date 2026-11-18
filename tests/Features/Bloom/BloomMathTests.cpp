@@ -28,6 +28,7 @@ TEST(BloomMathTest, DefaultsSurviveTheSanitizer)
     EXPECT_FLOAT_EQ(s.knee, d.knee);
     EXPECT_FLOAT_EQ(s.intensity, d.intensity);
     EXPECT_EQ(s.levels, d.levels);
+    EXPECT_FLOAT_EQ(kBloomMaxRadiance, 24.0f);
 }
 
 TEST(BloomMathTest, SanitizeClampsEveryField)
@@ -109,6 +110,27 @@ TEST(BloomMathTest, SoftThresholdCurve)
     }
 }
 
+TEST(BloomMathTest, PrefilterResponseCompressesHdrOutliersWithoutFlatteningBlobs)
+{
+    EXPECT_FLOAT_EQ(BloomPrefilterResponse(0.4f, 1.0f, 0.5f), 0.0f);
+    EXPECT_FLOAT_EQ(BloomPrefilterResponse(-2.0f, 1.0f, 0.5f), 0.0f);
+    EXPECT_FLOAT_EQ(BloomPrefilterResponse(std::numeric_limits<float>::quiet_NaN(), 1.0f, 0.5f), 0.0f);
+    EXPECT_FLOAT_EQ(BloomPrefilterResponse(std::numeric_limits<float>::infinity(), 1.0f, 0.5f), 0.0f);
+
+    // Normal scene highlights stay within a few percent of the unrolled-off curve.
+    const float unrolledAtTwo = 2.0f * BloomSoftThresholdWeight(2.0f, 1.0f, 0.5f);
+    EXPECT_NEAR(BloomPrefilterResponse(2.0f, 1.0f, 0.5f), unrolledAtTwo, 0.05f);
+
+    // Saturated cloud blobs do not flat-top at 24, yet extreme sun radiance stays below kBloomMaxRadiance.
+    const float at24 = BloomPrefilterResponse(24.0f, 2.0f, 1.0f);
+    const float at120 = BloomPrefilterResponse(120.0f, 2.0f, 1.0f);
+    const float atSun = BloomPrefilterResponse(60000.0f, 2.0f, 1.0f);
+    EXPECT_LT(at24, 13.0f);
+    EXPECT_GT(at120, at24 + 4.0f);
+    EXPECT_LT(atSun, kBloomMaxRadiance);
+    EXPECT_GT(atSun, at120);
+}
+
 TEST(BloomMathTest, PushCarriesTheSettings)
 {
     BloomSettings s;
@@ -140,6 +162,7 @@ TEST(BloomShaderTest, SourcesKeepTheNamesAndConstantsTheCppSideBinds)
     EXPECT_NE(prefilter.find("image2D destinationImage;"), std::string::npos);
     EXPECT_NE(prefilter.find("soft * soft / (4.0 * knee + 1e-5)"), std::string::npos);
     EXPECT_NE(prefilter.find("max(soft, brightness - threshold) / max(brightness, 1e-5)"), std::string::npos);
+    EXPECT_NE(prefilter.find("maxRadiance / (maxRadiance + kept)"), std::string::npos);
 
     const std::string down = ReadShader("BloomDown.comp");
     ASSERT_FALSE(down.empty());

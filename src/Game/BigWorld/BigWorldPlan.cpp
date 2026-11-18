@@ -4,6 +4,7 @@
 #include <cctype>
 #include <charconv>
 #include <cmath>
+#include <cstdlib>
 
 namespace gte::bigworld {
 
@@ -19,6 +20,22 @@ double Finite(double value, double fallback) noexcept
 double Bounded(double value, double fallback, double lo, double hi) noexcept
 {
     return std::clamp(Finite(value, fallback), lo, hi);
+}
+
+int NearestShadowSamples(int value) noexcept
+{
+    constexpr int kCandidates[] = { 1, 2, 4, 8 };
+    const int clamped = std::clamp(value, 1, 8);
+    int best = kCandidates[0];
+    int bestDiff = 1000000;
+    for (const int candidate : kCandidates) {
+        const int diff = std::abs(candidate - clamped);
+        if (diff <= bestDiff) {
+            best = candidate;
+            bestDiff = diff;
+        }
+    }
+    return best;
 }
 
 std::string FormatDouble(double value)
@@ -65,23 +82,49 @@ void AddCloudTierValues(Quality quality, FeatureTweak& clouds)
     }
 }
 
-void SyncCloudCoverageTweak(BigWorldPlan& plan, bool addIfMissing)
+FeatureTweak* FindTweak(BigWorldPlan& plan, std::string_view feature) noexcept
 {
-    const auto tweak = std::find_if(plan.tweaks.begin(), plan.tweaks.end(),
-        [](const FeatureTweak& t) { return t.feature == "VolumetricCloud"; });
-    if (tweak == plan.tweaks.end()) {
+    const auto it = std::find_if(plan.tweaks.begin(), plan.tweaks.end(),
+        [feature](const FeatureTweak& t) { return t.feature == feature; });
+    return it == plan.tweaks.end() ? nullptr : &*it;
+}
+
+void UpsertTweakKey(FeatureTweak& tweak, const char* key, std::string value, bool addIfMissing)
+{
+    const auto kv = std::find_if(tweak.values.begin(), tweak.values.end(),
+        [key](const KeyValue& entry) { return entry.key == key; });
+    if (kv == tweak.values.end() && !addIfMissing) {
         return;
     }
-    if (std::find(tweak->restoreKeys.begin(), tweak->restoreKeys.end(), "coverage") == tweak->restoreKeys.end()) {
-        tweak->restoreKeys.push_back("coverage");
+    if (std::find(tweak.restoreKeys.begin(), tweak.restoreKeys.end(), key) == tweak.restoreKeys.end()) {
+        tweak.restoreKeys.emplace_back(key);
     }
-    const std::string formatted = FormatDouble(plan.cloudCoverage);
-    const auto kv = std::find_if(tweak->values.begin(), tweak->values.end(),
-        [](const KeyValue& entry) { return entry.key == "coverage"; });
-    if (kv != tweak->values.end()) {
-        kv->value = formatted;
-    } else if (addIfMissing) {
-        tweak->values.push_back({ "coverage", formatted });
+    if (kv != tweak.values.end()) {
+        kv->value = std::move(value);
+    } else {
+        tweak.values.push_back({ key, std::move(value) });
+    }
+}
+
+void SyncPlanTweaks(BigWorldPlan& plan)
+{
+    if (FeatureTweak* const clouds = FindTweak(plan, "VolumetricCloud")) {
+        UpsertTweakKey(*clouds, "coverage", FormatDouble(plan.cloudCoverage), false);
+        UpsertTweakKey(*clouds, "shadowRangeKm", FormatDouble(plan.cloudShadowRangeKm), false);
+        UpsertTweakKey(*clouds, "shadowSoftness", FormatDouble(plan.cloudShadowSoftness), false);
+        UpsertTweakKey(*clouds, "sunRays", FormatDouble(plan.cloudSunRays), false);
+        UpsertTweakKey(*clouds, "shaftMist", FormatDouble(plan.cloudShaftMist), false);
+    }
+    if (FeatureTweak* const bloom = FindTweak(plan, "Bloom")) {
+        UpsertTweakKey(*bloom, "threshold", FormatDouble(plan.bloomThreshold), false);
+    }
+    if (FeatureTweak* const vl = FindTweak(plan, "VolumetricLight")) {
+        UpsertTweakKey(*vl, "maxDistance", FormatDouble(plan.volumetricMaxDistance), false);
+        UpsertTweakKey(*vl, "density", FormatDouble(plan.volumetricDensity), false);
+        UpsertTweakKey(*vl, "anisotropyG", FormatDouble(plan.volumetricAnisotropyG), false);
+        UpsertTweakKey(*vl, "shadowSamples", std::to_string(plan.volumetricShadowSamples), false);
+        UpsertTweakKey(*vl, "temporal", plan.volumetricTemporal ? "true" : "false", false);
+        UpsertTweakKey(*vl, "strength", FormatDouble(plan.volumetricStrength), false);
     }
 }
 
@@ -97,6 +140,16 @@ const char* QualityName(Quality quality) noexcept
     return "big";
 }
 
+const char* TierTerrainProfile(Quality quality) noexcept
+{
+    return quality == Quality::Lean ? "lean" : "scenic";
+}
+
+bool TierUsesVolumetricLight(Quality quality) noexcept
+{
+    return quality != Quality::Lean;
+}
+
 double TierCloudCoverage(Quality quality) noexcept
 {
     switch (quality) {
@@ -105,6 +158,11 @@ double TierCloudCoverage(Quality quality) noexcept
     case Quality::Big: break;
     }
     return kBigCloudCoverage;
+}
+
+double TierCloudShaftMist(Quality quality) noexcept
+{
+    return TierUsesVolumetricLight(quality) ? kScenicCloudShaftMist : kLeanCloudShaftMist;
 }
 
 bool TryParseQuality(std::string_view text, Quality& out) noexcept
@@ -122,15 +180,48 @@ BigWorldPlan MakeBigWorldPlan(Quality quality)
 {
     BigWorldPlan plan;
     plan.quality = quality;
+    plan.terrainProfile = TierTerrainProfile(quality);
+    plan.volumetricLight = TierUsesVolumetricLight(quality);
     plan.cloudCoverage = TierCloudCoverage(quality);
+    plan.cloudShaftMist = TierCloudShaftMist(quality);
     plan.river = quality != Quality::Lean;
 
     FeatureTweak clouds;
     clouds.feature = "VolumetricCloud";
-    clouds.restoreKeys = { "enabled", "coverage", "maxSteps", "resolutionDivisor", "shadowSteps", "shadowUpdate" };
-    clouds.values = { { "enabled", "true" }, { "coverage", FormatDouble(plan.cloudCoverage) } };
+    clouds.restoreKeys = { "enabled", "coverage", "shadowRangeKm", "shadowSoftness", "sunRays", "shaftMist",
+        "maxSteps", "resolutionDivisor", "shadowSteps", "shadowUpdate" };
+    clouds.values = {
+        { "enabled", "true" },
+        { "coverage", FormatDouble(plan.cloudCoverage) },
+        { "shadowRangeKm", FormatDouble(plan.cloudShadowRangeKm) },
+        { "shadowSoftness", FormatDouble(plan.cloudShadowSoftness) },
+        { "sunRays", FormatDouble(plan.cloudSunRays) },
+        { "shaftMist", FormatDouble(plan.cloudShaftMist) },
+    };
     AddCloudTierValues(quality, clouds);
     plan.tweaks.push_back(std::move(clouds));
+
+    FeatureTweak bloom;
+    bloom.feature = "Bloom";
+    bloom.restoreKeys = { "enabled", "threshold" };
+    bloom.values = { { "enabled", "true" }, { "threshold", FormatDouble(plan.bloomThreshold) } };
+    plan.tweaks.push_back(std::move(bloom));
+
+    if (plan.volumetricLight) {
+        FeatureTweak vl;
+        vl.feature = "VolumetricLight";
+        vl.restoreKeys = { "enabled", "maxDistance", "density", "anisotropyG", "shadowSamples", "temporal", "strength" };
+        vl.values = {
+            { "enabled", "true" },
+            { "maxDistance", FormatDouble(plan.volumetricMaxDistance) },
+            { "density", FormatDouble(plan.volumetricDensity) },
+            { "anisotropyG", FormatDouble(plan.volumetricAnisotropyG) },
+            { "shadowSamples", std::to_string(plan.volumetricShadowSamples) },
+            { "temporal", plan.volumetricTemporal ? "true" : "false" },
+            { "strength", FormatDouble(plan.volumetricStrength) },
+        };
+        plan.tweaks.push_back(std::move(vl));
+    }
 
     FeatureTweak grass;
     grass.feature = "Grass";
@@ -145,13 +236,25 @@ BigWorldPlan MakeBigWorldPlan(Quality quality)
 void SetCloudCoverage(BigWorldPlan& plan, double coverage)
 {
     plan.cloudCoverage = Bounded(coverage, TierCloudCoverage(plan.quality), 0.0, 1.0);
-    SyncCloudCoverageTweak(plan, /*addIfMissing=*/true);
+    if (FeatureTweak* const clouds = FindTweak(plan, "VolumetricCloud")) {
+        UpsertTweakKey(*clouds, "coverage", FormatDouble(plan.cloudCoverage), true);
+    }
 }
 
 BigWorldPlan SanitizeBigWorldPlan(BigWorldPlan plan)
 {
     const BigWorldPlan defaults;
     plan.cloudCoverage = Bounded(plan.cloudCoverage, TierCloudCoverage(plan.quality), 0.0, 1.0);
+    plan.cloudShadowRangeKm = Bounded(plan.cloudShadowRangeKm, defaults.cloudShadowRangeKm, 4.0, 100.0);
+    plan.cloudShadowSoftness = Bounded(plan.cloudShadowSoftness, defaults.cloudShadowSoftness, 0.0, 4.0);
+    plan.cloudSunRays = Bounded(plan.cloudSunRays, defaults.cloudSunRays, 0.0, 3.0);
+    plan.cloudShaftMist = Bounded(plan.cloudShaftMist, TierCloudShaftMist(plan.quality), 0.0, 4.0);
+    plan.bloomThreshold = Bounded(plan.bloomThreshold, defaults.bloomThreshold, 0.0, 16.0);
+    plan.volumetricMaxDistance = Bounded(plan.volumetricMaxDistance, defaults.volumetricMaxDistance, 1.0, 2000.0);
+    plan.volumetricDensity = Bounded(plan.volumetricDensity, defaults.volumetricDensity, 0.0, 1.0);
+    plan.volumetricAnisotropyG = Bounded(plan.volumetricAnisotropyG, defaults.volumetricAnisotropyG, -0.95, 0.95);
+    plan.volumetricShadowSamples = NearestShadowSamples(plan.volumetricShadowSamples);
+    plan.volumetricStrength = Bounded(plan.volumetricStrength, defaults.volumetricStrength, 0.0, 1.0);
     plan.spotX = Bounded(plan.spotX, defaults.spotX, -15000.0, 15000.0);
     plan.spotZ = Bounded(plan.spotZ, defaults.spotZ, -15000.0, 15000.0);
     plan.heightAboveGround = Bounded(plan.heightAboveGround, defaults.heightAboveGround, 1.0, 2000.0);
@@ -174,10 +277,10 @@ BigWorldPlan SanitizeBigWorldPlan(BigWorldPlan plan)
     plan.waterWaitSeconds = Bounded(plan.waterWaitSeconds, defaults.waterWaitSeconds, 1.0, 600.0);
     plan.grassWaitSeconds = Bounded(plan.grassWaitSeconds, defaults.grassWaitSeconds, 1.0, 600.0);
     if (plan.terrainProfile.empty()) {
-        plan.terrainProfile = defaults.terrainProfile;
+        plan.terrainProfile = TierTerrainProfile(plan.quality);
     }
     std::erase_if(plan.tweaks, [](const FeatureTweak& t) { return t.feature.empty() || t.values.empty(); });
-    SyncCloudCoverageTweak(plan, /*addIfMissing=*/false);
+    SyncPlanTweaks(plan);
     return plan;
 }
 

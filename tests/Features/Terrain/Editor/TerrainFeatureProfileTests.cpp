@@ -36,6 +36,26 @@ TEST(TerrainFeatureProfileTests, FullProfileSwitchesNothingOff)
     EXPECT_TRUE(PlanTerrainFeatureSwitch(terrain::TerrainProfile::Full, AllFeatures()).empty());
 }
 
+TEST(TerrainFeatureProfileTests, ScenicKeepsVolumetricLightAndSwitchesOffSsgiAndGtao)
+{
+    const std::vector<std::string> off = PlanTerrainFeatureSwitch(terrain::TerrainProfile::Scenic, AllFeatures());
+    EXPECT_TRUE(Has(off, "Ssgi"));
+    EXPECT_TRUE(Has(off, "Gtao"));
+    EXPECT_FALSE(Has(off, "VolumetricLight"));
+    EXPECT_FALSE(Has(off, "Atmosphere"));
+    EXPECT_FALSE(Has(off, "Shadow"));
+    EXPECT_FALSE(Has(off, "ToneMapping"));
+    EXPECT_FALSE(Has(off, "GpuDrivenScene"));
+
+    const std::vector<RenderFeatureDebugEntry> dotted{ Feature("VolumetricLight.Volume"),
+        Feature("VolumetricLight.Composite"), Feature("Ssgi.Trace"), Feature("Gtao.Occlusion") };
+    const std::vector<std::string> dottedOff = PlanTerrainFeatureSwitch(terrain::TerrainProfile::Scenic, dotted);
+    EXPECT_TRUE(Has(dottedOff, "Ssgi.Trace"));
+    EXPECT_TRUE(Has(dottedOff, "Gtao.Occlusion"));
+    EXPECT_FALSE(Has(dottedOff, "VolumetricLight.Volume"));
+    EXPECT_FALSE(Has(dottedOff, "VolumetricLight.Composite"));
+}
+
 TEST(TerrainFeatureProfileTests, LeanSwitchesOffTheHeavyScreenSpaceAndVolumeFeaturesOnly)
 {
     const std::vector<std::string> off = PlanTerrainFeatureSwitch(terrain::TerrainProfile::Lean, AllFeatures());

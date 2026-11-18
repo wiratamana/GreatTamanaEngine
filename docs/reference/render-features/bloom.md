@@ -1,14 +1,14 @@
 # Bloom
 
 > Glow around very bright pixels. For anyone who tunes glow, or sees a halo or a flooded frame.
-> Verified against code: 2026-11-03
+> Verified against code: 2026-11-17
 
 ## TL;DR
 - Feature `Bloom` in `src/Features/Bloom/`. Runs in `PostComposite` before `ToneMapping`.
 - Input is linear HDR scene color. Output is added on top (`Additive`). Pixels below the threshold add nothing.
 - It knows nothing about any model or material. Anything that outputs HDR above the threshold glows.
 - Steps: bright pass at half size, down chain (13-tap), up chain (3x3 tent, additive), blit into the private target.
-- Input radiance is clamped to 64, so the sun disc cannot flood the frame.
+- Bright-pass excess rolls off smoothly toward 24 (`kBloomMaxRadiance`), so the sun disc and bright cloud blobs cannot flood the frame or stamp a flat halo.
 
 ## Where in the frame
 
@@ -33,10 +33,11 @@ Pass names: `Bloom.Prefilter`, `Bloom.Down0`..`Bloom.Down4`, `Bloom.Up0`..`Bloom
 | `intensity` | 0.30 | 0..4 | Multiplier on the glow that is added. 0 declares nothing |
 | `levels` | 5 | 2..6 | Mip chain length. Reduced when the view is small |
 
-- Soft threshold: `kept = max(q, b - t) / b`, with `q = clamp(b - t + k, 0, 2k)^2 / (4k)`. `b` is the max channel, `t` the threshold, `k = t * knee`.
-- The bright pass averages 4 pixels with a Karis weight (`1 / (1 + luma)`) to suppress single hot pixels.
+- Soft threshold: `w = max(q, b - t) / b`, with `q = clamp(b - t + k, 0, 2k)^2 / (4k)`. `b` is the max channel, `t` the threshold, `k = t * knee`.
+- HDR rolloff: `kept = b * w` is compressed by `m / (m + kept)` with `m = 24` (`kBloomMaxRadiance`), leaving normal highlights near `1..3` almost unchanged while keeping extreme outliers smooth and bounded.
+- The bright pass then averages 4 pixels with a Karis weight (`1 / (1 + luma)`) to suppress single hot pixels.
 - A view whose last mip would be smaller than 2 pixels loses levels. Under 2 levels it reports `ExtentTooSmall`.
-- Tests pin the threshold curve and the push block layouts to the shader text.
+- Tests pin the threshold curve, HDR rolloff and push block layouts to the shader text.
 
 ## Debug keys
 - Writable: `enabled`, `threshold`, `knee`, `intensity`, `levels`. Values are clamped. A bad key or value is HTTP 400 and applies nothing. Action: `reset_defaults`.

@@ -20,6 +20,9 @@ constexpr const char* kLogCategory = "TerrainFeatures";
 // Culling feature keys the terrain scene reads back and rewrites.
 constexpr std::array<std::string_view, 5> kSettingKeys{ "enabled", "mode", "cone", "collectStats", "debugView" };
 
+// Screen-space indirect passes the scenic profile turns off while keeping volumetric light.
+constexpr std::array<std::string_view, 2> kScenicPrefixes{ "Ssgi", "Gtao" };
+
 // The fixed-cost features that hurt most on an integrated GPU.
 constexpr std::array<std::string_view, 3> kLeanPrefixes{ "VolumetricLight", "Ssgi", "Gtao" };
 
@@ -68,9 +71,11 @@ std::vector<std::string> PlanTerrainFeatureSwitch(
         if (!entry.enabled) {
             continue;
         }
-        const bool lean = StartsWithAny(entry.name, kLeanPrefixes);
-        const bool geometryOnly = profile == terrain::TerrainProfile::GeometryOnly && StartsWithAny(entry.name, kGeometryOnlyPrefixes);
-        if (lean || geometryOnly) {
+        const bool scenic = profile == terrain::TerrainProfile::Scenic && StartsWithAny(entry.name, kScenicPrefixes);
+        const bool lean = profile == terrain::TerrainProfile::Lean && StartsWithAny(entry.name, kLeanPrefixes);
+        const bool geometryOnly =
+            profile == terrain::TerrainProfile::GeometryOnly && StartsWithAny(entry.name, kGeometryOnlyPrefixes);
+        if (scenic || lean || geometryOnly) {
             off.push_back(entry.name);
         }
     }
