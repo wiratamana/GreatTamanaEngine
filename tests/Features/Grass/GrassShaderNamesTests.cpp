@@ -218,6 +218,7 @@ TEST(GrassShaderNamesTest, ShaderTextCarriesTheSharedConstants)
     EXPECT_EQ(cullText.find("sFadeBase"), std::string::npos);
     EXPECT_EQ(cullText.find("fadeLod"), std::string::npos);
     EXPECT_NE(cullText.find("params.lodFar.x"), std::string::npos);
+    EXPECT_NE(cullText.find("CloudSunTransmittance(cloudShadowMap,"), std::string::npos);
 
     const std::string shadowVertText = ReadText((shaderDir / "GrassShadow.vert").string().c_str());
     EXPECT_EQ(shadowVertText.find("primaryLod"), std::string::npos);

@@ -1721,11 +1721,16 @@ TEST(VolumetricCloudEndpointTest, ExposesShaftHighSunKeepAndReadOnlyShaftState)
     const fx::FeatureDebugResult state = endpoint->GetState();
     ASSERT_TRUE(state.ok);
     for (const char* key : { "forwardG", "shaftHighSunKeep", "game.sunUp", "game.shaftStrength", "game.beamHazePerKm",
-             "game.shaftHazePerM" }) {
+             "game.shaftHazePerM", "game.shadow.extentM", "game.shadow.texelM", "game.shadow.nearExtentM",
+             "game.shadow.nearTexelM" }) {
         ASSERT_NE(findField(state, key), nullptr) << key;
     }
     EXPECT_NEAR(std::get<double>(findField(state, "forwardG")->value), 0.65, 1e-6);
     EXPECT_NEAR(std::get<double>(findField(state, "shaftHighSunKeep")->value), 0.7, 1e-6);
+    EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "game.shadow.extentM")->value), 0.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "game.shadow.texelM")->value), 0.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "game.shadow.nearExtentM")->value), 0.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "game.shadow.nearTexelM")->value), 0.0);
 
     const std::vector<fx::FeatureDebugArg> validSet{ { "shaftHighSunKeep", "0.45" } };
     const fx::FeatureDebugResult updated = endpoint->Set(validSet);
@@ -1737,7 +1742,8 @@ TEST(VolumetricCloudEndpointTest, ExposesShaftHighSunKeepAndReadOnlyShaftState)
     ASSERT_TRUE(clamped.ok);
     EXPECT_DOUBLE_EQ(std::get<double>(findField(clamped, "shaftHighSunKeep")->value), 1.0);
 
-    for (const char* roKey : { "game.sunUp", "game.shaftStrength", "game.beamHazePerKm", "game.shaftHazePerM" }) {
+    for (const char* roKey : { "game.sunUp", "game.shaftStrength", "game.beamHazePerKm", "game.shaftHazePerM",
+             "game.shadow.extentM", "game.shadow.texelM", "game.shadow.nearExtentM", "game.shadow.nearTexelM" }) {
         const std::vector<fx::FeatureDebugArg> roSet{ { roKey, "0.5" } };
         const fx::FeatureDebugResult bad = endpoint->Set(roSet);
         EXPECT_FALSE(bad.ok) << roKey;
@@ -1760,6 +1766,205 @@ TEST(VolumetricCloudShaderTest, TempDebugHooksAndAirDesaturationAreGoneAndEnergy
     EXPECT_NE(march.find("src = BoundCloudLuma(src, kMaxSourceLuma);"), std::string::npos);
     EXPECT_NE(lighting.find("const float kSilverPhaseCap = 10.0;"), std::string::npos);
     EXPECT_NE(lighting.find("const float kMaxSourceLuma = 40.0;"), std::string::npos);
+}
+
+TEST(VolumetricCloudShadowNearTest, ConstantsAndNearGridShareTheSnappedCentre)
+{
+    EXPECT_EQ(kCloudShadowMapSize, 128u);
+    EXPECT_EQ(kCloudShadowNearScale, 8u);
+    EXPECT_EQ(kCloudShadowMapRows, 256u);
+    EXPECT_FLOAT_EQ(kCloudShadowFarEdgeFade, 0.1f);
+    EXPECT_FLOAT_EQ(kCloudShadowNearEdgeFade, 0.15f);
+    EXPECT_FLOAT_EQ(CloudShadowNearExtentM(24000.0f), 3000.0f);
+    EXPECT_FLOAT_EQ(CloudShadowNearTexelM(187.5f), 23.4375f);
+
+    const CloudShadowMap defaults;
+    EXPECT_FLOAT_EQ(defaults.nearScale, 8.0f);
+    EXPECT_EQ(defaults.mapRows, 256u);
+
+    for (const float rangeKm : { 24.0f, 8.0f, 12.0f }) {
+        VolumetricCloudSettings s;
+        s.layerBaseM = 1500.0f;
+        s.layerTopM = 5000.0f;
+        s.shadowRangeKm = rangeKm;
+        for (const Vec3& eye : { Vec3{ 137.0f, 420.0f, -891.0f }, Vec3{ -2000.0f, 12.0f, -800.0f } }) {
+            for (const Vec3& rawSun : { Vec3{ 0.0f, 1.0f, 0.0f }, Vec3{ 0.4f, 0.57f, -0.71f } }) {
+                const Vec3 sun = Normalize(rawSun);
+                const CloudShadowGrid grid = MakeCloudShadowGrid(s, eye, sun, kCloudShadowMapSize);
+                EXPECT_FLOAT_EQ(grid.nearTexelM, grid.texelM / static_cast<float>(kCloudShadowNearScale));
+                EXPECT_NEAR(std::abs(std::remainder(grid.centerX, static_cast<double>(grid.texelM))), 0.0, 1e-6);
+                EXPECT_NEAR(std::abs(std::remainder(grid.centerZ, static_cast<double>(grid.texelM))), 0.0, 1e-6);
+                EXPECT_NEAR(std::abs(std::remainder(grid.centerX, static_cast<double>(grid.nearTexelM))), 0.0, 1e-6);
+                EXPECT_NEAR(std::abs(std::remainder(grid.centerZ, static_cast<double>(grid.nearTexelM))), 0.0, 1e-6);
+
+                CloudShadowMap m;
+                m.sunDirection = sun;
+                m.centerX = static_cast<float>(grid.centerX);
+                m.centerZ = static_cast<float>(grid.centerZ);
+                m.extentM = grid.texelM * static_cast<float>(kCloudShadowMapSize);
+                m.layerBaseM = s.layerBaseM;
+                m.layerTopM = s.layerTopM;
+                m.strength = 1.0f;
+
+                const Vec3 atCentre{ m.centerX, 0.5f * (m.layerBaseM + m.layerTopM), m.centerZ };
+                const Vec2 farCentreUv = CloudShadowUv(m, atCentre);
+                const Vec2 nearCentreUv = CloudShadowNearUv(m, atCentre);
+                EXPECT_NEAR(farCentreUv.x, 0.5f, 1e-6f);
+                EXPECT_NEAR(farCentreUv.y, 0.5f, 1e-6f);
+                EXPECT_NEAR(nearCentreUv.x, 0.5f, 1e-6f);
+                EXPECT_NEAR(nearCentreUv.y, 0.5f, 1e-6f);
+
+                const Vec3 probe = eye + Vec3{ 180.0f, -5.0f, -95.0f };
+                const Vec2 farUv = CloudShadowUv(m, probe);
+                const Vec2 nearUv = CloudShadowNearUv(m, probe);
+                EXPECT_NEAR(nearUv.x - 0.5f, (farUv.x - 0.5f) * static_cast<float>(kCloudShadowNearScale), 1e-5f);
+                EXPECT_NEAR(nearUv.y - 0.5f, (farUv.y - 0.5f) * static_cast<float>(kCloudShadowNearScale), 1e-5f);
+            }
+        }
+    }
+}
+
+TEST(VolumetricCloudShadowNearTest, EdgeFadeAndNearBlendAreZeroOutsideAndOneInside)
+{
+    EXPECT_FLOAT_EQ(CloudShadowEdgeFade(Vec2{ -0.01f, 0.5f }, kCloudShadowNearEdgeFade), 0.0f);
+    EXPECT_FLOAT_EQ(CloudShadowEdgeFade(Vec2{ 1.01f, 0.5f }, kCloudShadowNearEdgeFade), 0.0f);
+    EXPECT_FLOAT_EQ(CloudShadowEdgeFade(Vec2{ 0.5f, 0.0f }, kCloudShadowNearEdgeFade), 0.0f);
+    EXPECT_FLOAT_EQ(CloudShadowEdgeFade(Vec2{ 0.5f, 1.0f }, kCloudShadowNearEdgeFade), 0.0f);
+    EXPECT_FLOAT_EQ(CloudShadowEdgeFade(Vec2{ 0.15f, 0.5f }, kCloudShadowNearEdgeFade), 1.0f);
+    EXPECT_FLOAT_EQ(CloudShadowEdgeFade(Vec2{ 0.85f, 0.85f }, kCloudShadowNearEdgeFade), 1.0f);
+    EXPECT_FLOAT_EQ(CloudShadowEdgeFade(Vec2{ 0.5f, 0.5f }, kCloudShadowNearEdgeFade), 1.0f);
+    EXPECT_FLOAT_EQ(CloudShadowEdgeFade(Vec2{ 0.075f, 0.5f }, kCloudShadowNearEdgeFade), 0.5f);
+
+    CloudShadowMap m;
+    m.sunDirection = Vec3::Up();
+    m.extentM = 24000.0f; // Near extent = 3000 m, half-width = 1500 m, inner full-weight half-width = 1050 m.
+    m.layerBaseM = 1500.0f;
+    m.layerTopM = 4500.0f;
+    m.strength = 1.0f;
+
+    EXPECT_FLOAT_EQ(CloudShadowNearBlend(m, Vec3{ 0.0f, 0.0f, 0.0f }), 1.0f);
+    EXPECT_FLOAT_EQ(CloudShadowNearBlend(m, Vec3{ 1000.0f, 0.0f, -1000.0f }), 1.0f);
+    EXPECT_TRUE(CloudShadowNearCovers(m, Vec3{ 0.0f, 0.0f, 0.0f }));
+
+    const float borderBlend = CloudShadowNearBlend(m, Vec3{ 1350.0f, 0.0f, 0.0f });
+    EXPECT_GT(borderBlend, 0.0f);
+    EXPECT_LT(borderBlend, 1.0f);
+    EXPECT_TRUE(CloudShadowNearCovers(m, Vec3{ 1350.0f, 0.0f, 0.0f }));
+
+    EXPECT_FLOAT_EQ(CloudShadowNearBlend(m, Vec3{ 1600.0f, 0.0f, 0.0f }), 0.0f);
+    EXPECT_FALSE(CloudShadowNearCovers(m, Vec3{ 1600.0f, 0.0f, 0.0f }));
+
+    CloudShadowMap legacy = m;
+    legacy.mapRows = kCloudShadowMapSize;
+    EXPECT_FLOAT_EQ(CloudShadowNearBlend(legacy, Vec3{ 0.0f, 0.0f, 0.0f }), 0.0f);
+}
+
+TEST(VolumetricCloudShadowNearTest, CpuLookupTwinKeepsFarBitIdenticalAndResolvesNearSingleClouds)
+{
+    constexpr std::uint32_t kSide = kCloudShadowMapSize;
+    constexpr std::uint32_t kRows = kCloudShadowMapRows;
+    std::vector<float> farOnly(static_cast<std::size_t>(kSide) * kSide, 1.0f);
+    std::vector<float> stacked(static_cast<std::size_t>(kSide) * kRows, 1.0f);
+
+    for (std::uint32_t y = 0; y < kSide; ++y) {
+        for (std::uint32_t x = 0; x < kSide; ++x) {
+            const float v = 0.25f + 0.6f * (static_cast<float>(x) / 127.0f) * (static_cast<float>(y) / 127.0f);
+            farOnly[static_cast<std::size_t>(y) * kSide + x] = v;
+            stacked[static_cast<std::size_t>(y) * kSide + x] = v;
+            stacked[static_cast<std::size_t>(y + kSide) * kSide + x] = 0.05f;
+        }
+    }
+
+    CloudShadowMap m;
+    m.sunDirection = Normalize(Vec3{ 0.2f, 0.9f, -0.1f });
+    m.centerX = 500.0f;
+    m.centerZ = -300.0f;
+    m.extentM = 24000.0f;
+    m.layerBaseM = 1500.0f;
+    m.layerTopM = 4500.0f;
+    m.strength = 1.0f;
+
+    CloudShadowMap mFar = m;
+    mFar.mapRows = kSide;
+    mFar.nearScale = 1.0f;
+
+    // Outside the 3 km near map, stacked 128x256 lookups must stay bit-identical to 128x128 far-only lookups.
+    const float alongGround = 0.5f * (m.layerBaseM + m.layerTopM) / m.sunDirection.y;
+    const float baseReceiverX = m.centerX - m.sunDirection.x * alongGround;
+    const float baseReceiverZ = m.centerZ - m.sunDirection.z * alongGround;
+    for (int step = 0; step < 12; ++step) {
+        const float offsetM = 1650.0f + static_cast<float>(step) * 950.0f;
+        const Vec3 pos{ baseReceiverX + offsetM, 0.0f, baseReceiverZ - 0.5f * offsetM };
+        EXPECT_FLOAT_EQ(
+            SampleCloudSunTransmittance(stacked, kSide, kRows, m, pos),
+            SampleCloudSunTransmittance(farOnly, kSide, kSide, mFar, pos))
+            << step;
+        EXPECT_FLOAT_EQ(
+            SampleCloudSunTransmittanceFast(stacked, kSide, kRows, m, pos, 2.5f),
+            SampleCloudSunTransmittanceFast(farOnly, kSide, kSide, mFar, pos, 2.5f))
+            << step;
+    }
+
+    // A single ~180 m cloud puff written into the near region is resolved, while the far region stays flat.
+    std::fill(farOnly.begin(), farOnly.end(), 0.85f);
+    std::fill(stacked.begin(), stacked.begin() + static_cast<std::size_t>(kSide) * kSide, 0.85f);
+    std::fill(stacked.begin() + static_cast<std::size_t>(kSide) * kSide, stacked.end(), 1.0f);
+    const float nearTexelM = m.extentM / static_cast<float>(kSide * kCloudShadowNearScale);
+    const float puffOffsetX = 200.0f;
+    const float puffOffsetZ = -100.0f;
+    for (std::uint32_t y = 0; y < kSide; ++y) {
+        for (std::uint32_t x = 0; x < kSide; ++x) {
+            const float lx = (static_cast<float>(x) + 0.5f - 0.5f * static_cast<float>(kSide)) * nearTexelM;
+            const float lz = (static_cast<float>(y) + 0.5f - 0.5f * static_cast<float>(kSide)) * nearTexelM;
+            const float dx = lx - puffOffsetX;
+            const float dz = lz - puffOffsetZ;
+            if (dx * dx + dz * dz <= 90.0f * 90.0f) {
+                stacked[static_cast<std::size_t>(y + kSide) * kSide + x] = 0.15f;
+            }
+        }
+    }
+    const Vec3 underPuff{ baseReceiverX + puffOffsetX, 0.0f, baseReceiverZ + puffOffsetZ };
+    const Vec3 besidePuff{ baseReceiverX + puffOffsetX + 240.0f, 0.0f, baseReceiverZ + puffOffsetZ };
+    EXPECT_LT(SampleCloudSunTransmittance(stacked, kSide, kRows, m, underPuff), 0.25f);
+    EXPECT_GT(SampleCloudSunTransmittance(stacked, kSide, kRows, m, besidePuff), 0.95f);
+    EXPECT_NEAR(SampleCloudSunTransmittance(farOnly, kSide, kSide, mFar, underPuff), 0.85f, 1e-5f);
+    EXPECT_NEAR(SampleCloudSunTransmittance(farOnly, kSide, kSide, mFar, besidePuff), 0.85f, 1e-5f);
+
+    // Near region clamping never bleeds across row 127 <-> 128, and the border fade is smooth and monotonic.
+    std::fill(stacked.begin(), stacked.begin() + static_cast<std::size_t>(kSide) * kSide, 0.8f);
+    std::fill(stacked.begin() + static_cast<std::size_t>(kSide) * kSide, stacked.end(), 0.2f);
+    EXPECT_NEAR(SampleCloudShadowRegionCubic(stacked, kSide, kSide, kSide, Vec2{ 0.5f, 0.001f }), 0.2f, 1e-5f);
+
+    float prevT = SampleCloudSunTransmittance(stacked, kSide, kRows, m, Vec3{ baseReceiverX, 0.0f, baseReceiverZ });
+    EXPECT_NEAR(prevT, 0.2f, 1e-5f);
+    for (int step = 1; step <= 160; ++step) {
+        const float x = baseReceiverX + static_cast<float>(step) * 10.0f;
+        const float curT = SampleCloudSunTransmittance(stacked, kSide, kRows, m, Vec3{ x, 0.0f, baseReceiverZ });
+        EXPECT_GE(curT + 1e-6f, prevT) << step;
+        EXPECT_LT(curT - prevT, 0.03f) << step;
+        prevT = curT;
+    }
+    EXPECT_NEAR(prevT, 0.8f, 1e-5f);
+}
+
+TEST(VolumetricCloudShadowNearTest, ShaderLookupAndShadowPassMatchCppConstants)
+{
+    std::ifstream in(std::filesystem::path(GTE_TEST_SHADERS_DIR) / "CloudShadowLookup.glsl", std::ios::binary);
+    ASSERT_TRUE(in.good());
+    const std::string lookup((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_NE(lookup.find("const float kCloudShadowNearScale = 8.0;"), std::string::npos);
+    EXPECT_NE(lookup.find("const float kCloudShadowFarFade = 0.1;"), std::string::npos);
+    EXPECT_NE(lookup.find("const float kCloudShadowNearFade = 0.15;"), std::string::npos);
+    EXPECT_NE(lookup.find("CloudShadowRegionCubic"), std::string::npos);
+    EXPECT_NE(lookup.find("CloudShadowRegionBilinear"), std::string::npos);
+    for (std::size_t at = lookup.find("texture("); at != std::string::npos; at = lookup.find("texture(", at + 1)) {
+        const bool part = at > 0 && (std::isalnum(static_cast<unsigned char>(lookup[at - 1])) || lookup[at - 1] == '_');
+        EXPECT_TRUE(part) << "CloudShadowLookup.glsl uses texture() without an explicit level of detail";
+    }
+
+    const std::string march = ReadShaderText("VolumetricCloud.comp");
+    EXPECT_NE(march.find("const int kShadowNearScale = 8;"), std::string::npos);
+    EXPECT_NE(march.find("CloudNearShadowDensity"), std::string::npos);
 }
 
 } // namespace

@@ -447,6 +447,7 @@ CloudShadowGrid MakeCloudShadowGrid(
 {
     CloudShadowGrid grid;
     grid.texelM = safe.shadowRangeKm * 1000.0f / static_cast<float>(std::max(mapSize, 1u));
+    grid.nearTexelM = CloudShadowNearTexelM(grid.texelM);
     const double texel = static_cast<double>(grid.texelM);
     // The map is read where a receiver's sun ray crosses the layer: centre it on the crossing of the eye's own ray.
     const double sunUp = std::max(static_cast<double>(sunDirection.y), 0.04);

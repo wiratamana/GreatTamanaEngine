@@ -30,7 +30,6 @@ struct VolumetricCloudViewState {
     fx::GpuParams<AtmosphereParametersGpu> shadowAtmosphereParams;
     std::array<fx::PersistentTarget, 2> shadowMap{
         fx::PersistentTarget{ "VolumetricCloud.ShadowMap0" }, fx::PersistentTarget{ "VolumetricCloud.ShadowMap1" } };
-    fx::PersistentTarget shadowAux{ "VolumetricCloud.ShadowAux" };
     CloudShadowGrid shadowGrid;       // Grid of the last map.
     std::uint64_t shadowFrame = 0;    // Frame that wrote it.
     bool shadowGridValid = false;     // The last map is usable as history.
@@ -104,6 +103,7 @@ private:
     fx::ComputeShader m_slice3dShader{ "VolumetricCloudSlice3D" };
     fx::ComputeShader m_slice2dShader{ "VolumetricCloudSlice2D" };
     fx::ViewOutput m_output{ "VolumetricCloud" };
+    fx::ViewOutput m_shadowOutput{ "CloudShadowMap" };
     fx::SceneSlot m_shadowSlot;
     fx::Channel<CloudShadowMap> m_shadowData{ kCloudShadowChannel };
     fx::Channel<WindState> m_windData{ kWindStateChannel };

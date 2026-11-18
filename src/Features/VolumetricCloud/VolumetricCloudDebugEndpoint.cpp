@@ -132,6 +132,10 @@ fx::FeatureDebugResult VolumetricCloudDebugEndpoint::GetState() const
     Add(out, "game.shaftStrength", static_cast<double>(game.shaftStrength));
     Add(out, "game.beamHazePerKm", static_cast<double>(game.beamHazePerKm));
     Add(out, "game.shaftHazePerM", static_cast<double>(game.shaftHazePerM));
+    Add(out, "game.shadow.extentM", static_cast<double>(game.shadowExtentM));
+    Add(out, "game.shadow.texelM", static_cast<double>(game.shadowTexelM));
+    Add(out, "game.shadow.nearExtentM", static_cast<double>(game.shadowNearExtentM));
+    Add(out, "game.shadow.nearTexelM", static_cast<double>(game.shadowNearTexelM));
     Add(out, "scene.status", std::string(StatusName(scene.status)));
     Add(out, "scene.skyLight", std::string(SkyLightName(scene.skyLight)));
     return out;

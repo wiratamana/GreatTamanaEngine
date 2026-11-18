@@ -562,62 +562,114 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
     return vec4(light, transmittance);
 }
 
-// Cloud shadow map mode: each texel holds the sun light that reaches the layer plane at its place. The ray from the
-// place toward the sun is marched through the whole layer with the smooth density (no fine erosion).
+// Cloud shadow map mode: stacked 128x256 map with far region (rows 0..127) and nested 1/8 near region (rows 128..255).
 const int kShadowMaxSteps = 24;
 const float kShadowMinSunY = 0.03;
+const int kShadowNearScale = 8;
+const float kNearShadowBlurScale = 0.4;
+const float kNearShadowMsWeight = 0.38;
+const float kNearShadowMsDecay = 0.10;
 
 float ShadowNoise(vec2 p)
 {
     return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
 }
 
-vec4 ShadowHistoryAt(vec2 uv, ivec2 size)
+vec4 ShadowHistoryAt(vec2 uv, int rowOffset, int side)
 {
-    vec2 p = uv * vec2(size) - 0.5;
+    vec2 p = uv * float(side) - 0.5;
     ivec2 i0 = ivec2(floor(p));
     vec2 f = p - vec2(i0);
-    ivec2 hi = size - 1;
-    vec4 a = texelFetch(shadowHistory, clamp(i0, ivec2(0), hi), 0);
-    vec4 b = texelFetch(shadowHistory, clamp(i0 + ivec2(1, 0), ivec2(0), hi), 0);
-    vec4 c = texelFetch(shadowHistory, clamp(i0 + ivec2(0, 1), ivec2(0), hi), 0);
-    vec4 d = texelFetch(shadowHistory, clamp(i0 + ivec2(1, 1), ivec2(0), hi), 0);
+    ivec2 hi = ivec2(side - 1);
+    ivec2 c00 = clamp(i0, ivec2(0), hi);
+    ivec2 c10 = clamp(i0 + ivec2(1, 0), ivec2(0), hi);
+    ivec2 c01 = clamp(i0 + ivec2(0, 1), ivec2(0), hi);
+    ivec2 c11 = clamp(i0 + ivec2(1, 1), ivec2(0), hi);
+    vec4 a = texelFetch(shadowHistory, ivec2(c00.x, c00.y + rowOffset), 0);
+    vec4 b = texelFetch(shadowHistory, ivec2(c10.x, c10.y + rowOffset), 0);
+    vec4 c = texelFetch(shadowHistory, ivec2(c01.x, c01.y + rowOffset), 0);
+    vec4 d = texelFetch(shadowHistory, ivec2(c11.x, c11.y + rowOffset), 0);
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// Near shadow density: billow, wisp and curl erosion resolve 100..300 m puffs and gaps inside cloud masses.
+float CloudNearShadowDensity(vec3 position)
+{
+    vec2 offset = position.xz - params.eyeAndPlanetRadius.xz;
+    float altitude = Altitude(dot(offset, offset), position.y);
+    float h = Saturate((altitude - params.layer.x) / max(params.layer.y - params.layer.x, kMinWidth));
+    float factor;
+    float shape = CloudShape(position, h, factor);
+    if (shape * factor <= 0.0) {
+        return 0.0;
+    }
+    vec2 wind = params.weather.yz;
+    vec2 shear = params.structure.zw * h;
+    vec3 world = vec3(position.x + wind.x + shear.x, altitude / params.structure2.y, position.z + wind.y + shear.y);
+    vec3 curl = textureLod(curlMap, world.xz / params.detailShape.y, 0.0).rgb * 2.0 - 1.0;
+    world += vec3(curl.x, curl.z * 0.5, curl.y) * (params.detailShape.x * (1.0 - 0.5 * h));
+    vec4 dn = textureLod(detailVolume, world / params.noise.y, 0.0);
+    float billow = dn.r * 0.6 + dn.g * 0.4;
+    float wisp = dn.b * 0.6 + dn.a * 0.4;
+    float billowErosion = mix(billow, 1.0 - billow, Saturate(h * 5.0));
+    float wispErosion = 1.0 - wisp;
+    float wispShare = params.detailShape.z * Saturate(1.2 - 1.6 * shape + 0.5 * Saturate((h - 0.7) * 3.0));
+    float rawErosion = mix(billowErosion, wispErosion, wispShare);
+    float rimErosion = rawErosion * params.noise.z * exp(-params.weather.w * 0.75) * mix(params.structure2.x, 1.0, 1.0 - shape);
+    float body = Saturate(Remap(shape, rimErosion, 1.0, 0.0, 1.0));
+    body *= 1.0 - 0.55 * billowErosion * Saturate(params.noise.z);
+    float smallLift = 1.0 + (1.0 - gCloudSize) * (1.0 - smoothstep(0.05, 0.35, h));
+    return CloudCurve(body) * factor * smallLift;
 }
 
 void WriteCloudShadow()
 {
     ivec2 size = min(imageSize(lowColorOut), imageSize(lowAuxOut));
+    int side = size.x;
     ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
-    if (texel.x >= size.x || texel.y >= size.y) {
+    if (side <= 0 || texel.x >= side || texel.y >= size.y) {
         return;
     }
-    float texelM = params.shadowGrid.x;
-    vec2 local = (vec2(texel) + 0.5 - 0.5 * vec2(size)) * texelM;
+    int region = texel.y / side;
+    if (region > 1) {
+        return;
+    }
+    bool isNear = (region == 1);
+    int rowOffset = region * side;
+    ivec2 regionTexel = ivec2(texel.x, texel.y - rowOffset);
+    float texelM = isNear ? (params.shadowGrid.x / float(kShadowNearScale)) : params.shadowGrid.x;
+    vec2 local = (vec2(regionTexel) + 0.5 - 0.5 * float(side)) * texelM;
     vec2 xz = params.shadowGrid.yz + local;
-    float blend = params.shadowShift.z;
-    bool haveHistory = blend < 0.999;
-    vec2 historyUv = (local + params.shadowShift.xy) / (texelM * vec2(size)) + 0.5;
+    float blend = isNear ? max(params.shadowShift.z, 0.45) : params.shadowShift.z;
+    ivec2 historySize = textureSize(shadowHistory, 0);
+    bool haveHistory = blend < 0.999 && historySize.x == side && historySize.y >= rowOffset + side;
+    vec2 historyUv = (local + params.shadowShift.xy) / (texelM * float(side)) + 0.5;
     if (haveHistory && !(all(greaterThanEqual(historyUv, vec2(0.0))) && all(lessThanEqual(historyUv, vec2(1.0))))) {
         haveHistory = false;
     }
-    ivec2 historySize = textureSize(shadowHistory, 0);
-    uint interval = max(uint(params.shadowTune.y + 0.5), 1u);
+    uint baseInterval = max(uint(params.shadowTune.y + 0.5), 1u);
+    uint interval = (isNear && baseInterval > 1u) ? (baseInterval + 1u) : baseInterval;
     // Whole 8 x 8 tiles take their turn together, so a skipped tile costs nothing.
-    uint phase = (gl_WorkGroupID.x + 3u * gl_WorkGroupID.y) % interval;
+    uint localGroupY = uint(regionTexel.y) >> 3u;
+    uint phase = (gl_WorkGroupID.x + 3u * localGroupY) % interval;
     if (haveHistory && (params.counts.y % interval) != phase) {
-        vec4 carried = ShadowHistoryAt(historyUv, historySize);
+        vec4 carried = ShadowHistoryAt(historyUv, rowOffset, side);
         imageStore(lowColorOut, texel, carried);
-        imageStore(lowAuxOut, texel, vec4(carried.g, 0.0, 0.0, 0.0));
+        imageStore(lowAuxOut, texel, vec4(vec3(carried.r), 1.0));
         return;
     }
-    // The history of a texel that is redone is blurred a little (a tent of about one texel): the noise of the
-    // few samples of each update averages out and the shadow edge stays soft.
+    // Far history gets ~0.5 texel smoothing; near history uses a tighter filter to preserve 100..300 m features.
     vec4 previous = vec4(1.0, 0.0, 0.0, 1.0);
+    float softness = isNear ? (params.shadowTune.x * kNearShadowBlurScale) : params.shadowTune.x;
     if (haveHistory) {
-        vec2 o = vec2(0.5 * clamp(params.shadowTune.x / 1.5, 0.0, 2.0)) / vec2(historySize);
-        previous = 0.25 * (ShadowHistoryAt(historyUv + vec2(o.x, o.y), historySize) + ShadowHistoryAt(historyUv + vec2(-o.x, o.y), historySize)
-            + ShadowHistoryAt(historyUv + vec2(o.x, -o.y), historySize) + ShadowHistoryAt(historyUv + vec2(-o.x, -o.y), historySize));
+        float tentTexels = isNear
+            ? (0.2 * clamp(softness, 0.0, 1.0))
+            : (0.5 * clamp(params.shadowTune.x / 1.5, 0.0, 2.0));
+        vec2 o = vec2(tentTexels / float(side));
+        previous = 0.25 * (ShadowHistoryAt(historyUv + vec2(o.x, o.y), rowOffset, side)
+            + ShadowHistoryAt(historyUv + vec2(-o.x, o.y), rowOffset, side)
+            + ShadowHistoryAt(historyUv + vec2(o.x, -o.y), rowOffset, side)
+            + ShadowHistoryAt(historyUv + vec2(-o.x, -o.y), rowOffset, side));
     }
 
     vec3 sun = params.sunDirectionAndIntensity.xyz;
@@ -628,23 +680,39 @@ void WriteCloudShadow()
     float sBottom = (base - mid) / sunY;
     float sTop = (top - mid) / sunY;
     int steps = clamp(int(params.shadowTune.z + 0.5), 1, kShadowMaxSteps);
-    float segment = (sTop - sBottom) / float(steps);
+    float span = sTop - sBottom;
     float frame = float(params.counts.y & 1023u);
-    vec2 noiseSeed = vec2(texel) + frame * vec2(5.588238, 3.1416);
+    vec2 noiseSeed = vec2(regionTexel) + frame * vec2(5.588238, 3.1416);
     float along = ShadowNoise(noiseSeed);
     float angle = 6.2831853 * ShadowNoise(noiseSeed + 17.0);
-    vec2 blur = vec2(cos(angle), sin(angle)) * sqrt(ShadowNoise(noiseSeed + 41.0)) * params.shadowTune.x * texelM;
+    vec2 blur = vec2(cos(angle), sin(angle)) * sqrt(ShadowNoise(noiseSeed + 41.0)) * softness * texelM;
     float opticalDepth = 0.0;
-    for (int i = 0; i < steps; ++i) {
-        float s = sBottom + (float(i) + along) * segment;
-        vec3 position = vec3(xz.x + blur.x + sun.x * s, mid + sun.y * s, xz.y + blur.y + sun.z * s);
-        opticalDepth += CloudLightDensity(position) * segment;
+    if (isNear) {
+        float du = 1.0 / float(steps);
+        for (int i = 0; i < steps; ++i) {
+            float u = (float(i) + along) * du;
+            float hFrac = (0.55 + 0.45 * u) * u;
+            float ds = (0.55 + 0.90 * u) * du * span;
+            float s = sBottom + hFrac * span;
+            vec3 position = vec3(xz.x + blur.x + sun.x * s, mid + sun.y * s, xz.y + blur.y + sun.z * s);
+            opticalDepth += CloudNearShadowDensity(position) * ds;
+        }
+    } else {
+        float segment = span / float(steps);
+        for (int i = 0; i < steps; ++i) {
+            float s = sBottom + (float(i) + along) * segment;
+            vec3 position = vec3(xz.x + blur.x + sun.x * s, mid + sun.y * s, xz.y + blur.y + sun.z * s);
+            opticalDepth += CloudLightDensity(position) * segment;
+        }
     }
     opticalDepth *= params.density.y * params.shadowShift.w;
-    vec4 current = vec4(exp(-opticalDepth), opticalDepth, 0.0, 1.0);
+    float transmittance = isNear
+        ? mix(exp(-opticalDepth), exp(-opticalDepth * kNearShadowMsDecay), kNearShadowMsWeight)
+        : exp(-opticalDepth);
+    vec4 current = vec4(transmittance, opticalDepth, 0.0, 1.0);
     vec4 result = haveHistory ? mix(previous, current, blend) : current;
     imageStore(lowColorOut, texel, result);
-    imageStore(lowAuxOut, texel, vec4(result.g, 0.0, 0.0, 0.0));
+    imageStore(lowAuxOut, texel, vec4(vec3(result.r), 1.0));
 }
 
 void main()

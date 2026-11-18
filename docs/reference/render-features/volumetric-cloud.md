@@ -172,7 +172,7 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `airScale` | 1 | 0..50 | Mode 1: factor on the air's scattering and extinction between the eye and a cloud |
 | `skyAmbient` | 3.5 | 0..10 | Mode 1: factor on the sky light that reaches the clouds (at the reference sky intensity 6, whatever `skyIntensity` the Atmosphere shows) |
 | `shadowStrength` | 1 | 0..1 | Cloud shadows: how much of the sun a receiver under a thick cloud loses. 0 = no shadow map is made (no cost) |
-| `shadowRangeKm` | 24 | 4..100 | Width of the shadow map around the camera (128 x 128 texels). Beyond its edge the sun is not shadowed |
+| `shadowRangeKm` | 24 | 4..100 | Far width of the 128 x 256 shadow map around the camera (rows 0..127 far, rows 128..255 nested 1/8 near map). Beyond the far edge the sun is not shadowed |
 | `shadowSoftness` | 1.5 | 0..4 | Edge blur of the cloud shadow in map texels |
 | `shadowUpdate` | 3 | 1..4 | Each 8 x 8 texel tile of the map is redone once per this many frames. 1 = every frame (2.2 ms), 4 = about 1 ms |
 | `shadowDensity` | 1 | 0.1..8 | Factor on the optical depth of the shadow ray; above 1 darker, harder shadows |
@@ -191,11 +191,11 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 Resolve detail: a pixel that is not marched this frame reads its history texel exactly (positions within 0.004 texel of a texel centre are snapped). Without the snap the 1e-4 texel matrix noise made the rgba16f store round the history down one half-float step on every unmarched frame, which darkened the converged picture the more the lower `freshBlend` was.
 
 ## Cloud shadows
-- The cloud pass also writes a map of the sun light the layer lets through (`VolumetricCloud.Shadow.Dispatch`, a PreOpaque pass; the same compute shader as the march, in a map mode). The map is a 128 x 128 RGBA16F texture (r = sun transmittance, g = optical depth) over the layer plane, centred on the camera and snapped to its texel lattice, so it does not shimmer when the camera moves.
-- Each texel marches the sun ray through the whole layer with the smooth density (no fine erosion), 10 jittered steps, and blends with the history of the last map (shifted by the wind and the grid move). The map is shown to the materials as scene slot 4 and described by the `VolumetricCloud.ShadowMap` channel (`Game/Lighting/CloudShadowMap.h`); the packed numbers sit in the scene uniform block (`cloudShadowGrid`, `cloudShadowLayer`).
-- A lit material reads it in `SunShadowAmount()` (`DirectionalLighting.glsl`, function `CloudSunTransmittance()` in `CloudShadowLookup.glsl`): the receiver's sun ray is followed to the middle of the layer, the map is read there with a cubic B-spline, and the result multiplies the sun term together with the cascade shadow. Ambient light stays. A receiver inside the layer is shaded only by the part above it; above the layer there is no shadow.
-- No map (clouds off, `shadowStrength` 0, sun below 2.4 degrees, pass toggled off) = the slot is the white dummy = no change to any picture. The shadow fades in between sun heights 0.04 and 0.10 (sine of the elevation).
-- Cost on the Iris Xe at 1280x720: about 0.8 ms for the dispatch at the defaults (`shadowUpdate` 3).
+- The cloud pass writes a stacked 128 x 256 RGBA16F map of the sun light the layer lets through (`VolumetricCloud.Shadow.Dispatch`, `PreOpaque` priority 12; `r` = sun transmittance, `g` = optical depth). Rows `0..127` hold the 128 x 128 far map (`shadowRangeKm`, 187.5 m/texel at 24 km); rows `128..255` hold a nested 128 x 128 near map of `1 / kCloudShadowNearScale` (`1/8`) the width (3 km / 23.4 m/texel at 24 km; 1 km / 7.8 m/texel at 8 km) sharing the far map's lattice-snapped centre, so neither region shimmers when the camera moves.
+- Far texels march 10 jittered steps of the smooth density (`shadowUpdate` tile interval); near texels sample billow, wisp and curl detail erosion with base-weighted steps, a tighter penumbra blur (`0.4 x shadowSoftness` in near texels) and forward-scattered transmittance so 100..300 m clouds and sky gaps dapple the ground instead of forming a flat dark slab. The map is bound to scene slot 4, published on `VolumetricCloud.ShadowMap` (`Game/Lighting/CloudShadowMap.h`), and mirrored as grayscale transmittance into `GameViewCloudShadowMap` for `/get_texture`.
+- Every consumer (`DirectionalLighting.glsl`, `GrassCull.comp`, `VolumetricLightInject.comp`, `AtmosphereAerialPerspectiveVolume.comp`, `VolumetricCloudAtmosphere.glsl`) samples through `CloudShadowLookup.glsl` (`CloudSunTransmittance` cubic B-spline or `CloudSunTransmittanceFast` bilinear): receivers inside the near region read rows `128..255` and blend smoothly over the outer 15% border into the unchanged far lookup.
+- No map (clouds off, `shadowStrength` and `shaftStrength` 0, sun below 2.4 degrees, pass toggled off) leaves the white dummy on slot 4 with no change to the picture. The shadow fades in between sun heights 0.04 and 0.10 (sine of elevation).
+- Cost on the Iris Xe at 1280x720: about 1.3 ms total (+0.5 ms over the single 128 x 128 map) at the defaults (`shadowUpdate` 3, near interval 4).
 
 ## Cloud coverage knobs
 | Want | Set |
@@ -237,9 +237,10 @@ Name for `/feature_debug`: `VolumetricCloud`. Actions: `reset_defaults`, `preset
 | `game.skyLight`, `scene.skyLight` | `Standalone` (mode 0), `Atmosphere` (mode 1 in use) or `Unavailable` (mode 1 asked for, no tables, standalone look used) |
 | `game.sunUp` | Sine of the active sun elevation in the last frame |
 | `game.shaftStrength`, `game.beamHazePerKm`, `game.shaftHazePerM` | Published cloud-shaft strength and haze densities of the last frame (`0` when no shadow map is published) |
+| `game.shadow.extentM`, `game.shadow.texelM`, `game.shadow.nearExtentM`, `game.shadow.nearTexelM` | Published far and nested near cloud-shadow map widths and texel sizes in metres (`0` when no shadow map is published) |
 | `game.assets.shape/detail/weather/blueNoise/curl` | Loaded size, or `not loaded` |
 
-Texture for `/get_texture`: `GameViewVolumetricCloud` (also `SceneViewVolumetricCloud`).
+Textures for `/get_texture`: `GameViewVolumetricCloud` (also `SceneViewVolumetricCloud`) and `GameViewCloudShadowMap` (also `SceneViewCloudShadowMap`, 128 x 256: top half far map, bottom half nested 1/8 near map).
 
 ## Quick check
 ```cmd

@@ -312,6 +312,10 @@ struct VolumetricCloudViewSnapshot {
     float shaftStrength = 0.0f;     // Published light-shaft strength of the last frame.
     float beamHazePerKm = 0.0f;     // Published beam-haze density per km of the last frame.
     float shaftHazePerM = 0.0f;     // Published volumetric-light mist extinction per m of the last frame.
+    float shadowExtentM = 0.0f;     // Published far cloud-shadow map width in metres.
+    float shadowTexelM = 0.0f;      // Published far cloud-shadow texel size in metres.
+    float shadowNearExtentM = 0.0f; // Published nested near cloud-shadow map width in metres.
+    float shadowNearTexelM = 0.0f;  // Published nested near cloud-shadow texel size in metres.
 };
 
 // Push constants of the slice viewer shaders (16 bytes).

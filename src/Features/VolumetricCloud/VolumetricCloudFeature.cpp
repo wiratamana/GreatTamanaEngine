@@ -49,6 +49,13 @@ void VolumetricCloudFeature::Setup(fx::FeatureSetup& s)
 
 void VolumetricCloudFeature::PublishWind(fx::PreOpaqueFrame& f)
 {
+    VolumetricCloudViewState& view = m_views.For(f.Scope());
+    if (view.shadowPublishedFrame != f.FrameIndex()) {
+        view.snapshot.shadowExtentM = 0.0f;
+        view.snapshot.shadowTexelM = 0.0f;
+        view.snapshot.shadowNearExtentM = 0.0f;
+        view.snapshot.shadowNearTexelM = 0.0f;
+    }
     // Both views call this in one frame; the drift moves once.
     if (f.FrameIndex() != m_windFrame) {
         m_windFrame = f.FrameIndex();
@@ -78,6 +85,10 @@ VolumetricCloudViewSnapshot VolumetricCloudFeature::Snapshot(rg::ViewScope scope
         snapshot.shaftStrength = 0.0f;
         snapshot.beamHazePerKm = 0.0f;
         snapshot.shaftHazePerM = 0.0f;
+        snapshot.shadowExtentM = 0.0f;
+        snapshot.shadowTexelM = 0.0f;
+        snapshot.shadowNearExtentM = 0.0f;
+        snapshot.shadowNearTexelM = 0.0f;
     }
     return snapshot;
 }
@@ -317,6 +328,10 @@ void VolumetricCloudFeature::ShadowMapPass(fx::PreOpaqueFrame& f)
     view.snapshot.shaftStrength = 0.0f;
     view.snapshot.beamHazePerKm = 0.0f;
     view.snapshot.shaftHazePerM = 0.0f;
+    view.snapshot.shadowExtentM = 0.0f;
+    view.snapshot.shadowTexelM = 0.0f;
+    view.snapshot.shadowNearExtentM = 0.0f;
+    view.snapshot.shadowNearTexelM = 0.0f;
     if (!cfg.enabled || !(cfg.shadowStrength > 0.0f || cfg.shaftStrength > 0.0f) || cfg.debugView != VolumetricCloudDebugView::Off
         || !m_shadowSlot.IsValid() || !f.View().relative.valid || !(sunUp > kCloudShadowFadeSunLow)
         || !f.PassEnabled("VolumetricCloud.Shadow.Dispatch")) {
@@ -337,12 +352,12 @@ void VolumetricCloudFeature::ShadowMapPass(fx::PreOpaqueFrame& f)
         return;
     }
 
-    const Extent2D mapExtent{ kCloudShadowMapSize, kCloudShadowMapSize };
+    const Extent2D mapExtent{ kCloudShadowMapSize, kCloudShadowMapRows };
     const std::uint32_t slot = static_cast<std::uint32_t>(f.FrameIndex() & 1u);
     const fx::Texture current = view.shadowMap[slot].Acquire(f, mapExtent, PixelFormat::RGBA16_Float);
     const fx::Texture previous = view.shadowMap[slot ^ 1u].Acquire(f, mapExtent, PixelFormat::RGBA16_Float);
-    const fx::Texture aux = view.shadowAux.Acquire(f, mapExtent, PixelFormat::RGBA16_Float);
-    if (!current.IsValid() || !previous.IsValid() || !aux.IsValid()) {
+    const fx::Texture debugMap = m_shadowOutput.Acquire(f, mapExtent, PixelFormat::RGBA16_Float);
+    if (!current.IsValid() || !previous.IsValid() || !debugMap.IsValid()) {
         stop();
         return;
     }
@@ -396,7 +411,7 @@ void VolumetricCloudFeature::ShadowMapPass(fx::PreOpaqueFrame& f)
                              .Bind("curlMap", curl)
                              .Bind("shadowHistory", previous)
                              .Bind("lowColorOut", current)
-                             .Bind("lowAuxOut", aux)
+                             .Bind("lowAuxOut", debugMap)
                              .Dispatch(mapExtent);
     if (!written) {
         f.ReportOnce("VolumetricCloud.Shadow.Dispatch was refused");
@@ -424,6 +439,8 @@ void VolumetricCloudFeature::ShadowMapPass(fx::PreOpaqueFrame& f)
     map.shaftHeightM = cfg.shaftHeightM;
     map.beamFill = cfg.shaftFill;
     map.skyFill = cfg.shadowFill;
+    map.nearScale = static_cast<float>(kCloudShadowNearScale);
+    map.mapRows = kCloudShadowMapRows;
     f.PublishToScene(m_shadowSlot, current);
     m_shadowData.Publish(f, map);
     view.shadowPublished = map;
@@ -431,6 +448,10 @@ void VolumetricCloudFeature::ShadowMapPass(fx::PreOpaqueFrame& f)
     view.snapshot.shaftStrength = map.shaftStrength;
     view.snapshot.beamHazePerKm = map.beamHazePerKm;
     view.snapshot.shaftHazePerM = map.shaftHazePerM;
+    view.snapshot.shadowExtentM = map.extentM;
+    view.snapshot.shadowTexelM = shadow.grid.texelM;
+    view.snapshot.shadowNearExtentM = CloudShadowNearExtentM(map.extentM);
+    view.snapshot.shadowNearTexelM = shadow.grid.nearTexelM;
 }
 
 void VolumetricCloudFeature::CompositePass(fx::CompositeFrame& f)

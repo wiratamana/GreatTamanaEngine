@@ -138,6 +138,7 @@ VolumetricCloudParamsGpu MakeVolumetricCloudParams(
 // is a multiple of the texel size, so the texel lattice is fixed in the world and the map does not shimmer.
 struct CloudShadowGrid {
     float texelM = 1.0f;
+    float nearTexelM = 1.0f / static_cast<float>(kCloudShadowNearScale);
     double centerX = 0.0;
     double centerZ = 0.0;
 };

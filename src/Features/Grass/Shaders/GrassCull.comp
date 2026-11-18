@@ -129,7 +129,7 @@ float GrassSunVisibility(vec3 world, vec3 normal, float rnd)
         }
     }
     if (shadow.cloudGrid.w > 0.0) {
-        vis *= CloudSunTransmittanceFast(cloudShadowMap, shadow.cloudGrid, shadow.cloudLayer, shadow.cloudSun.xyz, world);
+        vis *= CloudSunTransmittance(cloudShadowMap, shadow.cloudGrid, shadow.cloudLayer, shadow.cloudSun.xyz, world);
     }
     return clamp(vis, 0.0, 1.0);
 }
