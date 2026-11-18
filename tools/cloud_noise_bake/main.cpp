@@ -299,54 +299,121 @@ Volume BakeCurl(int n) {
     return Pack(n, n, 1, {&r, &g, &b, &a});
 }
 
-// Weather 512^2 (v3): slices of the periodic 3D noise at a fixed z are periodic in x and y.
-//   R coverage : a smooth multi-scale field (Perlin fbm at 3 / 8 / 20 cells, domain warped), so the sky holds huge masses,
-//                medium clouds and small puffs of every size in between, joined by gentle gradients. v2 used cut-off Worley
-//                cells: the result was flat-topped discs of nearly one size ("popcorn") whose straight edges showed as boxes.
-//                The local cap varies smoothly (no plateaus) and stays below 1 so no region becomes a solid sheet.
-//   G high cov.: broad overcast-ish region field (only used when the coverage setting is above 0.5).
-//   B cloud type / peak: 0 = flat stratus-like (low top), 1 = tall cumulus. Regional type field plus the big-mass field, so a
-//                cumulus mass is tallest in the middle and lower at its shoulders.
-//   A density  : 0.45..1 modulation.
-Volume BakeWeather(int n) {
+// Periodic separable 2D Gaussian blur wrapped modulo n on both axes.
+FVol BlurPeriodic2D(const FVol& src, int n, int radius, float sigma) {
+    std::vector<float> kernel(static_cast<std::size_t>(2 * radius + 1));
+    float ksum = 0.0f;
+    const float inv2Sigma2 = 1.0f / (2.0f * sigma * sigma);
+    for (int d = -radius; d <= radius; ++d) {
+        const float w = std::exp(-static_cast<float>(d * d) * inv2Sigma2);
+        kernel[static_cast<std::size_t>(d + radius)] = w;
+        ksum += w;
+    }
+    for (float& w : kernel) w /= ksum;
+
+    const std::size_t stride = static_cast<std::size_t>(n);
+    FVol tmp(src.size()), dst(src.size());
+    ParallelFor(n, [&](int y) {
+        const std::size_t row = static_cast<std::size_t>(y) * stride;
+        for (int x = 0; x < n; ++x) {
+            float acc = 0.0f;
+            for (int d = -radius; d <= radius; ++d)
+                acc += src[row + static_cast<std::size_t>(Wrap(x + d, n))] * kernel[static_cast<std::size_t>(d + radius)];
+            tmp[row + static_cast<std::size_t>(x)] = acc;
+        }
+    });
+    ParallelFor(n, [&](int y) {
+        const std::size_t row = static_cast<std::size_t>(y) * stride;
+        for (int x = 0; x < n; ++x) {
+            float acc = 0.0f;
+            for (int d = -radius; d <= radius; ++d)
+                acc += tmp[static_cast<std::size_t>(Wrap(y + d, n)) * stride + static_cast<std::size_t>(x)] * kernel[static_cast<std::size_t>(d + radius)];
+            dst[row + static_cast<std::size_t>(x)] = acc;
+        }
+    });
+    return dst;
+}
+
+// Weather 512^2: R multi-scale cumulus coverage, G spatially blurred R mass (~900 m radius), B peak type, A density.
+Volume BakeWeather(std::uint32_t size) {
+    const int n = static_cast<int>(size);
+    const std::size_t total = static_cast<std::size_t>(n) * static_cast<std::size_t>(n);
+    const float invN = 1.0f / static_cast<float>(n);
     const float zf = 0.37f;
     auto pf = [&](int base, int oct, std::uint32_t seed) {
         FVol v = Fill(n, n, 1, [=](float x, float y, float) { return PerlinFbm(x, y, zf, base, oct, seed); });
         Stretch(v);
         return v;
     };
-    // Domain warp: periodic displacement keeps the tile period.
-    FVol warpX = pf(3, 3, 201u), warpY = pf(3, 3, 211u);
+    auto normalize = [](FVol& v) {
+        double sum = 0.0;
+        for (float f : v) sum += static_cast<double>(f);
+        const float mean = static_cast<float>(sum / static_cast<double>(v.size()));
+        double var = 0.0;
+        for (float f : v) {
+            const double d = static_cast<double>(f - mean);
+            var += d * d;
+        }
+        const float invSd = 1.0f / static_cast<float>(std::sqrt(std::max(var / static_cast<double>(v.size()), 1e-12)));
+        for (float& f : v) f = (f - mean) * invSd;
+    };
+
+    // Moderate 2-octave periodic warp (<= 0.07 tile) bends cloud streets organically without folding contours.
+    const FVol warpX = pf(3, 2, 201u), warpY = pf(3, 2, 211u);
     auto warped = [&](int base, int oct, std::uint32_t seed, float warp) {
-        FVol v(static_cast<std::size_t>(n) * n);
+        FVol v(total);
         ParallelFor(n, [&](int y) {
+            const std::size_t row = static_cast<std::size_t>(y) * static_cast<std::size_t>(n);
             for (int x = 0; x < n; ++x) {
-                const std::size_t i = static_cast<std::size_t>(y) * n + x;
-                const float fx = static_cast<float>(x) / n + warp * (warpX[i] - 0.5f);
-                const float fy = static_cast<float>(y) / n + warp * (warpY[i] - 0.5f);
+                const std::size_t i = row + static_cast<std::size_t>(x);
+                const float fx = static_cast<float>(x) * invN + warp * (warpX[i] - 0.5f);
+                const float fy = static_cast<float>(y) * invN + warp * (warpY[i] - 0.5f);
                 v[i] = PerlinFbm(fx, fy, zf, base, oct, seed);
             }
         });
-        Stretch(v);
+        normalize(v);
         return v;
     };
-    FVol regional = pf(2, 3, 101u), cap = pf(5, 3, 111u), pg = pf(3, 4, 121u), pt = pf(3, 3, 131u), pd = pf(6, 4, 141u);
-    FVol bigF = warped(3, 3, 401u, 0.16f), midF = warped(8, 3, 411u, 0.10f), smallF = warped(20, 3, 421u, 0.06f);
-    FVol r(regional.size()), g(r.size()), b(r.size()), a(r.size());
-    for (std::size_t i = 0; i < r.size(); ++i) {
-        const float reg = Smoothstep(0.25f, 0.75f, regional[i]);                  // where the sky is busy
-        // One continuous field: huge lobes carry the shape, medium and small lobes ride on them.
-        const float field = 0.56f * bigF[i] + 0.29f * midF[i] + 0.15f * smallF[i] + 0.28f * (reg - 0.5f);
-        const float localCap = 0.40f + 0.28f * cap[i];                            // varies smoothly: no flat plateaus
-        const float body = Smoothstep(0.40f, 0.74f, field);
-        // Sparse small cumulus in the gaps: only the peaks of the small field, weak where the sky is busy.
-        const float puffs = Smoothstep(0.62f, 0.84f, 0.65f * smallF[i] + 0.35f * midF[i]) * 0.55f * (1.15f - reg);
-        r[i] = std::max(body * localCap, puffs);
-        g[i] = Smoothstep(0.58f, 0.85f, pg[i]);
-        // A cloud is about as tall as it is wide: thin, weak coverage (small puffs, shoulders of a mass) gets a low top.
-        const float typeBase = Smoothstep(0.10f, 0.90f, 0.40f * Smoothstep(0.25f, 0.75f, pt[i]) + 0.45f * Smoothstep(0.35f, 0.80f, bigF[i]) + 0.25f * midF[i]);
-        b[i] = typeBase * Smoothstep(0.05f, 0.60f, r[i]);
-        a[i] = 0.45f + 0.55f * pd[i];
+
+    // Multi-scale broken cumulus: macro streets (3), hero clusters (7), cumulus cells (15), fair-weather puffs (26).
+    FVol macroF = warped(3, 2, 401u, 0.07f);
+    for (float& f : macroF) f = 1.6f * std::tanh(f * (1.0f / 1.6f));
+    const FVol mesoF = warped(7, 3, 411u, 0.055f);
+    const FVol cellF = warped(15, 2, 421u, 0.04f);
+    const FVol puffF = warped(26, 2, 431u, 0.025f);
+    const FVol cap = pf(5, 3, 111u), pt = pf(4, 3, 131u), pd = pf(7, 3, 141u);
+
+    FVol combined(total);
+    for (std::size_t i = 0; i < total; ++i)
+        combined[i] = 0.22f * macroF[i] + 0.34f * mesoF[i] + 0.28f * cellF[i] + 0.16f * puffF[i];
+    normalize(combined);
+
+    FVol rRaw(total);
+    for (std::size_t i = 0; i < total; ++i) {
+        const float z = combined[i];
+        const float shoulder = Smoothstep(0.04f, 0.90f, z);
+        const float core = Smoothstep(0.70f, 2.35f, z);
+        const float peakCap = 0.83f + 0.09f * cap[i];
+        const float mainCloud = peakCap * (0.62f * shoulder + 0.38f * core);
+        // Companion puffs keep macro clearings dappled so foreground shadow maps never go completely blank.
+        const float puffMix = 0.808f * puffF[i] + 0.589f * cellF[i];
+        const float companion = Smoothstep(1.40f, 2.35f, puffMix) * (1.0f - Smoothstep(-0.80f, 0.50f, macroF[i])) * 0.52f;
+        rRaw[i] = std::max(mainCloud, companion);
+    }
+
+    // Radius-2 periodic smoothing removes 1-2 texel spikes and stair-step texel corners from R.
+    FVol r = BlurPeriodic2D(rRaw, n, 2, 1.0f);
+
+    // Spatially blurred R (~18 texels on 512) gives shader massAverage true cluster width without holes or sticks.
+    const int blurRadius = std::max(1, static_cast<int>(std::lround(static_cast<double>(n) * 18.0 / 512.0)));
+    const float blurSigma = static_cast<float>(blurRadius) / 3.1f;
+    const FVol blurredR = BlurPeriodic2D(r, n, blurRadius, blurSigma);
+
+    FVol g(total), b(total), a(total);
+    for (std::size_t i = 0; i < total; ++i) {
+        g[i] = std::clamp(blurredR[i] * 1.15f, 0.0f, 1.0f);
+        b[i] = Smoothstep(0.15f, 0.68f, g[i]) * (0.65f + 0.35f * Smoothstep(0.25f, 0.75f, pt[i]));
+        a[i] = 0.55f + 0.45f * Smoothstep(0.20f, 0.85f, 0.6f * pd[i] + 0.4f * g[i]);
     }
     return Pack(n, n, 1, {&r, &g, &b, &a});
 }
