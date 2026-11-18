@@ -225,6 +225,7 @@ protected:
         features.values["VolumetricCloud"]["coverage"] = "0.8";
         features.values["VolumetricCloud"]["shadowRangeKm"] = "24";
         features.values["VolumetricCloud"]["shadowSoftness"] = "1.5";
+        features.values["VolumetricCloud"]["shadowFill"] = "0.25";
         features.values["VolumetricCloud"]["sunRays"] = "0.8";
         features.values["VolumetricCloud"]["sunRaysContrast"] = "1";
         features.values["VolumetricCloud"]["sunRaysDecay"] = "1.5";
@@ -355,6 +356,7 @@ TEST_F(BigWorldDemoTest, SuccessPathReachesReadyAndSwitchesFeaturesOn)
     EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], "0.5");
     EXPECT_EQ(features.values["VolumetricCloud"]["shadowRangeKm"], "8");
     EXPECT_EQ(features.values["VolumetricCloud"]["shadowSoftness"], "0.6");
+    EXPECT_EQ(features.values["VolumetricCloud"]["shadowFill"], "0.4");
     EXPECT_EQ(features.values["VolumetricCloud"]["sunRays"], "1.2");
     EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysContrast"], "2.5");
     EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysDecay"], "1");
@@ -381,6 +383,7 @@ TEST_F(BigWorldDemoTest, EachTierAppliesItsSettingsAndRestoresRoundTripOnClose)
         EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], c.coverage) << QualityName(c.quality);
         EXPECT_EQ(features.values["VolumetricCloud"]["shadowRangeKm"], "8") << QualityName(c.quality);
         EXPECT_EQ(features.values["VolumetricCloud"]["shadowSoftness"], "0.6") << QualityName(c.quality);
+        EXPECT_EQ(features.values["VolumetricCloud"]["shadowFill"], "0.4") << QualityName(c.quality);
         EXPECT_EQ(features.values["VolumetricCloud"]["sunRays"], "1.2") << QualityName(c.quality);
         EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysContrast"], "2.5") << QualityName(c.quality);
         EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysDecay"], "1") << QualityName(c.quality);
@@ -392,6 +395,7 @@ TEST_F(BigWorldDemoTest, EachTierAppliesItsSettingsAndRestoresRoundTripOnClose)
         EXPECT_EQ(features.values["VolumetricCloud"]["enabled"], "false");
         EXPECT_EQ(features.values["VolumetricCloud"]["shadowRangeKm"], "24");
         EXPECT_EQ(features.values["VolumetricCloud"]["shadowSoftness"], "1.5");
+        EXPECT_EQ(features.values["VolumetricCloud"]["shadowFill"], "0.25");
         EXPECT_EQ(features.values["VolumetricCloud"]["sunRays"], "0.8");
         EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysContrast"], "1");
         EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysDecay"], "1.5");
@@ -610,6 +614,7 @@ TEST_F(BigWorldDemoTest, ASceneReplacedWhileReadyRestoresEverythingAndGoesIdle)
     EXPECT_EQ(water.removed.size(), 2u);
     EXPECT_EQ(features.values["VolumetricCloud"]["enabled"], "false");
     EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], "0.8");
+    EXPECT_EQ(features.values["VolumetricCloud"]["shadowFill"], "0.25");
     EXPECT_EQ(features.values["VolumetricCloud"]["sunRays"], "0.8");
     EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysContrast"], "1");
     EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysDecay"], "1.5");
@@ -631,6 +636,7 @@ TEST_F(BigWorldDemoTest, CloseUndoesEveryChange)
     EXPECT_EQ(water.removed.size(), 2u);
     EXPECT_EQ(features.values["VolumetricCloud"]["enabled"], "false");
     EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], "0.8");
+    EXPECT_EQ(features.values["VolumetricCloud"]["shadowFill"], "0.25");
     EXPECT_EQ(features.values["VolumetricCloud"]["sunRays"], "0.8");
     EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysContrast"], "1");
     EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysDecay"], "1.5");
@@ -859,6 +865,7 @@ TEST_F(BigWorldDemoTest, JsonCarriesPhasePlanKeysShadowKeysAndEscapesText)
     EXPECT_NE(json.find("\"cloudCoverage\":0.5"), std::string::npos);
     EXPECT_NE(json.find("\"cloudShadowRangeKm\":8"), std::string::npos);
     EXPECT_NE(json.find("\"cloudShadowSoftness\":0.6"), std::string::npos);
+    EXPECT_NE(json.find("\"cloudShadowFill\":0.4"), std::string::npos);
     EXPECT_NE(json.find("\"cloudSunRays\":1.2"), std::string::npos);
     EXPECT_NE(json.find("\"cloudSunRaysContrast\":2.5"), std::string::npos);
     EXPECT_NE(json.find("\"cloudSunRaysDecay\":1"), std::string::npos);

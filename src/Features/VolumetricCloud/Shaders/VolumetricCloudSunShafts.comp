@@ -19,6 +19,7 @@ layout(binding = 2) uniform sampler2D sceneDepth;
 layout(binding = 3, rgba16f) uniform writeonly image2D shaftsOut;
 
 const float kGoldenRatio = 0.61803398875;
+const float kTapJitterScale = 0.6;
 const float kStepExpRate = 0.9;
 const float kStepExpDenom = 1.45960311; // exp(kStepExpRate) - 1.0.
 const float kCloudOpenLow = 0.15;
@@ -28,7 +29,8 @@ const float kCoreAnisoScale = 1.8;
 const float kOpenSkyBaseline = 0.25;
 const float kThickCloudKeep = 0.65;
 const float kThickOccluderMaxS = 0.5;
-const float kPartialOcclusionVar = 0.12;
+const float kBlockedRampLow = 0.04;
+const float kBlockedRampHigh = 0.45;
 // Standard-Z [0, 1] with no projection bound (assumes nearZ ~ 0.1..0.2 m): <= ~30 m gets 0.25, far mountains 1.0.
 const float kNearAirDepth = 0.995;
 const float kNearAirRange = 0.0042;
@@ -123,7 +125,10 @@ void main()
     vec2 clippedVec = marchVec * sClip;
     float clippedLen = rayLen * sClip;
 
-    float jitter = fract(InterleavedGradientNoise(vec2(pixel)) + fract(mod(frameIndex, 4096.0) * kGoldenRatio));
+    // 2x2-quad noise and 0.6-step amplitude suppress quarter-res dither dots in clear sky corners.
+    vec2 noiseQuad = floor(vec2(pixel) * 0.5);
+    float noise = fract(InterleavedGradientNoise(noiseQuad) + fract(mod(frameIndex, 4096.0) * kGoldenRatio));
+    float jitter = 0.5 + (noise - 0.5) * kTapJitterScale;
     float invTaps = 1.0 / float(max(tapCount, 1));
 
     float sumOpen = 0.0;
@@ -167,12 +172,14 @@ void main()
         * (1.0 - smoothstep(reach * 0.65, reach * 1.25, distToSun));
 
     // Multiplicative baseline removes haze veil; open sky away from the sun core produces rays only on partial occlusion.
+    float blocked = 1.0 - rayFrac;
+    float blockedRamp = smoothstep(kBlockedRampLow, kBlockedRampHigh, blocked);
     float gapSignal = rayVar * sunOpen;
     float litOpen = Saturate(mix(rayFrac, sunOpen, 0.5 * rayVar));
     float gapGain = min(0.18 * contrast, 0.48);
     float remappedOpen = Saturate((litOpen - kOpenSkyBaseline) / (1.0 - kOpenSkyBaseline));
     float shapedBase = remappedOpen > 1e-6 ? pow(remappedOpen, contrast) : 0.0;
-    float partialMask = max(coreHalo, smoothstep(0.0, kPartialOcclusionVar, rayVar));
+    float partialMask = max(coreHalo, blockedRamp);
     float shapedShaft = shapedBase * (1.0 + gapGain * gapSignal) * partialMask;
 
     // Shafts are lit air in front of the scene; thick clouds keep a softer share and near geometry gets less air light.
@@ -182,7 +189,8 @@ void main()
     float ownDepth = SafeFloat(textureLod(sceneDepth, ownUv, 0.0).r, 1.0);
     float nearAirRamp = smoothstep(0.0, 1.0, Saturate((ownDepth - kNearAirDepth) / kNearAirRange));
     float airDistanceWeight = (ownDepth >= kClearDepthThreshold) ? 1.0 : mix(kNearAirMinWeight, 1.0, nearAirRamp);
-    float shaft = shapedShaft * glow * radialEnvelope * inFrontWeight * airDistanceWeight;
+    float blockedWeight = mix(mix(0.35, 1.0, blockedRamp), 1.0, Saturate(coreHalo));
+    float shaft = shapedShaft * glow * radialEnvelope * inFrontWeight * airDistanceWeight * blockedWeight;
 
     vec3 color = sunColor * (intensity * fade * shaft * kShaftStorageScale);
     color = mix(color, color * kHazeTint, hazeMix);

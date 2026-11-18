@@ -95,6 +95,7 @@ void SyncPlanTweaks(BigWorldPlan& plan)
         UpsertTweakKey(*clouds, "coverage", FormatDouble(plan.cloudCoverage), false);
         UpsertTweakKey(*clouds, "shadowRangeKm", FormatDouble(plan.cloudShadowRangeKm), false);
         UpsertTweakKey(*clouds, "shadowSoftness", FormatDouble(plan.cloudShadowSoftness), false);
+        UpsertTweakKey(*clouds, "shadowFill", FormatDouble(plan.cloudShadowFill), false);
         UpsertTweakKey(*clouds, "sunRays", FormatDouble(plan.cloudSunRays), false);
         UpsertTweakKey(*clouds, "sunRaysContrast", FormatDouble(plan.cloudSunRaysContrast), false);
         UpsertTweakKey(*clouds, "sunRaysDecay", FormatDouble(plan.cloudSunRaysDecay), false);
@@ -148,7 +149,7 @@ BigWorldPlan MakeBigWorldPlan(Quality quality)
 
     FeatureTweak clouds;
     clouds.feature = "VolumetricCloud";
-    clouds.restoreKeys = { "enabled", "coverage", "shadowRangeKm", "shadowSoftness", "sunRays",
+    clouds.restoreKeys = { "enabled", "coverage", "shadowRangeKm", "shadowSoftness", "shadowFill", "sunRays",
         "sunRaysContrast", "sunRaysDecay", "sunRaysLength",
         "maxSteps", "resolutionDivisor", "shadowSteps", "shadowUpdate" };
     clouds.values = {
@@ -156,6 +157,7 @@ BigWorldPlan MakeBigWorldPlan(Quality quality)
         { "coverage", FormatDouble(plan.cloudCoverage) },
         { "shadowRangeKm", FormatDouble(plan.cloudShadowRangeKm) },
         { "shadowSoftness", FormatDouble(plan.cloudShadowSoftness) },
+        { "shadowFill", FormatDouble(plan.cloudShadowFill) },
         { "sunRays", FormatDouble(plan.cloudSunRays) },
         { "sunRaysContrast", FormatDouble(plan.cloudSunRaysContrast) },
         { "sunRaysDecay", FormatDouble(plan.cloudSunRaysDecay) },
@@ -198,6 +200,7 @@ BigWorldPlan SanitizeBigWorldPlan(BigWorldPlan plan)
     plan.cloudCoverage = Bounded(plan.cloudCoverage, TierCloudCoverage(plan.quality), 0.0, 1.0);
     plan.cloudShadowRangeKm = Bounded(plan.cloudShadowRangeKm, defaults.cloudShadowRangeKm, 4.0, 100.0);
     plan.cloudShadowSoftness = Bounded(plan.cloudShadowSoftness, defaults.cloudShadowSoftness, 0.0, 4.0);
+    plan.cloudShadowFill = Bounded(plan.cloudShadowFill, defaults.cloudShadowFill, 0.0, 1.0);
     plan.cloudSunRays = Bounded(plan.cloudSunRays, defaults.cloudSunRays, 0.0, 3.0);
     plan.cloudSunRaysContrast = Bounded(plan.cloudSunRaysContrast, defaults.cloudSunRaysContrast, 0.2, 3.0);
     plan.cloudSunRaysDecay = Bounded(plan.cloudSunRaysDecay, defaults.cloudSunRaysDecay, 0.0, 6.0);

@@ -83,6 +83,7 @@ TEST(BigWorldPlanTest, DemoCloudAndBloomDefaultsMatchPlanConstants)
     EXPECT_DOUBLE_EQ(kBloomIntensity, 0.2);
     EXPECT_DOUBLE_EQ(kCloudShadowRangeKm, 8.0);
     EXPECT_DOUBLE_EQ(kCloudShadowSoftness, 0.6);
+    EXPECT_DOUBLE_EQ(kCloudShadowFill, 0.4);
     EXPECT_DOUBLE_EQ(kCloudSunRays, 1.2);
     EXPECT_DOUBLE_EQ(kCloudSunRaysContrast, 2.5);
     EXPECT_DOUBLE_EQ(kCloudSunRaysDecay, 1.0);
@@ -94,6 +95,7 @@ TEST(BigWorldPlanTest, DemoCloudAndBloomDefaultsMatchPlanConstants)
         ASSERT_NE(clouds, nullptr);
         EXPECT_EQ(ValueOf(*clouds, "shadowRangeKm"), "8");
         EXPECT_EQ(ValueOf(*clouds, "shadowSoftness"), "0.6");
+        EXPECT_EQ(ValueOf(*clouds, "shadowFill"), "0.4");
         EXPECT_EQ(ValueOf(*clouds, "sunRays"), "1.2");
         EXPECT_EQ(ValueOf(*clouds, "sunRaysContrast"), "2.5");
         EXPECT_EQ(ValueOf(*clouds, "sunRaysDecay"), "1");
@@ -195,6 +197,7 @@ TEST(BigWorldPlanTest, SanitizeReplacesNonFiniteValuesAndClampsRanges)
     plan.cloudCoverage = 0.28;
     plan.cloudShadowRangeKm = 1.0;
     plan.cloudShadowSoftness = 9.0;
+    plan.cloudShadowFill = 2.0;
     plan.cloudSunRays = -1.0;
     plan.cloudSunRaysContrast = 0.0;
     plan.cloudSunRaysDecay = 9.0;
@@ -211,6 +214,7 @@ TEST(BigWorldPlanTest, SanitizeReplacesNonFiniteValuesAndClampsRanges)
     EXPECT_DOUBLE_EQ(safe.cloudCoverage, 0.28);
     EXPECT_DOUBLE_EQ(safe.cloudShadowRangeKm, 4.0);
     EXPECT_DOUBLE_EQ(safe.cloudShadowSoftness, 4.0);
+    EXPECT_DOUBLE_EQ(safe.cloudShadowFill, 1.0);
     EXPECT_DOUBLE_EQ(safe.cloudSunRays, 0.0);
     EXPECT_DOUBLE_EQ(safe.cloudSunRaysContrast, 0.2);
     EXPECT_DOUBLE_EQ(safe.cloudSunRaysDecay, 6.0);
@@ -219,6 +223,8 @@ TEST(BigWorldPlanTest, SanitizeReplacesNonFiniteValuesAndClampsRanges)
     EXPECT_DOUBLE_EQ(safe.bloomIntensity, 4.0);
     EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricCloud"), "coverage"), "0.28");
     EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricCloud"), "shadowRangeKm"), "4");
+    EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricCloud"), "shadowSoftness"), "4");
+    EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricCloud"), "shadowFill"), "1");
     EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricCloud"), "sunRays"), "0");
     EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricCloud"), "sunRaysContrast"), "0.2");
     EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricCloud"), "sunRaysDecay"), "6");
@@ -233,8 +239,12 @@ TEST(BigWorldPlanTest, SanitizeReplacesNonFiniteValuesAndClampsRanges)
     EXPECT_EQ(safe.terrainProfile, "lean");
 
     BigWorldPlan lean = MakeBigWorldPlan(Quality::Lean);
+    lean.cloudShadowFill = -0.5;
     lean.terrainProfile.clear();
-    EXPECT_EQ(SanitizeBigWorldPlan(lean).terrainProfile, "lean");
+    const BigWorldPlan safeLean = SanitizeBigWorldPlan(lean);
+    EXPECT_DOUBLE_EQ(safeLean.cloudShadowFill, 0.0);
+    EXPECT_EQ(ValueOf(*FindTweak(safeLean, "VolumetricCloud"), "shadowFill"), "0");
+    EXPECT_EQ(safeLean.terrainProfile, "lean");
 }
 
 TEST(BigWorldPlanTest, SanitizeDropsEmptyTweaks)

@@ -23,7 +23,7 @@
 
 Every tier snapshots and restores the render settings it touches:
 - `Bloom`: `enabled` `true`, `threshold` `2.0` (`kBloomThreshold`), `intensity` `0.2` (`kBloomIntensity`) so sunlit clouds do not veil the sky.
-- `VolumetricCloud`: `coverage` (`0.45`–`0.5`), `shadowRangeKm` `8` (`kCloudShadowRangeKm`, ~62.5 m per 128x128 texel), `shadowSoftness` `0.6` (`kCloudShadowSoftness`), `sunRays` `1.2` (`kCloudSunRays`), `sunRaysContrast` `2.5` (`kCloudSunRaysContrast`), `sunRaysDecay` `1.0` (`kCloudSunRaysDecay`), `sunRaysLength` `1.5` (`kCloudSunRaysLength`), plus the tier march levers above.
+- `VolumetricCloud`: `coverage` (`0.45`–`0.5`), `shadowRangeKm` `8` (`kCloudShadowRangeKm`, ~62.5 m per 128x128 texel), `shadowSoftness` `0.6` (`kCloudShadowSoftness`), `shadowFill` `0.4` (`kCloudShadowFill`), `sunRays` `1.2` (`kCloudSunRays`), `sunRaysContrast` `2.5` (`kCloudSunRaysContrast`), `sunRaysDecay` `1.0` (`kCloudSunRaysDecay`), `sunRaysLength` `1.5` (`kCloudSunRaysLength`), plus the tier march levers above.
 - `Grass`: `enabled` `true` and the tier preset.
 
 ## Open and close over HTTP
@@ -36,7 +36,7 @@ Every tier snapshots and restores the render settings it touches:
 `open` returns at once. The terrain opens in that frame; the rest runs in the next frames. Poll `/bigworld/state` until `phase` is `Ready` (about 1.5 s on this machine). `open` and `close` are refused for browser requests. `state` is allowed.
 
 The state has these blocks:
-- `plan`: camera placement, `terrainProfile`, `lake`, `river`, `cloudCoverage`, `cloudShadowRangeKm`, `cloudShadowSoftness`, `cloudSunRays`, `cloudSunRaysContrast`, `cloudSunRaysDecay`, `cloudSunRaysLength`, `bloomThreshold`, `bloomIntensity`.
+- `plan`: camera placement, `terrainProfile`, `lake`, `river`, `cloudCoverage`, `cloudShadowRangeKm`, `cloudShadowSoftness`, `cloudShadowFill`, `cloudSunRays`, `cloudSunRaysContrast`, `cloudSunRaysDecay`, `cloudSunRaysLength`, `bloomThreshold`, `bloomIntensity`.
 - `terrain`: `open`, `nodesResident`, `nodesPending`, `uploadQueue`, `nodesRebuilding`.
 - `water`: `featureConnected`, `bodyCount`, `hasOcean`, `oceanLevel`, `carvePending`, `carveApplies`.
 - `grass`: render `status`, `tilePresent`, `seaLevel`, `tileRevision`, `blades` (LOD0, LOD1, LOD2), `receivesSunShadow`, `receivesCloudShadow`, `castCascades`, `castBlades`.
