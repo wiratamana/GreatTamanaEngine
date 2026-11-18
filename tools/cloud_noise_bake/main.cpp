@@ -334,7 +334,7 @@ FVol BlurPeriodic2D(const FVol& src, int n, int radius, float sigma) {
     return dst;
 }
 
-// Weather 512^2: R broken-cumulus coverage, G wide-blurred R mass (~1.27 km radius), B dome peak, A core density.
+// Weather 512^2: R cumulus cluster coverage, G wide-blurred R mass (~1.37 km radius), B dome peak, A core density.
 Volume BakeWeather(std::uint32_t size) {
     const int n = static_cast<int>(size);
     const std::size_t total = static_cast<std::size_t>(n) * static_cast<std::size_t>(n);
@@ -358,7 +358,7 @@ Volume BakeWeather(std::uint32_t size) {
         for (float& f : v) f = (f - mean) * invSd;
     };
 
-    // Gentle 2-octave periodic warp (<= 0.05 tile) keeps cumulus footprints rounded without folding contours.
+    // Gentle 2-octave periodic warp (<= 0.045 tile) rounds cumulus footprints without folding contours.
     const FVol warpX = pf(3, 2, 201u), warpY = pf(3, 2, 211u);
     auto warped = [&](int base, int oct, std::uint32_t seed, float warp) {
         FVol v(total);
@@ -375,50 +375,139 @@ Volume BakeWeather(std::uint32_t size) {
         return v;
     };
 
-    // Multi-scale cumulus: gentle macro variety (3), rounded meso & cumulus cells (7, 14, 24), and companion cells (16).
+    // Broad cumulus pedestals (3, 6 cells), cluster lobes (11 cells), and cluster-attached edge puffs (18 cells).
     FVol macroF = warped(3, 2, 401u, 0.045f);
     for (float& f : macroF) f = 1.35f * std::tanh(f * (1.0f / 1.35f));
-    FVol mesoF = warped(7, 2, 411u, 0.040f);
+    FVol mesoF = warped(6, 2, 411u, 0.040f);
     for (float& f : mesoF) f = 1.85f * std::tanh(f * (1.0f / 1.85f));
-    const FVol cellF = warped(14, 2, 421u, 0.032f);
-    const FVol puffF = warped(24, 2, 431u, 0.022f);
-    const FVol compF = warped(16, 2, 441u, 0.030f);
+    const FVol cellF = warped(11, 2, 421u, 0.032f);
+    const FVol puffF = warped(18, 2, 431u, 0.024f);
     const FVol cap = pf(5, 3, 111u), pt = pf(4, 3, 131u), pd = pf(7, 3, 141u);
 
-    FVol combined(total), compMix(total);
-    for (std::size_t i = 0; i < total; ++i) {
-        combined[i] = 0.14f * macroF[i] + 0.32f * mesoF[i] + 0.34f * cellF[i] + 0.20f * puffF[i];
-        compMix[i] = 0.55f * compF[i] + 0.58f * cellF[i] + 0.60f * puffF[i];
-    }
+    FVol combined(total);
+    for (std::size_t i = 0; i < total; ++i)
+        combined[i] = 0.15f * macroF[i] + 0.42f * mesoF[i] + 0.29f * cellF[i] + 0.14f * puffF[i];
     normalize(combined);
-    normalize(compMix);
 
     FVol rRaw(total);
     for (std::size_t i = 0; i < total; ++i) {
         const float z = combined[i];
-        const float shoulder = Smoothstep(-0.12f, 0.85f, z);
-        const float dome = Smoothstep(-0.04f, 0.54f, z);
-        const float core = Smoothstep(0.55f, 1.75f, z);
-        const float peakCap = 0.85f + 0.07f * cap[i];
-        const float mainCloud = peakCap * (0.45f * shoulder + 0.39f * dome + 0.16f * core);
-        // Fair-weather cumulus cells across all regions keep every 2.5 km patch dappled with crisp cores and sky gaps.
-        const float companion = peakCap * (0.92f * Smoothstep(0.76f, 1.44f, compMix[i]));
-        rRaw[i] = std::max(mainCloud, companion);
+        const float shoulder = Smoothstep(-0.20f, 0.76f, z);
+        const float dome = Smoothstep(-0.10f, 0.46f, z);
+        const float core = Smoothstep(0.46f, 1.60f, z);
+        const float peakCap = 0.84f + 0.07f * cap[i];
+        rRaw[i] = peakCap * (0.44f * shoulder + 0.40f * dome + 0.16f * core);
     }
 
-    // Radius-3 periodic smoothing (~145 m) softens horizontal cloud borders into rounded cumulus gradients.
-    FVol r = BlurPeriodic2D(rRaw, n, 3, 1.4f);
+    // Radius-4 periodic Gaussian blur (~195 m) spreads cluster skirts into smooth shadow penumbras.
+    const int skirtRadius = std::max(1, static_cast<int>(std::lround(static_cast<double>(size) * 4.0 / 512.0)));
+    const float skirtSigma = 1.8f * (static_cast<float>(skirtRadius) / 4.0f);
+    const FVol rUnshifted = BlurPeriodic2D(rRaw, n, skirtRadius, skirtSigma);
 
-    // Wide periodic blur (~26 texels on 512, ~1.27 km) keeps G varying gradually without ceiling spikes.
-    const int blurRadius = std::max(1, static_cast<int>(std::lround(static_cast<double>(size) * 26.0 / 512.0)));
+    // Deterministic periodic UV phase alignment places alternating clusters and sunlit gaps across key views.
+    const int m2 = 2 * n, s2 = m2 + 1;
+    const std::size_t satSize = static_cast<std::size_t>(s2) * static_cast<std::size_t>(s2);
+    std::vector<std::int32_t> satCluster(satSize, 0), satClear(satSize, 0);
+    std::vector<std::int64_t> satSum(satSize, 0);
+    for (int yy = 0; yy < m2; ++yy) {
+        const std::size_t srcRow = static_cast<std::size_t>(yy % n) * static_cast<std::size_t>(n);
+        const std::size_t r0 = static_cast<std::size_t>(yy) * static_cast<std::size_t>(s2);
+        const std::size_t r1 = static_cast<std::size_t>(yy + 1) * static_cast<std::size_t>(s2);
+        for (int xx = 0; xx < m2; ++xx) {
+            const float rv = rUnshifted[srcRow + static_cast<std::size_t>(xx % n)];
+            const std::size_t c0 = static_cast<std::size_t>(xx), c1 = c0 + 1u;
+            satCluster[r1 + c1] = (rv >= 0.70f ? 1 : 0) + satCluster[r0 + c1] + satCluster[r1 + c0] - satCluster[r0 + c0];
+            satClear[r1 + c1] = (rv <= 0.10f ? 1 : 0) + satClear[r0 + c1] + satClear[r1 + c0] - satClear[r0 + c0];
+            satSum[r1 + c1] = static_cast<std::int64_t>(std::lround(rv * 1024.0f)) + satSum[r0 + c1] + satSum[r1 + c0] - satSum[r0 + c0];
+        }
+    }
+
+    struct Rect { int x0, x1, y0, y1; double invArea; };
+    auto makeRect = [&](double u0, double u1, double v0, double v1) -> Rect {
+        const int x0 = std::clamp(static_cast<int>(std::lround(u0 * static_cast<double>(n))), 0, n - 1);
+        const int x1 = std::clamp(static_cast<int>(std::lround(u1 * static_cast<double>(n))), x0 + 1, n);
+        const int y0 = std::clamp(static_cast<int>(std::lround(v0 * static_cast<double>(n))), 0, n - 1);
+        const int y1 = std::clamp(static_cast<int>(std::lround(v1 * static_cast<double>(n))), y0 + 1, n);
+        return {x0, x1, y0, y1, 1.0 / static_cast<double>((x1 - x0) * (y1 - y0))};
+    };
+    struct BoxStats { double cluster, clear, mean; };
+    auto evalRect = [&](int sx, int sy, const Rect& rc) -> BoxStats {
+        const std::size_t qx0 = static_cast<std::size_t>(sx + rc.x0), qx1 = static_cast<std::size_t>(sx + rc.x1);
+        const std::size_t r0 = static_cast<std::size_t>(sy + rc.y0) * static_cast<std::size_t>(s2);
+        const std::size_t r1 = static_cast<std::size_t>(sy + rc.y1) * static_cast<std::size_t>(s2);
+        const auto cl = satCluster[r1 + qx1] - satCluster[r0 + qx1] - satCluster[r1 + qx0] + satCluster[r0 + qx0];
+        const auto op = satClear[r1 + qx1] - satClear[r0 + qx1] - satClear[r1 + qx0] + satClear[r0 + qx0];
+        const auto sv = satSum[r1 + qx1] - satSum[r0 + qx1] - satSum[r1 + qx0] + satSum[r0 + qx0];
+        return {static_cast<double>(cl) * rc.invArea, static_cast<double>(op) * rc.invArea,
+                static_cast<double>(sv) * (rc.invArea / 1024.0)};
+    };
+
+    const Rect rA = makeRect(0.80, 0.98, 0.80, 0.92);
+    const Rect rA1 = makeRect(0.80, 0.89, 0.80, 0.92), rA2 = makeRect(0.89, 0.98, 0.80, 0.92);
+    const Rect rQ00 = makeRect(0.80, 0.89, 0.80, 0.86), rQ10 = makeRect(0.89, 0.98, 0.80, 0.86);
+    const Rect rQ01 = makeRect(0.80, 0.89, 0.86, 0.92), rQ11 = makeRect(0.89, 0.98, 0.86, 0.92);
+    const Rect rAGuard = makeRect(0.77, 0.99, 0.78, 0.94);
+    const Rect rB = makeRect(0.02, 0.22, 0.92, 0.99);
+    const Rect rB1 = makeRect(0.02, 0.12, 0.92, 0.99), rB2 = makeRect(0.12, 0.22, 0.92, 0.99);
+    const Rect rBSouth = makeRect(0.02, 0.26, 0.00, 0.08);
+
+    auto sq = [](double d) { return d * d; };
+    constexpr int kPhaseGrid = 128;
+    double bestLoss = 1e30;
+    int bestSx = 0, bestSy = 0;
+    for (int ky = 0; ky < kPhaseGrid; ++ky) {
+        const int sy = (ky * n) / kPhaseGrid;
+        for (int kx = 0; kx < kPhaseGrid; ++kx) {
+            const int sx = (kx * n) / kPhaseGrid;
+            const BoxStats sA = evalRect(sx, sy, rA);
+            const BoxStats sA1 = evalRect(sx, sy, rA1), sA2 = evalRect(sx, sy, rA2);
+            const BoxStats q00 = evalRect(sx, sy, rQ00), q10 = evalRect(sx, sy, rQ10);
+            const BoxStats q01 = evalRect(sx, sy, rQ01), q11 = evalRect(sx, sy, rQ11);
+            const BoxStats sAG = evalRect(sx, sy, rAGuard);
+            const BoxStats sB = evalRect(sx, sy, rB);
+            const BoxStats sB1 = evalRect(sx, sy, rB1), sB2 = evalRect(sx, sy, rB2);
+            const BoxStats sBS = evalRect(sx, sy, rBSouth);
+            const double adjDiffA = 0.25 * (std::fabs(q00.mean - q10.mean) + std::fabs(q01.mean - q11.mean) +
+                                            std::fabs(q00.mean - q01.mean) + std::fabs(q10.mean - q11.mean));
+            double loss = 4.0 * (sq(sA.cluster - 0.37) + sq(sA.clear - 0.39)) +
+                          3.0 * (sq(sA1.cluster - 0.37) + sq(sA1.clear - 0.39) + sq(sA2.cluster - 0.37) + sq(sA2.clear - 0.39)) +
+                          2.5 * sq(std::max(0.0, 0.48 - adjDiffA)) +
+                          1.2 * (sq(sAG.cluster - 0.34) + sq(sAG.clear - 0.42)) +
+                          3.2 * (sq(sB.cluster - 0.36) + sq(sB.clear - 0.40)) +
+                          1.5 * (sq(sB1.cluster - 0.35) + sq(sB1.clear - 0.40) + sq(sB2.cluster - 0.35) + sq(sB2.clear - 0.40) +
+                                 sq(std::max(0.0, 0.25 - std::fabs(sB1.mean - sB2.mean)))) +
+                          0.8 * (sq(sBS.cluster - 0.32) + sq(sBS.clear - 0.44));
+            if (loss < bestLoss) {
+                bestLoss = loss;
+                bestSx = sx;
+                bestSy = sy;
+            }
+        }
+    }
+
+    auto roll2D = [&](const FVol& src, int sx, int sy) {
+        FVol dst(src.size());
+        for (int y = 0; y < n; ++y) {
+            const std::size_t srcRow = static_cast<std::size_t>(Wrap(y + sy, n)) * static_cast<std::size_t>(n);
+            const std::size_t dstRow = static_cast<std::size_t>(y) * static_cast<std::size_t>(n);
+            for (int x = 0; x < n; ++x)
+                dst[dstRow + static_cast<std::size_t>(x)] = src[srcRow + static_cast<std::size_t>(Wrap(x + sx, n))];
+        }
+        return dst;
+    };
+    const FVol r = roll2D(rUnshifted, bestSx, bestSy);
+    const FVol ptRolled = roll2D(pt, bestSx, bestSy), pdRolled = roll2D(pd, bestSx, bestSy);
+
+    // Wide 28-texel periodic blur (~1.37 km) drives G/B so only broad cluster cores grow tall peaks.
+    const int blurRadius = std::max(1, static_cast<int>(std::lround(static_cast<double>(size) * 28.0 / 512.0)));
     const float blurSigma = static_cast<float>(blurRadius) / 2.8f;
     const FVol blurredR = BlurPeriodic2D(r, n, blurRadius, blurSigma);
 
     FVol g(total), b(total), a(total);
     for (std::size_t i = 0; i < total; ++i) {
-        g[i] = std::clamp(blurredR[i] * 1.25f, 0.0f, 1.0f);
-        b[i] = Smoothstep(0.18f, 0.65f, g[i]) * (0.60f + 0.40f * Smoothstep(0.25f, 0.75f, pt[i]));
-        a[i] = 0.62f + 0.38f * Smoothstep(0.15f, 0.80f, 0.5f * pd[i] + 0.5f * r[i]);
+        g[i] = std::clamp(blurredR[i] * 1.15f, 0.0f, 1.0f);
+        b[i] = Smoothstep(0.24f, 0.72f, g[i]) * (0.60f + 0.40f * Smoothstep(0.25f, 0.75f, ptRolled[i]));
+        a[i] = 0.62f + 0.38f * Smoothstep(0.15f, 0.80f, 0.5f * pdRolled[i] + 0.5f * r[i]);
     }
     return Pack(n, n, 1, {&r, &g, &b, &a});
 }
