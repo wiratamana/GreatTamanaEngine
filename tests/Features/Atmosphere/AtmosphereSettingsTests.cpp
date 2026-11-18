@@ -26,7 +26,7 @@ TEST(AtmosphereSettingsTest, DefaultsPassThroughUnchanged)
     EXPECT_FLOAT_EQ(s.atmosphereThicknessKm, d.atmosphereThicknessKm);
     EXPECT_FLOAT_EQ(s.miePhaseG, d.miePhaseG);
     EXPECT_FLOAT_EQ(s.skyIntensity, d.skyIntensity);
-    EXPECT_FLOAT_EQ(d.aerialSkyMatch, 0.3f);
+    EXPECT_FLOAT_EQ(d.aerialSkyMatch, 0.0f);
     EXPECT_FLOAT_EQ(s.aerialSkyMatch, d.aerialSkyMatch);
     EXPECT_FLOAT_EQ(s.aerialPerspectiveMaxDistanceKm, d.aerialPerspectiveMaxDistanceKm);
     EXPECT_FLOAT_EQ(s.aerialPerspectiveScatteringExaggeration, d.aerialPerspectiveScatteringExaggeration);
@@ -131,7 +131,7 @@ TEST(AtmosphereSettingsTest, AerialSkyMatchSanitizesUnitRangeAndNonFinite)
     EXPECT_FLOAT_EQ(SanitizeAtmosphereSettings(s).aerialSkyMatch, 1.0f);
     for (const float nonFinite : { kNaN, kInf, -kInf }) {
         s.aerialSkyMatch = nonFinite;
-        EXPECT_FLOAT_EQ(SanitizeAtmosphereSettings(s).aerialSkyMatch, 0.3f);
+        EXPECT_FLOAT_EQ(SanitizeAtmosphereSettings(s).aerialSkyMatch, 0.0f);
     }
 }
 

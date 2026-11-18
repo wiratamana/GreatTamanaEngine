@@ -158,7 +158,7 @@ TEST(BigWorldModuleTest, FeatureAdapterSnapshotsAndRestoresPlanTweaksRoundTrip)
 
     EXPECT_EQ(clouds.ValueText("shadowRangeKm"), "8");
     EXPECT_EQ(clouds.ValueText("shadowSoftness"), "0.6");
-    EXPECT_EQ(clouds.ValueText("shadowFill"), "0.4");
+    EXPECT_EQ(clouds.ValueText("shadowFill"), "0.3");
     EXPECT_EQ(clouds.ValueText("sunRays"), "1.2");
     EXPECT_EQ(clouds.ValueText("sunRaysContrast"), "2.5");
     EXPECT_EQ(clouds.ValueText("sunRaysDecay"), "1");
@@ -225,7 +225,7 @@ TEST(BigWorldModuleTest, OpenCommandParsesCoverageOverrideAndStateSerializesNewK
     EXPECT_NE(state->body.find("\"cloudCoverage\":0.33"), std::string::npos);
     EXPECT_NE(state->body.find("\"cloudShadowRangeKm\":8"), std::string::npos);
     EXPECT_NE(state->body.find("\"cloudShadowSoftness\":0.6"), std::string::npos);
-    EXPECT_NE(state->body.find("\"cloudShadowFill\":0.4"), std::string::npos);
+    EXPECT_NE(state->body.find("\"cloudShadowFill\":0.3"), std::string::npos);
     EXPECT_NE(state->body.find("\"cloudSunRays\":1.2"), std::string::npos);
     EXPECT_NE(state->body.find("\"cloudSunRaysContrast\":2.5"), std::string::npos);
     EXPECT_NE(state->body.find("\"cloudSunRaysDecay\":1"), std::string::npos);

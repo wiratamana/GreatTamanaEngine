@@ -35,8 +35,8 @@ struct AtmosphereSettings {
     // Linear multiplier on the sky background radiance.
     float skyIntensity = 6.0f;
 
-    // Scales geometry in-scatter from physical (0) to skyIntensity (1) so far terrain fades into the horizon.
-    float aerialSkyMatch = 0.3f;
+    // Scales geometry in-scatter from physical (0) to skyIntensity (1); raise only to match far terrain to sky brightness.
+    float aerialSkyMatch = 0.0f;
 
     // Sun disk drawn into the sky background: a multiplier on the physical disk radiance (0 = no disk) and its
     // angular radius in degrees. The bloom turns the bright disk into a glow, so the defaults are above physical.

@@ -33,7 +33,7 @@
 |---|---|---|---|
 | `aerialPerspectiveStrength` | 1 | 0..1e30 | 1 = physical. 0 = scene color unchanged |
 | `skyIntensity` | 6 | 0..50 | Linear multiplier of the sky picture. The deep blue sky look uses 3 (see volumetric-cloud.md) |
-| `aerialSkyMatch` | 0.3 | 0..1 | Scales geometry haze from physical (0) to `skyIntensity` (1) |
+| `aerialSkyMatch` | 0 | 0..1 | Scales geometry haze from physical (0) to `skyIntensity` (1). Raise it only to make far terrain match the sky brightness |
 | `sunDiskIntensity` | 8 | 0..100 | Sun disk drawn into the sky background, times the physical disk radiance. 0 = no disk. The bloom makes it glow |
 | `sunDiskRadiusDeg` | 0.5 | 0.05..10 | Angular radius of the sun disk (degrees) |
 | `autoScale` | true | bool | Picks haze range from the visible depth range |

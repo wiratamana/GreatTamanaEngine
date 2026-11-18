@@ -19,7 +19,7 @@ inline constexpr double kBigCloudCoverage = 0.5;
 // Cloud shadow and screen-space sun-shaft defaults for the demo.
 inline constexpr double kCloudShadowRangeKm = 8.0;      // ~62.5 m per 128x128 shadow texel for field dappling.
 inline constexpr double kCloudShadowSoftness = 0.6;     // Tighter blur in texels to match the 8 km shadow map.
-inline constexpr double kCloudShadowFill = 0.4;         // Diffuse sun share on cloud-shaded ground.
+inline constexpr double kCloudShadowFill = 0.30;        // Diffuse sun share on cloud-shaded ground.
 inline constexpr double kCloudSunRays = 1.2;            // Screen-space sun shafts through cloud gaps.
 inline constexpr double kCloudSunRaysContrast = 2.5;    // Suppresses uniform sky veil so partial cloud gaps form beams.
 inline constexpr double kCloudSunRaysDecay = 1.0;       // Radial falloff of sun-shaft taps away from the sun.

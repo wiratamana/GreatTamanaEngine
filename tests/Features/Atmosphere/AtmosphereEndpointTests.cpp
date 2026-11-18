@@ -115,7 +115,7 @@ TEST_F(AtmosphereEndpointTest, EveryWritableKeyReadsBackAfterClamping)
 {
     const fx::FeatureDebugField* defaultMatch = Find(endpoint->GetState(), "aerialSkyMatch");
     ASSERT_NE(defaultMatch, nullptr);
-    EXPECT_DOUBLE_EQ(std::get<double>(defaultMatch->value), 0.3);
+    EXPECT_DOUBLE_EQ(std::get<double>(defaultMatch->value), 0.0);
 
     const fx::FeatureDebugResult result = Set({ { "autoScale", "false" }, { "aerialPerspectiveStrength", "0.5" },
         { "aerialPerspectiveMaxDistanceKm", "12.5" }, { "aerialPerspectiveDepthExponent", "3" },
