@@ -362,7 +362,7 @@ TEST_F(BigWorldDemoTest, SuccessPathReachesReadyAndSwitchesFeaturesOn)
     EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysContrast"], "1.65");
     EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysDecay"], "0.98");
     EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysLength"], "1.25");
-    EXPECT_EQ(features.values["VolumetricCloud"]["maxSteps"], "84");
+    EXPECT_EQ(features.values["VolumetricCloud"]["maxSteps"], "80");
     EXPECT_EQ(features.values["Bloom"]["threshold"], "2");
     EXPECT_EQ(features.values["Bloom"]["intensity"], "0.2");
     EXPECT_EQ(features.values["Grass"]["preset"], "Big");
@@ -380,7 +380,7 @@ TEST_F(BigWorldDemoTest, EachTierAppliesItsSettingsAndRestoresRoundTripOnClose)
         const char* coverage;
         const char* maxSteps;
     };
-    for (const Case c : { Case{ Quality::Big, "0.55", "84" }, Case{ Quality::Medium, "0.55", "72" }, Case{ Quality::Lean, "0.5", "56" } }) {
+    for (const Case c : { Case{ Quality::Big, "0.55", "80" }, Case{ Quality::Medium, "0.55", "72" }, Case{ Quality::Lean, "0.5", "56" } }) {
         OpenAndRunToReady(c.quality);
         EXPECT_EQ(terrain.lastProfile, "lean") << QualityName(c.quality);
         EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], c.coverage) << QualityName(c.quality);

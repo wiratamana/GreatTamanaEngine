@@ -164,7 +164,7 @@ TEST(BigWorldModuleTest, FeatureAdapterSnapshotsAndRestoresPlanTweaksRoundTrip)
     EXPECT_EQ(clouds.ValueText("sunRaysContrast"), "1.65");
     EXPECT_EQ(clouds.ValueText("sunRaysDecay"), "0.98");
     EXPECT_EQ(clouds.ValueText("sunRaysLength"), "1.25");
-    EXPECT_EQ(clouds.ValueText("maxSteps"), "84");
+    EXPECT_EQ(clouds.ValueText("maxSteps"), "80");
     EXPECT_EQ(bloom.ValueText("threshold"), "2");
     EXPECT_EQ(bloom.ValueText("intensity"), "0.2");
 

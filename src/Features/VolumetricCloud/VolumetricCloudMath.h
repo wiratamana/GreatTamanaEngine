@@ -37,7 +37,11 @@ float CloudShapeValue(float perlinWorley, float worleyG, float worleyB, float wo
     float shapeWorley, float shapeLow, float shapeHigh) noexcept;
 
 // CPU twin of the cluster dome roof height hMax in CloudShape() (VolumetricCloud.comp).
-float CloudDomedRoofHeight(float weatherCoverageProduct, float cloudSize, float peakMin) noexcept;
+float CloudDomedRoofHeight(
+    float weatherCoverageProduct, float turretPeak, float cloudSize, float peakMin) noexcept;
+
+// CPU twin of the lower-core interior solidity bias coreSolid in CloudShape() (VolumetricCloud.comp).
+float CloudCoreSolidBias(float weatherCoverageProduct, float heightFraction, float hMax) noexcept;
 
 // CPU twin of the medium-Worley modulated turret top height localTop in CloudShape() (VolumetricCloud.comp).
 float CloudTurretLocalTop(float hMax, float shapeMid, float farStreak = 0.0f) noexcept;
@@ -79,6 +83,9 @@ inline constexpr float kCloudFarWeatherTileScale = 2.8f;
 
 // The big lobe octave reads the shape volume at this multiple of the shape tile (VolumetricCloud.comp kLargeShapeScale).
 inline constexpr float kCloudLargeShapeScale = 2.0f;
+
+// The crown floret octave reads the shape volume at the shape tile divided by this factor (VolumetricCloud.comp kSmallShapeScale).
+inline constexpr float kCloudSmallShapeScale = 2.5f;
 
 // The far-zoomed shape lookup reads the shape volume at this multiple of the shape tile (VolumetricCloud.comp kFarZoom).
 inline constexpr float kCloudFarZoom = 2.8f;
@@ -283,10 +290,10 @@ float CloudAerialComposite(float scene, float cloudTransmittance, float cloudLig
 inline constexpr float kCloudSceneHdrKnee = 64.0f;
 
 // Soft HDR luminance shoulder applied to resolved cloud radiance before compositing (VolumetricCloudResolve.comp).
-inline constexpr float kCloudResolveShoulderStart = 4.2f;
-inline constexpr float kCloudResolveShoulderCeiling = 8.5f;
+inline constexpr float kCloudResolveShoulderStart = 3.6f;
+inline constexpr float kCloudResolveShoulderCeiling = 7.2f;
 
-// CPU twin of CompressCloudShoulder() in VolumetricCloudResolve.comp: chroma-preserving HDR shoulder above 4.2.
+// CPU twin of CompressCloudShoulder() in VolumetricCloudResolve.comp: chroma-preserving HDR shoulder above 3.6.
 Vec3 CompressCloudResolveLuma(const Vec3& radiance) noexcept;
 
 // CPU twin of SceneBehindCloud() in VolumetricCloudResolve.comp: steepens occlusion above kCloudSceneHdrKnee.

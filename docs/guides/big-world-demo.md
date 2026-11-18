@@ -19,7 +19,7 @@
 |---|---|---|---|---|---|
 | `lean` | `lean` (no VL, SSGI, GTAO) | Lean | `0.50` (`kLeanCloudCoverage`) | `maxSteps` 56, `resolutionDivisor` 4, `shadowSteps` 8, `shadowUpdate` 2 | no |
 | `medium` | `lean` (no VL, SSGI, GTAO) | Medium | `0.55` (`kMediumCloudCoverage`) | `maxSteps` 72, `resolutionDivisor` 3 | yes |
-| `big` (menu default) | `lean` (no VL, SSGI, GTAO) | Big | `0.55` (`kBigCloudCoverage`) | `maxSteps` 84 (auto `resolutionDivisor` 2, `shadowSteps` 12, `shadowUpdate` 1 defaults) | yes |
+| `big` (menu default) | `lean` (no VL, SSGI, GTAO) | Big | `0.55` (`kBigCloudCoverage`) | `maxSteps` 80 (auto `resolutionDivisor` 2, `shadowSteps` 12, `shadowUpdate` 1 defaults) | yes |
 
 Every tier snapshots and restores the render settings it touches:
 - `Bloom`: `enabled` `true`, `threshold` `2.0` (`kBloomThreshold`), `intensity` `0.2` (`kBloomIntensity`) so sunlit clouds do not veil the sky.

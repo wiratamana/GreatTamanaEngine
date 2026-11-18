@@ -46,36 +46,36 @@ struct VolumetricCloudSettings {
     // Layer shell. The planet is centred below the camera, like the sky model.
     float planetRadiusKm = 6371.0f;
     float layerBaseM = 1500.0f;
-    float layerTopM = 4400.0f;
-    float maxDistanceM = 250000.0f; // Longest ray. A ground camera sees the layer top at its horizon 237 km away.
+    float layerTopM = 3800.0f;
+    float maxDistanceM = 250000.0f; // Longest ray. A ground camera sees the layer top at its horizon 220 km away.
     float fadeStart = 0.9f;         // Fraction of the max distance where the clouds start to thin out (the air hazes them before).
 
     // Density model.
     float coverage = 0.8f; // Sky share under cloud: 0.2 a few puffs, 0.65 scattered, 1 overcast.
-    float density = 1.50f;
+    float density = 1.70f;
     float extinction = 0.048f; // Per metre at density 1.
     float weatherScaleM = 25000.0f;
     float shapeScaleM = 6250.0f;
     // Structure: how big and how leaning the clouds are.
     float shapeWorley = 0.70f;      // Weight of Worley cell-wall crease erosion in the base shape.
-    float largeShapeMix = 0.45f;    // Share of the big lobe octave (2 x the shape tile) in the shape; 0 = only the mid lobes.
-    float sizeVariation = 0.5f;     // How much the weather map's cloud type shifts that share: big tall clouds get big lobes, small ones keep mid lobes.
+    float largeShapeMix = 0.20f;    // Share of the big lobe octave (2 x the shape tile) in the shape; 0 = only the mid lobes.
+    float sizeVariation = 0.10f;    // How much the weather map's cloud type shifts that share: big tall clouds get big lobes, small ones keep mid lobes.
     float windShearM = 280.0f;      // How far the top of the layer is shifted downwind relative to its base; clouds lean.
-    float bodyErosion = 0.28f;      // Share of fine crown erosion kept on upper cloud domes; flat bases stay solid.
+    float bodyErosion = 0.42f;      // Share of fine crown erosion kept on upper cloud domes; flat bases stay solid.
     float verticalStretch = 0.70f;  // Vertical scale of noise lobes; 1 keeps cells isotropic.
     float baseVariation = 0.06f;    // How much the big octave gently shifts the cloud base; 0 = one flat base.
     float bodyThresholdMin = 0.10f; // Lowest cut level of the body: raises the threshold in big masses so a high coverage does not fill them solid; 0 = off.
-    float bodyWidth = 0.38f;        // Width of the body ramp in shape units: small = crisp lobe surfaces, large = soft mist; 0 = full range above threshold.
+    float bodyWidth = 0.22f;        // Width of the body ramp in shape units: small = crisp lobe surfaces, large = soft mist; 0 = full range above threshold.
     float baseRagged = 0.04f;       // How much the mid lobes undulate the cloud base; 0 = smooth condensation plane.
     float farSoftening = 0.7f;      // Extra share of the big octave at the far field start and beyond; far clouds lose their stacked fine sheets.
-    float detailScaleM = 350.0f;
-    float detailStrength = 0.68f;
+    float detailScaleM = 500.0f;
+    float detailStrength = 0.72f;
     // Detail noise: billowy (rounded lobes) and wispy (fibres) channels, pushed around by a curl noise.
     float curlAmountM = 95.0f;  // How far the curl noise moves the detail lookup, metres.
     float curlScaleM = 3500.0f; // World size of one tile of the curl noise.
     float wispiness = 0.30f;    // Share of the wispy (fibre) detail near the base and thin fringes; 0 = only billows.
     float fineDetail = 0.15f;    // Weight of a second, finer fetch of the detail noise; 0 = off.
-    float detailFadeDistM = 48000.0f;
+    float detailFadeDistM = 52000.0f;
     // Far field. Starts at farWeatherStartM and is full at twice that distance.
     float farWeatherStartM = 30000.0f; // Distance where the far field starts: second weather map, coverage lift, air shortening.
     float farWeatherMix = 0.5f;        // Share of a second, differently scaled weather map; 0 = off.
@@ -91,16 +91,16 @@ struct VolumetricCloudSettings {
     float topFalloffStart = 0.5f; // Where the top roundness starts to fall, as a fraction of the cloud's peak height.
     float shapeLow = 0.26f;       // Shape noise value that maps to 0 (the noise is stretched between low and high).
     float shapeHigh = 0.98f;      // Shape noise value that maps to 1.
-    float densityCurve = 0.95f;   // Exponent on the eroded body; > 1 keeps wispy translucent edges instead of inflated plateaus.
+    float densityCurve = 1.10f;   // Exponent on the eroded body; > 1 keeps wispy translucent edges instead of inflated plateaus.
 
     // March.
     float stepBaseM = 15.0f;
     float maxStepDepth = 0.4f;  // Largest optical depth one dense step may have; above it the step is shortened. 20 = off.
     float stepGrowth = 0.007f;  // Smallest growth per metre; a ray that would run out of steps grows faster, see maxSteps.
-    float coarseMultiplier = 1.0f;
-    float maxSteps = 84.0f; // Every ray reaches the end of its segment within 85 percent of this by growing its steps.
+    float coarseMultiplier = 2.0f;
+    float maxSteps = 80.0f; // Every ray reaches the end of its segment within 85 percent of this by growing its steps.
     float emptyToCoarse = 3.0f;
-    float clearSkip = 1.0f; // Stride multiplier over weather that holds no cloud; above 1 can miss small clouds.
+    float clearSkip = 1.8f; // Stride multiplier over weather that holds no cloud; above 1 can miss small clouds.
     float minTransmittance = 0.012f;
     float jitter = 1.0f;
 
@@ -117,22 +117,22 @@ struct VolumetricCloudSettings {
     float forwardG = 0.65f;
     float backwardG = -0.40f;
     float backwardMix = 0.46f;
-    float silverIntensity = 0.12f;  // Weight of the narrow forward lobe that lights thin edges facing the sun.
+    float silverIntensity = 0.09f;  // Weight of the narrow forward lobe that lights thin edges facing the sun.
     float silverG = 0.85f;
     float powder = 0.34f;           // Soft depth shading effect when looking away from the sun.
     float ambientBottom = 0.42f;    // Sky light left at the layer base, relative to the top.
     float hazeDistanceM = 45000.0f; // Distance at which a cloud has faded to 1/e into the sky behind it.
     float inScatter = 0.48f;        // Nubis in-scatter chance: shades cavities and thin rims softly; 0 = off.
-    float lightDetail = 1.0f;       // Share of the fine erosion the nearest sun sample uses.
+    float lightDetail = 1.0f;       // Share of the fine erosion the nearest sun samples use.
     float lightStride = 2.0f;       // Lit samples between two sun marches; the light in between is blended.
     float skyOcclusion = 0.85f;     // How strongly cloud above a sample blocks the sky light; 0 = height ramp only.
     float skyOcclusionReachM = 600.0f; // Height above a sample that the occlusion looks at.
-    float skyFloor = 0.32f;         // Share of the sky light that always reaches a sample.
+    float skyFloor = 0.25f;         // Share of the sky light that always reaches a sample.
     float groundBounce = 1.5f;      // Strength of the sunlight bounced up from the ground; 0 = none (mode 1).
     float groundWarmth = 0.7f;      // 0 grey ground light, 1 warm sunlit-ground light.
     float msBlueShift = 0.88f;      // Tints the deeper scattering octaves toward blue.
     float ambientSaturation = 1.22f; // Colour saturation of the sky light that reaches the cloud: 1 as the sky, 0 grey, >1 boosted.
-    float msDiffuse = 0.5f;         // Weight of the diffusion term of the multiple scattering: thick cores and undersides keep some light.
+    float msDiffuse = 0.36f;        // Weight of the diffusion term of the multiple scattering: thick cores and undersides keep some light.
     float msGlow = 0.30f;           // Weight of the inner glow of cloud seen toward the sun.
     float sunWarmth = 0.25f;        // Tints the sun light on the cloud toward warm; 0 = the colour the atmosphere gives it.
 

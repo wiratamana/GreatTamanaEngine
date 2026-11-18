@@ -177,7 +177,7 @@ TEST(BigWorldPlanTest, LowerTiersMarchTheCloudsWithFewerStepsAndAtLowerResolutio
     ASSERT_NE(big, nullptr);
     EXPECT_EQ(ValueOf(*lean, "maxSteps"), "56");
     EXPECT_EQ(ValueOf(*medium, "maxSteps"), "72");
-    EXPECT_EQ(ValueOf(*big, "maxSteps"), "84");
+    EXPECT_EQ(ValueOf(*big, "maxSteps"), "80");
     EXPECT_EQ(ValueOf(*lean, "resolutionDivisor"), "4");
     EXPECT_EQ(ValueOf(*medium, "resolutionDivisor"), "3");
     EXPECT_EQ(ValueOf(*lean, "shadowSteps"), "8");

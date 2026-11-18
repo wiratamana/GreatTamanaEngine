@@ -86,9 +86,9 @@ float SunOpticalDepth(vec3 position, vec3 sunDirection)
     for (uint i = 0u; i < steps; ++i) {
         float centre = travelled + (0.5 + (fract(gLightJitter + kGoldenRatio * float(i)) - 0.5) * kLightJitterSpan) * segment;
         vec3 samplePosition = position + sunDirection * centre;
-        // The nearest sample also carries the fine erosion, which gives the self-shadowing its detail.
-        float sampleDensity = (i == 0u && params.lightMisc.w > 0.0)
-            ? CloudDensityAt(samplePosition, params.lightMisc.w)
+        // Nearest two sun samples carry fine billow erosion for crisp floret self-shadow crevices.
+        float sampleDensity = (i <= 1u && params.lightMisc.w > 0.0)
+            ? CloudDensityAt(samplePosition, params.lightMisc.w * (i == 0u ? 1.0 : 0.55))
             : CloudLightDensity(samplePosition);
         opticalDepth += sampleDensity * segment;
         travelled += segment;

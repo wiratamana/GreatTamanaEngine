@@ -96,16 +96,12 @@ const float kFarStreakAlong = 5.6;
 const float kFarStreakAcross = 2.8;
 const float kFarTopScale = 0.4;
 const float kFarFill = 0.3;
-const float kCoverageGain = 1.5;
-const float kSmallShapeScale = 2.7;
+const float kCoverageGain = 1.18;
+const float kSmallShapeScale = 2.5;
 const vec3 kSmallShapeOffset = vec3(0.53, 0.07, 0.29);
-const float kSmallModLow = 0.45;
-const float kSmallModGain = 0.9;
 // The finest shape octaves fade out between these distances.
 const float kShapeLodStartM = 12000.0;
 const float kShapeLodEndM = 40000.0;
-// The small-cell octave (about 14 m texels) fades out earlier.
-const float kSmallLodEndM = 60000.0;
 const float kWeatherLodStartM = 15000.0;
 const float kWeatherLodEndM = 45000.0;
 const float kWeatherLodMax = 0.8;
@@ -247,10 +243,12 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
         return 0.0;
     }
     float wCov = Saturate(coverage * weatherCoverage);
-    float domeEnv = smoothstep(0.08, 0.68, wCov) * (0.38 + 0.62 * smoothstep(0.18, 0.78, gCloudSize));
-    float hMax = mix(0.18, 0.96, pow(domeEnv, 1.15));
-    hMax = max(hMax, params.density.z * smoothstep(0.08, 0.42, wCov));
-    if (heightFraction >= hMax * 1.12) {
+    float coreTurret = smoothstep(0.10, 0.85, wm.b) * smoothstep(0.20, 0.78, gCloudSize);
+    float shoulderEnv = smoothstep(0.06, 0.55, wCov) * 0.28;
+    float hMax = clamp(0.14 + shoulderEnv + 0.66 * pow(coreTurret, 1.15), 0.14, 0.96);
+    float peakFloor = params.density.z * smoothstep(0.42, 0.78, wCov) * smoothstep(0.35, 0.75, wm.b);
+    hMax = max(hMax, peakFloor);
+    if (heightFraction >= hMax * 1.10) {
         gWeatherClear = true;
         return 0.0;
     }
@@ -267,19 +265,20 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float shape = ShapeValue(shapeSample);
     float shapeMid = shape;
     float shapeLarge = shape;
-    if (params.structure.x > 0.0 || params.structure2.w > 0.0 || params.structure2.z > 0.0) {
+    if (params.structure.x > 0.0 || params.structure.y > 0.0 || params.structure2.w > 0.0 || params.structure2.z > 0.0) {
         // Big lobe octave carries broad masses, distant decks and macro base undulation.
         shapeLarge = ShapeValue(textureLod(shapeVolume, shapeUv / kLargeShapeScale + kLargeShapeOffset, 0.0));
-        if (params.structure.x > 0.0 || params.structure2.w > 0.0) {
-            float largeShare = Saturate(params.structure.x + params.structure.y * (wm.b - 0.5) * 2.0 + params.structure2.w * farRamp);
+        if (params.structure.x > 0.0 || params.structure.y > 0.0 || params.structure2.w > 0.0) {
+            float nearLarge = clamp(params.structure.x + params.structure.y * (wm.b - 0.5) * 2.0, 0.0, 0.26);
+            float largeShare = Saturate(nearLarge + params.structure2.w * farRamp);
             shape = mix(shape, shapeLarge, largeShare);
         }
     }
-    // Small cells get a second, finer lobe octave: bumpy cauliflower surfaces instead of one smooth lobe.
-    float smallness = (1.0 - gCloudSize) * (1.0 - smoothstep(0.25 * kSmallLodEndM, kSmallLodEndM, fromEyeLength));
-    if (smallness > 0.02) {
+    // Height-stratified crown floret octave sculpts convex cauliflower domes above the flat LCL base.
+    float floretMask = smoothstep(0.10, 0.30, heightFraction) * (1.0 - smoothstep(18000.0, 52000.0, fromEyeLength));
+    if (floretMask > 0.02) {
         float fine = ShapeValue(textureLod(shapeVolume, shapeUv * kSmallShapeScale + kSmallShapeOffset, 0.0));
-        shape *= mix(1.0, kSmallModLow + kSmallModGain * fine, smallness);
+        shape = mix(shape, shape * (0.58 + 0.62 * fine), floretMask * 0.65);
     }
     // Far model: the big octave read through a coordinate stretched along the wind gives rolls, not lobes.
     if (farStreak > 0.0) {
@@ -291,6 +290,10 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
         vec3 farUv = vec3(stretched.x, shapeUv.y * params.noise.x, stretched.y) / params.noise.x;
         shape = mix(shape, ShapeValue(textureLod(shapeVolume, farUv / kLargeShapeScale + kLargeShapeOffset, 0.0)), farStreak);
     }
+    // Lower-core solidity bias keeps cluster interiors and shadow footprints free of Worley valley holes.
+    float hNormEst = Saturate(heightFraction / max(hMax, 0.14));
+    float coreSolid = smoothstep(0.24, 0.50, wCov) * (1.0 - smoothstep(0.18, 0.58, hNormEst)) * 0.44;
+    shape = Saturate(shape + coreSolid);
 
     // Gentle macro condensation base plane with strongly domed cauliflower turret tops.
     float baseShift = clamp((0.5 - shapeLarge) * params.structure2.z * 0.08, -0.005, 0.008);
@@ -298,7 +301,7 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float roundBottom = smoothstep(baseShift, baseShift + params.heightShape.x, heightFraction);
     float turretMod = clamp(0.62 + 0.56 * shapeMid, 0.42, 1.08);
     float localTop = clamp(hMax * turretMod * mix(1.0, kFarTopScale, farStreak), 0.16, 0.98);
-    float roundTop = 1.0 - smoothstep(localTop * 0.52, localTop, heightFraction);
+    float roundTop = 1.0 - smoothstep(localTop * 0.74, localTop, heightFraction);
 
     float rampBottom = heightFraction * Saturate(Remap(heightFraction, 0.0, params.heightShape.z, 0.0, 1.0));
     float rampTop = Saturate(Remap(heightFraction, params.heightShape.w, 1.0, 1.0, 0.0));
@@ -326,7 +329,7 @@ float CloudDetail(vec3 position, float heightFraction, float shape, float densit
         return 0.0;
     }
     float fromEyeLength = length(position.xz - params.eyeAndPlanetRadius.xz);
-    detailAmount *= 1.0 - smoothstep(12000.0, 48000.0, fromEyeLength);
+    detailAmount *= 1.0 - smoothstep(18000.0, 52000.0, fromEyeLength);
     if (detailAmount <= 0.001) {
         return CloudCurve(shape) * densityFactor;
     }
@@ -350,9 +353,9 @@ float CloudDetail(vec3 position, float heightFraction, float shape, float densit
         vec4 fn = textureLod(detailVolume, world * kFineDetailScale / params.noise.y + 0.31, 0.0);
         erosion = mix(erosion, 1.0 - (fn.g * 0.5 + fn.a * 0.5), fineWeight * 0.5);
     }
-    // Keep flat bases and lower interiors solid while sculpting upper cauliflower crowns.
-    float crownSculpt = params.structure2.x * smoothstep(0.16, 0.46, heightFraction);
-    float shellMask = mix(crownSculpt, 1.0, 1.0 - smoothstep(0.14, 0.68, shape));
+    // Keep flat bases and lower interiors solid while sculpting upper crowns and vaporous base rims.
+    float crownSculpt = params.structure2.x * smoothstep(0.14, 0.42, heightFraction);
+    float shellMask = mix(crownSculpt, 1.0, 1.0 - smoothstep(0.08, 0.58, shape));
     erosion *= params.noise.z * detailAmount * shellMask;
     return CloudCurve(Saturate(Remap(shape, erosion, 1.0, 0.0, 1.0))) * densityFactor;
 }
