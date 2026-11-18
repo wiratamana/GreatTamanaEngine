@@ -41,7 +41,7 @@ TEST(ToneMappingShaderNamesTest, ShaderExposesBoundNamesAndPushBlock)
 
     ASSERT_TRUE(result.hasPushConstantRange);
     EXPECT_EQ(result.pushConstantRange.offset, 0u);
-    EXPECT_EQ(result.pushConstantRange.size, 32u);
+    EXPECT_EQ(result.pushConstantRange.size, 48u);
 }
 
 std::string ReadShaderSource()

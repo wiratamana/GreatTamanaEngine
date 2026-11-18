@@ -79,9 +79,10 @@ TEST(ToneMappingMathTest, PushCarriesTheSettingsAndTheFrame)
 
 TEST(ToneMappingMathTest, PushLayoutMatchesTheShaderBlock)
 {
-    EXPECT_EQ(sizeof(ToneMappingPush), 32u);
+    EXPECT_EQ(sizeof(ToneMappingPush), 48u);
     EXPECT_EQ(offsetof(ToneMappingPush, exposureModeSaturationDither), 0u);
     EXPECT_EQ(offsetof(ToneMappingPush, frame), 16u);
+    EXPECT_EQ(offsetof(ToneMappingPush, vignetteContrastSplitGrain), 32u);
 }
 
 } // namespace
