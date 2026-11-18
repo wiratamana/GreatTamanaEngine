@@ -158,6 +158,11 @@ bool BuildVolumetricCloudPanel(
     changed |= ImGui::SliderFloat("Shaft high-sun keep", &edit.shaftHighSunKeep, 0.0f, 1.0f);
     changed |= ImGui::SliderFloat("Shadow fill", &edit.shadowFill, 0.0f, 1.0f);
     changed |= ImGui::SliderFloat("Sun rays", &edit.sunRays, 0.0f, 3.0f);
+    changed |= ImGui::SliderFloat("Sun rays decay", &edit.sunRaysDecay, 0.0f, 6.0f);
+    changed |= ImGui::SliderFloat("Sun rays length", &edit.sunRaysLength, 0.2f, 3.0f);
+    changed |= ImGui::SliderFloat("Sun rays taps", &edit.sunRaysTaps, 8.0f, 48.0f, "%.0f");
+    changed |= ImGui::SliderFloat("Sun rays anisotropy", &edit.sunRaysAnisotropy, 0.0f, 0.95f);
+    changed |= ImGui::SliderFloat("Sun rays contrast", &edit.sunRaysContrast, 0.2f, 3.0f);
     changed |= ImGui::SliderFloat("Sun starburst", &edit.sunStar, 0.0f, 3.0f);
 
     ImGui::SeparatorText("Quality");

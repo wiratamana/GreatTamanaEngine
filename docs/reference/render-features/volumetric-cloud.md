@@ -1,6 +1,6 @@
 # VolumetricCloud (ray-marched cloud layer)
 > One sky cloud layer between two spheres, ray marched at low resolution and accumulated over frames. For anyone tuning or debugging clouds.
-> Verified against code: 2026-11-11
+> Verified against code: 2026-11-18
 
 ## TL;DR
 - One cloud layer (default 1500..5000 m above Y = 0) on a 6371 km planet, composited over the scene.
@@ -15,9 +15,9 @@
 | Registration | Stage | Priority | Toggle names |
 |---|---|---|---|
 | `VolumetricCloud.FrameStamp` | PreOpaque | 49 | `Always` (frame clock for snapshot age) |
-| `VolumetricCloud` (`Replace`) | PostComposite | -900 | `VolumetricCloud.March.Dispatch`, `...Resolve.Dispatch`, `...Debug.Dispatch`, `...CopyToPrivateTarget` |
+| `VolumetricCloud` (`Replace`) | PostComposite | -900 | `VolumetricCloud.March.Dispatch`, `...SunShafts.Dispatch`, `...Resolve.Dispatch`, `...Debug.Dispatch`, `...CopyToPrivateTarget` |
 
-Code: `src/Features/VolumetricCloud/`. Shaders: `VolumetricCloud.comp` (march), `VolumetricCloudResolve.comp` (upsample, history, composite), `VolumetricCloudLighting.glsl`, `VolumetricCloudSlice2D.comp`, `VolumetricCloudSlice3D.comp`. Panel: **VolumetricCloud**.
+Code: `src/Features/VolumetricCloud/`. Shaders: `VolumetricCloud.comp` (march), `VolumetricCloudSunShafts.comp` (quarter-res sun shafts), `VolumetricCloudResolve.comp` (upsample, history, composite), `VolumetricCloudLighting.glsl`, `VolumetricCloudSlice2D.comp`, `VolumetricCloudSlice3D.comp`. Panel: **VolumetricCloud**.
 The pass runs after the aerial composite (-1000), so sky pixels are final. It runs before shadow (-500), VolumetricLight (-250), TemporalAa (-150), Bloom and ToneMapping.
 The composite writes `scene * T + cloud` itself and uses `Replace`. The engine `AlphaOver` is straight alpha and does not fit premultiplied cloud light.
 
@@ -47,8 +47,9 @@ Units are the sky's: atmosphere space is km from the planet centre, the camera a
 
 ## How it works
 1. **March** (compute, 1/`resolutionDivisor` of the view). Each low-res texel marches one real pixel of its block. The pixel walks a Bayer order, so 16 frames cover the full grid at divisor 4. A ray starts on the layer shell, jittered by blue noise (the jitter of a pixel moves by the golden ratio each time that pixel is marched, so a still picture converges fast), takes long steps over empty air, steps back on the first hit and then takes short steps with the detail noise and a sun march (Beer-Lambert optical depth, dual lobe Henyey-Greenstein, silver lining, 3 multiple scattering octaves, powder, sky ambient). It stores light, transmittance, the mean cloud distance and how far the ray looked.
-2. **Resolve** (compute, full size). Reprojects the history of the last frame through the cloud distance (never the scene depth), blends it with the new samples and composites over the scene. A sample or a history texel is only used if it saw at least as far as the pixel's own surface and its cloud is not behind that surface. This keeps the silhouette of a mountain clean.
-3. **History** is two pairs of full-size RGBA16F targets (colour; distance, end distance and the per-pixel sample count), used in ping-pong. It is dropped on a camera cut, a resize, a disabled frame, a debug view or any early exit.
+2. **Sun shafts** (compute, quarter size, `VolumetricCloud.SunShafts.Dispatch`). Integrates radial crepuscular rays before the resolve pass from last frame's cloud history alpha and scene depth into a quarter-resolution RGBA16F target (`GameViewCloudSunShafts`) that the resolve samples bilinearly.
+3. **Resolve** (compute, full size). Reprojects the history of the last frame through the cloud distance (never the scene depth), blends it with the new samples and composites over the scene. A sample or a history texel is only used if it saw at least as far as the pixel's own surface and its cloud is not behind that surface. This keeps the silhouette of a mountain clean.
+4. **History** is two pairs of full-size RGBA16F targets (colour; distance, end distance and the per-pixel sample count), used in ping-pong. It is dropped on a camera cut, a resize, a disabled frame, a debug view or any early exit.
 
 **Horizon and far field.** The march range is `maxDistanceM` (250 km) and every ray grows its step length to reach the end of its segment within `maxSteps`. Beyond `farWeatherStartM` the weather map is mixed with a second sample at another scale, the coverage is lifted a little and the air in front of the cloud counts less (`farAirScale`), so the layer continues to the horizon as a flattening deck that fades into the haze instead of ending in an empty band. The resolve pass keeps its own fixed fallback distance (15 km, `kCloudHistoryFallbackDistanceM`) and does not follow `maxDistanceM`.
 
@@ -184,7 +185,12 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `shaftHeightM` | 2500 | 200..6000 | Scale height of the beam haze and the mist |
 | `shaftHighSunKeep` | 0.7 | 0..1 | Share of the low-sun `shaftStrength`, `shaftHaze` and `shaftMist` kept when the sun is overhead |
 | `shadowFill` | 0.25 | 0..1 | Share of the sun the cloud blocks that reaches shadowed receivers as diffuse light, so a shadowed ground is not black |
-| `sunRays` | 0 | 0..3 | Faint screen-space rays that show only as light against darker surroundings: the glow around the sun seen through the gaps of the clouds (the smoothed cloud history is the occluder, the jitter changes every frame). Gone when the sun is behind the camera or well outside the picture; dimmed slightly near the zenith. A ray tap that sees a surface counts as blocked. 0 = off |
+| `sunRays` | 0.8 | 0..3 | Intensity of the quarter-res screen-space sun shafts (`VolumetricCloud.SunShafts.Dispatch`) radiating from the sun through cloud gaps and over terrain silhouettes. Active up to 1.5 view heights outside the frame and at any sun height above the horizon. 0 = off |
+| `sunRaysDecay` | 1.5 | 0..6 | Exponential falloff of sun-shaft taps away from the sun |
+| `sunRaysLength` | 1.2 | 0.2..3 | Reach of the sun shafts across the screen, in view heights |
+| `sunRaysTaps` | 24 | 8..48 | Radial sample count per pixel, snapped to multiples of 8 |
+| `sunRaysAnisotropy` | 0.75 | 0..0.95 | Forward-scattering core strength (`g`) around the sun |
+| `sunRaysContrast` | 1 | 0.2..3 | Contrast exponent on open cloud gaps along the sun line |
 | `sunStar` | 1 | 0..3 | Small six-spike starburst on the sun where it shows through a gap in the clouds (stable in time, faded by the cloud cover at the sun and by each pixel's own cloud transmittance so spikes do not draw over thick cloud). Same sun-height fade as the rays. The spikes are drawn over sky pixels only: a ridge or building in front of the sun carries none. 0 = off |
 | `shaftStrength` | 1 | 0..1 | Light shafts: how much of the sun in-scatter of the air the cloud shadow map removes (aerial perspective, volumetric light, air in front of clouds). 0 = none |
 
@@ -196,6 +202,19 @@ Resolve detail: a pixel that is not marched this frame reads its history texel e
 - Every consumer (`DirectionalLighting.glsl`, `GrassCull.comp`, `VolumetricLightInject.comp`, `AtmosphereAerialPerspectiveVolume.comp`, `VolumetricCloudAtmosphere.glsl`) samples through `CloudShadowLookup.glsl` (`CloudSunTransmittance` cubic B-spline or `CloudSunTransmittanceFast` bilinear): receivers inside the near region read rows `128..255` and blend smoothly over the outer 15% border into the unchanged far lookup.
 - No map (clouds off, `shadowStrength` and `shaftStrength` 0, sun below 2.4 degrees, pass toggled off) leaves the white dummy on slot 4 with no change to the picture. The shadow fades in between sun heights 0.04 and 0.10 (sine of elevation).
 - Cost on the Iris Xe at 1280x720: about 1.3 ms total (+0.5 ms over the single 128 x 128 map) at the defaults (`shadowUpdate` 3, near interval 4).
+
+## Sun shafts algorithm
+- `VolumetricCloudSunShafts.comp` runs at quarter resolution (8 x 8 threads) and integrates screen-space crepuscular rays from each pixel toward the sun's projected UV (clamped to the reach in view heights and clipped at the screen border when the sun is outside the frame).
+- Each ray takes `taps` exponentially spaced samples that tighten near the sun, jittered per pixel with interleaved gradient noise plus a golden-ratio frame offset so temporal anti-aliasing averages them without banding or flicker.
+- A sample's openness is `isSky(sceneDepth) * smoothstep(0.15, 0.90, historyColor.a)`, so terrain silhouettes and thick clouds block light while thin cloud rims let partial rays pass. Samples are weighted by `exp(-decay * t)`.
+- Sample variance along sun-lit paths boosts rays that cross gaps next to cloud or terrain blockers, while uniform clear sky subtracts a small baseline so a cloudless sky shows only a gentle solar halo.
+- Shafts represent lit air in front of the scene: pixels over thick cloud keep a softer share, the sun colour is mixed toward a cool sky haze tint and smoothly capped below 6 per channel, and `VolumetricCloudResolve.comp` adds the bilinearly upsampled result after `SceneBehindCloud + cloud.rgb`.
+- Tuning knobs:
+  - `decay`: exponential falloff along the ray and with screen distance from the sun; higher values shorten beams and keep energy closer to the gaps and sun.
+  - `length` (reach): maximum radial span in view heights; controls how far beams stretch across the frame, including from an off-screen sun.
+  - `taps`: sample count along each ray (8..48, 24 default); more taps smooth narrow cloud gaps at higher GPU cost.
+  - `anisotropy`: forward-scattering core strength (`g`) around the sun; higher values tighten and brighten the solar corona relative to outer rays.
+  - `contrast`: exponent on ray openness; higher values deepen dark shadow lanes between bright shafts.
 
 ## Cloud coverage knobs
 | Want | Set |
@@ -238,9 +257,12 @@ Name for `/feature_debug`: `VolumetricCloud`. Actions: `reset_defaults`, `preset
 | `game.sunUp` | Sine of the active sun elevation in the last frame |
 | `game.shaftStrength`, `game.beamHazePerKm`, `game.shaftHazePerM` | Published cloud-shaft strength and haze densities of the last frame (`0` when no shadow map is published) |
 | `game.shadow.extentM`, `game.shadow.texelM`, `game.shadow.nearExtentM`, `game.shadow.nearTexelM` | Published far and nested near cloud-shadow map widths and texel sizes in metres (`0` when no shadow map is published) |
+| `game.sunShafts.sunUv` | Projected sun UV (`x,y`, clamped to `-4..4`) fed to the sun-shafts pass |
+| `game.sunShafts.reach` | Reach in view heights fed to the sun-shafts pass (`0` when not rendered) |
+| `game.sunShafts.active` | True when the sun-shafts pass ran with active rays in the last frame |
 | `game.assets.shape/detail/weather/blueNoise/curl` | Loaded size, or `not loaded` |
 
-Textures for `/get_texture`: `GameViewVolumetricCloud` (also `SceneViewVolumetricCloud`) and `GameViewCloudShadowMap` (also `SceneViewCloudShadowMap`, 128 x 256: top half far map, bottom half nested 1/8 near map).
+Textures for `/get_texture`: `GameViewVolumetricCloud` (also `SceneViewVolumetricCloud`), `GameViewCloudShadowMap` (also `SceneViewCloudShadowMap`, 128 x 256: top half far map, bottom half nested 1/8 near map) and `GameViewCloudSunShafts` (also `SceneViewCloudSunShafts`, quarter-size RGBA16F).
 
 ## Quick check
 ```cmd

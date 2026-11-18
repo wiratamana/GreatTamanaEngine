@@ -43,7 +43,8 @@ void VolumetricCloudFeature::Setup(fx::FeatureSetup& s)
 
     s.PostComposite("VolumetricCloud", kCompositePriority, fx::Blend::Replace,
         [this](fx::CompositeFrame& f) { CompositePass(f); },
-        fx::Gate{ "VolumetricCloud.March.Dispatch", "VolumetricCloud.Resolve.Dispatch", "VolumetricCloud.Debug.Dispatch",
+        fx::Gate{ "VolumetricCloud.March.Dispatch", "VolumetricCloud.SunShafts.Dispatch",
+            "VolumetricCloud.Resolve.Dispatch", "VolumetricCloud.Debug.Dispatch",
             "VolumetricCloud.CopyToPrivateTarget" });
 }
 
@@ -89,6 +90,10 @@ VolumetricCloudViewSnapshot VolumetricCloudFeature::Snapshot(rg::ViewScope scope
         snapshot.shadowTexelM = 0.0f;
         snapshot.shadowNearExtentM = 0.0f;
         snapshot.shadowNearTexelM = 0.0f;
+        snapshot.sunShaftsSunUv[0] = 0.0f;
+        snapshot.sunShaftsSunUv[1] = 0.0f;
+        snapshot.sunShaftsReach = 0.0f;
+        snapshot.sunShaftsActive = false;
     }
     return snapshot;
 }
@@ -176,8 +181,9 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
     const fx::Texture currentAux = view.historyAux[slot].Acquire(f, full, PixelFormat::RGBA16_Float);
     const fx::Texture previousColor = view.historyColor[slot ^ 1u].Acquire(f, full, PixelFormat::RGBA16_Float);
     const fx::Texture previousAux = view.historyAux[slot ^ 1u].Acquire(f, full, PixelFormat::RGBA16_Float);
+    const fx::Texture standIn = view.sunShaftsStandIn.Acquire(f, Extent2D{ 1, 1 }, PixelFormat::RGBA16_Float);
     if (!lowColor.IsValid() || !lowAux.IsValid() || !currentColor.IsValid() || !currentAux.IsValid()
-        || !previousColor.IsValid() || !previousAux.IsValid()) {
+        || !previousColor.IsValid() || !previousAux.IsValid() || !standIn.IsValid()) {
         snapshot.status = VolumetricCloudFrameStatus::TargetFailed;
         return false;
     }
@@ -292,14 +298,55 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
     snapshot.historyUsed = resolveFacts.historyValid;
     snapshot.divisor = divisor;
 
+    const bool shaftsHistoryValid = basis.valid && fx::HistoryUsable(view.previous, basis, f.FrameIndex(), full, divisor);
+    VolumetricCloudSunShaftsFacts shaftsFacts;
+    shaftsFacts.viewProjection = cameraView.relative.viewProjection;
+    shaftsFacts.sunDirection = sun.directionTowardSun;
+    shaftsFacts.sunColor = light.sunTint;
+    shaftsFacts.frameIndex = f.FrameIndex();
+    shaftsFacts.viewWidth = full.width;
+    shaftsFacts.viewHeight = full.height;
+    shaftsFacts.historyValid = shaftsHistoryValid;
+    const VolumetricCloudSunShaftsParamsGpu shaftsParams = MakeCloudSunShaftsParams(m_settings, shaftsFacts);
+    const bool shaftsActive = shaftsParams.frameFadeAspectActive[3] >= 0.5f;
+    snapshot.sunShaftsSunUv[0] = shaftsParams.sunUvAndReachAndIntensity[0];
+    snapshot.sunShaftsSunUv[1] = shaftsParams.sunUvAndReachAndIntensity[1];
+    snapshot.sunShaftsReach = shaftsParams.sunUvAndReachAndIntensity[2];
+
+    fx::Texture sunShaftsForResolve = standIn;
+    bool sunShaftsDispatched = false;
+    if (f.PassEnabled("VolumetricCloud.SunShafts.Dispatch") && f.ShaderReady(m_sunShaftsShader)) {
+        const Extent2D quarter = fx::ScaledExtent(full, 4);
+        const fx::Texture shaftsOut = m_sunShaftsOutput.Acquire(f, quarter, PixelFormat::RGBA16_Float);
+        if (shaftsOut.IsValid()) {
+            sunShaftsDispatched = f.Compute(m_sunShaftsShader, "VolumetricCloud.SunShafts.Dispatch")
+                                      .Params(view.sunShaftsParams, shaftsParams)
+                                      .Bind("historyColor", shaftsHistoryValid ? previousColor : standIn)
+                                      .Bind("sceneDepth", fx::Depth(f.SceneDepth()))
+                                      .Bind("shaftsOut", shaftsOut)
+                                      .Dispatch(quarter);
+            if (sunShaftsDispatched) {
+                sunShaftsForResolve = shaftsOut;
+            } else {
+                f.ReportOnce("VolumetricCloud.SunShafts.Dispatch was refused");
+            }
+        }
+    }
+    snapshot.sunShaftsActive = sunShaftsDispatched && shaftsActive;
+
+    VolumetricCloudResolveParamsGpu resolveGpuParams = MakeVolumetricCloudResolveParams(m_settings, facts, resolveFacts);
+    resolveGpuParams.sunRay[2] = snapshot.sunShaftsActive
+        ? (shaftsParams.sunUvAndReachAndIntensity[3] * shaftsParams.frameFadeAspectActive[1])
+        : 0.0f;
     const bool resolved = f.Compute(m_resolveShader, "VolumetricCloud.Resolve.Dispatch")
-                              .Params(view.resolveParams, MakeVolumetricCloudResolveParams(m_settings, facts, resolveFacts))
+                              .Params(view.resolveParams, resolveGpuParams)
                               .Bind("sourceColor", f.SceneColor())
                               .Bind("sourceDepth", fx::Depth(f.SceneDepth()))
                               .Bind("lowColor", lowColor)
                               .Bind("lowAux", lowAux)
                               .Bind("historyColor", previousColor)
                               .Bind("historyAux", previousAux)
+                              .Bind("sunShafts", sunShaftsForResolve)
                               .Bind("historyColorOut", currentColor)
                               .Bind("historyAuxOut", currentAux)
                               .Bind("destinationImage", output)
@@ -460,6 +507,10 @@ void VolumetricCloudFeature::CompositePass(fx::CompositeFrame& f)
     VolumetricCloudViewState& view = m_views.For(f.Scope());
     VolumetricCloudViewSnapshot& snapshot = view.snapshot;
     snapshot.frameIndex = f.FrameIndex();
+    snapshot.sunShaftsSunUv[0] = 0.0f;
+    snapshot.sunShaftsSunUv[1] = 0.0f;
+    snapshot.sunShaftsReach = 0.0f;
+    snapshot.sunShaftsActive = false;
     if (view.shadowPublishedFrame != f.FrameIndex()) {
         snapshot.shaftStrength = 0.0f;
         snapshot.beamHazePerKm = 0.0f;

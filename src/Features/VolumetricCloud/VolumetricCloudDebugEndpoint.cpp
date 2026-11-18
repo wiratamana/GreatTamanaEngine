@@ -3,6 +3,7 @@
 #include "VolumetricCloudFeature.h"
 
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -85,6 +86,19 @@ std::string SizeText(std::uint32_t w, std::uint32_t h, std::uint32_t d)
     return std::to_string(w) + "x" + std::to_string(h) + (d > 0 ? "x" + std::to_string(d) : "");
 }
 
+std::string FloatText(float v)
+{
+    char text[32] = {};
+    const float clean = std::isfinite(v) ? (v == 0.0f ? 0.0f : v) : 0.0f;
+    const auto [end, ec] = std::to_chars(text, text + sizeof(text), clean, std::chars_format::general, 6);
+    return ec == std::errc{} ? std::string(text, end) : std::string("0");
+}
+
+std::string PairText(float x, float y)
+{
+    return FloatText(x) + "," + FloatText(y);
+}
+
 void Add(fx::FeatureDebugResult& out, std::string key, fx::FeatureDebugValue value)
 {
     out.fields.push_back({ std::move(key), std::move(value) });
@@ -136,6 +150,9 @@ fx::FeatureDebugResult VolumetricCloudDebugEndpoint::GetState() const
     Add(out, "game.shadow.texelM", static_cast<double>(game.shadowTexelM));
     Add(out, "game.shadow.nearExtentM", static_cast<double>(game.shadowNearExtentM));
     Add(out, "game.shadow.nearTexelM", static_cast<double>(game.shadowNearTexelM));
+    Add(out, "game.sunShafts.sunUv", PairText(game.sunShaftsSunUv[0], game.sunShaftsSunUv[1]));
+    Add(out, "game.sunShafts.reach", static_cast<double>(game.sunShaftsReach));
+    Add(out, "game.sunShafts.active", game.sunShaftsActive);
     Add(out, "scene.status", std::string(StatusName(scene.status)));
     Add(out, "scene.skyLight", std::string(SkyLightName(scene.skyLight)));
     return out;

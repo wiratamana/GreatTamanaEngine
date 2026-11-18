@@ -19,6 +19,7 @@ namespace gte {
 struct VolumetricCloudViewState {
     fx::GpuParams<VolumetricCloudParamsGpu> params;
     fx::GpuParams<VolumetricCloudResolveParamsGpu> resolveParams;
+    fx::GpuParams<VolumetricCloudSunShaftsParamsGpu> sunShaftsParams;
     fx::GpuParams<AtmosphereParametersGpu> atmosphereParams;
     VolumetricCloudViewSnapshot snapshot;
     double windOffset[2] = {};
@@ -44,6 +45,7 @@ struct VolumetricCloudViewState {
         fx::PersistentTarget{ "VolumetricCloud.HistoryColor0" }, fx::PersistentTarget{ "VolumetricCloud.HistoryColor1" } };
     std::array<fx::PersistentTarget, 2> historyAux{
         fx::PersistentTarget{ "VolumetricCloud.HistoryAux0" }, fx::PersistentTarget{ "VolumetricCloud.HistoryAux1" } };
+    fx::PersistentTarget sunShaftsStandIn{ "VolumetricCloud.SunShaftsStandIn" };
 };
 
 // Volumetric clouds: one ray marched layer between two spheres, composited over the scene with the scene
@@ -99,11 +101,13 @@ private:
     fx::StaticTexture m_blueNoise{ kCloudBlueNoiseAsset };
     fx::StaticTexture m_curl{ kCloudCurlAsset };
     fx::ComputeShader m_marchShader{ "VolumetricCloud" };
+    fx::ComputeShader m_sunShaftsShader{ "VolumetricCloudSunShafts" };
     fx::ComputeShader m_resolveShader{ "VolumetricCloudResolve" };
     fx::ComputeShader m_slice3dShader{ "VolumetricCloudSlice3D" };
     fx::ComputeShader m_slice2dShader{ "VolumetricCloudSlice2D" };
     fx::ViewOutput m_output{ "VolumetricCloud" };
     fx::ViewOutput m_shadowOutput{ "CloudShadowMap" };
+    fx::ViewOutput m_sunShaftsOutput{ "CloudSunShafts" };
     fx::SceneSlot m_shadowSlot;
     fx::Channel<CloudShadowMap> m_shadowData{ kCloudShadowChannel };
     fx::Channel<WindState> m_windData{ kWindStateChannel };

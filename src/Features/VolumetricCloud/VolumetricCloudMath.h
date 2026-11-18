@@ -250,4 +250,27 @@ Vec3 CloudSceneBehind(const Vec3& scene, float cloudTransmittance) noexcept;
 // Distance that stands for "no surface", in km.
 inline constexpr float kCloudNoSurfaceKm = 1000.0f;
 
+// Off-screen fade distance (in view heights), UV clamp and sky-haze tint share of VolumetricCloudSunShafts.comp.
+inline constexpr float kCloudSunShaftsOutsideView = 1.5f;
+inline constexpr float kCloudSunShaftsUvClamp = 4.0f;
+inline constexpr float kCloudSunShaftsHazeMix = 0.3f;
+
+// Horizon and off-screen fade (0..1) of the quarter-res sun-shafts pass; stays full for an overhead sun.
+float CloudSunShaftsFade(float sunUp, const float (&sunUv)[2], float aspect) noexcept;
+
+// Per-frame inputs of the quarter-resolution sun-shafts pass.
+struct VolumetricCloudSunShaftsFacts {
+    Mat4 viewProjection = Mat4::Identity(); // Eye-relative: fx::View::relative.viewProjection.
+    Vec3 sunDirection = Vec3::Up();
+    Vec3 sunColor = Vec3::One();
+    std::uint64_t frameIndex = 0;
+    std::uint32_t viewWidth = 1;
+    std::uint32_t viewHeight = 1;
+    bool historyValid = true;
+};
+
+// Builds the 64-byte parameter block of VolumetricCloudSunShafts.comp; outputs are always finite.
+VolumetricCloudSunShaftsParamsGpu MakeCloudSunShaftsParams(
+    const VolumetricCloudSettings& settings, const VolumetricCloudSunShaftsFacts& facts) noexcept;
+
 } // namespace gte

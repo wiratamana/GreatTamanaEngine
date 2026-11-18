@@ -1,0 +1,169 @@
+#version 450
+
+// Quarter-resolution radial crepuscular rays through cloud gaps and over terrain silhouettes.
+layout(local_size_x = 8, local_size_y = 8) in;
+
+#include "SceneDepthConstants.glsl"
+#include "InterleavedGradientNoise.glsl"
+
+// Member names and order match VolumetricCloudSunShaftsParamsGpu.
+layout(std430, binding = 0) readonly buffer VolumetricCloudSunShaftsParams {
+    vec4 sunUvAndReachAndIntensity; // xy sun uv, z reach (view heights), w intensity.
+    vec4 decayTapsAnisoContrast;    // x decay, y taps (8..48), z anisotropy g, w contrast.
+    vec4 sunColorAndHazeMix;        // rgb tinted sun colour, w haze mix.
+    vec4 frameFadeAspectActive;     // x frame index, y fade 0..1, z aspect (w/h), w active 0/1.
+} params;
+
+layout(binding = 1) uniform sampler2D historyColor;
+layout(binding = 2) uniform sampler2D sceneDepth;
+layout(binding = 3, rgba16f) uniform writeonly image2D shaftsOut;
+
+const float kGoldenRatio = 0.61803398875;
+const float kStepExpRate = 0.9;
+const float kStepExpDenom = 1.45960311; // exp(kStepExpRate) - 1.0.
+const float kCloudOpenLow = 0.15;
+const float kCloudOpenHigh = 0.90;
+const float kRadialDecayScale = 1.10;
+const float kCoreAnisoScale = 1.8;
+const float kOpenSkyBaseline = 0.07;
+const float kThickCloudKeep = 0.4;
+const vec3 kHazeTint = vec3(0.75, 0.88, 1.10);
+const float kShaftSoftCap = 6.0;
+
+float SafeFloat(float v, float fallback)
+{
+    return (isnan(v) || isinf(v)) ? fallback : v;
+}
+
+float Saturate(float v)
+{
+    return clamp(SafeFloat(v, 0.0), 0.0, 1.0);
+}
+
+void main()
+{
+    ivec2 outSize = imageSize(shaftsOut);
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (pixel.x >= outSize.x || pixel.y >= outSize.y) {
+        return;
+    }
+
+    float shaftsActive = SafeFloat(params.frameFadeAspectActive.w, 0.0);
+    float fade = Saturate(params.frameFadeAspectActive.y);
+    float intensity = max(SafeFloat(params.sunUvAndReachAndIntensity.w, 0.0), 0.0);
+    if (shaftsActive < 0.5 || fade <= 0.0 || intensity <= 0.0) {
+        imageStore(shaftsOut, pixel, vec4(0.0));
+        return;
+    }
+
+    vec2 sunUv = vec2(
+        SafeFloat(params.sunUvAndReachAndIntensity.x, 0.5),
+        SafeFloat(params.sunUvAndReachAndIntensity.y, 0.5));
+    float reach = max(SafeFloat(params.sunUvAndReachAndIntensity.z, 1.2), 1e-3);
+    float decay = max(SafeFloat(params.decayTapsAnisoContrast.x, 1.5), 0.0);
+    int tapCount = clamp(int(SafeFloat(params.decayTapsAnisoContrast.y, 24.0) + 0.5), 8, 48);
+    float anisoG = clamp(SafeFloat(params.decayTapsAnisoContrast.z, 0.75), 0.0, 0.95);
+    float contrast = clamp(SafeFloat(params.decayTapsAnisoContrast.w, 1.6), 0.25, 8.0);
+    vec3 sunColor = max(vec3(
+        SafeFloat(params.sunColorAndHazeMix.x, 0.0),
+        SafeFloat(params.sunColorAndHazeMix.y, 0.0),
+        SafeFloat(params.sunColorAndHazeMix.z, 0.0)), vec3(0.0));
+    float hazeMix = Saturate(params.sunColorAndHazeMix.w);
+    float frameIndex = max(SafeFloat(params.frameFadeAspectActive.x, 0.0), 0.0);
+    float aspect = clamp(SafeFloat(params.frameFadeAspectActive.z, 1.0), 0.1, 10.0);
+
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(max(outSize, ivec2(1)));
+    ivec2 histSize = max(textureSize(historyColor, 0), ivec2(1));
+    vec2 halfTexel = 0.5 / vec2(histSize);
+    vec2 uvMin = halfTexel;
+    vec2 uvMax = vec2(1.0) - halfTexel;
+
+    // Scale x by aspect so screen distance and reach are measured in view heights.
+    vec2 rawToSun = sunUv - uv;
+    vec2 toSun = vec2(rawToSun.x * aspect, rawToSun.y);
+    float distToSun = length(toSun);
+    float rayLen = min(distToSun, reach);
+    float marchShare = distToSun > 1e-5 ? (rayLen / max(distToSun, 1e-5)) : 0.0;
+    vec2 marchVec = rawToSun * marchShare;
+
+    // Clip off-screen rays at the frustum border so taps stay on the true radial line.
+    float sClip = 1.0;
+    if (marchVec.x > 1e-6) {
+        sClip = min(sClip, max((uvMax.x - uv.x) / marchVec.x, 0.0));
+    } else if (marchVec.x < -1e-6) {
+        sClip = min(sClip, max((uvMin.x - uv.x) / marchVec.x, 0.0));
+    }
+    if (marchVec.y > 1e-6) {
+        sClip = min(sClip, max((uvMax.y - uv.y) / marchVec.y, 0.0));
+    } else if (marchVec.y < -1e-6) {
+        sClip = min(sClip, max((uvMin.y - uv.y) / marchVec.y, 0.0));
+    }
+    vec2 clippedVec = marchVec * sClip;
+    float clippedLen = rayLen * sClip;
+
+    float jitter = fract(InterleavedGradientNoise(vec2(pixel)) + fract(mod(frameIndex, 4096.0) * kGoldenRatio));
+    float invTaps = 1.0 / float(max(tapCount, 1));
+
+    float sumOpen = 0.0;
+    float sumOpenSq = 0.0;
+    float sumWeight = 0.0;
+    float sumSunOpen = 0.0;
+    float sumSunWeight = 0.0;
+
+    for (int i = 0; i < tapCount; ++i) {
+        float u = (float(i) + jitter) * invTaps;
+        float s = 1.0 - (exp(kStepExpRate * (1.0 - u)) - 1.0) / kStepExpDenom;
+        vec2 tapUv = clamp(uv + clippedVec * s, uvMin, uvMax);
+        float t = s * clippedLen;
+
+        float isSky = step(kClearDepthThreshold, textureLod(sceneDepth, tapUv, 0.0).r);
+        float cloudAlpha = Saturate(textureLod(historyColor, tapUv, 0.0).a);
+        float openSample = isSky * smoothstep(kCloudOpenLow, kCloudOpenHigh, cloudAlpha);
+
+        float w = exp(-decay * t);
+        sumOpen += openSample * w;
+        sumOpenSq += (openSample * openSample) * w;
+        sumWeight += w;
+
+        float sunW = s * s + 1e-3;
+        sumSunOpen += openSample * sunW;
+        sumSunWeight += sunW;
+    }
+
+    float invSumW = 1.0 / max(sumWeight, 1e-5);
+    float rayFrac = Saturate(sumOpen * invSumW);
+    float meanSq = Saturate(sumOpenSq * invSumW);
+    float rayVar = Saturate(4.0 * max(meanSq - rayFrac * rayFrac, 0.0));
+    float sunOpen = Saturate(sumSunOpen / max(sumSunWeight, 1e-5));
+
+    // Angular forward peak near the sun controlled by anisotropy g, plus radial reach envelope.
+    float corePeak = 1.0 + kCoreAnisoScale * anisoG * anisoG;
+    float coreFalloff = mix(2.2, 5.0, anisoG);
+    float glow = mix(1.0, corePeak, exp(-distToSun * coreFalloff));
+    float radialEnvelope = exp(-decay * kRadialDecayScale * distToSun)
+        * (1.0 - smoothstep(reach * 0.65, reach * 1.25, distToSun));
+
+    // Variance along sun-lit rays boosts cloud-gap and silhouette shafts without inverting cloud shadows.
+    float gapSignal = rayVar * sunOpen;
+    float litOpen = Saturate(mix(rayFrac, sunOpen, 0.5 * rayVar));
+    float gapGain = min(0.18 * contrast, 0.48);
+    float baseline = min(kOpenSkyBaseline, 0.05 * contrast) * (1.0 - gapSignal);
+    float shapedBase = litOpen > 1e-6 ? pow(litOpen, contrast) : 0.0;
+    float shapedShaft = max(shapedBase * (1.0 + gapGain * gapSignal) - baseline, 0.0);
+
+    // Shafts are lit air in front of the scene; thick clouds keep a softer share.
+    float ownCloudAlpha = Saturate(textureLod(historyColor, clamp(uv, uvMin, uvMax), 0.0).a);
+    float inFrontWeight = mix(1.0, kThickCloudKeep, 1.0 - ownCloudAlpha);
+    float shaft = shapedShaft * glow * radialEnvelope * inFrontWeight;
+
+    vec3 color = sunColor * (intensity * fade * shaft);
+    color = mix(color, color * kHazeTint, hazeMix);
+
+    // Hue-preserving smooth compression so no channel exceeds kShaftSoftCap (~6).
+    float peak = max(color.r, max(color.g, color.b));
+    color /= (1.0 + peak / kShaftSoftCap);
+    if (any(isnan(color)) || any(isinf(color))) {
+        color = vec3(0.0);
+    }
+    imageStore(shaftsOut, pixel, vec4(clamp(color, vec3(0.0), vec3(kShaftSoftCap)), 1.0));
+}

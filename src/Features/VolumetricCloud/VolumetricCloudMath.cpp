@@ -73,6 +73,7 @@ VolumetricCloudSettings SanitizeVolumetricCloudSettings(const VolumetricCloudSet
         out.*(entry.member) = ClampOrDefault(candidate.*(entry.member), entry.low, entry.high, defaults.*(entry.member));
     }
     out.layerTopM = std::max(out.layerTopM, out.layerBaseM + kMinLayerThicknessM);
+    out.sunRaysTaps = std::clamp(std::round(out.sunRaysTaps / 8.0f) * 8.0f, 8.0f, 48.0f);
     out.channel = std::min(candidate.channel, kCloudDebugChannelRgb);
     if (static_cast<std::uint8_t>(candidate.debugView) > static_cast<std::uint8_t>(VolumetricCloudDebugView::BlueNoise)) {
         out.debugView = VolumetricCloudDebugView::Off;
@@ -644,6 +645,81 @@ bool CloudTapUsable(float tapEndKm, float tapDistanceKm, float tapTransmittance,
     }
     // A cloud that sits behind this pixel's surface must not be added to it.
     return tapTransmittance > 0.999f || tapDistanceKm <= (1.0f + kRelative) * pixelEndKm + kSlackKm;
+}
+
+float CloudSunShaftsFade(float sunUp, const float (&sunUv)[2], float aspect) noexcept
+{
+    if (!std::isfinite(sunUp) || sunUp <= 0.0f || !std::isfinite(sunUv[0]) || !std::isfinite(sunUv[1])) {
+        return 0.0f;
+    }
+    const float onSet = Saturate(sunUp / 0.05f);
+    const float safeAspect = std::isfinite(aspect) ? std::max(aspect, 0.0f) : 1.0f;
+    const float outX = std::max({ 0.0f, -sunUv[0], sunUv[0] - 1.0f }) * safeAspect;
+    const float outY = std::max({ 0.0f, -sunUv[1], sunUv[1] - 1.0f });
+    const float outside = Saturate(std::sqrt(outX * outX + outY * outY) / kCloudSunShaftsOutsideView);
+    const float inView = 1.0f - outside * outside * (3.0f - 2.0f * outside);
+    return onSet * inView;
+}
+
+VolumetricCloudSunShaftsParamsGpu MakeCloudSunShaftsParams(
+    const VolumetricCloudSettings& settings, const VolumetricCloudSunShaftsFacts& facts) noexcept
+{
+    const float* vp = facts.viewProjection.Data();
+    bool inputsFinite = std::isfinite(settings.sunRays) && std::isfinite(settings.sunRaysDecay)
+        && std::isfinite(settings.sunRaysLength) && std::isfinite(settings.sunRaysTaps)
+        && std::isfinite(settings.sunRaysAnisotropy) && std::isfinite(settings.sunRaysContrast)
+        && std::isfinite(facts.sunDirection.x) && std::isfinite(facts.sunDirection.y) && std::isfinite(facts.sunDirection.z)
+        && std::isfinite(facts.sunColor.x) && std::isfinite(facts.sunColor.y) && std::isfinite(facts.sunColor.z);
+    for (int i = 0; i < 16 && inputsFinite; ++i) {
+        inputsFinite = std::isfinite(vp[i]);
+    }
+
+    const VolumetricCloudSettings safe = SanitizeVolumetricCloudSettings(settings);
+    const float aspect = static_cast<float>(std::max(facts.viewWidth, 1u)) / static_cast<float>(std::max(facts.viewHeight, 1u));
+    const float frame = static_cast<float>(facts.frameIndex & 0xFFFFFu);
+    const float intensity = inputsFinite ? safe.sunRays : 0.0f;
+    float sunUv[2] = { 0.5f, 0.5f };
+    float fade = 0.0f;
+    float active = 0.0f;
+
+    if (inputsFinite && facts.viewWidth > 0 && facts.viewHeight > 0) {
+        const float dirLenSq = LengthSquared(facts.sunDirection);
+        if (std::isfinite(dirLenSq) && dirLenSq > 1e-12f) {
+            const Vec3 toSun = facts.sunDirection / std::sqrt(dirLenSq);
+            const Vec4 clip = facts.viewProjection * Vec4(toSun.x * 1000.0f, toSun.y * 1000.0f, toSun.z * 1000.0f, 1.0f);
+            if (std::isfinite(clip.x) && std::isfinite(clip.y) && std::isfinite(clip.z) && std::isfinite(clip.w)
+                && clip.w > 1e-3f) {
+                const float rawUv[2] = { clip.x / clip.w * 0.5f + 0.5f, clip.y / clip.w * 0.5f + 0.5f };
+                if (std::isfinite(rawUv[0]) && std::isfinite(rawUv[1])) {
+                    sunUv[0] = std::clamp(rawUv[0], -kCloudSunShaftsUvClamp, kCloudSunShaftsUvClamp);
+                    sunUv[1] = std::clamp(rawUv[1], -kCloudSunShaftsUvClamp, kCloudSunShaftsUvClamp);
+                    fade = CloudSunShaftsFade(toSun.y, rawUv, aspect);
+                    if (facts.historyValid && intensity > 0.0f && fade > 0.0f) {
+                        active = 1.0f;
+                    }
+                }
+            }
+        }
+    }
+
+    VolumetricCloudSunShaftsParamsGpu p;
+    p.sunUvAndReachAndIntensity[0] = sunUv[0];
+    p.sunUvAndReachAndIntensity[1] = sunUv[1];
+    p.sunUvAndReachAndIntensity[2] = safe.sunRaysLength;
+    p.sunUvAndReachAndIntensity[3] = intensity;
+    p.decayTapsAnisoContrast[0] = safe.sunRaysDecay;
+    p.decayTapsAnisoContrast[1] = safe.sunRaysTaps;
+    p.decayTapsAnisoContrast[2] = safe.sunRaysAnisotropy;
+    p.decayTapsAnisoContrast[3] = safe.sunRaysContrast;
+    p.sunColorAndHazeMix[0] = inputsFinite ? std::clamp(facts.sunColor.x, 0.0f, kCloudMaxSourceLuma) : 0.0f;
+    p.sunColorAndHazeMix[1] = inputsFinite ? std::clamp(facts.sunColor.y, 0.0f, kCloudMaxSourceLuma) : 0.0f;
+    p.sunColorAndHazeMix[2] = inputsFinite ? std::clamp(facts.sunColor.z, 0.0f, kCloudMaxSourceLuma) : 0.0f;
+    p.sunColorAndHazeMix[3] = kCloudSunShaftsHazeMix;
+    p.frameFadeAspectActive[0] = frame;
+    p.frameFadeAspectActive[1] = fade;
+    p.frameFadeAspectActive[2] = aspect;
+    p.frameFadeAspectActive[3] = active;
+    return p;
 }
 
 } // namespace gte
