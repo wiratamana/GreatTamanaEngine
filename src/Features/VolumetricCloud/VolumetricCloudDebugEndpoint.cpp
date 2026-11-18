@@ -150,6 +150,7 @@ fx::FeatureDebugResult VolumetricCloudDebugEndpoint::GetState() const
     Add(out, "game.shadow.texelM", static_cast<double>(game.shadowTexelM));
     Add(out, "game.shadow.nearExtentM", static_cast<double>(game.shadowNearExtentM));
     Add(out, "game.shadow.nearTexelM", static_cast<double>(game.shadowNearTexelM));
+    Add(out, "game.shadow.nearCovers", game.shadowNearCovers);
     Add(out, "game.sunShafts.sunUv", PairText(game.sunShaftsSunUv[0], game.sunShaftsSunUv[1]));
     Add(out, "game.sunShafts.reach", static_cast<double>(game.sunShaftsReach));
     Add(out, "game.sunShafts.active", game.sunShaftsActive);

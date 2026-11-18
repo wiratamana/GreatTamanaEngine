@@ -1777,6 +1777,51 @@ TEST(VolumetricCloudEndpointTest, ExposesShaftHighSunKeepAndReadOnlyShaftState)
     }
 }
 
+TEST(VolumetricCloudEndpointTest, ExposesReadOnlyShadowNearCovers)
+{
+    VolumetricCloudFeature feature;
+    fx::IFeatureDebugEndpoint* endpoint = feature.DebugEndpoint();
+    ASSERT_NE(endpoint, nullptr);
+
+    const auto findField = [](const fx::FeatureDebugResult& r, std::string_view key) -> const fx::FeatureDebugField* {
+        for (const fx::FeatureDebugField& f : r.fields) {
+            if (f.key == key) {
+                return &f;
+            }
+        }
+        return nullptr;
+    };
+
+    const fx::FeatureDebugResult state = endpoint->GetState();
+    ASSERT_TRUE(state.ok);
+    const fx::FeatureDebugField* nearCovers = findField(state, "game.shadow.nearCovers");
+    ASSERT_NE(nearCovers, nullptr);
+    ASSERT_TRUE(std::holds_alternative<bool>(nearCovers->value));
+    EXPECT_FALSE(std::get<bool>(nearCovers->value));
+    EXPECT_FALSE(VolumetricCloudViewSnapshot{}.shadowNearCovers);
+
+    const std::vector<fx::FeatureDebugArg> roSet{ { "game.shadow.nearCovers", "true" } };
+    const fx::FeatureDebugResult bad = endpoint->Set(roSet);
+    EXPECT_FALSE(bad.ok);
+    EXPECT_EQ(bad.badKey, "game.shadow.nearCovers");
+    EXPECT_EQ(bad.message, "key is read-only");
+
+    VolumetricCloudSettings s;
+    const Vec3 eye{ -2000.0f, 12.0f, -800.0f };
+    const Vec3 sun = Normalize(Vec3{ 0.4f, 0.57f, -0.71f });
+    const CloudShadowGrid grid = MakeCloudShadowGrid(s, eye, sun, kCloudShadowMapSize);
+    CloudShadowMap map;
+    map.sunDirection = sun;
+    map.centerX = static_cast<float>(grid.centerX);
+    map.centerZ = static_cast<float>(grid.centerZ);
+    map.extentM = grid.texelM * static_cast<float>(kCloudShadowMapSize);
+    map.layerBaseM = s.layerBaseM;
+    map.layerTopM = s.layerTopM;
+    map.strength = 1.0f;
+    EXPECT_TRUE(CloudShadowNearCovers(map, eye));
+    EXPECT_FALSE(CloudShadowNearCovers(map, eye + Vec3{ map.extentM, 0.0f, 0.0f }));
+}
+
 TEST(VolumetricCloudShaderTest, TempDebugHooksAndAirDesaturationAreGoneAndEnergyCapsMatchCpp)
 {
     const std::string march = ReadShaderText("VolumetricCloud.comp");
@@ -1990,7 +2035,12 @@ TEST(VolumetricCloudShadowNearTest, ShaderLookupAndShadowPassMatchCppConstants)
 
     const std::string march = ReadShaderText("VolumetricCloud.comp");
     EXPECT_NE(march.find("const int kShadowNearScale = 8;"), std::string::npos);
+    EXPECT_NE(march.find("const float kNearShadowDetail = 0.4;"), std::string::npos);
     EXPECT_NE(march.find("CloudNearShadowDensity"), std::string::npos);
+    EXPECT_NE(march.find("CloudCurve(shape) * factor * modulation"), std::string::npos);
+    EXPECT_NE(march.find("float transmittance = exp(-opticalDepth);"), std::string::npos);
+    EXPECT_EQ(march.find("kNearShadowMsWeight"), std::string::npos);
+    EXPECT_EQ(march.find("kNearShadowMsDecay"), std::string::npos);
 }
 
 void ExpectAllFinite(const VolumetricCloudSunShaftsParamsGpu& p)
@@ -2025,12 +2075,12 @@ TEST(VolumetricCloudSunShaftsTest, ParamsBlockLayoutAndSizeMatchTheShader)
 TEST(VolumetricCloudSunShaftsTest, SettingsDefaultsAndSanitizerSnapTapsToStepsOfEight)
 {
     const VolumetricCloudSettings defaults;
-    EXPECT_FLOAT_EQ(defaults.sunRays, 0.8f);
-    EXPECT_FLOAT_EQ(defaults.sunRaysDecay, 1.5f);
-    EXPECT_FLOAT_EQ(defaults.sunRaysLength, 1.2f);
+    EXPECT_FLOAT_EQ(defaults.sunRays, 1.2f);
+    EXPECT_FLOAT_EQ(defaults.sunRaysDecay, 1.0f);
+    EXPECT_FLOAT_EQ(defaults.sunRaysLength, 1.5f);
     EXPECT_FLOAT_EQ(defaults.sunRaysTaps, 24.0f);
     EXPECT_FLOAT_EQ(defaults.sunRaysAnisotropy, 0.75f);
-    EXPECT_FLOAT_EQ(defaults.sunRaysContrast, 1.0f);
+    EXPECT_FLOAT_EQ(defaults.sunRaysContrast, 2.5f);
 
     VolumetricCloudSettings low = defaults;
     low.sunRays = -1.0f;
@@ -2223,12 +2273,12 @@ TEST(VolumetricCloudSunShaftsTest, EndpointAndSetupExposeSunShaftsKeysSettingsAn
              "sunRaysContrast", "game.sunShafts.sunUv", "game.sunShafts.reach", "game.sunShafts.active" }) {
         ASSERT_NE(findField(state, key), nullptr) << key;
     }
-    EXPECT_NEAR(std::get<double>(findField(state, "sunRays")->value), 0.8, 1e-6);
-    EXPECT_NEAR(std::get<double>(findField(state, "sunRaysDecay")->value), 1.5, 1e-6);
-    EXPECT_NEAR(std::get<double>(findField(state, "sunRaysLength")->value), 1.2, 1e-6);
+    EXPECT_NEAR(std::get<double>(findField(state, "sunRays")->value), 1.2, 1e-6);
+    EXPECT_NEAR(std::get<double>(findField(state, "sunRaysDecay")->value), 1.0, 1e-6);
+    EXPECT_NEAR(std::get<double>(findField(state, "sunRaysLength")->value), 1.5, 1e-6);
     EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "sunRaysTaps")->value), 24.0);
     EXPECT_NEAR(std::get<double>(findField(state, "sunRaysAnisotropy")->value), 0.75, 1e-6);
-    EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "sunRaysContrast")->value), 1.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "sunRaysContrast")->value), 2.5);
     EXPECT_NE(std::get<std::string>(findField(state, "game.sunShafts.sunUv")->value).find(','), std::string::npos);
     EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "game.sunShafts.reach")->value), 0.0);
     EXPECT_FALSE(std::get<bool>(findField(state, "game.sunShafts.active")->value));

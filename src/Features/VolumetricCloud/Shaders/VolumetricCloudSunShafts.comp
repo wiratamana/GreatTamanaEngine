@@ -25,10 +25,17 @@ const float kCloudOpenLow = 0.15;
 const float kCloudOpenHigh = 0.90;
 const float kRadialDecayScale = 1.10;
 const float kCoreAnisoScale = 1.8;
-const float kOpenSkyBaseline = 0.07;
-const float kThickCloudKeep = 0.4;
+const float kOpenSkyBaseline = 0.25;
+const float kThickCloudKeep = 0.65;
+const float kThickOccluderMaxS = 0.5;
+const float kPartialOcclusionVar = 0.12;
+// Standard-Z [0, 1] with no projection bound (assumes nearZ ~ 0.1..0.2 m): <= ~30 m gets 0.25, far mountains 1.0.
+const float kNearAirDepth = 0.995;
+const float kNearAirRange = 0.0042;
+const float kNearAirMinWeight = 0.25;
 const vec3 kHazeTint = vec3(0.75, 0.88, 1.10);
-const float kShaftSoftCap = 6.0;
+const float kShaftStorageScale = 0.5; // Paired with kShaftGain = 2.0 in resolve so raw buffer stays in 0..3.
+const float kShaftSoftCap = 3.0;
 
 float SafeFloat(float v, float fallback)
 {
@@ -38,6 +45,20 @@ float SafeFloat(float v, float fallback)
 float Saturate(float v)
 {
     return clamp(SafeFloat(v, 0.0), 0.0, 1.0);
+}
+
+// Thickens opaque occluders by one quarter-res texel on the nearer half of the ray so thin poles/edges are kept.
+float SampleSky(vec2 sampleUv, vec2 quarterTexel, vec2 uvMin, vec2 uvMax, bool thicken)
+{
+    float sky = step(kClearDepthThreshold, textureLod(sceneDepth, sampleUv, 0.0).r);
+    if (!thicken || sky <= 0.0) {
+        return sky;
+    }
+    sky *= step(kClearDepthThreshold, textureLod(sceneDepth, clamp(sampleUv + vec2(quarterTexel.x, 0.0), uvMin, uvMax), 0.0).r);
+    sky *= step(kClearDepthThreshold, textureLod(sceneDepth, clamp(sampleUv - vec2(quarterTexel.x, 0.0), uvMin, uvMax), 0.0).r);
+    sky *= step(kClearDepthThreshold, textureLod(sceneDepth, clamp(sampleUv + vec2(0.0, quarterTexel.y), uvMin, uvMax), 0.0).r);
+    sky *= step(kClearDepthThreshold, textureLod(sceneDepth, clamp(sampleUv - vec2(0.0, quarterTexel.y), uvMin, uvMax), 0.0).r);
+    return sky;
 }
 
 void main()
@@ -59,11 +80,11 @@ void main()
     vec2 sunUv = vec2(
         SafeFloat(params.sunUvAndReachAndIntensity.x, 0.5),
         SafeFloat(params.sunUvAndReachAndIntensity.y, 0.5));
-    float reach = max(SafeFloat(params.sunUvAndReachAndIntensity.z, 1.2), 1e-3);
-    float decay = max(SafeFloat(params.decayTapsAnisoContrast.x, 1.5), 0.0);
+    float reach = max(SafeFloat(params.sunUvAndReachAndIntensity.z, 1.5), 1e-3);
+    float decay = max(SafeFloat(params.decayTapsAnisoContrast.x, 1.0), 0.0);
     int tapCount = clamp(int(SafeFloat(params.decayTapsAnisoContrast.y, 24.0) + 0.5), 8, 48);
     float anisoG = clamp(SafeFloat(params.decayTapsAnisoContrast.z, 0.75), 0.0, 0.95);
-    float contrast = clamp(SafeFloat(params.decayTapsAnisoContrast.w, 1.6), 0.25, 8.0);
+    float contrast = clamp(SafeFloat(params.decayTapsAnisoContrast.w, 2.5), 0.2, 8.0);
     vec3 sunColor = max(vec3(
         SafeFloat(params.sunColorAndHazeMix.x, 0.0),
         SafeFloat(params.sunColorAndHazeMix.y, 0.0),
@@ -72,7 +93,8 @@ void main()
     float frameIndex = max(SafeFloat(params.frameFadeAspectActive.x, 0.0), 0.0);
     float aspect = clamp(SafeFloat(params.frameFadeAspectActive.z, 1.0), 0.1, 10.0);
 
-    vec2 uv = (vec2(pixel) + 0.5) / vec2(max(outSize, ivec2(1)));
+    vec2 quarterTexel = 1.0 / vec2(max(outSize, ivec2(1)));
+    vec2 uv = (vec2(pixel) + 0.5) * quarterTexel;
     ivec2 histSize = max(textureSize(historyColor, 0), ivec2(1));
     vec2 halfTexel = 0.5 / vec2(histSize);
     vec2 uvMin = halfTexel;
@@ -116,7 +138,7 @@ void main()
         vec2 tapUv = clamp(uv + clippedVec * s, uvMin, uvMax);
         float t = s * clippedLen;
 
-        float isSky = step(kClearDepthThreshold, textureLod(sceneDepth, tapUv, 0.0).r);
+        float isSky = SampleSky(tapUv, quarterTexel, uvMin, uvMax, s < kThickOccluderMaxS);
         float cloudAlpha = Saturate(textureLod(historyColor, tapUv, 0.0).a);
         float openSample = isSky * smoothstep(kCloudOpenLow, kCloudOpenHigh, cloudAlpha);
 
@@ -140,26 +162,32 @@ void main()
     float corePeak = 1.0 + kCoreAnisoScale * anisoG * anisoG;
     float coreFalloff = mix(2.2, 5.0, anisoG);
     float glow = mix(1.0, corePeak, exp(-distToSun * coreFalloff));
+    float coreHalo = exp(-distToSun * coreFalloff * 1.5);
     float radialEnvelope = exp(-decay * kRadialDecayScale * distToSun)
         * (1.0 - smoothstep(reach * 0.65, reach * 1.25, distToSun));
 
-    // Variance along sun-lit rays boosts cloud-gap and silhouette shafts without inverting cloud shadows.
+    // Multiplicative baseline removes haze veil; open sky away from the sun core produces rays only on partial occlusion.
     float gapSignal = rayVar * sunOpen;
     float litOpen = Saturate(mix(rayFrac, sunOpen, 0.5 * rayVar));
     float gapGain = min(0.18 * contrast, 0.48);
-    float baseline = min(kOpenSkyBaseline, 0.05 * contrast) * (1.0 - gapSignal);
-    float shapedBase = litOpen > 1e-6 ? pow(litOpen, contrast) : 0.0;
-    float shapedShaft = max(shapedBase * (1.0 + gapGain * gapSignal) - baseline, 0.0);
+    float remappedOpen = Saturate((litOpen - kOpenSkyBaseline) / (1.0 - kOpenSkyBaseline));
+    float shapedBase = remappedOpen > 1e-6 ? pow(remappedOpen, contrast) : 0.0;
+    float partialMask = max(coreHalo, smoothstep(0.0, kPartialOcclusionVar, rayVar));
+    float shapedShaft = shapedBase * (1.0 + gapGain * gapSignal) * partialMask;
 
-    // Shafts are lit air in front of the scene; thick clouds keep a softer share.
-    float ownCloudAlpha = Saturate(textureLod(historyColor, clamp(uv, uvMin, uvMax), 0.0).a);
+    // Shafts are lit air in front of the scene; thick clouds keep a softer share and near geometry gets less air light.
+    vec2 ownUv = clamp(uv, uvMin, uvMax);
+    float ownCloudAlpha = Saturate(textureLod(historyColor, ownUv, 0.0).a);
     float inFrontWeight = mix(1.0, kThickCloudKeep, 1.0 - ownCloudAlpha);
-    float shaft = shapedShaft * glow * radialEnvelope * inFrontWeight;
+    float ownDepth = SafeFloat(textureLod(sceneDepth, ownUv, 0.0).r, 1.0);
+    float nearAirRamp = smoothstep(0.0, 1.0, Saturate((ownDepth - kNearAirDepth) / kNearAirRange));
+    float airDistanceWeight = (ownDepth >= kClearDepthThreshold) ? 1.0 : mix(kNearAirMinWeight, 1.0, nearAirRamp);
+    float shaft = shapedShaft * glow * radialEnvelope * inFrontWeight * airDistanceWeight;
 
-    vec3 color = sunColor * (intensity * fade * shaft);
+    vec3 color = sunColor * (intensity * fade * shaft * kShaftStorageScale);
     color = mix(color, color * kHazeTint, hazeMix);
 
-    // Hue-preserving smooth compression so no channel exceeds kShaftSoftCap (~6).
+    // Hue-preserving smooth compression into 0..3; VolumetricCloudResolve.comp restores x2 gain.
     float peak = max(color.r, max(color.g, color.b));
     color /= (1.0 + peak / kShaftSoftCap);
     if (any(isnan(color)) || any(isinf(color))) {

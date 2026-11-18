@@ -62,7 +62,14 @@ TEST(VolumetricCloudSunShaftsShaderTest, ShaderUsesSharedIncludesGuardsAndNoDisc
     EXPECT_NE(shader.find("Saturate("), std::string::npos);
     EXPECT_NE(shader.find("max("), std::string::npos);
     EXPECT_NE(shader.find("clamp("), std::string::npos);
-    EXPECT_NE(shader.find("kShaftSoftCap"), std::string::npos);
+    EXPECT_NE(shader.find("kOpenSkyBaseline = 0.25"), std::string::npos);
+    EXPECT_NE(shader.find("1.0 - kOpenSkyBaseline"), std::string::npos);
+    EXPECT_NE(shader.find("kThickCloudKeep = 0.65"), std::string::npos);
+    EXPECT_NE(shader.find("kThickOccluderMaxS = 0.5"), std::string::npos);
+    EXPECT_NE(shader.find("kNearAirDepth"), std::string::npos);
+    EXPECT_NE(shader.find("kNearAirRange"), std::string::npos);
+    EXPECT_NE(shader.find("kShaftStorageScale = 0.5"), std::string::npos);
+    EXPECT_NE(shader.find("kShaftSoftCap = 3.0"), std::string::npos);
     EXPECT_EQ(shader.find("discard"), std::string::npos);
 
     for (std::size_t at = shader.find("texture("); at != std::string::npos; at = shader.find("texture(", at + 1)) {
@@ -76,7 +83,9 @@ TEST(VolumetricCloudSunShaftsShaderTest, ResolveCompositesSunShaftsWithoutLegacy
     const std::string resolve = ReadShaderText("VolumetricCloudResolve.comp");
     ASSERT_FALSE(resolve.empty());
     EXPECT_NE(resolve.find("uniform sampler2D sunShafts;"), std::string::npos);
+    EXPECT_NE(resolve.find("const float kShaftGain = 2.0;"), std::string::npos);
     EXPECT_NE(resolve.find("textureLod(sunShafts, uv, 0.0).rgb"), std::string::npos);
+    EXPECT_NE(resolve.find("kShaftGain *"), std::string::npos);
     EXPECT_EQ(resolve.find("SunRays("), std::string::npos);
     for (const std::string_view removed : { "kRayDeadZone", "kRaySurroundRadius", "openHere", "onGround", "discard" }) {
         EXPECT_EQ(resolve.find(removed), std::string::npos) << removed;

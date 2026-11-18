@@ -56,6 +56,7 @@ void VolumetricCloudFeature::PublishWind(fx::PreOpaqueFrame& f)
         view.snapshot.shadowTexelM = 0.0f;
         view.snapshot.shadowNearExtentM = 0.0f;
         view.snapshot.shadowNearTexelM = 0.0f;
+        view.snapshot.shadowNearCovers = false;
     }
     // Both views call this in one frame; the drift moves once.
     if (f.FrameIndex() != m_windFrame) {
@@ -90,6 +91,7 @@ VolumetricCloudViewSnapshot VolumetricCloudFeature::Snapshot(rg::ViewScope scope
         snapshot.shadowTexelM = 0.0f;
         snapshot.shadowNearExtentM = 0.0f;
         snapshot.shadowNearTexelM = 0.0f;
+        snapshot.shadowNearCovers = false;
         snapshot.sunShaftsSunUv[0] = 0.0f;
         snapshot.sunShaftsSunUv[1] = 0.0f;
         snapshot.sunShaftsReach = 0.0f;
@@ -379,6 +381,7 @@ void VolumetricCloudFeature::ShadowMapPass(fx::PreOpaqueFrame& f)
     view.snapshot.shadowTexelM = 0.0f;
     view.snapshot.shadowNearExtentM = 0.0f;
     view.snapshot.shadowNearTexelM = 0.0f;
+    view.snapshot.shadowNearCovers = false;
     if (!cfg.enabled || !(cfg.shadowStrength > 0.0f || cfg.shaftStrength > 0.0f) || cfg.debugView != VolumetricCloudDebugView::Off
         || !m_shadowSlot.IsValid() || !f.View().relative.valid || !(sunUp > kCloudShadowFadeSunLow)
         || !f.PassEnabled("VolumetricCloud.Shadow.Dispatch")) {
@@ -499,6 +502,7 @@ void VolumetricCloudFeature::ShadowMapPass(fx::PreOpaqueFrame& f)
     view.snapshot.shadowTexelM = shadow.grid.texelM;
     view.snapshot.shadowNearExtentM = CloudShadowNearExtentM(map.extentM);
     view.snapshot.shadowNearTexelM = shadow.grid.nearTexelM;
+    view.snapshot.shadowNearCovers = CloudShadowMapUsable(map) && CloudShadowNearCovers(map, facts.eye);
 }
 
 void VolumetricCloudFeature::CompositePass(fx::CompositeFrame& f)

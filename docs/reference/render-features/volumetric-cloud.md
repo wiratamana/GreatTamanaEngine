@@ -185,12 +185,12 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `shaftHeightM` | 2500 | 200..6000 | Scale height of the beam haze and the mist |
 | `shaftHighSunKeep` | 0.7 | 0..1 | Share of the low-sun `shaftStrength`, `shaftHaze` and `shaftMist` kept when the sun is overhead |
 | `shadowFill` | 0.25 | 0..1 | Share of the sun the cloud blocks that reaches shadowed receivers as diffuse light, so a shadowed ground is not black |
-| `sunRays` | 0.8 | 0..3 | Intensity of the quarter-res screen-space sun shafts (`VolumetricCloud.SunShafts.Dispatch`) radiating from the sun through cloud gaps and over terrain silhouettes. Active up to 1.5 view heights outside the frame and at any sun height above the horizon. 0 = off |
-| `sunRaysDecay` | 1.5 | 0..6 | Exponential falloff of sun-shaft taps away from the sun |
-| `sunRaysLength` | 1.2 | 0.2..3 | Reach of the sun shafts across the screen, in view heights |
+| `sunRays` | 1.2 | 0..3 | Intensity of the quarter-res screen-space sun shafts (`VolumetricCloud.SunShafts.Dispatch`) radiating from the sun through cloud gaps and over terrain silhouettes. Active up to 1.5 view heights outside the frame and at any sun height above the horizon. 0 = off |
+| `sunRaysDecay` | 1 | 0..6 | Exponential falloff of sun-shaft taps away from the sun |
+| `sunRaysLength` | 1.5 | 0.2..3 | Reach of the sun shafts across the screen, in view heights |
 | `sunRaysTaps` | 24 | 8..48 | Radial sample count per pixel, snapped to multiples of 8 |
 | `sunRaysAnisotropy` | 0.75 | 0..0.95 | Forward-scattering core strength (`g`) around the sun |
-| `sunRaysContrast` | 1 | 0.2..3 | Contrast exponent on open cloud gaps along the sun line |
+| `sunRaysContrast` | 2.5 | 0.2..3 | Contrast exponent on open cloud gaps along the sun line |
 | `sunStar` | 1 | 0..3 | Small six-spike starburst on the sun where it shows through a gap in the clouds (stable in time, faded by the cloud cover at the sun and by each pixel's own cloud transmittance so spikes do not draw over thick cloud). Same sun-height fade as the rays. The spikes are drawn over sky pixels only: a ridge or building in front of the sun carries none. 0 = off |
 | `shaftStrength` | 1 | 0..1 | Light shafts: how much of the sun in-scatter of the air the cloud shadow map removes (aerial perspective, volumetric light, air in front of clouds). 0 = none |
 
@@ -206,9 +206,9 @@ Resolve detail: a pixel that is not marched this frame reads its history texel e
 ## Sun shafts algorithm
 - `VolumetricCloudSunShafts.comp` runs at quarter resolution (8 x 8 threads) and integrates screen-space crepuscular rays from each pixel toward the sun's projected UV (clamped to the reach in view heights and clipped at the screen border when the sun is outside the frame).
 - Each ray takes `taps` exponentially spaced samples that tighten near the sun, jittered per pixel with interleaved gradient noise plus a golden-ratio frame offset so temporal anti-aliasing averages them without banding or flicker.
-- A sample's openness is `isSky(sceneDepth) * smoothstep(0.15, 0.90, historyColor.a)`, so terrain silhouettes and thick clouds block light while thin cloud rims let partial rays pass. Samples are weighted by `exp(-decay * t)`.
-- Sample variance along sun-lit paths boosts rays that cross gaps next to cloud or terrain blockers, while uniform clear sky subtracts a small baseline so a cloudless sky shows only a gentle solar halo.
-- Shafts represent lit air in front of the scene: pixels over thick cloud keep a softer share, the sun colour is mixed toward a cool sky haze tint and smoothly capped below 6 per channel, and `VolumetricCloudResolve.comp` adds the bilinearly upsampled result after `SceneBehindCloud + cloud.rgb`.
+- A sample's openness is `isSky(sceneDepth) * smoothstep(0.15, 0.90, historyColor.a)`, so terrain silhouettes and thick clouds block light while thin cloud rims let partial rays pass. Any opaque geometry (mountain, wall, or thin pole via a 4-neighbour quarter-res depth check on the nearer half of the ray) occludes rays, and near geometry gets less air light than far mountains or sky. Samples are weighted by `exp(-decay * t)`.
+- Openness is remapped multiplicatively above a `0.25` baseline before the contrast curve and gated by ray variance away from the sun core, so partial occlusion casts beams while a cloudless sky shows only a gentle solar halo.
+- Shafts represent lit air in front of the scene: pixels over thick cloud keep a `0.65` share, the sun colour is mixed toward a cool sky haze tint and smoothly capped below `3` per channel, and `VolumetricCloudResolve.comp` adds `2x` the bilinearly upsampled result after `SceneBehindCloud + cloud.rgb`.
 - Tuning knobs:
   - `decay`: exponential falloff along the ray and with screen distance from the sun; higher values shorten beams and keep energy closer to the gaps and sun.
   - `length` (reach): maximum radial span in view heights; controls how far beams stretch across the frame, including from an off-screen sun.
@@ -257,6 +257,7 @@ Name for `/feature_debug`: `VolumetricCloud`. Actions: `reset_defaults`, `preset
 | `game.sunUp` | Sine of the active sun elevation in the last frame |
 | `game.shaftStrength`, `game.beamHazePerKm`, `game.shaftHazePerM` | Published cloud-shaft strength and haze densities of the last frame (`0` when no shadow map is published) |
 | `game.shadow.extentM`, `game.shadow.texelM`, `game.shadow.nearExtentM`, `game.shadow.nearTexelM` | Published far and nested near cloud-shadow map widths and texel sizes in metres (`0` when no shadow map is published) |
+| `game.shadow.nearCovers` | True when a usable cloud shadow map is published and its nested near region covers the camera eye |
 | `game.sunShafts.sunUv` | Projected sun UV (`x,y`, clamped to `-4..4`) fed to the sun-shafts pass |
 | `game.sunShafts.reach` | Reach in view heights fed to the sun-shafts pass (`0` when not rendered) |
 | `game.sunShafts.active` | True when the sun-shafts pass ran with active rays in the last frame |

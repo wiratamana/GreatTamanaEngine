@@ -135,6 +135,7 @@ bool FetchHistory(vec2 texelPosition, float pixelEndKm, out vec4 color, out floa
 
 const float kStarRadius = 0.13;   // Reach of the spikes (view height units).
 const float kStarGain = 2.5;
+const float kShaftGain = 2.0;     // Restores full HDR scale from the 0..3 sun-shafts buffer.
 
 // Share of this pixel and its four neighbours that show sky: the spikes fade out at a silhouette instead of cutting.
 float SkyShare(vec2 uv, float ownDepth)
@@ -315,7 +316,7 @@ void main()
     imageStore(historyAuxOut, pixel, vec4(cloudDistanceKm, pixelEndKm, newCount, 0.0));
 
     vec3 color = SceneBehindCloud(scene, cloud.a) + cloud.rgb;
-    color += max(textureLod(sunShafts, uv, 0.0).rgb, vec3(0.0)) * (1.0 - 0.5 * (1.0 - cloud.a));
+    color += max(textureLod(sunShafts, uv, 0.0).rgb, vec3(0.0)) * (kShaftGain * (1.0 - 0.5 * (1.0 - cloud.a)));
     if (params.sunRay.w > 0.0) {
         color += SunStar(uv, rawDepth) * cloud.a;
     }

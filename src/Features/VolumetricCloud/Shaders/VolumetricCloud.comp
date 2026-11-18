@@ -567,8 +567,7 @@ const int kShadowMaxSteps = 24;
 const float kShadowMinSunY = 0.03;
 const int kShadowNearScale = 8;
 const float kNearShadowBlurScale = 0.4;
-const float kNearShadowMsWeight = 0.38;
-const float kNearShadowMsDecay = 0.10;
+const float kNearShadowDetail = 0.4;
 
 float ShadowNoise(vec2 p)
 {
@@ -592,7 +591,7 @@ vec4 ShadowHistoryAt(vec2 uv, int rowOffset, int side)
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
-// Near shadow density: billow, wisp and curl erosion resolve 100..300 m puffs and gaps inside cloud masses.
+// Near shadow density: same base density as CloudLightDensity(), modulated by bounded curl/billow/wisp detail.
 float CloudNearShadowDensity(vec3 position)
 {
     vec2 offset = position.xz - params.eyeAndPlanetRadius.xz;
@@ -615,11 +614,8 @@ float CloudNearShadowDensity(vec3 position)
     float wispErosion = 1.0 - wisp;
     float wispShare = params.detailShape.z * Saturate(1.2 - 1.6 * shape + 0.5 * Saturate((h - 0.7) * 3.0));
     float rawErosion = mix(billowErosion, wispErosion, wispShare);
-    float rimErosion = rawErosion * params.noise.z * exp(-params.weather.w * 0.75) * mix(params.structure2.x, 1.0, 1.0 - shape);
-    float body = Saturate(Remap(shape, rimErosion, 1.0, 0.0, 1.0));
-    body *= 1.0 - 0.55 * billowErosion * Saturate(params.noise.z);
-    float smallLift = 1.0 + (1.0 - gCloudSize) * (1.0 - smoothstep(0.05, 0.35, h));
-    return CloudCurve(body) * factor * smallLift;
+    float modulation = clamp(1.0 + (0.5 - rawErosion) * 2.0 * kNearShadowDetail, 0.6, 1.4);
+    return CloudCurve(shape) * factor * modulation;
 }
 
 void WriteCloudShadow()
@@ -640,7 +636,7 @@ void WriteCloudShadow()
     float texelM = isNear ? (params.shadowGrid.x / float(kShadowNearScale)) : params.shadowGrid.x;
     vec2 local = (vec2(regionTexel) + 0.5 - 0.5 * float(side)) * texelM;
     vec2 xz = params.shadowGrid.yz + local;
-    float blend = isNear ? max(params.shadowShift.z, 0.45) : params.shadowShift.z;
+    float blend = isNear ? max(params.shadowShift.z, 0.3) : params.shadowShift.z;
     ivec2 historySize = textureSize(shadowHistory, 0);
     bool haveHistory = blend < 0.999 && historySize.x == side && historySize.y >= rowOffset + side;
     vec2 historyUv = (local + params.shadowShift.xy) / (texelM * float(side)) + 0.5;
@@ -684,20 +680,18 @@ void WriteCloudShadow()
     float frame = float(params.counts.y & 1023u);
     vec2 noiseSeed = vec2(regionTexel) + frame * vec2(5.588238, 3.1416);
     float along = ShadowNoise(noiseSeed);
-    float angle = 6.2831853 * ShadowNoise(noiseSeed + 17.0);
-    vec2 blur = vec2(cos(angle), sin(angle)) * sqrt(ShadowNoise(noiseSeed + 41.0)) * softness * texelM;
     float opticalDepth = 0.0;
     if (isNear) {
-        float du = 1.0 / float(steps);
-        for (int i = 0; i < steps; ++i) {
-            float u = (float(i) + along) * du;
-            float hFrac = (0.55 + 0.45 * u) * u;
-            float ds = (0.55 + 0.90 * u) * du * span;
-            float s = sBottom + hFrac * span;
-            vec3 position = vec3(xz.x + blur.x + sun.x * s, mid + sun.y * s, xz.y + blur.y + sun.z * s);
-            opticalDepth += CloudNearShadowDensity(position) * ds;
+        int nearSteps = max(steps, 12);
+        float segment = span / float(nearSteps);
+        for (int i = 0; i < nearSteps; ++i) {
+            float s = sBottom + (float(i) + along) * segment;
+            vec3 position = vec3(xz.x + sun.x * s, mid + sun.y * s, xz.y + sun.z * s);
+            opticalDepth += CloudNearShadowDensity(position) * segment;
         }
     } else {
+        float angle = 6.2831853 * ShadowNoise(noiseSeed + 17.0);
+        vec2 blur = vec2(cos(angle), sin(angle)) * sqrt(ShadowNoise(noiseSeed + 41.0)) * softness * texelM;
         float segment = span / float(steps);
         for (int i = 0; i < steps; ++i) {
             float s = sBottom + (float(i) + along) * segment;
@@ -706,9 +700,7 @@ void WriteCloudShadow()
         }
     }
     opticalDepth *= params.density.y * params.shadowShift.w;
-    float transmittance = isNear
-        ? mix(exp(-opticalDepth), exp(-opticalDepth * kNearShadowMsDecay), kNearShadowMsWeight)
-        : exp(-opticalDepth);
+    float transmittance = exp(-opticalDepth);
     vec4 current = vec4(transmittance, opticalDepth, 0.0, 1.0);
     vec4 result = haveHistory ? mix(previous, current, blend) : current;
     imageStore(lowColorOut, texel, result);
