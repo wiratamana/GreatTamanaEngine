@@ -171,11 +171,11 @@ struct VolumetricCloudSettings {
     float sunRays = 1.2f;           // Intensity of the quarter-res screen-space sun shafts through cloud gaps (0 = off).
     float sunRaysDecay = 1.0f;      // Exponential decay of sun-shaft taps away from the sun.
     float sunRaysLength = 1.5f;     // Reach of the sun shafts across the screen, in view heights.
-    float sunRaysTaps = 32.0f;      // Radial sample count per pixel, snapped to 8..48 in steps of 8.
+    float sunRaysTaps = 48.0f;      // Radial sample count per pixel, snapped to 8..48 in steps of 8.
     float sunRaysAnisotropy = 0.75f; // Forward-scatter phase eccentricity g of the sun-shaft glow.
     float sunRaysContrast = 2.5f;   // Contrast gain on open cloud gaps along the sun line.
     float sunRaysAirLengthM = 2000.0f; // Distance scale (m) over which geometry accumulates sun-shaft air light.
-    float sunRaysSpoke = 1.0f;      // Strength of the angular high-pass spoke term between cloud gaps (0 = off).
+    float sunRaysSpoke = 0.5f;      // Strength of the angular high-pass spoke term between cloud gaps (0 = off).
     float sunStar = 1.0f;         // Strength of the small starburst on the sun where it shows through a gap (0 = off).
 };
 

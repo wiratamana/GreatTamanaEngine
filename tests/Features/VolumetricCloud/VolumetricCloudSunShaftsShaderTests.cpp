@@ -65,6 +65,8 @@ TEST(VolumetricCloudSunShaftsShaderTest, ShaderUsesSharedIncludesGuardsAndNoDisc
     EXPECT_NE(shader.find("Saturate("), std::string::npos);
     EXPECT_NE(shader.find("max("), std::string::npos);
     EXPECT_NE(shader.find("clamp("), std::string::npos);
+    EXPECT_NE(shader.find("SafeFloat(params.decayTapsAnisoContrast.y, 48.0)"), std::string::npos);
+    EXPECT_EQ(shader.find("decayTapsAnisoContrast.y, 32.0"), std::string::npos);
     EXPECT_NE(shader.find("kTapJitterScale = 0.6"), std::string::npos);
     EXPECT_NE(shader.find("floor(vec2(pixel) * 0.5)"), std::string::npos);
     EXPECT_NE(shader.find("kOpenSkyBaseline = 0.25"), std::string::npos);
@@ -111,6 +113,10 @@ TEST(VolumetricCloudSunShaftsShaderTest, ResolveCompositesSunShaftsAndAngularSpo
     EXPECT_NE(resolve.find("const float kShaftGain = 2.0;"), std::string::npos);
     EXPECT_NE(resolve.find("const float kShaftCloudKeep = 0.5;"), std::string::npos);
     EXPECT_NE(resolve.find("const float kSpokeWidth = 0.012;"), std::string::npos);
+    EXPECT_NE(resolve.find("const float kSpokeFarScale = 2.0;"), std::string::npos);
+    EXPECT_NE(resolve.find("const float kSpokeFarMix = 0.4;"), std::string::npos);
+    EXPECT_NE(resolve.find("const float kSpokeNoiseFloor = 0.03;"), std::string::npos);
+    EXPECT_NE(resolve.find("const float kSpokeAirLengthM = 2000.0;"), std::string::npos);
     EXPECT_NE(resolve.find("const float kSpokeGain = 6.0;"), std::string::npos);
     EXPECT_NE(resolve.find("const float kSpokeFalloff = 1.5;"), std::string::npos);
     EXPECT_NE(resolve.find("const float kSpokeSoftCap = 3.0;"), std::string::npos);
@@ -119,13 +125,21 @@ TEST(VolumetricCloudSunShaftsShaderTest, ResolveCompositesSunShaftsAndAngularSpo
     EXPECT_NE(resolve.find("textureLod(sunShafts, uv, 0.0)"), std::string::npos);
     EXPECT_NE(resolve.find("textureLod(sunShafts, clamp(uv - tangent * kSpokeWidth, uvMin, uvMax), 0.0).a"), std::string::npos);
     EXPECT_NE(resolve.find("textureLod(sunShafts, clamp(uv + tangent * kSpokeWidth, uvMin, uvMax), 0.0).a"), std::string::npos);
-    EXPECT_NE(resolve.find("max(0.0, centerAlpha - 0.5 * (aLeft + aRight))"), std::string::npos);
+    EXPECT_NE(resolve.find("textureLod(sunShafts, clamp(uv - tangent * (kSpokeFarScale * kSpokeWidth), uvMin, uvMax), 0.0).a"),
+        std::string::npos);
+    EXPECT_NE(resolve.find("textureLod(sunShafts, clamp(uv + tangent * (kSpokeFarScale * kSpokeWidth), uvMin, uvMax), 0.0).a"),
+        std::string::npos);
+    EXPECT_NE(resolve.find("max(0.0, centerAlpha - mix(sideNear, sideFar, kSpokeFarMix))"), std::string::npos);
+    EXPECT_NE(resolve.find("max(0.0, spoke - kSpokeNoiseFloor)"), std::string::npos);
+    EXPECT_NE(resolve.find("1.0 - exp(-pixelEndKm * 1000.0 / kSpokeAirLengthM)"), std::string::npos);
     EXPECT_NE(resolve.find("exp(-distToSun * kSpokeFalloff)"), std::string::npos);
     EXPECT_NE(resolve.find("params.sunRayColor.rgb"), std::string::npos);
     EXPECT_NE(resolve.find("params.sunRay.z"), std::string::npos);
     EXPECT_NE(resolve.find("1.0 + peak / kSpokeSoftCap"), std::string::npos);
     EXPECT_NE(resolve.find("kShaftGain * shaftCloudWeight"), std::string::npos);
-    EXPECT_NE(resolve.find("SunShaftSpokes(uv, shaftCenter, spokeStrength) * shaftCloudWeight"), std::string::npos);
+    EXPECT_NE(resolve.find("if (spokeStrength > 0.0)"), std::string::npos);
+    EXPECT_NE(resolve.find("SunShaftSpokes(uv, shaftCenter, spokeStrength) * shaftCloudWeight * spokeAir"), std::string::npos);
+    EXPECT_EQ(resolve.find("0.5 * (aLeft + aRight)"), std::string::npos);
     EXPECT_EQ(resolve.find("SunRays("), std::string::npos);
     for (const std::string_view removed : { "kRayDeadZone", "kRaySurroundRadius", "openHere", "onGround", "discard" }) {
         EXPECT_EQ(resolve.find(removed), std::string::npos) << removed;

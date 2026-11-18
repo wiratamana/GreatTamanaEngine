@@ -115,7 +115,7 @@ void main()
         SafeFloat(params.sunUvAndReachAndIntensity.y, 0.5));
     float reach = max(SafeFloat(params.sunUvAndReachAndIntensity.z, 1.5), 1e-3);
     float decay = max(SafeFloat(params.decayTapsAnisoContrast.x, 1.0), 0.0);
-    int tapCount = clamp(int(SafeFloat(params.decayTapsAnisoContrast.y, 32.0) + 0.5), 8, 48);
+    int tapCount = clamp(int(SafeFloat(params.decayTapsAnisoContrast.y, 48.0) + 0.5), 8, 48);
     float anisoG = clamp(SafeFloat(params.decayTapsAnisoContrast.z, 0.75), 0.0, 0.95);
     float contrast = clamp(SafeFloat(params.decayTapsAnisoContrast.w, 2.5), 0.2, 8.0);
     vec3 sunColor = max(vec3(

@@ -2089,11 +2089,11 @@ TEST(VolumetricCloudSunShaftsTest, SettingsDefaultsAndSanitizerSnapTapsToStepsOf
     EXPECT_FLOAT_EQ(defaults.sunRays, 1.2f);
     EXPECT_FLOAT_EQ(defaults.sunRaysDecay, 1.0f);
     EXPECT_FLOAT_EQ(defaults.sunRaysLength, 1.5f);
-    EXPECT_FLOAT_EQ(defaults.sunRaysTaps, 32.0f);
+    EXPECT_FLOAT_EQ(defaults.sunRaysTaps, 48.0f);
     EXPECT_FLOAT_EQ(defaults.sunRaysAnisotropy, 0.75f);
     EXPECT_FLOAT_EQ(defaults.sunRaysContrast, 2.5f);
     EXPECT_FLOAT_EQ(defaults.sunRaysAirLengthM, 2000.0f);
-    EXPECT_FLOAT_EQ(defaults.sunRaysSpoke, 1.0f);
+    EXPECT_FLOAT_EQ(defaults.sunRaysSpoke, 0.5f);
 
     VolumetricCloudSettings low = defaults;
     low.sunRays = -1.0f;
@@ -2359,11 +2359,11 @@ TEST(VolumetricCloudSunShaftsTest, EndpointAndSetupExposeSunShaftsKeysSettingsAn
     EXPECT_NEAR(std::get<double>(findField(state, "sunRays")->value), 1.2, 1e-6);
     EXPECT_NEAR(std::get<double>(findField(state, "sunRaysDecay")->value), 1.0, 1e-6);
     EXPECT_NEAR(std::get<double>(findField(state, "sunRaysLength")->value), 1.5, 1e-6);
-    EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "sunRaysTaps")->value), 32.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "sunRaysTaps")->value), 48.0);
     EXPECT_NEAR(std::get<double>(findField(state, "sunRaysAnisotropy")->value), 0.75, 1e-6);
     EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "sunRaysContrast")->value), 2.5);
     EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "sunRaysAirLengthM")->value), 2000.0);
-    EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "sunRaysSpoke")->value), 1.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "sunRaysSpoke")->value), 0.5);
     EXPECT_NE(std::get<std::string>(findField(state, "game.sunShafts.sunUv")->value).find(','), std::string::npos);
     EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "game.sunShafts.reach")->value), 0.0);
     EXPECT_FALSE(std::get<bool>(findField(state, "game.sunShafts.active")->value));
@@ -2407,7 +2407,7 @@ TEST(VolumetricCloudSunShaftsTest, ResolveParamsReuseSunRayZForSpokeWithoutGrowi
     const VolumetricCloudResolveParamsGpu defaultsOut = MakeVolumetricCloudResolveParams(s, facts, resolve);
     EXPECT_FLOAT_EQ(defaultsOut.sunRay[0], 0.4f);
     EXPECT_FLOAT_EQ(defaultsOut.sunRay[1], 0.3f);
-    EXPECT_FLOAT_EQ(defaultsOut.sunRay[2], 1.0f);
+    EXPECT_FLOAT_EQ(defaultsOut.sunRay[2], 0.5f);
 
     s.sunRaysSpoke = 2.5f;
     resolve.sunRayFade = 0.5f;
