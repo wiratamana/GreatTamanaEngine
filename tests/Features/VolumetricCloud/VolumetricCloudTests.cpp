@@ -2,6 +2,7 @@
 
 #include "Core/FeatureKit/ScreenSpaceView.h"
 #include "Features/Atmosphere/AtmosphereTypes.h"
+#include "Features/VolumetricCloud/VolumetricCloudFeature.h"
 #include "Features/VolumetricCloud/VolumetricCloudMath.h"
 #include "Features/VolumetricCloud/VolumetricCloudTypes.h"
 #include "Renderer/Vulkan/ShaderReflection.h"
@@ -22,6 +23,7 @@
 #include <sstream>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace gte {
@@ -885,7 +887,7 @@ TEST(VolumetricCloudLightingTest, EveryLightingSettingIsReachableAndSane)
     EXPECT_GE(d.msOctaves, 1.0f);
     EXPECT_LT(d.msAttenuation, 1.0f + 1e-6f);
     EXPECT_LT(d.backwardG, 0.0f);
-    EXPECT_GT(d.forwardG, 0.0f);
+    EXPECT_FLOAT_EQ(d.forwardG, 0.65f);
 }
 
 const ReflectedDescriptorBinding* Find(const ShaderReflectionResult& result, const std::string& name)
@@ -1490,14 +1492,16 @@ TEST(VolumetricCloudShaderTest, AStillPixelReadsItsHistoryExactly)
     EXPECT_NE(resolve.find("previousTexel = mix(previousTexel, snapped, lessThan(abs(previousTexel - snapped), vec2(kSnapTexels)));"), std::string::npos);
 }
 
-// The starburst and the ray taps never paint or pass through a surface that stands in front of the sun.
+// The starburst and the ray taps respect scene depth and cloud transmittance, and HDR sky glare has a steep knee.
 TEST(VolumetricCloudShaderTest, StarburstAndRaysRespectSceneDepth)
 {
     const std::string resolve = gte::ReadShaderText("VolumetricCloudResolve.comp");
     EXPECT_NE(resolve.find("float SkyShare(vec2 uv, float ownDepth)"), std::string::npos);
     EXPECT_NE(resolve.find("seen *= SkyShare(uv, ownDepth);"), std::string::npos);
-    EXPECT_NE(resolve.find("color += SunStar(uv, rawDepth);"), std::string::npos);
+    EXPECT_NE(resolve.find("color += SunStar(uv, rawDepth) * cloud.a;"), std::string::npos);
     EXPECT_NE(resolve.find("step(kClearDepthThreshold, textureLod(sourceDepth, tapUv, 0.0).r)"), std::string::npos);
+    EXPECT_NE(resolve.find("const float kSceneHdrKnee = 16.0;"), std::string::npos);
+    EXPECT_NE(resolve.find("vec3 color = SceneBehindCloud(scene, cloud.a) + cloud.rgb;"), std::string::npos);
 }
 
 TEST(VolumetricCloudShaderTest, NoImplicitLodInTheComputeShaders)
@@ -1548,6 +1552,214 @@ TEST(VolumetricCloudMathTest, TheMarchReadsTheShadowMapForTheAirOnlyWithAShaftSt
     EXPECT_FLOAT_EQ(p.shadowGrid[3], 0.0f);
     EXPECT_FLOAT_EQ(p.shadowTune[3], 0.75f);
     EXPECT_FLOAT_EQ(p.shadowShift[2], 2.0f);
+}
+
+TEST(VolumetricCloudLightingTest, SilverLobeAndSourceLumaAreSmoothlyBounded)
+{
+    const VolumetricCloudSettings defaults = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    EXPECT_FLOAT_EQ(kCloudSilverPhaseCap, 10.0f);
+    EXPECT_FLOAT_EQ(kCloudMaxSourceLuma, 40.0f);
+    const float peak = CloudSunScatter(defaults, 1.0f, 0.0f);
+    const float nearSun = CloudSunScatter(defaults, 0.99f, 0.0f);
+    const float shoulder = CloudSunScatter(defaults, 0.9f, 0.0f);
+    EXPECT_LT(peak, 5.0f);
+    EXPECT_GT(peak, nearSun);
+    EXPECT_GT(nearSun, shoulder);
+
+    const auto lumaOf = [](const Vec3& c) { return 0.2126f * c.x + 0.7152f * c.y + 0.0722f * c.z; };
+    const Vec3 clampedNeg = BoundCloudLuma(Vec3(-2.0f, 0.0f, -5.0f));
+    EXPECT_FLOAT_EQ(clampedNeg.x, 0.0f);
+    EXPECT_FLOAT_EQ(clampedNeg.y, 0.0f);
+    EXPECT_FLOAT_EQ(clampedNeg.z, 0.0f);
+
+    const Vec3 mid = BoundCloudLuma(Vec3(10.0f, 10.0f, 10.0f));
+    EXPECT_GT(lumaOf(mid), 9.9f);
+
+    const Vec3 tinted = BoundCloudLuma(Vec3(120.0f, 60.0f, 30.0f));
+    EXPECT_NEAR(tinted.x / tinted.y, 2.0f, 1e-5f);
+    EXPECT_NEAR(tinted.y / tinted.z, 2.0f, 1e-5f);
+    EXPECT_LT(lumaOf(tinted), kCloudMaxSourceLuma);
+
+    float prevLuma = 0.0f;
+    for (int step = 1; step <= 200; ++step) {
+        const float v = static_cast<float>(step) * 0.5f;
+        const float curLuma = lumaOf(BoundCloudLuma(Vec3(v, v, v)));
+        EXPECT_GT(curLuma, prevLuma);
+        EXPECT_LT(curLuma - prevLuma, 0.6f);
+        EXPECT_LT(curLuma, kCloudMaxSourceLuma);
+        prevLuma = curLuma;
+    }
+    EXPECT_LT(lumaOf(BoundCloudLuma(Vec3(10000.0f, 10000.0f, 10000.0f))), kCloudMaxSourceLuma + 1e-4f);
+}
+
+TEST(VolumetricCloudLightingTest, SceneHdrAboveTheKneeFadesWithFourthPowerOfTransmittance)
+{
+    EXPECT_FLOAT_EQ(kCloudSceneHdrKnee, 16.0f);
+    const Vec3 sky(12.0f, 8.0f, 4.0f);
+    const Vec3 skyThrough = CloudSceneBehind(sky, 0.25f);
+    EXPECT_FLOAT_EQ(skyThrough.x, 3.0f);
+    EXPECT_FLOAT_EQ(skyThrough.y, 2.0f);
+    EXPECT_FLOAT_EQ(skyThrough.z, 1.0f);
+
+    const Vec3 sunDisc(60000.0f, 45000.0f, 30000.0f);
+    const Vec3 open = CloudSceneBehind(sunDisc, 1.0f);
+    EXPECT_NEAR(open.x, sunDisc.x, 1e-2f);
+    const Vec3 blocked = CloudSceneBehind(sunDisc, 0.0f);
+    EXPECT_FLOAT_EQ(blocked.x, 0.0f);
+
+    const Vec3 thin = CloudSceneBehind(sunDisc, 0.1f);
+    EXPECT_LT(thin.x, 10.0f);
+    EXPECT_NEAR(thin.x / thin.y, 4.0f / 3.0f, 1e-5f);
+    EXPECT_NEAR(thin.y / thin.z, 3.0f / 2.0f, 1e-5f);
+
+    // Continuous across the knee.
+    const Vec3 below = CloudSceneBehind(Vec3(15.99f, 8.0f, 4.0f), 0.5f);
+    const Vec3 above = CloudSceneBehind(Vec3(16.01f, 8.005f, 4.0025f), 0.5f);
+    EXPECT_NEAR(below.x, above.x, 0.02f);
+}
+
+TEST(VolumetricCloudMathTest, HighSunShaftFadeKeepsTheConfiguredFloorAcrossAllElevations)
+{
+    const VolumetricCloudSettings defaults = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    EXPECT_FLOAT_EQ(defaults.shaftHighSunKeep, 0.7f);
+
+    VolumetricCloudSettings bad = defaults;
+    bad.shaftHighSunKeep = 4.0f;
+    EXPECT_FLOAT_EQ(SanitizeVolumetricCloudSettings(bad).shaftHighSunKeep, 1.0f);
+    bad.shaftHighSunKeep = -1.0f;
+    EXPECT_FLOAT_EQ(SanitizeVolumetricCloudSettings(bad).shaftHighSunKeep, 0.0f);
+    bad.shaftHighSunKeep = std::numeric_limits<float>::quiet_NaN();
+    EXPECT_FLOAT_EQ(SanitizeVolumetricCloudSettings(bad).shaftHighSunKeep, 0.7f);
+
+    const auto sunUpAtDeg = [](double deg) { return static_cast<float>(std::sin(deg * 3.14159265358979323846 / 180.0)); };
+    EXPECT_FLOAT_EQ(CloudShaftSunFade(sunUpAtDeg(0.0), 0.7f), 1.0f);
+    EXPECT_GT(CloudShaftSunFade(sunUpAtDeg(35.0), 0.7f), 0.8f);
+    EXPECT_GT(CloudShaftSunFade(sunUpAtDeg(60.0), 0.7f), 0.7f);
+    EXPECT_FLOAT_EQ(CloudShaftSunFade(sunUpAtDeg(88.0), 0.7f), 0.7f);
+    EXPECT_FLOAT_EQ(CloudShaftSunFade(sunUpAtDeg(90.0), 0.7f), 0.7f);
+
+    for (const float keep : { 0.0f, 0.35f, 0.7f, 1.0f }) {
+        const float lowSun = CloudShaftSunFade(sunUpAtDeg(0.0), keep);
+        EXPECT_FLOAT_EQ(lowSun, 1.0f);
+        for (const double deg : { 0.0, 35.0, 60.0, 88.0, 90.0 }) {
+            EXPECT_GE(CloudShaftSunFade(sunUpAtDeg(deg), keep), keep * lowSun - 1e-6f) << "deg " << deg << " keep " << keep;
+        }
+        float previous = lowSun;
+        for (int step = 1; step <= 180; ++step) {
+            const double deg = static_cast<double>(step) * 0.5;
+            const float current = CloudShaftSunFade(sunUpAtDeg(deg), keep);
+            EXPECT_LE(current, previous + 1e-6f) << "deg " << deg;
+            EXPECT_LT(std::abs(current - previous), 0.02f) << "deg " << deg;
+            EXPECT_GE(current, keep * lowSun - 1e-6f) << "deg " << deg;
+            previous = current;
+        }
+    }
+
+    VolumetricCloudSettings s = defaults;
+    s.shaftMist = 0.5f;
+    EXPECT_FLOAT_EQ(ComputeCloudShadowStrengths(s, sunUpAtDeg(0.0)).shaftStrength, 0.0f);
+    const CloudShadowStrengths low = ComputeCloudShadowStrengths(s, sunUpAtDeg(10.0));
+    EXPECT_FLOAT_EQ(low.shaftStrength, s.shaftStrength);
+    EXPECT_FLOAT_EQ(low.beamHazePerKm, s.shaftHaze);
+    EXPECT_FLOAT_EQ(low.shaftHazePerM, s.shaftMist * 0.001f);
+
+    CloudShadowStrengths prev = low;
+    for (const double deg : { 35.0, 60.0, 88.0, 90.0 }) {
+        const CloudShadowStrengths cur = ComputeCloudShadowStrengths(s, sunUpAtDeg(deg));
+        EXPECT_GE(cur.shaftStrength, s.shaftHighSunKeep * low.shaftStrength - 1e-6f) << deg;
+        EXPECT_GE(cur.beamHazePerKm, s.shaftHighSunKeep * low.beamHazePerKm - 1e-6f) << deg;
+        EXPECT_GE(cur.shaftHazePerM, s.shaftHighSunKeep * low.shaftHazePerM - 1e-6f) << deg;
+        EXPECT_GT(cur.beamHazePerKm, 0.0f) << deg;
+        EXPECT_LE(cur.shaftStrength, prev.shaftStrength + 1e-6f) << deg;
+        EXPECT_LE(cur.beamHazePerKm, prev.beamHazePerKm + 1e-6f) << deg;
+        prev = cur;
+    }
+
+    // Continuous over the whole 0..90 degree sweep including the horizon ramp.
+    float prevBeam = ComputeCloudShadowStrengths(s, sunUpAtDeg(0.0)).beamHazePerKm;
+    for (int step = 1; step <= 900; ++step) {
+        const float curBeam = ComputeCloudShadowStrengths(s, sunUpAtDeg(static_cast<double>(step) * 0.1)).beamHazePerKm;
+        EXPECT_LT(std::abs(curBeam - prevBeam), 0.05f) << step;
+        prevBeam = curBeam;
+    }
+}
+
+TEST(VolumetricCloudMathTest, SunRayFadeStaysPositiveOverheadAndDropsOutsideTheView)
+{
+    const float centerUv[2] = { 0.5f, 0.5f };
+    const float aspect = 16.0f / 9.0f;
+    const auto sunUpAtDeg = [](double deg) { return static_cast<float>(std::sin(deg * 3.14159265358979323846 / 180.0)); };
+    EXPECT_FLOAT_EQ(CloudSunRayFade(sunUpAtDeg(0.0), centerUv, aspect), 0.0f);
+    const float at35 = CloudSunRayFade(sunUpAtDeg(35.0), centerUv, aspect);
+    EXPECT_FLOAT_EQ(at35, 1.0f);
+    float prev = at35;
+    for (const double deg : { 60.0, 72.0, 85.0, 88.0, 90.0 }) {
+        const float cur = CloudSunRayFade(sunUpAtDeg(deg), centerUv, aspect);
+        EXPECT_GT(cur, 0.0f) << deg;
+        EXPECT_LE(cur, prev + 1e-6f) << deg;
+        prev = cur;
+    }
+    const float farOutside[2] = { 2.0f, 0.5f };
+    EXPECT_FLOAT_EQ(CloudSunRayFade(sunUpAtDeg(35.0), farOutside, aspect), 0.0f);
+}
+
+TEST(VolumetricCloudEndpointTest, ExposesShaftHighSunKeepAndReadOnlyShaftState)
+{
+    VolumetricCloudFeature feature;
+    fx::IFeatureDebugEndpoint* endpoint = feature.DebugEndpoint();
+    ASSERT_NE(endpoint, nullptr);
+
+    const auto findField = [](const fx::FeatureDebugResult& r, std::string_view key) -> const fx::FeatureDebugField* {
+        for (const fx::FeatureDebugField& f : r.fields) {
+            if (f.key == key) {
+                return &f;
+            }
+        }
+        return nullptr;
+    };
+
+    const fx::FeatureDebugResult state = endpoint->GetState();
+    ASSERT_TRUE(state.ok);
+    for (const char* key : { "forwardG", "shaftHighSunKeep", "game.sunUp", "game.shaftStrength", "game.beamHazePerKm",
+             "game.shaftHazePerM" }) {
+        ASSERT_NE(findField(state, key), nullptr) << key;
+    }
+    EXPECT_NEAR(std::get<double>(findField(state, "forwardG")->value), 0.65, 1e-6);
+    EXPECT_NEAR(std::get<double>(findField(state, "shaftHighSunKeep")->value), 0.7, 1e-6);
+
+    const std::vector<fx::FeatureDebugArg> validSet{ { "shaftHighSunKeep", "0.45" } };
+    const fx::FeatureDebugResult updated = endpoint->Set(validSet);
+    ASSERT_TRUE(updated.ok);
+    EXPECT_NEAR(std::get<double>(findField(updated, "shaftHighSunKeep")->value), 0.45, 1e-6);
+
+    const std::vector<fx::FeatureDebugArg> clampSet{ { "shaftHighSunKeep", "5.0" } };
+    const fx::FeatureDebugResult clamped = endpoint->Set(clampSet);
+    ASSERT_TRUE(clamped.ok);
+    EXPECT_DOUBLE_EQ(std::get<double>(findField(clamped, "shaftHighSunKeep")->value), 1.0);
+
+    for (const char* roKey : { "game.sunUp", "game.shaftStrength", "game.beamHazePerKm", "game.shaftHazePerM" }) {
+        const std::vector<fx::FeatureDebugArg> roSet{ { roKey, "0.5" } };
+        const fx::FeatureDebugResult bad = endpoint->Set(roSet);
+        EXPECT_FALSE(bad.ok) << roKey;
+        EXPECT_EQ(bad.badKey, roKey);
+    }
+}
+
+TEST(VolumetricCloudShaderTest, TempDebugHooksAndAirDesaturationAreGoneAndEnergyCapsMatchCpp)
+{
+    const std::string march = ReadShaderText("VolumetricCloud.comp");
+    const std::string lighting = ReadShaderText("VolumetricCloudLighting.glsl");
+    EXPECT_EQ(march.find("TEMP"), std::string::npos);
+    EXPECT_EQ(lighting.find("TEMP"), std::string::npos);
+    EXPECT_EQ(march.find("gXoff"), std::string::npos);
+    EXPECT_EQ(march.find("gDbgShape"), std::string::npos);
+    EXPECT_EQ(lighting.find("gDiffuseMode"), std::string::npos);
+    EXPECT_EQ(march.find("mix(airTransmittance,"), std::string::npos);
+    EXPECT_NE(march.find("if (AtmosphereOn() && cloud.a < 1.0 && cloudDistance > 0.0)"), std::string::npos);
+    EXPECT_NE(march.find("cloud.rgb = cloud.rgb * airTransmittance + (1.0 - cloud.a) * air * airGain;"), std::string::npos);
+    EXPECT_NE(march.find("src = BoundCloudLuma(src, kMaxSourceLuma);"), std::string::npos);
+    EXPECT_NE(lighting.find("const float kSilverPhaseCap = 10.0;"), std::string::npos);
+    EXPECT_NE(lighting.find("const float kMaxSourceLuma = 40.0;"), std::string::npos);
 }
 
 } // namespace

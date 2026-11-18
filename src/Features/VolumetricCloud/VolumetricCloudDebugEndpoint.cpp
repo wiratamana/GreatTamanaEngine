@@ -122,12 +122,18 @@ fx::FeatureDebugResult VolumetricCloudDebugEndpoint::GetState() const
     Add(out, "game.assets.weather", SizeText(weather.width, weather.height, 0));
     Add(out, "game.assets.blueNoise", SizeText(blue.width, blue.height, 0));
     Add(out, "game.assets.curl", SizeText(curl.width, curl.height, 0));
-    Add(out, "game.status", std::string(StatusName(m_feature.Snapshot(rg::ViewScope::Primary).status)));
-    Add(out, "game.historyUsed", m_feature.Snapshot(rg::ViewScope::Primary).historyUsed);
-    Add(out, "game.divisor", static_cast<std::int64_t>(m_feature.Snapshot(rg::ViewScope::Primary).divisor));
-    Add(out, "game.skyLight", std::string(SkyLightName(m_feature.Snapshot(rg::ViewScope::Primary).skyLight)));
-    Add(out, "scene.status", std::string(StatusName(m_feature.Snapshot(rg::ViewScope::Secondary).status)));
-    Add(out, "scene.skyLight", std::string(SkyLightName(m_feature.Snapshot(rg::ViewScope::Secondary).skyLight)));
+    const VolumetricCloudViewSnapshot game = m_feature.Snapshot(rg::ViewScope::Primary);
+    const VolumetricCloudViewSnapshot scene = m_feature.Snapshot(rg::ViewScope::Secondary);
+    Add(out, "game.status", std::string(StatusName(game.status)));
+    Add(out, "game.historyUsed", game.historyUsed);
+    Add(out, "game.divisor", static_cast<std::int64_t>(game.divisor));
+    Add(out, "game.skyLight", std::string(SkyLightName(game.skyLight)));
+    Add(out, "game.sunUp", static_cast<double>(game.sunUp));
+    Add(out, "game.shaftStrength", static_cast<double>(game.shaftStrength));
+    Add(out, "game.beamHazePerKm", static_cast<double>(game.beamHazePerKm));
+    Add(out, "game.shaftHazePerM", static_cast<double>(game.shaftHazePerM));
+    Add(out, "scene.status", std::string(StatusName(scene.status)));
+    Add(out, "scene.skyLight", std::string(SkyLightName(scene.skyLight)));
     return out;
 }
 

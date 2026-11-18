@@ -15,15 +15,6 @@ namespace {
 constexpr std::int32_t kFrameStampPriority = 49;
 constexpr std::int32_t kShadowMapPriority = 12; // After the sun light record, before the scene uniforms read the map.
 constexpr std::uint32_t kShadowSlotIndex = 4;
-constexpr float kShadowFadeSunLow = 0.04f;     // Sun height (sine of the elevation) where the shadows start to fade in.
-constexpr float kShadowFadeSunHigh = 0.10f;
-constexpr float kHazeFadeSunLow = 0.30f;  // Sun height (sine of the elevation) where the beam haze starts to thin out.
-constexpr float kHazeFadeSunHigh = 0.75f; // And where it is gone.
-constexpr float kSunRayOutsideView = 0.2f;   // How far the sun may lie outside the picture (view height units) before the rays are gone.
-constexpr float kSunRayFadeSunLow = 0.55f;  // Sun height where the sun rays start to fade out.
-constexpr float kSunRayFadeSunHigh = 0.95f; // And where they are gone.
-constexpr float kShaftFadeSunLow = 0.30f;  // Sun height where the air shadows (light shafts) start to fade out.
-constexpr float kShaftFadeSunHigh = 0.62f; // And where they are gone.
 constexpr double kShadowMaxSkipFrames = 2.0;   // A longer gap makes the old map useless as history.
 constexpr std::int32_t kCompositePriority = -900; // After the aerial composite, so sky pixels are final.
 constexpr float kMetresPerKilometer = 1000.0f;    // World units are metres, like the sky model.
@@ -84,6 +75,9 @@ VolumetricCloudViewSnapshot VolumetricCloudFeature::Snapshot(rg::ViewScope scope
     VolumetricCloudViewSnapshot snapshot = m_views.For(scope).snapshot;
     if (fx::SnapshotIsStale(snapshot.frameIndex, m_newestFrame)) {
         snapshot.status = VolumetricCloudFrameStatus::NotRendered;
+        snapshot.shaftStrength = 0.0f;
+        snapshot.beamHazePerKm = 0.0f;
+        snapshot.shaftHazePerM = 0.0f;
     }
     return snapshot;
 }
@@ -178,6 +172,7 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
     }
 
     const ResolvedDirectionalLight sun = ResolveActiveDirectionalLight(f.Scene());
+    snapshot.sunUp = sun.directionTowardSun.y;
     const std::optional<SunLightModulation> modulation = m_sunLight.Fetch(f);
     const SunLightModulation light = modulation ? SanitizeSunLightModulation(*modulation) : SunLightModulation{};
 
@@ -276,15 +271,8 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
         if (clip.w > 1e-3f && sunUpNow > 0.0f) {
             resolveFacts.sunUv[0] = clip.x / clip.w * 0.5f + 0.5f;
             resolveFacts.sunUv[1] = clip.y / clip.w * 0.5f + 0.5f;
-            const float lowSun = 1.0f - std::clamp((sunUpNow - kSunRayFadeSunLow) / (kSunRayFadeSunHigh - kSunRayFadeSunLow), 0.0f, 1.0f);
-            const float onSet = std::clamp(sunUpNow / 0.05f, 0.0f, 1.0f);
-            // A sun well outside the picture gives no rays: no glare from a sun nobody sees.
             const float aspect = static_cast<float>(full.width) / static_cast<float>(std::max(full.height, 1u));
-            const float outX = std::max({ 0.0f, -resolveFacts.sunUv[0], resolveFacts.sunUv[0] - 1.0f }) * aspect;
-            const float outY = std::max({ 0.0f, -resolveFacts.sunUv[1], resolveFacts.sunUv[1] - 1.0f });
-            const float outside = std::clamp(std::sqrt(outX * outX + outY * outY) / kSunRayOutsideView, 0.0f, 1.0f);
-            const float inView = 1.0f - outside * outside * (3.0f - 2.0f * outside);
-            resolveFacts.sunRayFade = lowSun * lowSun * (3.0f - 2.0f * lowSun) * onSet * inView;
+            resolveFacts.sunRayFade = CloudSunRayFade(sunUpNow, resolveFacts.sunUv, aspect);
         }
         resolveFacts.sunColor[0] = light.sunTint.x;
         resolveFacts.sunColor[1] = light.sunTint.y;
@@ -325,8 +313,12 @@ void VolumetricCloudFeature::ShadowMapPass(fx::PreOpaqueFrame& f)
 
     const ResolvedDirectionalLight sun = ResolveActiveDirectionalLight(f.Scene());
     const float sunUp = sun.directionTowardSun.y;
+    view.snapshot.sunUp = sunUp;
+    view.snapshot.shaftStrength = 0.0f;
+    view.snapshot.beamHazePerKm = 0.0f;
+    view.snapshot.shaftHazePerM = 0.0f;
     if (!cfg.enabled || !(cfg.shadowStrength > 0.0f || cfg.shaftStrength > 0.0f) || cfg.debugView != VolumetricCloudDebugView::Off
-        || !m_shadowSlot.IsValid() || !f.View().relative.valid || !(sunUp > kShadowFadeSunLow)
+        || !m_shadowSlot.IsValid() || !f.View().relative.valid || !(sunUp > kCloudShadowFadeSunLow)
         || !f.PassEnabled("VolumetricCloud.Shadow.Dispatch")) {
         stop();
         return;
@@ -415,7 +407,7 @@ void VolumetricCloudFeature::ShadowMapPass(fx::PreOpaqueFrame& f)
     view.shadowFrame = f.FrameIndex();
     view.shadowGridValid = true;
 
-    const float fade = std::clamp((sunUp - kShadowFadeSunLow) / (kShadowFadeSunHigh - kShadowFadeSunLow), 0.0f, 1.0f);
+    const CloudShadowStrengths strengths = ComputeCloudShadowStrengths(cfg, sunUp);
     CloudShadowMap map;
     map.map = current;
     map.sunDirection = sun.directionTowardSun;
@@ -424,15 +416,11 @@ void VolumetricCloudFeature::ShadowMapPass(fx::PreOpaqueFrame& f)
     map.extentM = shadow.grid.texelM * static_cast<float>(kCloudShadowMapSize);
     map.layerBaseM = cfg.layerBaseM;
     map.layerTopM = cfg.layerTopM;
-    const float fadeSmooth = fade * fade * (3.0f - 2.0f * fade);
-    map.strength = cfg.shadowStrength * fadeSmooth;
-    const float shaftFade = 1.0f - std::clamp((sunUp - kShaftFadeSunLow) / (kShaftFadeSunHigh - kShaftFadeSunLow), 0.0f, 1.0f);
-    map.shaftStrength = cfg.shaftStrength * fadeSmooth * shaftFade * shaftFade * (3.0f - 2.0f * shaftFade);
+    map.strength = strengths.strength;
+    map.shaftStrength = strengths.shaftStrength;
     map.shaftSharpness = cfg.shaftSharpness;
-    // The beam haze is thickest for a low sun and thins out above about 45 degrees.
-    const float hazeFade = 1.0f - std::clamp((sunUp - kHazeFadeSunLow) / (kHazeFadeSunHigh - kHazeFadeSunLow), 0.0f, 1.0f);
-    map.beamHazePerKm = cfg.shaftHaze * hazeFade * hazeFade * (3.0f - 2.0f * hazeFade) * fadeSmooth;
-    map.shaftHazePerM = cfg.shaftMist * 0.001f * hazeFade * hazeFade * (3.0f - 2.0f * hazeFade) * fadeSmooth;
+    map.beamHazePerKm = strengths.beamHazePerKm;
+    map.shaftHazePerM = strengths.shaftHazePerM;
     map.shaftHeightM = cfg.shaftHeightM;
     map.beamFill = cfg.shaftFill;
     map.skyFill = cfg.shadowFill;
@@ -440,6 +428,9 @@ void VolumetricCloudFeature::ShadowMapPass(fx::PreOpaqueFrame& f)
     m_shadowData.Publish(f, map);
     view.shadowPublished = map;
     view.shadowPublishedFrame = f.FrameIndex();
+    view.snapshot.shaftStrength = map.shaftStrength;
+    view.snapshot.beamHazePerKm = map.beamHazePerKm;
+    view.snapshot.shaftHazePerM = map.shaftHazePerM;
 }
 
 void VolumetricCloudFeature::CompositePass(fx::CompositeFrame& f)
@@ -448,6 +439,11 @@ void VolumetricCloudFeature::CompositePass(fx::CompositeFrame& f)
     VolumetricCloudViewState& view = m_views.For(f.Scope());
     VolumetricCloudViewSnapshot& snapshot = view.snapshot;
     snapshot.frameIndex = f.FrameIndex();
+    if (view.shadowPublishedFrame != f.FrameIndex()) {
+        snapshot.shaftStrength = 0.0f;
+        snapshot.beamHazePerKm = 0.0f;
+        snapshot.shaftHazePerM = 0.0f;
+    }
 
     // A frame that does not write the history must not leave the last one usable.
     const auto bail = [&](VolumetricCloudFrameStatus status) {

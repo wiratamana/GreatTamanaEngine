@@ -89,8 +89,17 @@ float CloudPhase(const VolumetricCloudSettings& safe, float cosTheta, float ecce
 // Beer-Lambert transmittance for an optical depth.
 float CloudBeer(float opticalDepth) noexcept;
 
-// Sun light reaching a sample: the sum over octaves of b^i * phase_i * exp(-tau * a^i), plus the silver lobe.
+// Soft ceiling on the silver-lining Henyey-Greenstein phase (VolumetricCloudLighting.glsl kSilverPhaseCap).
+inline constexpr float kCloudSilverPhaseCap = 10.0f;
+
+// Smooth luminance ceiling on a cloud sample (VolumetricCloudLighting.glsl kMaxSourceLuma).
+inline constexpr float kCloudMaxSourceLuma = 40.0f;
+
+// Sun light reaching a sample: the sum over octaves of b^i * phase_i * exp(-tau * a^i), plus the soft-capped silver lobe.
 float CloudSunScatter(const VolumetricCloudSettings& safe, float cosTheta, float opticalDepth) noexcept;
+
+// Smoothly bounds the luminance of `radiance` below `maxLuma` while preserving RGB hue.
+Vec3 BoundCloudLuma(const Vec3& radiance, float maxLuma = kCloudMaxSourceLuma) noexcept;
 
 // One energy-conserving march step: the fraction of the light behind that the step absorbs.
 float CloudStepOpacity(float extinction, float stepLength) noexcept;
@@ -151,6 +160,27 @@ void SetCloudShaftLookup(VolumetricCloudParamsGpu& params, const CloudShadowMap&
 VolumetricCloudParamsGpu MakeVolumetricCloudShadowParams(const VolumetricCloudSettings& safe,
     const VolumetricCloudFrameFacts& facts, const VolumetricCloudShadowFacts& shadow) noexcept;
 
+// Sun height (sine of elevation) where cloud shadows fade in near the horizon.
+inline constexpr float kCloudShadowFadeSunLow = 0.04f;
+inline constexpr float kCloudShadowFadeSunHigh = 0.10f;
+
+// Sun height range over which shaft strength and beam haze transition from 1 to shaftHighSunKeep.
+inline constexpr float kCloudShaftFadeSunLow = 0.30f;
+inline constexpr float kCloudShaftFadeSunHigh = 0.95f;
+
+// High-sun scale on light shafts and beam haze: 1 at low sun, smoothly reaching highSunKeep overhead.
+float CloudShaftSunFade(float sunUp, float highSunKeep) noexcept;
+
+struct CloudShadowStrengths {
+    float strength = 0.0f;
+    float shaftStrength = 0.0f;
+    float beamHazePerKm = 0.0f;
+    float shaftHazePerM = 0.0f;
+};
+
+// Published cloud shadow and shaft terms for `sunUp` (sine of sun elevation), including horizon and high-sun fades.
+CloudShadowStrengths ComputeCloudShadowStrengths(const VolumetricCloudSettings& safe, float sunUp) noexcept;
+
 // Width in texels of the march grid when the divisor is automatic (setting 0).
 inline constexpr float kCloudAutoMarchTexels = 320.0f;
 inline constexpr std::uint32_t kCloudMaxResolutionDivisor = 6;
@@ -175,6 +205,14 @@ float CloudMarchJitter(float blueNoise, std::uint64_t frameIndex, std::uint32_t 
 
 // Screen-space sun rays: how far toward the sun a pixel looks (share of the way) and the radius of the sun glow.
 inline constexpr float kCloudSunRayGlowRadius = 0.18f;
+
+// Sun height and off-screen limits for screen-space sun rays and starburst.
+inline constexpr float kCloudSunRayOutsideView = 0.2f;
+inline constexpr float kCloudSunRayFadeSunLow = 0.85f;
+inline constexpr float kCloudSunRayFadeSunHigh = 1.05f;
+
+// Screen-space sun-ray and starburst fade for `sunUp`, projected `sunUv` (0..1) and view `aspect` (width / height).
+float CloudSunRayFade(float sunUp, const float (&sunUv)[2], float aspect) noexcept;
 
 // Previous-frame data of the resolve pass.
 struct VolumetricCloudResolveFacts {
@@ -201,6 +239,12 @@ bool CloudTapUsable(float tapEndKm, float tapDistanceKm, float tapTransmittance,
 // unchanged where the cloud lets everything through.
 float CloudAerialComposite(float scene, float cloudTransmittance, float cloudLight, float airTransmittance,
     float airLight) noexcept;
+
+// Scene radiance knee above which cloud transmittance applies to the fourth power (VolumetricCloudResolve.comp).
+inline constexpr float kCloudSceneHdrKnee = 16.0f;
+
+// CPU twin of SceneBehindCloud() in VolumetricCloudResolve.comp: steepens occlusion above kCloudSceneHdrKnee.
+Vec3 CloudSceneBehind(const Vec3& scene, float cloudTransmittance) noexcept;
 
 // Distance that stands for "no surface", in km.
 inline constexpr float kCloudNoSurfaceKm = 1000.0f;

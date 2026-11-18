@@ -155,6 +155,7 @@ bool BuildVolumetricCloudPanel(
     changed |= ImGui::SliderFloat("Shaft shadow fill", &edit.shaftFill, 0.0f, 4.0f, "%.2f");
     changed |= ImGui::SliderFloat("Shaft mist near (per km)", &edit.shaftMist, 0.0f, 4.0f, "%.2f");
     changed |= ImGui::SliderFloat("Shaft haze height (m)", &edit.shaftHeightM, 200.0f, 6000.0f, "%.0f");
+    changed |= ImGui::SliderFloat("Shaft high-sun keep", &edit.shaftHighSunKeep, 0.0f, 1.0f);
     changed |= ImGui::SliderFloat("Shadow fill", &edit.shadowFill, 0.0f, 1.0f);
     changed |= ImGui::SliderFloat("Sun rays", &edit.sunRays, 0.0f, 3.0f);
     changed |= ImGui::SliderFloat("Sun starburst", &edit.sunStar, 0.0f, 3.0f);

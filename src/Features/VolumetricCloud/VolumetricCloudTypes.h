@@ -114,7 +114,7 @@ struct VolumetricCloudSettings {
     float msContribution = 0.65f;   // Per octave factor on the light.
     float msEccentricity = 0.5f;    // Per octave factor on the phase eccentricity.
     float phaseModel = 0.0f;        // 0 dual lobe Henyey-Greenstein, 1 Henyey-Greenstein plus Draine.
-    float forwardG = 0.8f;
+    float forwardG = 0.65f;
     float backwardG = -0.35f;
     float backwardMix = 0.3f;
     float silverIntensity = 0.2f;   // Weight of the narrow forward lobe that lights thin edges facing the sun.
@@ -166,6 +166,7 @@ struct VolumetricCloudSettings {
     float shaftFill = 0.45f;     // Sky light in the shadowed columns of the haze (0 = black, 1 = like the sky's multiple scattering).
     float shaftMist = 0.0f;      // Extinction per km of an extra near-field mist in the volumetric light (0 = none).
     float shaftHeightM = 2500.0f; // Scale height of that haze; it thins out above.
+    float shaftHighSunKeep = 0.7f; // Share of low-sun shaft strength and beam haze kept when the sun is overhead.
     float shadowFill = 0.25f;     // Share of the blocked sun that reaches shadowed ground as diffuse light.
     float sunRays = 0.0f;         // Strength of the faint screen-space sun glare through gaps in the clouds (0 = off).
     float sunStar = 1.0f;         // Strength of the small starburst on the sun where it shows through a gap (0 = off).
@@ -288,6 +289,7 @@ inline constexpr std::array kVolumetricCloudFloatSettings{
     VolumetricCloudFloatSetting{ "shaftFill", &VolumetricCloudSettings::shaftFill, 0.0f, 4.0f },
     VolumetricCloudFloatSetting{ "shaftMist", &VolumetricCloudSettings::shaftMist, 0.0f, 4.0f },
     VolumetricCloudFloatSetting{ "shaftHeightM", &VolumetricCloudSettings::shaftHeightM, 200.0f, 6000.0f },
+    VolumetricCloudFloatSetting{ "shaftHighSunKeep", &VolumetricCloudSettings::shaftHighSunKeep, 0.0f, 1.0f },
     VolumetricCloudFloatSetting{ "shadowFill", &VolumetricCloudSettings::shadowFill, 0.0f, 1.0f },
     VolumetricCloudFloatSetting{ "sunRays", &VolumetricCloudSettings::sunRays, 0.0f, 3.0f },
     VolumetricCloudFloatSetting{ "sunStar", &VolumetricCloudSettings::sunStar, 0.0f, 3.0f },
@@ -306,6 +308,10 @@ struct VolumetricCloudViewSnapshot {
     std::uint64_t frameIndex = 0;
     bool historyUsed = false;       // The resolve pass blended the history of the last frame.
     std::uint32_t divisor = 1;      // March resolution divisor of the last frame.
+    float sunUp = 0.0f;             // Sine of the active sun elevation in the last frame.
+    float shaftStrength = 0.0f;     // Published light-shaft strength of the last frame.
+    float beamHazePerKm = 0.0f;     // Published beam-haze density per km of the last frame.
+    float shaftHazePerM = 0.0f;     // Published volumetric-light mist extinction per m of the last frame.
 };
 
 // Push constants of the slice viewer shaders (16 bytes).

@@ -138,10 +138,10 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `msContribution` | 0.65 | 0..1 | Per octave factor on the light |
 | `msEccentricity` | 0.5 | 0..1 | Per octave factor on the phase eccentricity |
 | `phaseModel` | 0 | 0..1 | 0 dual lobe Henyey-Greenstein, 1 Henyey-Greenstein plus Draine |
-| `forwardG` | 0.8 | 0..0.99 | Forward lobe eccentricity |
+| `forwardG` | 0.65 | 0..0.99 | Forward lobe eccentricity |
 | `backwardG` | -0.35 | -0.99..0 | Backward lobe eccentricity |
 | `backwardMix` | 0.3 | 0..1 | Weight of the backward lobe |
-| `silverIntensity` | 0.2 | 0..4 | Weight of the narrow forward lobe that lights thin edges facing the sun |
+| `silverIntensity` | 0.2 | 0..4 | Weight of the narrow forward lobe that lights thin edges facing the sun (phase soft-capped at 10) |
 | `silverG` | 0.97 | 0.5..0.999 | Eccentricity of that lobe |
 | `powder` | 0.5 | 0..1 | Dark edge effect when looking away from the sun |
 | `inScatter` | 0.8 | 0..1 | Nubis in-scatter chance on the sun light: darkens cloud edges, cavities and the base, brightens the core and upper body; fades out looking into the sun so the silver lining stays. 0 = off |
@@ -178,13 +178,14 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `shadowDensity` | 1 | 0.1..8 | Factor on the optical depth of the shadow ray; above 1 darker, harder shadows |
 | `shadowSteps` | 10 | 4..24 | Samples of the shadow ray through the layer. Fewer than 10 misses thin cloud |
 | `shaftSharpness` | 3 | 1..8 | Exponent on the sun transmittance of the air: higher gives crisper beams and darker gaps |
-| `shaftHaze` | 0.6 | 0..4 | Density per km at the ground of the beam haze (its extinction is a quarter of it, so far terrain stays visible): a thin blue-violet haze in the aerial perspective volume (it reaches at least 24 km) that the cloud shadow map lights, so lit and shadowed columns of the air show as light curtains over the ground. Thickest for a low sun, gone above about 45 degrees. 0 = no beam haze |
+| `shaftHaze` | 0.6 | 0..4 | Density per km at the ground of the beam haze (its extinction is a quarter of it, so far terrain stays visible): a thin blue-violet haze in the aerial perspective volume (it reaches at least 24 km) that the cloud shadow map lights, so lit and shadowed columns of the air show as light curtains over the ground. Thickest for a low sun, scaled down toward `shaftHighSunKeep` as the sun rises overhead. 0 = no beam haze |
 | `shaftFill` | 0.45 | 0..4 | Sky light in the shadowed columns of the beam haze, relative to the multiple-scattering table (0 = black columns); the shadowed columns read blue-violet |
 | `shaftMist` | 0 | 0..4 | Extinction per km of an extra near-field mist in the volumetric light (stretches that volume to 4 km). 0 = none |
 | `shaftHeightM` | 2500 | 200..6000 | Scale height of the beam haze and the mist |
+| `shaftHighSunKeep` | 0.7 | 0..1 | Share of the low-sun `shaftStrength`, `shaftHaze` and `shaftMist` kept when the sun is overhead |
 | `shadowFill` | 0.25 | 0..1 | Share of the sun the cloud blocks that reaches shadowed receivers as diffuse light, so a shadowed ground is not black |
-| `sunRays` | 0 | 0..3 | Faint screen-space rays that show only as light against darker surroundings: the glow around the sun seen through the gaps of the clouds (the smoothed cloud history is the occluder, the jitter changes every frame). Gone when the sun is behind the camera or well outside the picture, and for a high sun. A ray tap that sees a surface counts as blocked. 0 = off |
-| `sunStar` | 1 | 0..3 | Small six-spike starburst on the sun where it shows through a gap in the clouds (stable in time, faded by the cloud cover at the sun). Same fade as the rays. The spikes are drawn over sky pixels only: a ridge or building in front of the sun carries none. 0 = off |
+| `sunRays` | 0 | 0..3 | Faint screen-space rays that show only as light against darker surroundings: the glow around the sun seen through the gaps of the clouds (the smoothed cloud history is the occluder, the jitter changes every frame). Gone when the sun is behind the camera or well outside the picture; dimmed slightly near the zenith. A ray tap that sees a surface counts as blocked. 0 = off |
+| `sunStar` | 1 | 0..3 | Small six-spike starburst on the sun where it shows through a gap in the clouds (stable in time, faded by the cloud cover at the sun and by each pixel's own cloud transmittance so spikes do not draw over thick cloud). Same sun-height fade as the rays. The spikes are drawn over sky pixels only: a ridge or building in front of the sun carries none. 0 = off |
 | `shaftStrength` | 1 | 0..1 | Light shafts: how much of the sun in-scatter of the air the cloud shadow map removes (aerial perspective, volumetric light, air in front of clouds). 0 = none |
 
 Resolve detail: a pixel that is not marched this frame reads its history texel exactly (positions within 0.004 texel of a texel centre are snapped). Without the snap the 1e-4 texel matrix noise made the rgba16f store round the history down one half-float step on every unmarched frame, which darkened the converged picture the more the lower `freshBlend` was.
@@ -234,6 +235,8 @@ Name for `/feature_debug`: `VolumetricCloud`. Actions: `reset_defaults`, `preset
 | `game.historyUsed` | The resolve pass blended the history of the last frame |
 | `game.divisor` | March divisor of the last frame |
 | `game.skyLight`, `scene.skyLight` | `Standalone` (mode 0), `Atmosphere` (mode 1 in use) or `Unavailable` (mode 1 asked for, no tables, standalone look used) |
+| `game.sunUp` | Sine of the active sun elevation in the last frame |
+| `game.shaftStrength`, `game.beamHazePerKm`, `game.shaftHazePerM` | Published cloud-shaft strength and haze densities of the last frame (`0` when no shadow map is published) |
 | `game.assets.shape/detail/weather/blueNoise/curl` | Loaded size, or `not loaded` |
 
 Texture for `/get_texture`: `GameViewVolumetricCloud` (also `SceneViewVolumetricCloud`).
@@ -273,7 +276,7 @@ Memory per view: 4 full-size RGBA16F history targets (about 12 MB at 884x432), s
 - A coarser divisor is a little softer (mean error against a full-res reference 0.8 at divisor 4 against 0.5 at divisor 2, out of 255, still camera). A still picture at divisor 6 converges to nearly the same picture as divisor 4 but needs 36 frames per sample of a pixel (about 10 samples = 12 s at 30 fps). Moving clouds are soft: wind of 40 m/s keeps 86 percent of the still sharpness, 200 m/s about 75 percent. A newly exposed screen edge and the first frames after a resize or a camera cut show the raw block pattern for up to n*n frames.
 - TemporalAa (-150) sees the clouds as normal pixels. Its jitter is not fed into the march pattern. TemporalAa, Gtao and Ssgi use the same eye-relative camera, so they stay on far from the origin.
 - Mode 1 reads the sky of the camera's height only: one sky-view lookup set for the whole picture and the camera's position for the air. Clouds that are far away and high see the same sky light as the ones overhead.
-- Clouds do not shadow the aerial perspective shafts or the sun glow of the sky. They only dim what is behind them. A sun glow behind a cloud is dimmed by the cloud transmittance, like any other pixel.
+- The sky background and sun disk are drawn before the cloud pass and dimmed in the resolve composite. Scene radiance up to 16 is dimmed by the cloud transmittance; brighter glare and the sun disk are dimmed by the fourth power of the transmittance so the disk does not leak through cloud.
 - Mode 1 follows the planet's shadow: at a sun angle just below the horizon only the high far clouds stay lit and the rest go dark, as the sky does. Mode 0 keeps lighting them with a fixed twilight tint.
 - The layer is a sphere shell around a planet centred below the camera. Horizontal camera position does not bend it.
 - Perspective cameras only. A view with no valid eye-relative camera (`View::relative`) gives `NoValidCamera`.

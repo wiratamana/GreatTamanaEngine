@@ -27,7 +27,7 @@ float ClampOrDefault(float value, float low, float high, float fallback) noexcep
 
 float Saturate(float v) noexcept
 {
-    return std::clamp(v, 0.0f, 1.0f);
+    return std::isfinite(v) ? std::clamp(v, 0.0f, 1.0f) : 0.0f;
 }
 
 float SmoothStep(float lo, float hi, float v) noexcept
@@ -282,7 +282,22 @@ float CloudSunScatter(const VolumetricCloudSettings& safe, float cosTheta, float
         contribution *= safe.msContribution;
         eccentricity *= safe.msEccentricity;
     }
-    return sum + safe.silverIntensity * CloudHenyeyGreenstein(cosTheta, safe.silverG) * CloudBeer(opticalDepth);
+    const float silverHg = CloudHenyeyGreenstein(cosTheta, safe.silverG);
+    const float silverPhase = kCloudSilverPhaseCap * (1.0f - std::exp(-silverHg / kCloudSilverPhaseCap));
+    return sum + safe.silverIntensity * silverPhase * CloudBeer(opticalDepth);
+}
+
+Vec3 BoundCloudLuma(const Vec3& radiance, float maxLuma) noexcept
+{
+    const float r = std::isfinite(radiance.x) ? std::max(radiance.x, 0.0f) : 0.0f;
+    const float g = std::isfinite(radiance.y) ? std::max(radiance.y, 0.0f) : 0.0f;
+    const float b = std::isfinite(radiance.z) ? std::max(radiance.z, 0.0f) : 0.0f;
+    const float cap = std::isfinite(maxLuma) ? std::max(maxLuma, kMinStepM) : kCloudMaxSourceLuma;
+    const float luma = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+    const float ratio = luma / cap;
+    const float r2 = ratio * ratio;
+    const float scale = ratio > 1e4f ? (1.0f / ratio) : (1.0f / std::sqrt(std::sqrt(1.0f + r2 * r2)));
+    return Vec3(r * scale, g * scale, b * scale);
 }
 
 float CloudStepOpacity(float extinction, float stepLength) noexcept
@@ -470,6 +485,29 @@ VolumetricCloudParamsGpu MakeVolumetricCloudShadowParams(const VolumetricCloudSe
     return p;
 }
 
+float CloudShaftSunFade(float sunUp, float highSunKeep) noexcept
+{
+    const float keep = std::isfinite(highSunKeep) ? std::clamp(highSunKeep, 0.0f, 1.0f) : VolumetricCloudSettings{}.shaftHighSunKeep;
+    const float safeSunUp = std::isfinite(sunUp) ? sunUp : 0.0f;
+    const float high = SmoothStep(kCloudShaftFadeSunLow, kCloudShaftFadeSunHigh, safeSunUp);
+    return 1.0f + (keep - 1.0f) * high;
+}
+
+CloudShadowStrengths ComputeCloudShadowStrengths(const VolumetricCloudSettings& safe, float sunUp) noexcept
+{
+    CloudShadowStrengths out;
+    if (!std::isfinite(sunUp) || sunUp <= kCloudShadowFadeSunLow) {
+        return out;
+    }
+    const float horizonFade = SmoothStep(kCloudShadowFadeSunLow, kCloudShadowFadeSunHigh, sunUp);
+    const float highSun = CloudShaftSunFade(sunUp, safe.shaftHighSunKeep);
+    out.strength = std::max(safe.shadowStrength, 0.0f) * horizonFade;
+    out.shaftStrength = std::max(safe.shaftStrength, 0.0f) * horizonFade * highSun;
+    out.beamHazePerKm = std::max(safe.shaftHaze, 0.0f) * horizonFade * highSun;
+    out.shaftHazePerM = std::max(safe.shaftMist, 0.0f) * 0.001f * horizonFade * highSun;
+    return out;
+}
+
 std::uint32_t CloudResolutionDivisor(const VolumetricCloudSettings& safe, std::uint32_t viewWidth) noexcept
 {
     if (safe.resolutionDivisor < 0.5f) {
@@ -524,6 +562,21 @@ float CloudMarchJitter(float blueNoise, std::uint64_t frameIndex, std::uint32_t 
     return static_cast<float>(value - std::floor(value));
 }
 
+float CloudSunRayFade(float sunUp, const float (&sunUv)[2], float aspect) noexcept
+{
+    if (!std::isfinite(sunUp) || sunUp <= 0.0f || !std::isfinite(sunUv[0]) || !std::isfinite(sunUv[1])) {
+        return 0.0f;
+    }
+    const float lowSun = 1.0f - Saturate((sunUp - kCloudSunRayFadeSunLow) / (kCloudSunRayFadeSunHigh - kCloudSunRayFadeSunLow));
+    const float onSet = Saturate(sunUp / 0.05f);
+    const float safeAspect = std::isfinite(aspect) ? std::max(aspect, 0.0f) : 1.0f;
+    const float outX = std::max({ 0.0f, -sunUv[0], sunUv[0] - 1.0f }) * safeAspect;
+    const float outY = std::max({ 0.0f, -sunUv[1], sunUv[1] - 1.0f });
+    const float outside = Saturate(std::sqrt(outX * outX + outY * outY) / kCloudSunRayOutsideView);
+    const float inView = 1.0f - outside * outside * (3.0f - 2.0f * outside);
+    return lowSun * lowSun * (3.0f - 2.0f * lowSun) * onSet * inView;
+}
+
 VolumetricCloudResolveParamsGpu MakeVolumetricCloudResolveParams(const VolumetricCloudSettings& safe,
     const VolumetricCloudFrameFacts& facts, const VolumetricCloudResolveFacts& resolve) noexcept
 {
@@ -566,6 +619,18 @@ float CloudAerialComposite(float scene, float cloudTransmittance, float cloudLig
     float airLight) noexcept
 {
     return scene * cloudTransmittance + cloudLight * airTransmittance + (1.0f - cloudTransmittance) * airLight;
+}
+
+Vec3 CloudSceneBehind(const Vec3& scene, float cloudTransmittance) noexcept
+{
+    const float t = Saturate(cloudTransmittance);
+    const float peak = std::max({ scene.x, scene.y, scene.z });
+    if (!(peak > kCloudSceneHdrKnee)) {
+        return scene * t;
+    }
+    const Vec3 low = scene * (kCloudSceneHdrKnee / peak);
+    const float t2 = t * t;
+    return low * t + (scene - low) * (t2 * t2);
 }
 
 bool CloudTapUsable(float tapEndKm, float tapDistanceKm, float tapTransmittance, float pixelEndKm) noexcept

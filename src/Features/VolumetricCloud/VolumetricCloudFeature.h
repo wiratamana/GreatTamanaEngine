@@ -51,6 +51,7 @@ struct VolumetricCloudViewState {
 // depth as the far limit of every ray. The slice debug views show the baked noise instead.
 class VolumetricCloudFeature final : public fx::Feature {
 public:
+    VolumetricCloudFeature() = default;
     explicit VolumetricCloudFeature(fx::FeatureHost& host);
 
     const char* Name() const override { return kVolumetricCloudFeatureName; }
