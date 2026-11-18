@@ -337,8 +337,9 @@ bool VolumetricCloudFeature::RunMarch(fx::CompositeFrame& f, VolumetricCloudView
     snapshot.sunShaftsActive = sunShaftsDispatched && shaftsActive;
 
     VolumetricCloudResolveParamsGpu resolveGpuParams = MakeVolumetricCloudResolveParams(m_settings, facts, resolveFacts);
+    // Reuse sunRay.z for the resolve spoke multiplier; active only when the quarter-res sun-shafts pass ran.
     resolveGpuParams.sunRay[2] = snapshot.sunShaftsActive
-        ? (shaftsParams.sunUvAndReachAndIntensity[3] * shaftsParams.frameFadeAspectActive[1])
+        ? (m_settings.sunRaysSpoke * shaftsParams.frameFadeAspectActive[1])
         : 0.0f;
     const bool resolved = f.Compute(m_resolveShader, "VolumetricCloud.Resolve.Dispatch")
                               .Params(view.resolveParams, resolveGpuParams)

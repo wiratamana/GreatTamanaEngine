@@ -12,6 +12,7 @@ layout(std430, binding = 0) readonly buffer VolumetricCloudSunShaftsParams {
     vec4 decayTapsAnisoContrast;    // x decay, y taps (8..48), z anisotropy g, w contrast.
     vec4 sunColorAndHazeMix;        // rgb tinted sun colour, w haze mix.
     vec4 frameFadeAspectActive;     // x frame index, y fade 0..1, z aspect (w/h), w active 0/1.
+    vec4 depthParams;               // x near plane (m), y far plane (m), z reserved, w air length scale (m).
 } params;
 
 layout(binding = 1) uniform sampler2D historyColor;
@@ -31,10 +32,13 @@ const float kThickCloudKeep = 0.65;
 const float kThickOccluderMaxS = 0.5;
 const float kBlockedRampLow = 0.04;
 const float kBlockedRampHigh = 0.45;
-// Standard-Z [0, 1] with no projection bound (assumes nearZ ~ 0.1..0.2 m): <= ~30 m gets 0.25, far mountains 1.0.
-const float kNearAirDepth = 0.995;
-const float kNearAirRange = 0.0042;
-const float kNearAirMinWeight = 0.25;
+const float kDefaultNearPlaneM = 0.1;
+const float kDefaultFarPlaneM = 10000.0;
+const float kDefaultAirLengthM = 2000.0;
+const float kMinAirLengthM = 200.0;
+const float kMaxAirLengthM = 20000.0;
+const float kGeometryAirFloor = 0.0;
+const float kNearOccluderMinM = 4.0;
 const vec3 kHazeTint = vec3(0.75, 0.88, 1.10);
 const float kShaftStorageScale = 0.5; // Paired with kShaftGain = 2.0 in resolve so raw buffer stays in 0..3.
 const float kShaftSoftCap = 3.0;
@@ -49,17 +53,44 @@ float Saturate(float v)
     return clamp(SafeFloat(v, 0.0), 0.0, 1.0);
 }
 
-// Thickens opaque occluders by one quarter-res texel on the nearer half of the ray so thin poles/edges are kept.
-float SampleSky(vec2 sampleUv, vec2 quarterTexel, vec2 uvMin, vec2 uvMax, bool thicken)
+// Standard-Z [0, 1] linear view depth in metres for Mat4::PerspectiveFovLH_ZO.
+float LinearizeDepth(float depth, float nearPlaneM, float farPlaneM)
 {
-    float sky = step(kClearDepthThreshold, textureLod(sceneDepth, sampleUv, 0.0).r);
+    float d = Saturate(depth);
+    return (nearPlaneM * farPlaneM) / max(farPlaneM - d * (farPlaneM - nearPlaneM), 1e-4);
+}
+
+// Raw standard-Z depth in [0, 1] corresponding to `linearDistanceM` (inverse of LinearizeDepth).
+float DepthFromLinearM(float linearDistanceM, float nearPlaneM, float farPlaneM)
+{
+    if (linearDistanceM <= nearPlaneM) {
+        return 0.0;
+    }
+    if (linearDistanceM >= farPlaneM) {
+        return kClearDepthThreshold;
+    }
+    float denom = max(linearDistanceM * (farPlaneM - nearPlaneM), 1e-4);
+    return clamp(farPlaneM * (linearDistanceM - nearPlaneM) / denom, 0.0, kClearDepthThreshold);
+}
+
+// Sky and geometry closer than kNearOccluderMinM stay open so foreground grass blades do not cast comb shadows.
+float TapDepthOpen(float rawDepth, float nearTapDepth)
+{
+    float d = SafeFloat(rawDepth, 1.0);
+    return (d >= kClearDepthThreshold || d < nearTapDepth) ? 1.0 : 0.0;
+}
+
+// Thickens opaque occluders by one quarter-res texel on the nearer half of the ray so thin poles/edges are kept.
+float SampleSky(vec2 sampleUv, vec2 quarterTexel, vec2 uvMin, vec2 uvMax, float nearTapDepth, bool thicken)
+{
+    float sky = TapDepthOpen(textureLod(sceneDepth, sampleUv, 0.0).r, nearTapDepth);
     if (!thicken || sky <= 0.0) {
         return sky;
     }
-    sky *= step(kClearDepthThreshold, textureLod(sceneDepth, clamp(sampleUv + vec2(quarterTexel.x, 0.0), uvMin, uvMax), 0.0).r);
-    sky *= step(kClearDepthThreshold, textureLod(sceneDepth, clamp(sampleUv - vec2(quarterTexel.x, 0.0), uvMin, uvMax), 0.0).r);
-    sky *= step(kClearDepthThreshold, textureLod(sceneDepth, clamp(sampleUv + vec2(0.0, quarterTexel.y), uvMin, uvMax), 0.0).r);
-    sky *= step(kClearDepthThreshold, textureLod(sceneDepth, clamp(sampleUv - vec2(0.0, quarterTexel.y), uvMin, uvMax), 0.0).r);
+    sky *= TapDepthOpen(textureLod(sceneDepth, clamp(sampleUv + vec2(quarterTexel.x, 0.0), uvMin, uvMax), 0.0).r, nearTapDepth);
+    sky *= TapDepthOpen(textureLod(sceneDepth, clamp(sampleUv - vec2(quarterTexel.x, 0.0), uvMin, uvMax), 0.0).r, nearTapDepth);
+    sky *= TapDepthOpen(textureLod(sceneDepth, clamp(sampleUv + vec2(0.0, quarterTexel.y), uvMin, uvMax), 0.0).r, nearTapDepth);
+    sky *= TapDepthOpen(textureLod(sceneDepth, clamp(sampleUv - vec2(0.0, quarterTexel.y), uvMin, uvMax), 0.0).r, nearTapDepth);
     return sky;
 }
 
@@ -84,7 +115,7 @@ void main()
         SafeFloat(params.sunUvAndReachAndIntensity.y, 0.5));
     float reach = max(SafeFloat(params.sunUvAndReachAndIntensity.z, 1.5), 1e-3);
     float decay = max(SafeFloat(params.decayTapsAnisoContrast.x, 1.0), 0.0);
-    int tapCount = clamp(int(SafeFloat(params.decayTapsAnisoContrast.y, 24.0) + 0.5), 8, 48);
+    int tapCount = clamp(int(SafeFloat(params.decayTapsAnisoContrast.y, 32.0) + 0.5), 8, 48);
     float anisoG = clamp(SafeFloat(params.decayTapsAnisoContrast.z, 0.75), 0.0, 0.95);
     float contrast = clamp(SafeFloat(params.decayTapsAnisoContrast.w, 2.5), 0.2, 8.0);
     vec3 sunColor = max(vec3(
@@ -94,6 +125,12 @@ void main()
     float hazeMix = Saturate(params.sunColorAndHazeMix.w);
     float frameIndex = max(SafeFloat(params.frameFadeAspectActive.x, 0.0), 0.0);
     float aspect = clamp(SafeFloat(params.frameFadeAspectActive.z, 1.0), 0.1, 10.0);
+    float rawNearM = SafeFloat(params.depthParams.x, kDefaultNearPlaneM);
+    float nearPlaneM = rawNearM > 0.0 ? rawNearM : kDefaultNearPlaneM;
+    float rawFarM = SafeFloat(params.depthParams.y, kDefaultFarPlaneM);
+    float farPlaneM = rawFarM > nearPlaneM ? rawFarM : max(kDefaultFarPlaneM, nearPlaneM + 1.0);
+    float airLengthM = clamp(SafeFloat(params.depthParams.w, kDefaultAirLengthM), kMinAirLengthM, kMaxAirLengthM);
+    float nearTapDepth = DepthFromLinearM(kNearOccluderMinM, nearPlaneM, farPlaneM);
 
     vec2 quarterTexel = 1.0 / vec2(max(outSize, ivec2(1)));
     vec2 uv = (vec2(pixel) + 0.5) * quarterTexel;
@@ -143,7 +180,7 @@ void main()
         vec2 tapUv = clamp(uv + clippedVec * s, uvMin, uvMax);
         float t = s * clippedLen;
 
-        float isSky = SampleSky(tapUv, quarterTexel, uvMin, uvMax, s < kThickOccluderMaxS);
+        float isSky = SampleSky(tapUv, quarterTexel, uvMin, uvMax, nearTapDepth, s < kThickOccluderMaxS);
         float cloudAlpha = Saturate(textureLod(historyColor, tapUv, 0.0).a);
         float openSample = isSky * smoothstep(kCloudOpenLow, kCloudOpenHigh, cloudAlpha);
 
@@ -182,24 +219,27 @@ void main()
     float partialMask = max(coreHalo, blockedRamp);
     float shapedShaft = shapedBase * (1.0 + gapGain * gapSignal) * partialMask;
 
-    // Shafts are lit air in front of the scene; thick clouds keep a softer share and near geometry gets less air light.
+    // Shafts are lit air in front of the scene; thick clouds keep a softer share and geometry scales physically by distance.
     vec2 ownUv = clamp(uv, uvMin, uvMax);
     float ownCloudAlpha = Saturate(textureLod(historyColor, ownUv, 0.0).a);
     float inFrontWeight = mix(1.0, kThickCloudKeep, 1.0 - ownCloudAlpha);
     float ownDepth = SafeFloat(textureLod(sceneDepth, ownUv, 0.0).r, 1.0);
-    float nearAirRamp = smoothstep(0.0, 1.0, Saturate((ownDepth - kNearAirDepth) / kNearAirRange));
-    float airDistanceWeight = (ownDepth >= kClearDepthThreshold) ? 1.0 : mix(kNearAirMinWeight, 1.0, nearAirRamp);
+    float airDistanceWeight = 1.0;
+    if (ownDepth < kClearDepthThreshold) {
+        float linearDistanceM = max(LinearizeDepth(ownDepth, nearPlaneM, farPlaneM), 0.0);
+        airDistanceWeight = mix(kGeometryAirFloor, 1.0, Saturate(1.0 - exp(-linearDistanceM / airLengthM)));
+    }
     float blockedWeight = mix(mix(0.35, 1.0, blockedRamp), 1.0, Saturate(coreHalo));
     float shaft = shapedShaft * glow * radialEnvelope * inFrontWeight * airDistanceWeight * blockedWeight;
 
     vec3 color = sunColor * (intensity * fade * shaft * kShaftStorageScale);
     color = mix(color, color * kHazeTint, hazeMix);
 
-    // Hue-preserving smooth compression into 0..3; VolumetricCloudResolve.comp restores x2 gain.
+    // Smooth compression into 0..3; alpha carries raw open fraction (rayFrac) for resolve spokes.
     float peak = max(color.r, max(color.g, color.b));
     color /= (1.0 + peak / kShaftSoftCap);
     if (any(isnan(color)) || any(isinf(color))) {
         color = vec3(0.0);
     }
-    imageStore(shaftsOut, pixel, vec4(clamp(color, vec3(0.0), vec3(kShaftSoftCap)), 1.0));
+    imageStore(shaftsOut, pixel, vec4(clamp(color, vec3(0.0), vec3(kShaftSoftCap)), rayFrac));
 }

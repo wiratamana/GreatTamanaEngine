@@ -171,9 +171,11 @@ struct VolumetricCloudSettings {
     float sunRays = 1.2f;           // Intensity of the quarter-res screen-space sun shafts through cloud gaps (0 = off).
     float sunRaysDecay = 1.0f;      // Exponential decay of sun-shaft taps away from the sun.
     float sunRaysLength = 1.5f;     // Reach of the sun shafts across the screen, in view heights.
-    float sunRaysTaps = 24.0f;      // Radial sample count per pixel, snapped to 8..48 in steps of 8.
+    float sunRaysTaps = 32.0f;      // Radial sample count per pixel, snapped to 8..48 in steps of 8.
     float sunRaysAnisotropy = 0.75f; // Forward-scatter phase eccentricity g of the sun-shaft glow.
     float sunRaysContrast = 2.5f;   // Contrast gain on open cloud gaps along the sun line.
+    float sunRaysAirLengthM = 2000.0f; // Distance scale (m) over which geometry accumulates sun-shaft air light.
+    float sunRaysSpoke = 1.0f;      // Strength of the angular high-pass spoke term between cloud gaps (0 = off).
     float sunStar = 1.0f;         // Strength of the small starburst on the sun where it shows through a gap (0 = off).
 };
 
@@ -302,6 +304,8 @@ inline constexpr std::array kVolumetricCloudFloatSettings{
     VolumetricCloudFloatSetting{ "sunRaysTaps", &VolumetricCloudSettings::sunRaysTaps, 8.0f, 48.0f },
     VolumetricCloudFloatSetting{ "sunRaysAnisotropy", &VolumetricCloudSettings::sunRaysAnisotropy, 0.0f, 0.95f },
     VolumetricCloudFloatSetting{ "sunRaysContrast", &VolumetricCloudSettings::sunRaysContrast, 0.2f, 3.0f },
+    VolumetricCloudFloatSetting{ "sunRaysAirLengthM", &VolumetricCloudSettings::sunRaysAirLengthM, 200.0f, 20000.0f },
+    VolumetricCloudFloatSetting{ "sunRaysSpoke", &VolumetricCloudSettings::sunRaysSpoke, 0.0f, 4.0f },
     VolumetricCloudFloatSetting{ "sunStar", &VolumetricCloudSettings::sunStar, 0.0f, 3.0f },
 };
 
@@ -392,20 +396,21 @@ struct VolumetricCloudResolveParamsGpu {
     float motion[4] = {};               // x extra blend at one pixel of motion, y Catmull-Rom history weight, z adaptive sample count (0/1).
     std::uint32_t counts[4] = {};       // x divisor, yz sample offset inside the block, w history valid.
     std::uint32_t sizes[4] = {};        // xy view size, zw march target size.
-    float sunRay[4] = {};               // xy sun position in the view (0..1), z strength of the rays (0 = off), w strength of the starburst (0 = off).
+    float sunRay[4] = {};               // xy sun uv, z spoke strength (sunRaysSpoke, 0 = off), w starburst strength (0 = off).
     float sunRayColor[4] = {};          // rgb colour of the rays, w glow radius (view height units).
 };
 static_assert(sizeof(VolumetricCloudResolveParamsGpu) == 128 + 8 * 16);
 static_assert(std::is_trivially_copyable_v<VolumetricCloudResolveParamsGpu>);
 
-// Parameter block of VolumetricCloudSunShafts.comp (64 bytes); member order matches the shader.
+// Parameter block of VolumetricCloudSunShafts.comp (80 bytes); member order matches the shader.
 struct VolumetricCloudSunShaftsParamsGpu {
     float sunUvAndReachAndIntensity[4] = {}; // xy sun uv, z reach (view heights), w intensity.
     float decayTapsAnisoContrast[4] = {};    // x decay, y taps, z anisotropy g, w contrast.
     float sunColorAndHazeMix[4] = {};        // rgb tinted sun colour, w haze mix.
     float frameFadeAspectActive[4] = {};     // x frame index, y fade (0..1), z aspect (w/h), w active (0/1).
+    float depthParams[4] = {};               // x near plane (m), y far plane (m), z reserved, w air length scale (m).
 };
-static_assert(sizeof(VolumetricCloudSunShaftsParamsGpu) == 64);
+static_assert(sizeof(VolumetricCloudSunShaftsParamsGpu) == 80);
 static_assert(std::is_trivially_copyable_v<VolumetricCloudSunShaftsParamsGpu>);
 
 // Clamps every field into its documented range; a non-finite number falls back to the default.

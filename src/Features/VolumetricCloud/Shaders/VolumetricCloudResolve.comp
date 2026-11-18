@@ -16,7 +16,7 @@ layout(std430, binding = 0) readonly buffer VolumetricCloudResolveParams {
     vec4 motion;        // x extra blend at one pixel of motion, y sharp (Catmull-Rom) history 0..1, z adaptive sample count 0/1.
     uvec4 counts;       // x divisor, yz sample offset, w history valid.
     uvec4 sizes;        // xy view size, zw march target size.
-    vec4 sunRay;        // xy sun position in the view, z strength of the rays (0 = off), w strength of the starburst (0 = off).
+    vec4 sunRay;        // xy sun uv, z spoke strength (sunRaysSpoke, 0 = off), w starburst strength (0 = off).
     vec4 sunRayColor;   // rgb colour, w glow radius (view height units).
 } params;
 
@@ -29,7 +29,7 @@ layout(binding = 6) uniform sampler2D historyAux;
 layout(binding = 7, rgba16f) uniform writeonly image2D historyColorOut;
 layout(binding = 8, rgba16f) uniform writeonly image2D historyAuxOut;
 layout(binding = 9, rgba16f) uniform writeonly image2D destinationImage;
-layout(binding = 10) uniform sampler2D sunShafts;    // Quarter-res crepuscular rays; black when off.
+layout(binding = 10) uniform sampler2D sunShafts;    // Quarter-res rays in rgb, raw open fraction in a.
 
 const float kNoSurfaceKm = 1000.0;
 const float kMaxOutputLuminance = 65504.0;
@@ -136,6 +136,14 @@ bool FetchHistory(vec2 texelPosition, float pixelEndKm, out vec4 color, out floa
 const float kStarRadius = 0.13;   // Reach of the spikes (view height units).
 const float kStarGain = 2.5;
 const float kShaftGain = 2.0;     // Restores full HDR scale from the 0..3 sun-shafts buffer.
+const float kShaftCloudKeep = 0.5;
+const float kSpokeWidth = 0.012;  // Tangential high-pass offset (view height units).
+const float kSpokeGain = 6.0;
+const float kSpokeFalloff = 1.5;
+const float kSpokeSoftCap = 3.0;
+const float kSpokeMinLuma = 1e-3;
+const float kSpokeMinDist = 1e-5;
+const vec3 kSpokeLumaWeights = vec3(0.2126, 0.7152, 0.0722);
 
 // Share of this pixel and its four neighbours that show sky: the spikes fade out at a silhouette instead of cutting.
 float SkyShare(vec2 uv, float ownDepth)
@@ -169,6 +177,59 @@ vec3 SunStar(vec2 uv, float ownDepth)
     float core = 0.02 / (r + 0.012);
     vec3 tint = mix(params.sunRayColor.rgb, vec3(1.0), 0.5);
     return tint * (kStarGain * params.sunRay.w * seen * falloff * (spikes * 0.9 + core * 0.25));
+}
+
+float SafeFloat(float v, float fallback)
+{
+    return (isnan(v) || isinf(v)) ? fallback : v;
+}
+
+vec3 SafeNonNegVec3(vec3 v)
+{
+    return vec3(
+        max(SafeFloat(v.x, 0.0), 0.0),
+        max(SafeFloat(v.y, 0.0), 0.0),
+        max(SafeFloat(v.z, 0.0), 0.0));
+}
+
+// Angular high-pass of the open-ray fraction (sunShafts.a) for crepuscular spokes between small clouds.
+vec3 SunShaftSpokes(vec2 uv, vec4 centerSample, float spokeStrength)
+{
+    float aspect = float(max(params.sizes.x, 1u)) / float(max(params.sizes.y, 1u));
+    vec2 sunUv = vec2(SafeFloat(params.sunRay.x, 0.5), SafeFloat(params.sunRay.y, 0.5));
+    vec2 toSun = vec2((sunUv.x - uv.x) * aspect, sunUv.y - uv.y);
+    float distToSun = length(toSun);
+    if (distToSun <= kSpokeMinDist) {
+        return vec3(0.0);
+    }
+
+    vec2 radialDir = toSun / distToSun;
+    vec2 tangent = vec2(-radialDir.y / aspect, radialDir.x);
+    vec2 halfTexel = 0.5 / vec2(max(textureSize(sunShafts, 0), ivec2(1)));
+    vec2 uvMin = halfTexel;
+    vec2 uvMax = vec2(1.0) - halfTexel;
+
+    float centerAlpha = clamp(SafeFloat(centerSample.a, 0.0), 0.0, 1.0);
+    float aLeft = clamp(SafeFloat(textureLod(sunShafts, clamp(uv - tangent * kSpokeWidth, uvMin, uvMax), 0.0).a, 0.0), 0.0, 1.0);
+    float aRight = clamp(SafeFloat(textureLod(sunShafts, clamp(uv + tangent * kSpokeWidth, uvMin, uvMax), 0.0).a, 0.0), 0.0, 1.0);
+    float spoke = max(0.0, centerAlpha - 0.5 * (aLeft + aRight));
+    if (spoke <= 0.0) {
+        return vec3(0.0);
+    }
+
+    vec3 sunShaftsRgbCentre = SafeNonNegVec3(centerSample.rgb);
+    float centreLuma = dot(sunShaftsRgbCentre, kSpokeLumaWeights);
+    vec3 fallbackRgb = SafeNonNegVec3(params.sunRayColor.rgb);
+    float fallbackLuma = dot(fallbackRgb, kSpokeLumaWeights);
+    vec3 hue = centreLuma >= kSpokeMinLuma
+        ? (sunShaftsRgbCentre / max(centreLuma, kSpokeMinLuma))
+        : (fallbackRgb / max(fallbackLuma, kSpokeMinLuma));
+
+    float falloff = exp(-distToSun * kSpokeFalloff);
+    vec3 spokeRgb = hue * (spoke * kSpokeGain * falloff * spokeStrength);
+    float peak = max(spokeRgb.r, max(spokeRgb.g, spokeRgb.b));
+    spokeRgb /= (1.0 + peak / kSpokeSoftCap);
+    return SafeNonNegVec3(spokeRgb);
 }
 
 void main()
@@ -316,7 +377,13 @@ void main()
     imageStore(historyAuxOut, pixel, vec4(cloudDistanceKm, pixelEndKm, newCount, 0.0));
 
     vec3 color = SceneBehindCloud(scene, cloud.a) + cloud.rgb;
-    color += max(textureLod(sunShafts, uv, 0.0).rgb, vec3(0.0)) * (kShaftGain * (1.0 - 0.5 * (1.0 - cloud.a)));
+    vec4 shaftCenter = textureLod(sunShafts, uv, 0.0);
+    float shaftCloudWeight = 1.0 - kShaftCloudKeep * (1.0 - cloud.a);
+    color += SafeNonNegVec3(shaftCenter.rgb) * (kShaftGain * shaftCloudWeight);
+    float spokeStrength = max(SafeFloat(params.sunRay.z, 0.0), 0.0);
+    if (spokeStrength > 0.0) {
+        color += SunShaftSpokes(uv, shaftCenter, spokeStrength) * shaftCloudWeight;
+    }
     if (params.sunRay.w > 0.0) {
         color += SunStar(uv, rawDepth) * cloud.a;
     }

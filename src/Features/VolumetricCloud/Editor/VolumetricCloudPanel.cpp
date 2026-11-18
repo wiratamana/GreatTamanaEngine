@@ -163,6 +163,8 @@ bool BuildVolumetricCloudPanel(
     changed |= ImGui::SliderFloat("Sun rays taps", &edit.sunRaysTaps, 8.0f, 48.0f, "%.0f");
     changed |= ImGui::SliderFloat("Sun rays anisotropy", &edit.sunRaysAnisotropy, 0.0f, 0.95f);
     changed |= ImGui::SliderFloat("Sun rays contrast", &edit.sunRaysContrast, 0.2f, 3.0f);
+    changed |= ImGui::SliderFloat("Sun rays air length (m)", &edit.sunRaysAirLengthM, 200.0f, 20000.0f, "%.0f");
+    changed |= ImGui::SliderFloat("Sun rays spoke", &edit.sunRaysSpoke, 0.0f, 4.0f);
     changed |= ImGui::SliderFloat("Sun starburst", &edit.sunStar, 0.0f, 3.0f);
 
     ImGui::SeparatorText("Quality");

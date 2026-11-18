@@ -250,10 +250,12 @@ Vec3 CloudSceneBehind(const Vec3& scene, float cloudTransmittance) noexcept;
 // Distance that stands for "no surface", in km.
 inline constexpr float kCloudNoSurfaceKm = 1000.0f;
 
-// Off-screen fade distance (in view heights), UV clamp and sky-haze tint share of VolumetricCloudSunShafts.comp.
+// Off-screen fade distance (in view heights), UV clamp, sky-haze tint and fallback depth planes of sun shafts.
 inline constexpr float kCloudSunShaftsOutsideView = 1.5f;
 inline constexpr float kCloudSunShaftsUvClamp = 4.0f;
 inline constexpr float kCloudSunShaftsHazeMix = 0.3f;
+inline constexpr float kCloudSunShaftsFallbackNearM = 0.1f;
+inline constexpr float kCloudSunShaftsFallbackFarM = 10000.0f;
 
 // Horizon and off-screen fade (0..1) of the quarter-res sun-shafts pass; stays full for an overhead sun.
 float CloudSunShaftsFade(float sunUp, const float (&sunUv)[2], float aspect) noexcept;
@@ -269,7 +271,7 @@ struct VolumetricCloudSunShaftsFacts {
     bool historyValid = true;
 };
 
-// Builds the 64-byte parameter block of VolumetricCloudSunShafts.comp; outputs are always finite.
+// Builds the 80-byte parameter block of VolumetricCloudSunShafts.comp; outputs are always finite.
 VolumetricCloudSunShaftsParamsGpu MakeCloudSunShaftsParams(
     const VolumetricCloudSettings& settings, const VolumetricCloudSunShaftsFacts& facts) noexcept;
 

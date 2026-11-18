@@ -63,6 +63,53 @@ SphereRoots IntersectShell(float cameraY, float dirY, float radiusM, float heigh
     return roots;
 }
 
+struct CloudPerspectivePlanes {
+    float nearM = kCloudSunShaftsFallbackNearM;
+    float farM = kCloudSunShaftsFallbackFarM;
+};
+
+// Recovers standard-Z near and far planes from PerspectiveFovLH_ZO * View (row 2 xyz = k * row 3 xyz).
+CloudPerspectivePlanes ExtractPerspectiveNearFar(const Mat4& vp) noexcept
+{
+    CloudPerspectivePlanes planes;
+    const float* data = vp.Data();
+    for (int i = 0; i < 16; ++i) {
+        if (!std::isfinite(data[i])) {
+            return planes;
+        }
+    }
+    const double r2x = vp(2, 0);
+    const double r2y = vp(2, 1);
+    const double r2z = vp(2, 2);
+    const double r3x = vp(3, 0);
+    const double r3y = vp(3, 1);
+    const double r3z = vp(3, 2);
+    const double r3Sq = r3x * r3x + r3y * r3y + r3z * r3z;
+    const double r2Sq = r2x * r2x + r2y * r2y + r2z * r2z;
+    if (!(r3Sq > 1e-8) || !(r2Sq > 0.0)) {
+        return planes;
+    }
+    const double k = (r2x * r3x + r2y * r3y + r2z * r3z) / r3Sq;
+    const double dx = r2x - k * r3x;
+    const double dy = r2y - k * r3y;
+    const double dz = r2z - k * r3z;
+    if (!std::isfinite(k) || !(dx * dx + dy * dy + dz * dz <= 1e-6 * r2Sq)) {
+        return planes;
+    }
+    const double b = (static_cast<double>(vp(2, 3)) - k * static_cast<double>(vp(3, 3))) / std::sqrt(r3Sq);
+    if (!std::isfinite(b) || !(k > 1.0) || !(b < 0.0)) {
+        return planes;
+    }
+    const float nearF = static_cast<float>(-b / k);
+    const float farF = static_cast<float>(-b / (k - 1.0));
+    if (!std::isfinite(nearF) || !std::isfinite(farF) || !(nearF > 0.0f) || !(farF > nearF)) {
+        return planes;
+    }
+    planes.nearM = nearF;
+    planes.farM = farF;
+    return planes;
+}
+
 } // namespace
 
 VolumetricCloudSettings SanitizeVolumetricCloudSettings(const VolumetricCloudSettings& candidate) noexcept
@@ -606,9 +653,11 @@ VolumetricCloudResolveParamsGpu MakeVolumetricCloudResolveParams(const Volumetri
     p.sizes[1] = facts.viewHeight;
     p.sizes[2] = resolve.lowWidth;
     p.sizes[3] = resolve.lowHeight;
+    const float spoke = std::isfinite(safe.sunRaysSpoke) ? std::clamp(safe.sunRaysSpoke, 0.0f, 4.0f) : VolumetricCloudSettings{}.sunRaysSpoke;
+    const float rayFade = std::isfinite(resolve.sunRayFade) ? std::clamp(resolve.sunRayFade, 0.0f, 1.0f) : 0.0f;
     p.sunRay[0] = resolve.sunUv[0];
     p.sunRay[1] = resolve.sunUv[1];
-    p.sunRay[2] = safe.sunRays * resolve.sunRayFade;
+    p.sunRay[2] = (std::isfinite(safe.sunRays) && safe.sunRays > 0.0f) ? spoke * rayFade : 0.0f;
     p.sunRay[3] = safe.sunStar * resolve.sunRayFade;
     for (int i = 0; i < 3; ++i) {
         p.sunRayColor[i] = resolve.sunColor[i];
@@ -668,6 +717,7 @@ VolumetricCloudSunShaftsParamsGpu MakeCloudSunShaftsParams(
     bool inputsFinite = std::isfinite(settings.sunRays) && std::isfinite(settings.sunRaysDecay)
         && std::isfinite(settings.sunRaysLength) && std::isfinite(settings.sunRaysTaps)
         && std::isfinite(settings.sunRaysAnisotropy) && std::isfinite(settings.sunRaysContrast)
+        && std::isfinite(settings.sunRaysAirLengthM)
         && std::isfinite(facts.sunDirection.x) && std::isfinite(facts.sunDirection.y) && std::isfinite(facts.sunDirection.z)
         && std::isfinite(facts.sunColor.x) && std::isfinite(facts.sunColor.y) && std::isfinite(facts.sunColor.z);
     for (int i = 0; i < 16 && inputsFinite; ++i) {
@@ -675,6 +725,7 @@ VolumetricCloudSunShaftsParamsGpu MakeCloudSunShaftsParams(
     }
 
     const VolumetricCloudSettings safe = SanitizeVolumetricCloudSettings(settings);
+    const CloudPerspectivePlanes depthPlanes = ExtractPerspectiveNearFar(facts.viewProjection);
     const float aspect = static_cast<float>(std::max(facts.viewWidth, 1u)) / static_cast<float>(std::max(facts.viewHeight, 1u));
     const float frame = static_cast<float>(facts.frameIndex & 0xFFFFFu);
     const float intensity = inputsFinite ? safe.sunRays : 0.0f;
@@ -719,6 +770,10 @@ VolumetricCloudSunShaftsParamsGpu MakeCloudSunShaftsParams(
     p.frameFadeAspectActive[1] = fade;
     p.frameFadeAspectActive[2] = aspect;
     p.frameFadeAspectActive[3] = active;
+    p.depthParams[0] = depthPlanes.nearM;
+    p.depthParams[1] = depthPlanes.farM;
+    p.depthParams[2] = 0.0f;
+    p.depthParams[3] = safe.sunRaysAirLengthM;
     return p;
 }
 

@@ -991,6 +991,8 @@ TEST(VolumetricCloudShaderNamesTest, SunShaftsExposesBoundNames)
 
 TEST(VolumetricCloudTemporalTest, ResolveBlockLayoutMatchesTheShader)
 {
+    static_assert(sizeof(VolumetricCloudResolveParamsGpu) == 256);
+    EXPECT_EQ(offsetof(VolumetricCloudResolveParamsGpu, invViewProjection), 0u);
     EXPECT_EQ(offsetof(VolumetricCloudResolveParamsGpu, prevViewProjection), 64u);
     EXPECT_EQ(offsetof(VolumetricCloudResolveParamsGpu, eye), 128u);
     EXPECT_EQ(offsetof(VolumetricCloudResolveParamsGpu, windDelta), 144u);
@@ -1360,7 +1362,8 @@ TEST(VolumetricCloudParamsTest, GlslBlocksHaveTheCppMembersAtTheCppOffsets)
         { GTE_CLOUD_MEMBER(VolumetricCloudSunShaftsParamsGpu, sunUvAndReachAndIntensity),
             GTE_CLOUD_MEMBER(VolumetricCloudSunShaftsParamsGpu, decayTapsAnisoContrast),
             GTE_CLOUD_MEMBER(VolumetricCloudSunShaftsParamsGpu, sunColorAndHazeMix),
-            GTE_CLOUD_MEMBER(VolumetricCloudSunShaftsParamsGpu, frameFadeAspectActive) });
+            GTE_CLOUD_MEMBER(VolumetricCloudSunShaftsParamsGpu, frameFadeAspectActive),
+            GTE_CLOUD_MEMBER(VolumetricCloudSunShaftsParamsGpu, depthParams) });
 #undef GTE_CLOUD_MEMBER
 }
 
@@ -2050,26 +2053,34 @@ void ExpectAllFinite(const VolumetricCloudSunShaftsParamsGpu& p)
         EXPECT_TRUE(std::isfinite(p.decayTapsAnisoContrast[i])) << i;
         EXPECT_TRUE(std::isfinite(p.sunColorAndHazeMix[i])) << i;
         EXPECT_TRUE(std::isfinite(p.frameFadeAspectActive[i])) << i;
+        EXPECT_TRUE(std::isfinite(p.depthParams[i])) << i;
     }
+    EXPECT_GT(p.depthParams[0], 0.0f);
+    EXPECT_GT(p.depthParams[1], p.depthParams[0]);
+    EXPECT_FLOAT_EQ(p.depthParams[2], 0.0f);
+    EXPECT_GE(p.depthParams[3], 200.0f);
+    EXPECT_LE(p.depthParams[3], 20000.0f);
 }
 
-Mat4 MakeTestRelativeViewProjection(const Vec3& forward, const Vec3& up, float aspect)
+Mat4 MakeTestRelativeViewProjection(
+    const Vec3& forward, const Vec3& up, float aspect, float nearZ = 0.1f, float farZ = 1000.0f)
 {
     const Vec3 eye(1200.0f, 50.0f, -800.0f);
     const Mat4 view = Mat4::LookAtLH(eye, eye + Normalize(forward), Normalize(up));
-    const Mat4 proj = Mat4::PerspectiveFovLH_ZO(1.0471976f, aspect, 0.1f, 1000.0f);
+    const Mat4 proj = Mat4::PerspectiveFovLH_ZO(1.0471976f, aspect, nearZ, farZ);
     return MakeEyeRelativeCamera(proj * view, eye).viewProjection;
 }
 
 TEST(VolumetricCloudSunShaftsTest, ParamsBlockLayoutAndSizeMatchTheShader)
 {
-    static_assert(sizeof(VolumetricCloudSunShaftsParamsGpu) == 64);
+    static_assert(sizeof(VolumetricCloudSunShaftsParamsGpu) == 80);
     static_assert(std::is_trivially_copyable_v<VolumetricCloudSunShaftsParamsGpu>);
     EXPECT_EQ(offsetof(VolumetricCloudSunShaftsParamsGpu, sunUvAndReachAndIntensity), 0u);
     EXPECT_EQ(offsetof(VolumetricCloudSunShaftsParamsGpu, decayTapsAnisoContrast), 16u);
     EXPECT_EQ(offsetof(VolumetricCloudSunShaftsParamsGpu, sunColorAndHazeMix), 32u);
     EXPECT_EQ(offsetof(VolumetricCloudSunShaftsParamsGpu, frameFadeAspectActive), 48u);
-    EXPECT_EQ(sizeof(VolumetricCloudSunShaftsParamsGpu), 64u);
+    EXPECT_EQ(offsetof(VolumetricCloudSunShaftsParamsGpu, depthParams), 64u);
+    EXPECT_EQ(sizeof(VolumetricCloudSunShaftsParamsGpu), 80u);
 }
 
 TEST(VolumetricCloudSunShaftsTest, SettingsDefaultsAndSanitizerSnapTapsToStepsOfEight)
@@ -2078,9 +2089,11 @@ TEST(VolumetricCloudSunShaftsTest, SettingsDefaultsAndSanitizerSnapTapsToStepsOf
     EXPECT_FLOAT_EQ(defaults.sunRays, 1.2f);
     EXPECT_FLOAT_EQ(defaults.sunRaysDecay, 1.0f);
     EXPECT_FLOAT_EQ(defaults.sunRaysLength, 1.5f);
-    EXPECT_FLOAT_EQ(defaults.sunRaysTaps, 24.0f);
+    EXPECT_FLOAT_EQ(defaults.sunRaysTaps, 32.0f);
     EXPECT_FLOAT_EQ(defaults.sunRaysAnisotropy, 0.75f);
     EXPECT_FLOAT_EQ(defaults.sunRaysContrast, 2.5f);
+    EXPECT_FLOAT_EQ(defaults.sunRaysAirLengthM, 2000.0f);
+    EXPECT_FLOAT_EQ(defaults.sunRaysSpoke, 1.0f);
 
     VolumetricCloudSettings low = defaults;
     low.sunRays = -1.0f;
@@ -2089,6 +2102,8 @@ TEST(VolumetricCloudSunShaftsTest, SettingsDefaultsAndSanitizerSnapTapsToStepsOf
     low.sunRaysTaps = 1.0f;
     low.sunRaysAnisotropy = -0.5f;
     low.sunRaysContrast = 0.01f;
+    low.sunRaysAirLengthM = 10.0f;
+    low.sunRaysSpoke = -0.5f;
     low = SanitizeVolumetricCloudSettings(low);
     EXPECT_FLOAT_EQ(low.sunRays, 0.0f);
     EXPECT_FLOAT_EQ(low.sunRaysDecay, 0.0f);
@@ -2096,6 +2111,8 @@ TEST(VolumetricCloudSunShaftsTest, SettingsDefaultsAndSanitizerSnapTapsToStepsOf
     EXPECT_FLOAT_EQ(low.sunRaysTaps, 8.0f);
     EXPECT_FLOAT_EQ(low.sunRaysAnisotropy, 0.0f);
     EXPECT_FLOAT_EQ(low.sunRaysContrast, 0.2f);
+    EXPECT_FLOAT_EQ(low.sunRaysAirLengthM, 200.0f);
+    EXPECT_FLOAT_EQ(low.sunRaysSpoke, 0.0f);
 
     VolumetricCloudSettings high = defaults;
     high.sunRays = 9.0f;
@@ -2104,6 +2121,8 @@ TEST(VolumetricCloudSunShaftsTest, SettingsDefaultsAndSanitizerSnapTapsToStepsOf
     high.sunRaysTaps = 99.0f;
     high.sunRaysAnisotropy = 2.0f;
     high.sunRaysContrast = 9.0f;
+    high.sunRaysAirLengthM = 90000.0f;
+    high.sunRaysSpoke = 9.0f;
     high = SanitizeVolumetricCloudSettings(high);
     EXPECT_FLOAT_EQ(high.sunRays, 3.0f);
     EXPECT_FLOAT_EQ(high.sunRaysDecay, 6.0f);
@@ -2111,6 +2130,8 @@ TEST(VolumetricCloudSunShaftsTest, SettingsDefaultsAndSanitizerSnapTapsToStepsOf
     EXPECT_FLOAT_EQ(high.sunRaysTaps, 48.0f);
     EXPECT_FLOAT_EQ(high.sunRaysAnisotropy, 0.95f);
     EXPECT_FLOAT_EQ(high.sunRaysContrast, 3.0f);
+    EXPECT_FLOAT_EQ(high.sunRaysAirLengthM, 20000.0f);
+    EXPECT_FLOAT_EQ(high.sunRaysSpoke, 4.0f);
 
     for (const auto [rawTaps, snapped] : { std::pair{ 9.0f, 8.0f }, std::pair{ 13.0f, 16.0f },
              std::pair{ 23.0f, 24.0f }, std::pair{ 37.0f, 40.0f }, std::pair{ 46.0f, 48.0f } }) {
@@ -2123,10 +2144,14 @@ TEST(VolumetricCloudSunShaftsTest, SettingsDefaultsAndSanitizerSnapTapsToStepsOf
     nanSettings.sunRays = std::numeric_limits<float>::quiet_NaN();
     nanSettings.sunRaysTaps = std::numeric_limits<float>::infinity();
     nanSettings.sunRaysContrast = -std::numeric_limits<float>::infinity();
+    nanSettings.sunRaysAirLengthM = std::numeric_limits<float>::quiet_NaN();
+    nanSettings.sunRaysSpoke = std::numeric_limits<float>::quiet_NaN();
     const VolumetricCloudSettings recovered = SanitizeVolumetricCloudSettings(nanSettings);
     EXPECT_FLOAT_EQ(recovered.sunRays, defaults.sunRays);
     EXPECT_FLOAT_EQ(recovered.sunRaysTaps, defaults.sunRaysTaps);
     EXPECT_FLOAT_EQ(recovered.sunRaysContrast, defaults.sunRaysContrast);
+    EXPECT_FLOAT_EQ(recovered.sunRaysAirLengthM, defaults.sunRaysAirLengthM);
+    EXPECT_FLOAT_EQ(recovered.sunRaysSpoke, defaults.sunRaysSpoke);
 }
 
 TEST(VolumetricCloudSunShaftsTest, BuilderHandlesOverheadSunInView)
@@ -2158,6 +2183,10 @@ TEST(VolumetricCloudSunShaftsTest, BuilderHandlesOverheadSunInView)
     EXPECT_FLOAT_EQ(p.frameFadeAspectActive[1], 1.0f);
     EXPECT_NEAR(p.frameFadeAspectActive[2], 1280.0f / 720.0f, 1e-5f);
     EXPECT_FLOAT_EQ(p.frameFadeAspectActive[3], 1.0f);
+    EXPECT_NEAR(p.depthParams[0], 0.1f, 1e-4f);
+    EXPECT_NEAR(p.depthParams[1], 1000.0f, 1.0f);
+    EXPECT_FLOAT_EQ(p.depthParams[2], 0.0f);
+    EXPECT_FLOAT_EQ(p.depthParams[3], s.sunRaysAirLengthM);
 }
 
 TEST(VolumetricCloudSunShaftsTest, BuilderFadesOutsideFrameAndClampsExtremeUv)
@@ -2240,6 +2269,59 @@ TEST(VolumetricCloudSunShaftsTest, BuilderMarksBehindCameraIntensityZeroNoHistor
     EXPECT_FLOAT_EQ(nanSetOut.frameFadeAspectActive[3], 0.0f);
 }
 
+TEST(VolumetricCloudSunShaftsTest, BuilderExtractsCameraDepthPlanesAndFallsBackWhenInvalid)
+{
+    VolumetricCloudSettings s = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    s.sunRaysAirLengthM = 3500.0f;
+
+    VolumetricCloudSunShaftsFacts aerial;
+    aerial.viewWidth = 1280;
+    aerial.viewHeight = 720;
+    aerial.sunDirection = Normalize(Vec3(0.0f, 0.3f, 0.9539f));
+    aerial.viewProjection = MakeTestRelativeViewProjection(
+        Vec3(0.0f, 0.2f, 0.9798f), Vec3::Up(), 1280.0f / 720.0f, 3.0f, 25000.0f);
+    const VolumetricCloudSunShaftsParamsGpu aerialOut = MakeCloudSunShaftsParams(s, aerial);
+    ExpectAllFinite(aerialOut);
+    EXPECT_NEAR(aerialOut.depthParams[0], 3.0f, 1e-3f);
+    EXPECT_NEAR(aerialOut.depthParams[1], 25000.0f, 250.0f);
+    EXPECT_FLOAT_EQ(aerialOut.depthParams[2], 0.0f);
+    EXPECT_FLOAT_EQ(aerialOut.depthParams[3], 3500.0f);
+
+    const Vec3 eye(500.0f, 2.0f, -300.0f);
+    const Mat4 view = Mat4::LookAtLH(eye, eye + Normalize(Vec3(0.2f, 0.1f, 0.97f)), Vec3::Up());
+    VolumetricCloudSunShaftsFacts flipped = aerial;
+    flipped.viewProjection = MakeEyeRelativeCamera(
+        Mat4::PerspectiveFovLH_ZO(1.0471976f, 16.0f / 9.0f, 0.15f, 10000.0f, /*flipY=*/true) * view, eye).viewProjection;
+    const VolumetricCloudSunShaftsParamsGpu flippedOut = MakeCloudSunShaftsParams(s, flipped);
+    ExpectAllFinite(flippedOut);
+    EXPECT_NEAR(flippedOut.depthParams[0], 0.15f, 1e-4f);
+    EXPECT_NEAR(flippedOut.depthParams[1], 10000.0f, 50.0f);
+
+    for (const Mat4& badVp : {
+             Mat4::Identity(),
+             Mat4::Zero(),
+             Mat4::OrthographicLH_ZO(-10.0f, 10.0f, -10.0f, 10.0f, 0.5f, 500.0f),
+             Mat4::PerspectiveFovLH_ZO(1.0471976f, 16.0f / 9.0f, -0.5f, 1000.0f) * view,
+             Mat4::PerspectiveFovLH_ZO(1.0471976f, 16.0f / 9.0f, 500.0f, 100.0f) * view,
+         }) {
+        VolumetricCloudSunShaftsFacts bad = aerial;
+        bad.viewProjection = badVp;
+        const VolumetricCloudSunShaftsParamsGpu out = MakeCloudSunShaftsParams(s, bad);
+        ExpectAllFinite(out);
+        EXPECT_FLOAT_EQ(out.depthParams[0], kCloudSunShaftsFallbackNearM);
+        EXPECT_FLOAT_EQ(out.depthParams[1], kCloudSunShaftsFallbackFarM);
+        EXPECT_FLOAT_EQ(out.depthParams[2], 0.0f);
+        EXPECT_FLOAT_EQ(out.depthParams[3], 3500.0f);
+    }
+
+    VolumetricCloudSettings nanAir = s;
+    nanAir.sunRaysAirLengthM = std::numeric_limits<float>::quiet_NaN();
+    const VolumetricCloudSunShaftsParamsGpu nanAirOut = MakeCloudSunShaftsParams(nanAir, aerial);
+    ExpectAllFinite(nanAirOut);
+    EXPECT_FLOAT_EQ(nanAirOut.depthParams[3], VolumetricCloudSettings{}.sunRaysAirLengthM);
+    EXPECT_FLOAT_EQ(nanAirOut.frameFadeAspectActive[3], 0.0f);
+}
+
 TEST(VolumetricCloudSunShaftsTest, EndpointAndSetupExposeSunShaftsKeysSettingsAndPassGate)
 {
     VolumetricCloudFeature feature;
@@ -2270,24 +2352,35 @@ TEST(VolumetricCloudSunShaftsTest, EndpointAndSetupExposeSunShaftsKeysSettingsAn
     const fx::FeatureDebugResult state = endpoint->GetState();
     ASSERT_TRUE(state.ok);
     for (const char* key : { "sunRays", "sunRaysDecay", "sunRaysLength", "sunRaysTaps", "sunRaysAnisotropy",
-             "sunRaysContrast", "game.sunShafts.sunUv", "game.sunShafts.reach", "game.sunShafts.active" }) {
+             "sunRaysContrast", "sunRaysAirLengthM", "sunRaysSpoke", "game.sunShafts.sunUv", "game.sunShafts.reach",
+             "game.sunShafts.active" }) {
         ASSERT_NE(findField(state, key), nullptr) << key;
     }
     EXPECT_NEAR(std::get<double>(findField(state, "sunRays")->value), 1.2, 1e-6);
     EXPECT_NEAR(std::get<double>(findField(state, "sunRaysDecay")->value), 1.0, 1e-6);
     EXPECT_NEAR(std::get<double>(findField(state, "sunRaysLength")->value), 1.5, 1e-6);
-    EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "sunRaysTaps")->value), 24.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "sunRaysTaps")->value), 32.0);
     EXPECT_NEAR(std::get<double>(findField(state, "sunRaysAnisotropy")->value), 0.75, 1e-6);
     EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "sunRaysContrast")->value), 2.5);
+    EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "sunRaysAirLengthM")->value), 2000.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "sunRaysSpoke")->value), 1.0);
     EXPECT_NE(std::get<std::string>(findField(state, "game.sunShafts.sunUv")->value).find(','), std::string::npos);
     EXPECT_DOUBLE_EQ(std::get<double>(findField(state, "game.sunShafts.reach")->value), 0.0);
     EXPECT_FALSE(std::get<bool>(findField(state, "game.sunShafts.active")->value));
 
-    const std::vector<fx::FeatureDebugArg> args{ { "sunRaysTaps", "21" }, { "sunRaysContrast", "1.8" } };
+    const std::vector<fx::FeatureDebugArg> args{
+        { "sunRaysTaps", "21" }, { "sunRaysContrast", "1.8" }, { "sunRaysAirLengthM", "4500" }, { "sunRaysSpoke", "2.5" } };
     const fx::FeatureDebugResult updated = endpoint->Set(args);
     ASSERT_TRUE(updated.ok);
     EXPECT_DOUBLE_EQ(std::get<double>(findField(updated, "sunRaysTaps")->value), 24.0);
     EXPECT_NEAR(std::get<double>(findField(updated, "sunRaysContrast")->value), 1.8, 1e-6);
+    EXPECT_DOUBLE_EQ(std::get<double>(findField(updated, "sunRaysAirLengthM")->value), 4500.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(findField(updated, "sunRaysSpoke")->value), 2.5);
+
+    const std::vector<fx::FeatureDebugArg> clampSpoke{ { "sunRaysSpoke", "9.0" } };
+    const fx::FeatureDebugResult clampedSpoke = endpoint->Set(clampSpoke);
+    ASSERT_TRUE(clampedSpoke.ok);
+    EXPECT_DOUBLE_EQ(std::get<double>(findField(clampedSpoke, "sunRaysSpoke")->value), 4.0);
 
     for (const char* roKey : { "game.sunShafts.sunUv", "game.sunShafts.reach", "game.sunShafts.active" }) {
         const std::vector<fx::FeatureDebugArg> roSet{ { roKey, "0" } };
@@ -2295,6 +2388,37 @@ TEST(VolumetricCloudSunShaftsTest, EndpointAndSetupExposeSunShaftsKeysSettingsAn
         EXPECT_FALSE(bad.ok) << roKey;
         EXPECT_EQ(bad.badKey, roKey);
     }
+}
+
+TEST(VolumetricCloudSunShaftsTest, ResolveParamsReuseSunRayZForSpokeWithoutGrowingBlock)
+{
+    static_assert(sizeof(VolumetricCloudResolveParamsGpu) == 256);
+    EXPECT_EQ(offsetof(VolumetricCloudResolveParamsGpu, sunRay), 224u);
+    EXPECT_EQ(offsetof(VolumetricCloudResolveParamsGpu, sunRayColor), 240u);
+    EXPECT_EQ(sizeof(VolumetricCloudResolveParamsGpu), 256u);
+
+    VolumetricCloudSettings s = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
+    VolumetricCloudFrameFacts facts;
+    VolumetricCloudResolveFacts resolve;
+    resolve.sunUv[0] = 0.4f;
+    resolve.sunUv[1] = 0.3f;
+    resolve.sunRayFade = 1.0f;
+
+    const VolumetricCloudResolveParamsGpu defaultsOut = MakeVolumetricCloudResolveParams(s, facts, resolve);
+    EXPECT_FLOAT_EQ(defaultsOut.sunRay[0], 0.4f);
+    EXPECT_FLOAT_EQ(defaultsOut.sunRay[1], 0.3f);
+    EXPECT_FLOAT_EQ(defaultsOut.sunRay[2], 1.0f);
+
+    s.sunRaysSpoke = 2.5f;
+    resolve.sunRayFade = 0.5f;
+    EXPECT_FLOAT_EQ(MakeVolumetricCloudResolveParams(s, facts, resolve).sunRay[2], 1.25f);
+
+    s.sunRaysSpoke = 0.0f;
+    EXPECT_FLOAT_EQ(MakeVolumetricCloudResolveParams(s, facts, resolve).sunRay[2], 0.0f);
+
+    s.sunRaysSpoke = 2.0f;
+    s.sunRays = 0.0f;
+    EXPECT_FLOAT_EQ(MakeVolumetricCloudResolveParams(s, facts, resolve).sunRay[2], 0.0f);
 }
 
 } // namespace

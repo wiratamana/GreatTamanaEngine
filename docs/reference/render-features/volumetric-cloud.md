@@ -188,9 +188,11 @@ Sanitized on write (`SanitizeVolumetricCloudSettings`). NaN and infinity become 
 | `sunRays` | 1.2 | 0..3 | Intensity of the quarter-res screen-space sun shafts (`VolumetricCloud.SunShafts.Dispatch`) radiating from the sun through cloud gaps and over terrain silhouettes. Active up to 1.5 view heights outside the frame and at any sun height above the horizon. 0 = off |
 | `sunRaysDecay` | 1 | 0..6 | Exponential falloff of sun-shaft taps away from the sun |
 | `sunRaysLength` | 1.5 | 0.2..3 | Reach of the sun shafts across the screen, in view heights |
-| `sunRaysTaps` | 24 | 8..48 | Radial sample count per pixel, snapped to multiples of 8 |
+| `sunRaysTaps` | 32 | 8..48 | Radial sample count per pixel, snapped to multiples of 8 |
 | `sunRaysAnisotropy` | 0.75 | 0..0.95 | Forward-scattering core strength (`g`) around the sun |
 | `sunRaysContrast` | 2.5 | 0.2..3 | Contrast exponent on open cloud gaps along the sun line |
+| `sunRaysAirLengthM` | 2000 | 200..20000 | Distance scale (m) over which geometry accumulates sun-shaft air light (`1 - exp(-d / L)`); near silhouettes stay dark while distant mountains pick up air light |
+| `sunRaysSpoke` | 1 | 0..4 | Multiplier on the angular high-pass spoke term of the open-ray fraction in the resolve composite; brings out crepuscular spokes between small scattered clouds. 0 = off |
 | `sunStar` | 1 | 0..3 | Small six-spike starburst on the sun where it shows through a gap in the clouds (stable in time, faded by the cloud cover at the sun and by each pixel's own cloud transmittance so spikes do not draw over thick cloud). Same sun-height fade as the rays. The spikes are drawn over sky pixels only: a ridge or building in front of the sun carries none. 0 = off |
 | `shaftStrength` | 1 | 0..1 | Light shafts: how much of the sun in-scatter of the air the cloud shadow map removes (aerial perspective, volumetric light, air in front of clouds). 0 = none |
 
@@ -206,15 +208,18 @@ Resolve detail: a pixel that is not marched this frame reads its history texel e
 ## Sun shafts algorithm
 - `VolumetricCloudSunShafts.comp` runs at quarter resolution (8 x 8 threads) and integrates screen-space crepuscular rays from each pixel toward the sun's projected UV (clamped to the reach in view heights and clipped at the screen border when the sun is outside the frame).
 - Each ray takes `taps` exponentially spaced samples that tighten near the sun, jittered per 2 x 2 pixel quad (`0.6` of a step) with interleaved gradient noise plus a golden-ratio frame offset so temporal anti-aliasing averages them without banding, clear-sky dither dots or flicker.
-- A sample's openness is `isSky(sceneDepth) * smoothstep(0.15, 0.90, historyColor.a)`, so terrain silhouettes and thick clouds block light while thin cloud rims let partial rays pass. Any opaque geometry (mountain, wall, or thin pole via a 4-neighbour quarter-res depth check on the nearer half of the ray) occludes rays, and near geometry gets less air light than far mountains or sky. Samples are weighted by `exp(-decay * t)`.
+- A sample's openness is `isSky(sceneDepth) * smoothstep(0.15, 0.90, historyColor.a)`, so terrain silhouettes and thick clouds block light while thin cloud rims let partial rays pass. Opaque geometry at 4 m or farther (mountain, wall, or thin pole via a 4-neighbour quarter-res depth check on the nearer half of the ray) occludes rays, whereas taps closer than 4 m (tested against a per-pixel raw-depth threshold from camera near/far) stay open so foreground grass blades do not cast comb shadows. Samples are weighted by `exp(-decay * t)`.
 - Openness is remapped multiplicatively above a `0.25` baseline before the contrast curve and gated away from the sun core by a `0.04..0.45` ramp on the blocked ray fraction (`1 - rayFrac`, also scaling lightly blocked rays down to `0.35x`), so partial occlusion casts soft-edged beams without a single-tap veil while a cloudless sky shows only a gentle solar halo.
-- Shafts represent lit air in front of the scene: pixels over thick cloud keep a `0.65` share, the sun colour is mixed toward a cool sky haze tint and smoothly capped below `3` per channel, and `VolumetricCloudResolve.comp` adds `2x` the bilinearly upsampled result after `SceneBehindCloud + cloud.rgb`.
+- Shafts represent lit air in front of the scene: geometry pixels weight air light physically by linearised distance in metres (`1 - exp(-linearDistanceM / sunRaysAirLengthM)`, sky pixels weight `1`, so a 30 m silhouette gets ~1.5% and stays dark while a 4 km mountain gets ~86%), pixels over thick cloud keep a `0.65` share, the sun colour is mixed toward a cool sky haze tint and smoothly capped below `3` per channel, and `VolumetricCloudResolve.comp` adds `2x` the bilinearly upsampled result after `SceneBehindCloud + cloud.rgb`.
+- `VolumetricCloudSunShafts.comp` writes the raw weighted open fraction (`rayFrac`, `0..1` before baseline and contrast shaping) into `shaftsOut.a` while RGB keeps the shaped shaft radiance. `VolumetricCloudResolve.comp` then evaluates an angular high-pass of that open fraction perpendicular to the sun vector (`max(0, centerAlpha - 0.5 * (aLeft + aRight))` at `+-0.012` view heights), tinting it from the centre shaft hue (falling back to `sunRayColor.rgb` in dark open sky), scaling by `sunRaysSpoke` and radial falloff, and soft-capping below `3` so scattered small cumulus cast distinct spokes without adding a sky veil.
 - Tuning knobs:
   - `decay`: exponential falloff along the ray and with screen distance from the sun; higher values shorten beams and keep energy closer to the gaps and sun.
   - `length` (reach): maximum radial span in view heights; controls how far beams stretch across the frame, including from an off-screen sun.
-  - `taps`: sample count along each ray (8..48, 24 default); more taps smooth narrow cloud gaps at higher GPU cost.
+  - `taps`: sample count along each ray (8..48, 32 default); more taps smooth narrow cloud gaps at higher GPU cost.
   - `anisotropy`: forward-scattering core strength (`g`) around the sun; higher values tighten and brighten the solar corona relative to outer rays.
   - `contrast`: exponent on ray openness; higher values deepen dark shadow lanes between bright shafts.
+  - `air length` (`sunRaysAirLengthM`): physical air-column scale in metres (200..20000, 2000 default) controlling how quickly geometry accumulates sun-shaft air light with distance.
+  - `spoke` (`sunRaysSpoke`): multiplier on the angular high-pass spoke term (0..4, 1 default; 0 = off).
 
 ## Cloud coverage knobs
 | Want | Set |
