@@ -18,8 +18,8 @@ inline constexpr double kBigCloudCoverage = 0.55;
 
 // Cloud shadow and screen-space sun-shaft defaults for the demo.
 inline constexpr double kCloudShadowRangeKm = 16.0;     // Covers +/-8 km terrain; nested 1/8 near map spans 2 km (~15.6 m/texel).
-inline constexpr double kCloudShadowSoftness = 0.75;    // Smooth 5-tap shadow edges without grain across near and far maps.
-inline constexpr double kCloudShadowFill = 0.10;        // Crisp diffuse sky fill on cloud-shaded ground and mountains.
+inline constexpr double kCloudShadowSoftness = 0.48;    // Preserves cumulus footprint edges across the 128x128 far and near maps.
+inline constexpr double kCloudShadowFill = 0.22;        // Cool diffuse sky fill on cloud-shaded grass and terrain.
 inline constexpr double kCloudSunRays = 0.55;           // Subtle screen-space sun shafts through cloud gaps without glare.
 inline constexpr double kCloudSunRaysContrast = 1.65;   // Suppresses uniform sky veil so partial cloud gaps form beams.
 inline constexpr double kCloudSunRaysDecay = 0.98;      // Radial falloff of sun-shaft taps away from the sun.

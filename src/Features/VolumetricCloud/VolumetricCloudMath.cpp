@@ -192,6 +192,44 @@ float CloudStretchShape(float shape, float low, float high) noexcept
     return Saturate((shape - low) / std::max(high - low, kMinStepM));
 }
 
+float CloudShapeValue(float perlinWorley, float worleyG, float worleyB, float worleyA, float shapeLod,
+    float shapeWorley, float shapeLow, float shapeHigh) noexcept
+{
+    const float lod = Saturate(shapeLod);
+    const float g = Saturate(worleyG);
+    const float b = Saturate(worleyB);
+    const float a = Saturate(worleyA);
+    const float fbm = g * (0.625f + 0.375f * lod) + (b * 0.25f + a * 0.125f) * (1.0f - lod);
+    const float worleyWeight = std::isfinite(shapeWorley) ? std::max(shapeWorley, 0.0f) : 0.0f;
+    const float crease = (1.0f - fbm) * worleyWeight;
+    const float shape = CloudRemap(perlinWorley, crease - kCloudShapeCreaseBias, 1.0f, 0.0f, 1.0f);
+    return CloudStretchShape(shape, shapeLow, std::max(shapeHigh, shapeLow + 0.05f));
+}
+
+float CloudDomedRoofHeight(float weatherCoverageProduct, float cloudSize, float peakMin) noexcept
+{
+    const float wCov = Saturate(weatherCoverageProduct);
+    const float size = Saturate(cloudSize);
+    const float domeEnv = SmoothStep(0.08f, 0.68f, wCov) * (0.38f + 0.62f * SmoothStep(0.18f, 0.78f, size));
+    const float hMax = 0.18f + (0.96f - 0.18f) * std::pow(domeEnv, 1.15f);
+    return std::max(hMax, Saturate(peakMin) * SmoothStep(0.08f, 0.42f, wCov));
+}
+
+float CloudTurretLocalTop(float hMax, float shapeMid, float farStreak) noexcept
+{
+    const float safeMax = std::isfinite(hMax) ? std::max(hMax, 0.0f) : 0.0f;
+    const float turretMod = std::clamp(0.62f + 0.56f * Saturate(shapeMid), 0.42f, 1.08f);
+    const float farScale = 1.0f + (0.4f - 1.0f) * Saturate(farStreak);
+    return std::clamp(safeMax * turretMod * farScale, 0.16f, 0.98f);
+}
+
+float CloudCrownShellMask(float heightFraction, float shape, float bodyErosion) noexcept
+{
+    const float crownSculpt = Saturate(bodyErosion) * SmoothStep(0.16f, 0.46f, heightFraction);
+    const float outerShell = 1.0f - SmoothStep(0.14f, 0.68f, shape);
+    return crownSculpt + (1.0f - crownSculpt) * outerShell;
+}
+
 float CloudSkyVisibility(float upwardOpticalDepth, float strength, float floor) noexcept
 {
     return floor + (1.0f - floor) * std::exp(-std::max(upwardOpticalDepth, 0.0f) * strength);
@@ -278,7 +316,8 @@ double CloudWindPeriodM(const VolumetricCloudSettings& safe) noexcept
     constexpr std::uint64_t kMaxPeriodM = 1048576ull;
     std::uint64_t period = 1;
     for (const float tile : { safe.weatherScaleM, safe.weatherScaleM * kCloudFarWeatherTileScale, safe.shapeScaleM,
-             safe.shapeScaleM * kCloudLargeShapeScale, safe.detailScaleM }) {
+             safe.shapeScaleM * kCloudLargeShapeScale, safe.shapeScaleM * kCloudFarZoom, safe.detailScaleM,
+             safe.curlScaleM }) {
         const std::uint64_t metres = static_cast<std::uint64_t>(std::max(std::llround(tile), 1ll));
         period = period / std::gcd(period, metres) * metres;
         if (period > kMaxPeriodM) {

@@ -29,6 +29,22 @@ float CloudShapeGradient(float heightFraction, float peak, float baseRoundness, 
 // Stretches the shape noise value so [low, high] maps to [0, 1] (clamped).
 float CloudStretchShape(float shape, float low, float high) noexcept;
 
+// Crease bias subtracted from Worley cell-wall erosion in ShapeValue() (VolumetricCloud.comp).
+inline constexpr float kCloudShapeCreaseBias = 0.22f;
+
+// CPU twin of ShapeValue() in VolumetricCloud.comp: Worley cell-wall creases carve convex domes from Perlin-Worley.
+float CloudShapeValue(float perlinWorley, float worleyG, float worleyB, float worleyA, float shapeLod,
+    float shapeWorley, float shapeLow, float shapeHigh) noexcept;
+
+// CPU twin of the cluster dome roof height hMax in CloudShape() (VolumetricCloud.comp).
+float CloudDomedRoofHeight(float weatherCoverageProduct, float cloudSize, float peakMin) noexcept;
+
+// CPU twin of the medium-Worley modulated turret top height localTop in CloudShape() (VolumetricCloud.comp).
+float CloudTurretLocalTop(float hMax, float shapeMid, float farStreak = 0.0f) noexcept;
+
+// CPU twin of the height-masked crown erosion shellMask in CloudDetail() (VolumetricCloud.comp).
+float CloudCrownShellMask(float heightFraction, float shape, float bodyErosion) noexcept;
+
 // Share of the sky light that reaches a sample with `upwardOpticalDepth` of cloud above it (SkyVisibility()).
 float CloudSkyVisibility(float upwardOpticalDepth, float strength, float floor) noexcept;
 
@@ -63,6 +79,9 @@ inline constexpr float kCloudFarWeatherTileScale = 2.8f;
 
 // The big lobe octave reads the shape volume at this multiple of the shape tile (VolumetricCloud.comp kLargeShapeScale).
 inline constexpr float kCloudLargeShapeScale = 2.0f;
+
+// The far-zoomed shape lookup reads the shape volume at this multiple of the shape tile (VolumetricCloud.comp kFarZoom).
+inline constexpr float kCloudFarZoom = 2.8f;
 
 // Distance (m) the resolve pass assumes for a pixel that has no fresh cloud distance. Fixed: it is not tied to the
 // march range, which reaches the horizon (250 km and more).
@@ -206,7 +225,7 @@ struct CloudShadowStrengths {
 CloudShadowStrengths ComputeCloudShadowStrengths(const VolumetricCloudSettings& safe, float sunUp) noexcept;
 
 // Width in texels of the march grid when the divisor is automatic (setting 0).
-inline constexpr float kCloudAutoMarchTexels = 420.0f;
+inline constexpr float kCloudAutoMarchTexels = 632.0f;
 inline constexpr std::uint32_t kCloudMaxResolutionDivisor = 6;
 
 // The march resolution divisor in use: the setting rounded to 1..6; 0 picks it from `viewWidth` (4 when it is unknown).

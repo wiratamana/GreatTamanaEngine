@@ -37,7 +37,7 @@ layout(std430, binding = 0) readonly buffer VolumetricCloudParams {
     vec4 detailShape;               // x curl amount (m), y curl tile (m), z wispiness, w fine detail weight.
     vec4 structure;                 // x large lobe mix, y size variation, zw wind shear vector at the layer top (m).
     vec4 structure2;                // x erosion kept in the body, y vertical stretch of the noise, z base variation, w far softening.
-    vec4 structure3;                // x weight of the Worley cells in the shape (popcorn), y body threshold floor, z ragged base, w body ramp width.
+    vec4 structure3;                // x Worley crease weight, y body threshold floor, z ragged base, w body ramp width.
     vec4 lightTune;                 // x sky light saturation, y diffusion gain, z inner glow gain, w reserved.
     vec4 lightTune2;                // x sun warmth, yzw reserved.
     vec4 shadowGrid;                // x map texel (m), yz map centre x, z (m), w 1 = write the cloud shadow map.
@@ -77,7 +77,6 @@ const float kFarWeatherTileScale = 2.8;
 const vec2 kFarWeatherOffset = vec2(0.37, 0.61);
 // The second, finer fetch of the detail noise reads it at this multiple of the detail frequency.
 const float kFineDetailScale = 3.1;
-const float kShapeWorleyMean = 0.5;
 // The large lobe octave reads the shape volume at this multiple of the shape tile, shifted so it is not a copy of the mid octave.
 const float kLargeShapeScale = 2.0;
 const vec3 kLargeShapeOffset = vec3(0.17, 0.31, 0.43);
@@ -93,8 +92,8 @@ const float kMinTransmittance = 0.012;
 // Beyond this distance the layer thins and stretches along the wind into horizon rolls.
 const float kFarStreakStartM = 15000.0;
 const float kFarStreakEndM = 50000.0;
-const float kFarStreakAlong = 5.0;
-const float kFarStreakAcross = 2.5;
+const float kFarStreakAlong = 5.6;
+const float kFarStreakAcross = 2.8;
 const float kFarTopScale = 0.4;
 const float kFarFill = 0.3;
 const float kCoverageGain = 1.5;
@@ -112,7 +111,7 @@ const float kWeatherLodEndM = 45000.0;
 const float kWeatherLodMax = 0.8;
 const float kZoomStartM = 20000.0;
 const float kZoomEndM = 50000.0;
-const float kFarZoom = 2.5;
+const float kFarZoom = 2.8;
 const vec3 kFarZoomOffset = vec3(0.21, 0.0, 0.58);
 
 float Saturate(float v)
@@ -201,13 +200,12 @@ float gCloudSize = 1.0;
 // Set by CloudShape(): 0 near, 1 far; the finest shape octaves fade out with distance (they would alias into dots).
 float gShapeLod = 0.0;
 
-// The shape value of one volume fetch: Perlin-Worley body against the Worley fbm, stretched to 0..1.
+// Shape value of one volume fetch: Worley cell-wall creases carve convex domes from Perlin-Worley.
 float ShapeValue(vec4 sn)
 {
     float fbm = sn.g * (0.625 + 0.375 * gShapeLod) + (sn.b * 0.25 + sn.a * 0.125) * (1.0 - gShapeLod);
-    // The Worley cells are what makes equal-sized popcorn balls; their weight scales them toward their mean.
-    fbm = kShapeWorleyMean + (fbm - kShapeWorleyMean) * params.structure3.x;
-    float shape = Remap(sn.r, fbm - 1.0, 1.0, 0.0, 1.0);
+    float crease = (1.0 - fbm) * params.structure3.x;
+    float shape = Remap(sn.r, crease - 0.22, 1.0, 0.0, 1.0);
     return Saturate(Remap(shape, params.skip.z, params.skip.w, 0.0, 1.0));
 }
 
@@ -249,11 +247,10 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
         return 0.0;
     }
     float wCov = Saturate(coverage * weatherCoverage);
-    float massGate = smoothstep(0.22, 0.82, gCloudSize);
-    float hMax = mix(0.16, 0.94, pow(smoothstep(0.12, 0.70, wCov), 1.35) * (0.25 + 0.75 * massGate));
-    hMax = max(hMax, params.density.z * 0.8);
-    float hNorm = heightFraction / max(hMax, 0.16);
-    if (hNorm >= 1.05) {
+    float domeEnv = smoothstep(0.08, 0.68, wCov) * (0.38 + 0.62 * smoothstep(0.18, 0.78, gCloudSize));
+    float hMax = mix(0.18, 0.96, pow(domeEnv, 1.15));
+    hMax = max(hMax, params.density.z * smoothstep(0.08, 0.42, wCov));
+    if (heightFraction >= hMax * 1.12) {
         gWeatherClear = true;
         return 0.0;
     }
@@ -270,11 +267,13 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float shape = ShapeValue(shapeSample);
     float shapeMid = shape;
     float shapeLarge = shape;
-    if (params.structure.x > 0.0 || params.structure2.w > 0.0) {
-        // Big lobe octave carries broad masses and distant decks while mid lobes sculpt smaller puffs.
+    if (params.structure.x > 0.0 || params.structure2.w > 0.0 || params.structure2.z > 0.0) {
+        // Big lobe octave carries broad masses, distant decks and macro base undulation.
         shapeLarge = ShapeValue(textureLod(shapeVolume, shapeUv / kLargeShapeScale + kLargeShapeOffset, 0.0));
-        float largeShare = Saturate(params.structure.x + params.structure.y * (wm.b - 0.5) * 2.0 + params.structure2.w * farRamp);
-        shape = mix(shape, shapeLarge, largeShare);
+        if (params.structure.x > 0.0 || params.structure2.w > 0.0) {
+            float largeShare = Saturate(params.structure.x + params.structure.y * (wm.b - 0.5) * 2.0 + params.structure2.w * farRamp);
+            shape = mix(shape, shapeLarge, largeShare);
+        }
     }
     // Small cells get a second, finer lobe octave: bumpy cauliflower surfaces instead of one smooth lobe.
     float smallness = (1.0 - gCloudSize) * (1.0 - smoothstep(0.25 * kSmallLodEndM, kSmallLodEndM, fromEyeLength));
@@ -284,7 +283,7 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     }
     // Far model: the big octave read through a coordinate stretched along the wind gives rolls, not lobes.
     if (farStreak > 0.0) {
-        // Fixed axes: with a stretch of 5 and 2.5 the wind wrap (350000 m) is a whole number of noise tiles, so it never pops.
+        // Fixed axes: with a stretch of 5.6 and 2.8 the wind wrap (350000 m) is a whole number of noise tiles, so it never pops.
         const vec2 windAxis = vec2(1.0, 0.0);
         const vec2 crossAxis = vec2(0.0, 1.0);
         vec2 world2 = shapeUv.xz * params.noise.x;
@@ -293,21 +292,22 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
         shape = mix(shape, ShapeValue(textureLod(shapeVolume, farUv / kLargeShapeScale + kLargeShapeOffset, 0.0)), farStreak);
     }
 
-    // Flat condensation base with convex 3D-modulated dome tops across all cloud sizes.
-    float baseShift = clamp((shapeSample.r - 0.635) * 0.025, -0.008, 0.012);
-    float shiftedBase = baseShift * clamp(params.structure2.z / 0.18, 0.0, 4.0);
-    float roundBottom = smoothstep(shiftedBase, shiftedBase + params.heightShape.x, heightFraction);
-    float localTop = hMax * clamp(0.72 + 0.38 * shapeMid, 0.50, 1.04) * mix(1.0, kFarTopScale, farStreak);
-    float roundTop = 1.0 - smoothstep(localTop * 0.42, localTop, heightFraction);
+    // Gentle macro condensation base plane with strongly domed cauliflower turret tops.
+    float baseShift = clamp((0.5 - shapeLarge) * params.structure2.z * 0.08, -0.005, 0.008);
+    baseShift += clamp((0.5 - shapeMid) * params.structure3.z * 0.04, 0.0, 0.01);
+    float roundBottom = smoothstep(baseShift, baseShift + params.heightShape.x, heightFraction);
+    float turretMod = clamp(0.62 + 0.56 * shapeMid, 0.42, 1.08);
+    float localTop = clamp(hMax * turretMod * mix(1.0, kFarTopScale, farStreak), 0.16, 0.98);
+    float roundTop = 1.0 - smoothstep(localTop * 0.52, localTop, heightFraction);
 
     float rampBottom = heightFraction * Saturate(Remap(heightFraction, 0.0, params.heightShape.z, 0.0, 1.0));
     float rampTop = Saturate(Remap(heightFraction, params.heightShape.w, 1.0, 1.0, 0.0));
     densityFactor = params.density.x * rampBottom * rampTop * wm.a * 2.0;
 
     // Linear body; pyramidal base pedestal widens shared flat bottoms while dome taper sculpts turrets.
-    hNorm = Saturate(heightFraction / max(localTop, 0.12));
-    float basePedestal = 1.0 + 0.20 * (1.0 - smoothstep(0.06, 0.32, heightFraction));
-    float domeTaper = 1.0 - 0.55 * smoothstep(0.20, 1.0, hNorm);
+    float hNorm = Saturate(heightFraction / max(localTop, 0.14));
+    float basePedestal = 1.0 + 0.18 * (1.0 - smoothstep(0.05, 0.26, heightFraction));
+    float domeTaper = 1.0 - 0.56 * smoothstep(0.20, 1.0, hNorm);
     float effCoverage = Saturate(wCov * basePedestal * domeTaper);
     float threshold = max(1.0 - effCoverage, params.structure3.y);
     float rampEnd = params.structure3.w > 0.0 ? min(threshold + params.structure3.w, 1.0) : 1.0;
@@ -350,8 +350,9 @@ float CloudDetail(vec3 position, float heightFraction, float shape, float densit
         vec4 fn = textureLod(detailVolume, world * kFineDetailScale / params.noise.y + 0.31, 0.0);
         erosion = mix(erosion, 1.0 - (fn.g * 0.5 + fn.a * 0.5), fineWeight * 0.5);
     }
-    // Restrict subtractive erosion to the outer shell so dense cloud cores stay solid.
-    float shellMask = mix(params.structure2.x, 1.0, 1.0 - smoothstep(0.12, 0.62, shape));
+    // Keep flat bases and lower interiors solid while sculpting upper cauliflower crowns.
+    float crownSculpt = params.structure2.x * smoothstep(0.16, 0.46, heightFraction);
+    float shellMask = mix(crownSculpt, 1.0, 1.0 - smoothstep(0.14, 0.68, shape));
     erosion *= params.noise.z * detailAmount * shellMask;
     return CloudCurve(Saturate(Remap(shape, erosion, 1.0, 0.0, 1.0))) * densityFactor;
 }
