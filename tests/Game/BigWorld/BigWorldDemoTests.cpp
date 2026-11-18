@@ -189,14 +189,6 @@ public:
             const auto it = c->second.find("enabled");
             out.cloudsEnabled = it != c->second.end() && ParseBool(it->second);
         }
-        if (const auto vl = values.find("VolumetricLight"); vl != values.end()) {
-            out.volumetricLightAvailable = true;
-            const auto en = vl->second.find("enabled");
-            out.volumetricLightEnabled = en != vl->second.end() && ParseBool(en->second);
-            const auto status = vl->second.find("game.status");
-            out.volumetricLightDisabledByProfile =
-                volumetricLightDisabledByProfile || (status != vl->second.end() && status->second == "PassDisabled");
-        }
         if (const auto s = values.find("Shadow"); s != values.end()) {
             const auto it = s->second.find("game.sunElevationDegrees");
             if (it != s->second.end()) {
@@ -216,7 +208,6 @@ public:
     std::map<std::string, std::map<std::string, std::string>> values;
     std::vector<Saved> saved;
     std::vector<std::string> setLog;
-    bool volumetricLightDisabledByProfile = false;
     bool failSnapshot = false;
     bool failSet = false;
     int snapshotCalls = 0;
@@ -234,15 +225,10 @@ protected:
         features.values["VolumetricCloud"]["coverage"] = "0.8";
         features.values["VolumetricCloud"]["shadowRangeKm"] = "24";
         features.values["VolumetricCloud"]["shadowSoftness"] = "1.5";
-        features.values["VolumetricCloud"]["sunRays"] = "0";
-        features.values["VolumetricCloud"]["shaftMist"] = "0";
-        features.values["VolumetricLight"]["enabled"] = "true";
-        features.values["VolumetricLight"]["maxDistance"] = "60";
-        features.values["VolumetricLight"]["density"] = "0.01";
-        features.values["VolumetricLight"]["anisotropyG"] = "0.7";
-        features.values["VolumetricLight"]["shadowSamples"] = "4";
-        features.values["VolumetricLight"]["temporal"] = "true";
-        features.values["VolumetricLight"]["strength"] = "1";
+        features.values["VolumetricCloud"]["sunRays"] = "0.8";
+        features.values["VolumetricCloud"]["sunRaysContrast"] = "1";
+        features.values["VolumetricCloud"]["sunRaysDecay"] = "1.5";
+        features.values["VolumetricCloud"]["sunRaysLength"] = "1.2";
         features.values["Shadow"]["game.sunElevationDegrees"] = "35";
         features.values["Grass"]["enabled"] = "true";
         features.values["Grass"]["densityLod0"] = "16";
@@ -329,12 +315,15 @@ TEST_F(BigWorldDemoTest, OpenOpensTheTerrainAndPlacesTheCameraAtOnce)
     ASSERT_TRUE(demo.Open(plan, now).ok);
     EXPECT_EQ(demo.State().phase, Phase::WaitingForNodes);
     EXPECT_EQ(terrain.openCalls, 1);
-    EXPECT_EQ(terrain.lastProfile, "scenic");
+    EXPECT_EQ(terrain.lastProfile, "lean");
     EXPECT_EQ(terrain.cameraCalls, 1);
     EXPECT_DOUBLE_EQ(terrain.lastCamera.x, -1234.0);
     EXPECT_DOUBLE_EQ(terrain.lastCamera.z, 55.0);
     EXPECT_DOUBLE_EQ(terrain.lastCamera.heightAboveGround, 9.0);
     EXPECT_TRUE(demo.State().terrainOwned);
+
+    ASSERT_TRUE(demo.Open(MakeBigWorldPlan(Quality::Medium), now).ok);
+    EXPECT_EQ(terrain.lastProfile, "lean");
 
     ASSERT_TRUE(demo.Open(MakeBigWorldPlan(Quality::Lean), now).ok);
     EXPECT_EQ(terrain.lastProfile, "lean");
@@ -366,14 +355,12 @@ TEST_F(BigWorldDemoTest, SuccessPathReachesReadyAndSwitchesFeaturesOn)
     EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], "0.5");
     EXPECT_EQ(features.values["VolumetricCloud"]["shadowRangeKm"], "8");
     EXPECT_EQ(features.values["VolumetricCloud"]["shadowSoftness"], "0.6");
-    EXPECT_EQ(features.values["VolumetricCloud"]["sunRays"], "0.6");
-    EXPECT_EQ(features.values["VolumetricCloud"]["shaftMist"], "0.15");
+    EXPECT_EQ(features.values["VolumetricCloud"]["sunRays"], "1.2");
+    EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysContrast"], "2.5");
+    EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysDecay"], "1");
+    EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysLength"], "1.5");
     EXPECT_EQ(features.values["Bloom"]["threshold"], "2");
     EXPECT_EQ(features.values["Bloom"]["intensity"], "0.2");
-    EXPECT_EQ(features.values["VolumetricLight"]["maxDistance"], "400");
-    EXPECT_EQ(features.values["VolumetricLight"]["density"], "0.0003");
-    EXPECT_EQ(features.values["VolumetricLight"]["anisotropyG"], "0.75");
-    EXPECT_EQ(features.values["VolumetricLight"]["shadowSamples"], "2");
     EXPECT_EQ(features.values["Grass"]["preset"], "Big");
     ASSERT_EQ(water.lakes.size(), 1u);
     EXPECT_EQ(water.rivers.size(), 1u);
@@ -387,33 +374,30 @@ TEST_F(BigWorldDemoTest, EachTierAppliesItsSettingsAndRestoresRoundTripOnClose)
     struct Case {
         Quality quality;
         const char* coverage;
-        const char* mist;
-        const char* vlMaxDist;
     };
-    for (const Case c : { Case{ Quality::Big, "0.5", "0.15", "400" }, Case{ Quality::Medium, "0.5", "0.15", "400" },
-             Case{ Quality::Lean, "0.45", "0", "60" } }) {
+    for (const Case c : { Case{ Quality::Big, "0.5" }, Case{ Quality::Medium, "0.5" }, Case{ Quality::Lean, "0.45" } }) {
         OpenAndRunToReady(c.quality);
+        EXPECT_EQ(terrain.lastProfile, "lean") << QualityName(c.quality);
         EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], c.coverage) << QualityName(c.quality);
         EXPECT_EQ(features.values["VolumetricCloud"]["shadowRangeKm"], "8") << QualityName(c.quality);
         EXPECT_EQ(features.values["VolumetricCloud"]["shadowSoftness"], "0.6") << QualityName(c.quality);
-        EXPECT_EQ(features.values["VolumetricCloud"]["sunRays"], "0.6") << QualityName(c.quality);
-        EXPECT_EQ(features.values["VolumetricCloud"]["shaftMist"], c.mist) << QualityName(c.quality);
+        EXPECT_EQ(features.values["VolumetricCloud"]["sunRays"], "1.2") << QualityName(c.quality);
+        EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysContrast"], "2.5") << QualityName(c.quality);
+        EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysDecay"], "1") << QualityName(c.quality);
+        EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysLength"], "1.5") << QualityName(c.quality);
         EXPECT_EQ(features.values["Bloom"]["threshold"], "2") << QualityName(c.quality);
         EXPECT_EQ(features.values["Bloom"]["intensity"], "0.2") << QualityName(c.quality);
-        EXPECT_EQ(features.values["VolumetricLight"]["maxDistance"], c.vlMaxDist) << QualityName(c.quality);
         ASSERT_TRUE(demo.Close().ok);
         EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], "0.8") << QualityName(c.quality);
         EXPECT_EQ(features.values["VolumetricCloud"]["enabled"], "false");
         EXPECT_EQ(features.values["VolumetricCloud"]["shadowRangeKm"], "24");
         EXPECT_EQ(features.values["VolumetricCloud"]["shadowSoftness"], "1.5");
-        EXPECT_EQ(features.values["VolumetricCloud"]["sunRays"], "0");
-        EXPECT_EQ(features.values["VolumetricCloud"]["shaftMist"], "0");
+        EXPECT_EQ(features.values["VolumetricCloud"]["sunRays"], "0.8");
+        EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysContrast"], "1");
+        EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysDecay"], "1.5");
+        EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysLength"], "1.2");
         EXPECT_EQ(features.values["Bloom"]["threshold"], "1");
         EXPECT_EQ(features.values["Bloom"]["intensity"], "0.3");
-        EXPECT_EQ(features.values["VolumetricLight"]["maxDistance"], "60");
-        EXPECT_EQ(features.values["VolumetricLight"]["density"], "0.01");
-        EXPECT_EQ(features.values["VolumetricLight"]["anisotropyG"], "0.7");
-        EXPECT_EQ(features.values["VolumetricLight"]["shadowSamples"], "4");
     }
 }
 
@@ -626,9 +610,12 @@ TEST_F(BigWorldDemoTest, ASceneReplacedWhileReadyRestoresEverythingAndGoesIdle)
     EXPECT_EQ(water.removed.size(), 2u);
     EXPECT_EQ(features.values["VolumetricCloud"]["enabled"], "false");
     EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], "0.8");
+    EXPECT_EQ(features.values["VolumetricCloud"]["sunRays"], "0.8");
+    EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysContrast"], "1");
+    EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysDecay"], "1.5");
+    EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysLength"], "1.2");
     EXPECT_EQ(features.values["Bloom"]["threshold"], "1");
     EXPECT_EQ(features.values["Bloom"]["intensity"], "0.3");
-    EXPECT_EQ(features.values["VolumetricLight"]["maxDistance"], "60");
     EXPECT_EQ(features.values["Grass"]["densityLod0"], "16");
     ASSERT_EQ(demo.State().warnings.size(), 1u); // no stale "no height tile" from the last poll
     EXPECT_EQ(demo.State().warnings[0], kSceneReplacedNote);
@@ -644,9 +631,12 @@ TEST_F(BigWorldDemoTest, CloseUndoesEveryChange)
     EXPECT_EQ(water.removed.size(), 2u);
     EXPECT_EQ(features.values["VolumetricCloud"]["enabled"], "false");
     EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], "0.8");
+    EXPECT_EQ(features.values["VolumetricCloud"]["sunRays"], "0.8");
+    EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysContrast"], "1");
+    EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysDecay"], "1.5");
+    EXPECT_EQ(features.values["VolumetricCloud"]["sunRaysLength"], "1.2");
     EXPECT_EQ(features.values["Bloom"]["threshold"], "1");
     EXPECT_EQ(features.values["Bloom"]["intensity"], "0.3");
-    EXPECT_EQ(features.values["VolumetricLight"]["maxDistance"], "60");
     EXPECT_EQ(features.values["Grass"]["densityLod0"], "16");
     EXPECT_TRUE(demo.State().waterBodyIds.empty());
     EXPECT_FALSE(demo.State().terrainOwned);
@@ -743,34 +733,6 @@ TEST_F(BigWorldDemoTest, ADisconnectedWaterFeatureIsReported)
     Pump(1.0);
     ASSERT_FALSE(demo.State().warnings.empty());
     EXPECT_NE(demo.State().warnings[0].find("not connected"), std::string::npos);
-}
-
-TEST_F(BigWorldDemoTest, VolumetricLightDisabledByProfileWarnsOnlyWhenExpected)
-{
-    OpenAndRunToReady(Quality::Big);
-    EXPECT_TRUE(demo.State().warnings.empty());
-
-    features.volumetricLightDisabledByProfile = true;
-    Pump(1.0);
-    EXPECT_TRUE(HasWarningContaining(demo.State().warnings, "VolumetricLight disabled by profile"));
-
-    features.volumetricLightDisabledByProfile = false;
-    Pump(1.0);
-    EXPECT_TRUE(demo.State().warnings.empty());
-
-    // Lean tier intentionally uses profile "lean", so disabled VolumetricLight is expected and must not warn.
-    features.volumetricLightDisabledByProfile = true;
-    OpenAndRunToReady(Quality::Lean);
-    EXPECT_FALSE(HasWarningContaining(demo.State().warnings, "VolumetricLight disabled by profile"));
-
-    // A Big plan forced onto profile "lean" also warns.
-    features.volumetricLightDisabledByProfile = false;
-    BigWorldPlan forcedLean = MakeBigWorldPlan(Quality::Big);
-    forcedLean.terrainProfile = "lean";
-    ASSERT_TRUE(demo.Open(forcedLean, now).ok);
-    Pump(5.0, [&] { HealthyWorld(); });
-    ASSERT_TRUE(demo.Ready());
-    EXPECT_TRUE(HasWarningContaining(demo.State().warnings, "VolumetricLight disabled by profile"));
 }
 
 TEST_F(BigWorldDemoTest, MissingSunShadowCascadesOnGrassWarnsAndPublishedCascadesDoNot)
@@ -872,8 +834,6 @@ TEST_F(BigWorldDemoTest, HealthReadsTheGrassCountersAndShadowState)
     EXPECT_EQ(g.castCascades, 1);
     EXPECT_EQ(g.castBlades, 69000);
     EXPECT_TRUE(demo.State().health.cloudsEnabled);
-    EXPECT_TRUE(demo.State().health.volumetricLightEnabled);
-    EXPECT_FALSE(demo.State().health.volumetricLightDisabledByProfile);
     EXPECT_TRUE(demo.State().health.sunAboveHorizon);
 }
 
@@ -895,23 +855,18 @@ TEST_F(BigWorldDemoTest, JsonCarriesPhasePlanKeysShadowKeysAndEscapesText)
     EXPECT_NE(json.find("\"phase\":\"Ready\""), std::string::npos);
     EXPECT_NE(json.find("\"ready\":true"), std::string::npos);
     EXPECT_NE(json.find("\"info\":\"\""), std::string::npos);
-    EXPECT_NE(json.find("\"terrainProfile\":\"scenic\""), std::string::npos);
+    EXPECT_NE(json.find("\"terrainProfile\":\"lean\""), std::string::npos);
     EXPECT_NE(json.find("\"cloudCoverage\":0.5"), std::string::npos);
     EXPECT_NE(json.find("\"cloudShadowRangeKm\":8"), std::string::npos);
     EXPECT_NE(json.find("\"cloudShadowSoftness\":0.6"), std::string::npos);
-    EXPECT_NE(json.find("\"cloudSunRays\":0.6"), std::string::npos);
-    EXPECT_NE(json.find("\"cloudShaftMist\":0.15"), std::string::npos);
+    EXPECT_NE(json.find("\"cloudSunRays\":1.2"), std::string::npos);
+    EXPECT_NE(json.find("\"cloudSunRaysContrast\":2.5"), std::string::npos);
+    EXPECT_NE(json.find("\"cloudSunRaysDecay\":1"), std::string::npos);
+    EXPECT_NE(json.find("\"cloudSunRaysLength\":1.5"), std::string::npos);
     EXPECT_NE(json.find("\"bloomThreshold\":2"), std::string::npos);
     EXPECT_NE(json.find("\"bloomIntensity\":0.2"), std::string::npos);
-    EXPECT_NE(json.find("\"volumetricLight\":true"), std::string::npos);
-    EXPECT_NE(json.find("\"volumetricMaxDistance\":400"), std::string::npos);
-    EXPECT_NE(json.find("\"volumetricDensity\":0.0003"), std::string::npos);
-    EXPECT_NE(json.find("\"volumetricAnisotropyG\":0.75"), std::string::npos);
-    EXPECT_NE(json.find("\"volumetricShadowSamples\":2"), std::string::npos);
-    EXPECT_NE(json.find("\"volumetricTemporal\":true"), std::string::npos);
-    EXPECT_NE(json.find("\"volumetricStrength\":1"), std::string::npos);
-    EXPECT_NE(json.find("\"volumetricLight\":{\"available\":true,\"enabled\":true,\"disabledByProfile\":false}"),
-        std::string::npos);
+    EXPECT_EQ(json.find("volumetric"), std::string::npos);
+    EXPECT_EQ(json.find("cloudShaftMist"), std::string::npos);
     EXPECT_NE(json.find("\"grass\":{"), std::string::npos);
     EXPECT_NE(json.find("\"receivesSunShadow\":true"), std::string::npos);
     EXPECT_NE(json.find("\"receivesCloudShadow\":true"), std::string::npos);

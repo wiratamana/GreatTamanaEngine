@@ -4,7 +4,6 @@
 #include "../../Water/Editor/WaterModule.h"
 #include "../../Water/World/WaterEdit.h"
 #include "../../../Core/Core.h"
-#include "../../../Core/Plugins/RenderFeatureCompositor.h"
 #include "../../../Game/Game.h"
 #include "../../../Game/Lighting/DirectionalLightResolver.h"
 
@@ -348,26 +347,6 @@ bigworld::FeatureState FeaturePortAdapter::GetState() const
         const fx::FeatureDebugResult s = clouds->GetState();
         out.cloudsAvailable = true;
         out.cloudsEnabled = AsBool(FindField(s, "enabled"));
-    }
-    if (const fx::IFeatureDebugEndpoint* const vl = m_modules.FindEndpoint("VolumetricLight")) {
-        const fx::FeatureDebugResult s = vl->GetState();
-        out.volumetricLightAvailable = true;
-        out.volumetricLightEnabled = AsBool(FindField(s, "enabled"));
-        out.volumetricLightDisabledByProfile = AsString(FindField(s, "game.status")) == "PassDisabled";
-    }
-    if (m_core != nullptr) {
-        if (const RenderFeatureCompositor* const compositor = m_core->GetRenderFeatureCompositor()) {
-            bool disabled = false;
-            for (const RenderFeatureDebugEntry& entry : compositor->DebugSnapshot()) {
-                if (entry.name == "VolumetricLight.Volume" || entry.name == "VolumetricLight.Composite") {
-                    out.volumetricLightAvailable = true;
-                    if (!entry.enabled || !entry.enabledPrimary) {
-                        disabled = true;
-                    }
-                }
-            }
-            out.volumetricLightDisabledByProfile = disabled;
-        }
     }
     if (m_core != nullptr) {
         const ResolvedDirectionalLight sun = ResolveActiveDirectionalLight(m_core->GetGame().GetRegistry());

@@ -1,4 +1,4 @@
-// Checks the Big World plan: quality tiers, cloud/bloom/volumetric settings, sanitizing and geometry helpers.
+// Checks the Big World plan: quality tiers, cloud and bloom settings, sanitizing and geometry helpers.
 
 #include "Game/BigWorld/BigWorldPlan.h"
 
@@ -63,32 +63,17 @@ TEST(BigWorldPlanTest, EveryTierSwitchesCloudsBloomAndGrassOn)
     }
 }
 
-TEST(BigWorldPlanTest, TerrainProfileAndVolumetricLightFollowTheTier)
+TEST(BigWorldPlanTest, EveryTierUsesLeanTerrainProfileWithoutVolumetricLight)
 {
-    const BigWorldPlan lean = MakeBigWorldPlan(Quality::Lean);
-    const BigWorldPlan medium = MakeBigWorldPlan(Quality::Medium);
-    const BigWorldPlan big = MakeBigWorldPlan(Quality::Big);
-
-    EXPECT_EQ(lean.terrainProfile, "lean");
-    EXPECT_FALSE(lean.volumetricLight);
-    EXPECT_EQ(FindTweak(lean, "VolumetricLight"), nullptr);
-    EXPECT_DOUBLE_EQ(lean.cloudShaftMist, kLeanCloudShaftMist);
-    EXPECT_EQ(ValueOf(*FindTweak(lean, "VolumetricCloud"), "shaftMist"), "0");
-
-    for (const BigWorldPlan* p : { &medium, &big }) {
-        EXPECT_EQ(p->terrainProfile, "scenic");
-        EXPECT_TRUE(p->volumetricLight);
-        EXPECT_DOUBLE_EQ(p->cloudShaftMist, kScenicCloudShaftMist);
-        EXPECT_EQ(ValueOf(*FindTweak(*p, "VolumetricCloud"), "shaftMist"), "0.15");
-        const FeatureTweak* vl = FindTweak(*p, "VolumetricLight");
-        ASSERT_NE(vl, nullptr);
-        EXPECT_EQ(ValueOf(*vl, "enabled"), "true");
-        EXPECT_EQ(ValueOf(*vl, "maxDistance"), "400");
-        EXPECT_EQ(ValueOf(*vl, "density"), "0.0003");
-        EXPECT_EQ(ValueOf(*vl, "anisotropyG"), "0.75");
-        EXPECT_EQ(ValueOf(*vl, "shadowSamples"), "2");
-        EXPECT_EQ(ValueOf(*vl, "temporal"), "true");
-        EXPECT_EQ(ValueOf(*vl, "strength"), "1");
+    for (const Quality q : { Quality::Lean, Quality::Medium, Quality::Big }) {
+        const BigWorldPlan plan = MakeBigWorldPlan(q);
+        EXPECT_EQ(plan.terrainProfile, "lean") << QualityName(q);
+        EXPECT_EQ(FindTweak(plan, "VolumetricLight"), nullptr) << QualityName(q);
+        const FeatureTweak* clouds = FindTweak(plan, "VolumetricCloud");
+        ASSERT_NE(clouds, nullptr);
+        EXPECT_EQ(ValueOf(*clouds, "shaftMist"), "") << QualityName(q);
+        EXPECT_EQ(std::find(clouds->restoreKeys.begin(), clouds->restoreKeys.end(), "shaftMist"),
+            clouds->restoreKeys.end());
     }
 }
 
@@ -98,13 +83,10 @@ TEST(BigWorldPlanTest, DemoCloudAndBloomDefaultsMatchPlanConstants)
     EXPECT_DOUBLE_EQ(kBloomIntensity, 0.2);
     EXPECT_DOUBLE_EQ(kCloudShadowRangeKm, 8.0);
     EXPECT_DOUBLE_EQ(kCloudShadowSoftness, 0.6);
-    EXPECT_DOUBLE_EQ(kCloudSunRays, 0.6);
-    EXPECT_DOUBLE_EQ(kVolumetricMaxDistance, 400.0);
-    EXPECT_DOUBLE_EQ(kVolumetricDensity, 0.0003);
-    EXPECT_DOUBLE_EQ(kVolumetricAnisotropyG, 0.75);
-    EXPECT_EQ(kVolumetricShadowSamples, 2);
-    EXPECT_TRUE(kVolumetricTemporal);
-    EXPECT_DOUBLE_EQ(kVolumetricStrength, 1.0);
+    EXPECT_DOUBLE_EQ(kCloudSunRays, 1.2);
+    EXPECT_DOUBLE_EQ(kCloudSunRaysContrast, 2.5);
+    EXPECT_DOUBLE_EQ(kCloudSunRaysDecay, 1.0);
+    EXPECT_DOUBLE_EQ(kCloudSunRaysLength, 1.5);
 
     for (const Quality q : { Quality::Lean, Quality::Medium, Quality::Big }) {
         const BigWorldPlan plan = MakeBigWorldPlan(q);
@@ -112,7 +94,10 @@ TEST(BigWorldPlanTest, DemoCloudAndBloomDefaultsMatchPlanConstants)
         ASSERT_NE(clouds, nullptr);
         EXPECT_EQ(ValueOf(*clouds, "shadowRangeKm"), "8");
         EXPECT_EQ(ValueOf(*clouds, "shadowSoftness"), "0.6");
-        EXPECT_EQ(ValueOf(*clouds, "sunRays"), "0.6");
+        EXPECT_EQ(ValueOf(*clouds, "sunRays"), "1.2");
+        EXPECT_EQ(ValueOf(*clouds, "sunRaysContrast"), "2.5");
+        EXPECT_EQ(ValueOf(*clouds, "sunRaysDecay"), "1");
+        EXPECT_EQ(ValueOf(*clouds, "sunRaysLength"), "1.5");
     }
 }
 
@@ -211,14 +196,11 @@ TEST(BigWorldPlanTest, SanitizeReplacesNonFiniteValuesAndClampsRanges)
     plan.cloudShadowRangeKm = 1.0;
     plan.cloudShadowSoftness = 9.0;
     plan.cloudSunRays = -1.0;
-    plan.cloudShaftMist = 9.0;
+    plan.cloudSunRaysContrast = 0.0;
+    plan.cloudSunRaysDecay = 9.0;
+    plan.cloudSunRaysLength = 0.05;
     plan.bloomThreshold = 99.0;
     plan.bloomIntensity = 99.0;
-    plan.volumetricMaxDistance = 5000.0;
-    plan.volumetricDensity = -0.2;
-    plan.volumetricAnisotropyG = 2.0;
-    plan.volumetricShadowSamples = 3;
-    plan.volumetricStrength = 4.0;
     plan.spotX = std::numeric_limits<double>::quiet_NaN();
     plan.heightAboveGround = -5.0;
     plan.lookDownDegrees = 500.0;
@@ -230,26 +212,25 @@ TEST(BigWorldPlanTest, SanitizeReplacesNonFiniteValuesAndClampsRanges)
     EXPECT_DOUBLE_EQ(safe.cloudShadowRangeKm, 4.0);
     EXPECT_DOUBLE_EQ(safe.cloudShadowSoftness, 4.0);
     EXPECT_DOUBLE_EQ(safe.cloudSunRays, 0.0);
-    EXPECT_DOUBLE_EQ(safe.cloudShaftMist, 4.0);
+    EXPECT_DOUBLE_EQ(safe.cloudSunRaysContrast, 0.2);
+    EXPECT_DOUBLE_EQ(safe.cloudSunRaysDecay, 6.0);
+    EXPECT_DOUBLE_EQ(safe.cloudSunRaysLength, 0.2);
     EXPECT_DOUBLE_EQ(safe.bloomThreshold, 16.0);
     EXPECT_DOUBLE_EQ(safe.bloomIntensity, 4.0);
-    EXPECT_DOUBLE_EQ(safe.volumetricMaxDistance, 2000.0);
-    EXPECT_DOUBLE_EQ(safe.volumetricDensity, 0.0);
-    EXPECT_DOUBLE_EQ(safe.volumetricAnisotropyG, 0.95);
-    EXPECT_EQ(safe.volumetricShadowSamples, 4);
-    EXPECT_DOUBLE_EQ(safe.volumetricStrength, 1.0);
     EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricCloud"), "coverage"), "0.28");
     EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricCloud"), "shadowRangeKm"), "4");
+    EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricCloud"), "sunRays"), "0");
+    EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricCloud"), "sunRaysContrast"), "0.2");
+    EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricCloud"), "sunRaysDecay"), "6");
+    EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricCloud"), "sunRaysLength"), "0.2");
     EXPECT_EQ(ValueOf(*FindTweak(safe, "Bloom"), "threshold"), "16");
     EXPECT_EQ(ValueOf(*FindTweak(safe, "Bloom"), "intensity"), "4");
-    EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricLight"), "maxDistance"), "2000");
-    EXPECT_EQ(ValueOf(*FindTweak(safe, "VolumetricLight"), "shadowSamples"), "4");
     EXPECT_TRUE(std::isfinite(safe.spotX));
     EXPECT_GE(safe.heightAboveGround, 1.0);
     EXPECT_LE(safe.lookDownDegrees, 85.0);
     EXPECT_TRUE(std::isfinite(safe.nodeWaitSeconds));
     EXPECT_GE(safe.minResidentNodes, 1);
-    EXPECT_EQ(safe.terrainProfile, "scenic");
+    EXPECT_EQ(safe.terrainProfile, "lean");
 
     BigWorldPlan lean = MakeBigWorldPlan(Quality::Lean);
     lean.terrainProfile.clear();
@@ -263,7 +244,7 @@ TEST(BigWorldPlanTest, SanitizeDropsEmptyTweaks)
     FeatureTweak noValues;
     noValues.feature = "Grass";
     plan.tweaks.push_back(noValues);
-    EXPECT_EQ(SanitizeBigWorldPlan(plan).tweaks.size(), 4u);
+    EXPECT_EQ(SanitizeBigWorldPlan(plan).tweaks.size(), 3u);
     EXPECT_EQ(SanitizeBigWorldPlan(MakeBigWorldPlan(Quality::Lean)).tweaks.size(), 3u);
 }
 

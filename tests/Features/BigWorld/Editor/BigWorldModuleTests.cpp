@@ -73,7 +73,7 @@ public:
     std::map<std::string, fx::Feature*> features;
 };
 
-TEST(BigWorldModuleTest, FeatureAdapterReadsShadowCloudVolumetricLightAndSunStateFromEndpoints)
+TEST(BigWorldModuleTest, FeatureAdapterReadsShadowCloudAndSunStateFromEndpoints)
 {
     FakeDebugFeature grass("Grass");
     grass.fields = {
@@ -91,15 +91,12 @@ TEST(BigWorldModuleTest, FeatureAdapterReadsShadowCloudVolumetricLightAndSunStat
     };
     FakeDebugFeature clouds("VolumetricCloud");
     clouds.fields = { { "enabled", true }, { "coverage", 0.8 } };
-    FakeDebugFeature vl("VolumetricLight");
-    vl.fields = { { "enabled", true }, { "game.status", std::string("Ok") } };
     FakeDebugFeature shadow("Shadow");
     shadow.fields = { { "game.sunElevationDegrees", 35.0 } };
 
     FakeModuleDirectory dir;
     dir.features["Grass"] = &grass;
     dir.features["VolumetricCloud"] = &clouds;
-    dir.features["VolumetricLight"] = &vl;
     dir.features["Shadow"] = &shadow;
 
     FeaturePortAdapter adapter(dir);
@@ -114,15 +111,9 @@ TEST(BigWorldModuleTest, FeatureAdapterReadsShadowCloudVolumetricLightAndSunStat
     EXPECT_EQ(s.grass.castBlades, 54321);
     EXPECT_TRUE(s.cloudsAvailable);
     EXPECT_TRUE(s.cloudsEnabled);
-    EXPECT_TRUE(s.volumetricLightAvailable);
-    EXPECT_TRUE(s.volumetricLightEnabled);
-    EXPECT_FALSE(s.volumetricLightDisabledByProfile);
     EXPECT_TRUE(s.sunAvailable);
     EXPECT_TRUE(s.sunAboveHorizon);
     EXPECT_DOUBLE_EQ(s.sunElevationDegrees, 35.0);
-
-    vl.fields[1].value = std::string("PassDisabled");
-    EXPECT_TRUE(adapter.GetState().volumetricLightDisabledByProfile);
 
     shadow.fields[0].value = -4.0;
     const bigworld::FeatureState lowSun = adapter.GetState();
@@ -138,8 +129,10 @@ TEST(BigWorldModuleTest, FeatureAdapterSnapshotsAndRestoresPlanTweaksRoundTrip)
         { "coverage", 0.8 },
         { "shadowRangeKm", 24.0 },
         { "shadowSoftness", 1.5 },
-        { "sunRays", 0.0 },
-        { "shaftMist", 0.0 },
+        { "sunRays", 0.8 },
+        { "sunRaysContrast", 1.0 },
+        { "sunRaysDecay", 1.5 },
+        { "sunRaysLength", 1.2 },
         { "maxSteps", 96.0 },
         { "resolutionDivisor", 0.0 },
         { "shadowSteps", 10.0 },
@@ -147,21 +140,10 @@ TEST(BigWorldModuleTest, FeatureAdapterSnapshotsAndRestoresPlanTweaksRoundTrip)
     };
     FakeDebugFeature bloom("Bloom");
     bloom.fields = { { "enabled", true }, { "threshold", 1.0 }, { "intensity", 0.3 } };
-    FakeDebugFeature vl("VolumetricLight");
-    vl.fields = {
-        { "enabled", true },
-        { "maxDistance", 60.0 },
-        { "density", 0.01 },
-        { "anisotropyG", 0.7 },
-        { "shadowSamples", std::int64_t{ 4 } },
-        { "temporal", false },
-        { "strength", 0.8 },
-    };
 
     FakeModuleDirectory dir;
     dir.features["VolumetricCloud"] = &clouds;
     dir.features["Bloom"] = &bloom;
-    dir.features["VolumetricLight"] = &vl;
 
     FeaturePortAdapter adapter(dir);
     const bigworld::BigWorldPlan plan = bigworld::MakeBigWorldPlan(bigworld::Quality::Big);
@@ -175,16 +157,12 @@ TEST(BigWorldModuleTest, FeatureAdapterSnapshotsAndRestoresPlanTweaksRoundTrip)
 
     EXPECT_EQ(clouds.ValueText("shadowRangeKm"), "8");
     EXPECT_EQ(clouds.ValueText("shadowSoftness"), "0.6");
-    EXPECT_EQ(clouds.ValueText("sunRays"), "0.6");
-    EXPECT_EQ(clouds.ValueText("shaftMist"), "0.15");
+    EXPECT_EQ(clouds.ValueText("sunRays"), "1.2");
+    EXPECT_EQ(clouds.ValueText("sunRaysContrast"), "2.5");
+    EXPECT_EQ(clouds.ValueText("sunRaysDecay"), "1");
+    EXPECT_EQ(clouds.ValueText("sunRaysLength"), "1.5");
     EXPECT_EQ(bloom.ValueText("threshold"), "2");
     EXPECT_EQ(bloom.ValueText("intensity"), "0.2");
-    EXPECT_EQ(vl.ValueText("maxDistance"), "400");
-    EXPECT_EQ(vl.ValueText("density"), "0.0003");
-    EXPECT_EQ(vl.ValueText("anisotropyG"), "0.75");
-    EXPECT_EQ(vl.ValueText("shadowSamples"), "2");
-    EXPECT_EQ(vl.ValueText("temporal"), "true");
-    EXPECT_EQ(vl.ValueText("strength"), "1");
 
     ASSERT_TRUE(adapter.RestoreAll().ok);
     // The snapshot keeps the text the endpoint printed, so compare numbers instead of spelling.
@@ -193,16 +171,12 @@ TEST(BigWorldModuleTest, FeatureAdapterSnapshotsAndRestoresPlanTweaksRoundTrip)
     EXPECT_DOUBLE_EQ(number(clouds, "coverage"), 0.8);
     EXPECT_DOUBLE_EQ(number(clouds, "shadowRangeKm"), 24.0);
     EXPECT_DOUBLE_EQ(number(clouds, "shadowSoftness"), 1.5);
-    EXPECT_DOUBLE_EQ(number(clouds, "sunRays"), 0.0);
-    EXPECT_DOUBLE_EQ(number(clouds, "shaftMist"), 0.0);
+    EXPECT_DOUBLE_EQ(number(clouds, "sunRays"), 0.8);
+    EXPECT_DOUBLE_EQ(number(clouds, "sunRaysContrast"), 1.0);
+    EXPECT_DOUBLE_EQ(number(clouds, "sunRaysDecay"), 1.5);
+    EXPECT_DOUBLE_EQ(number(clouds, "sunRaysLength"), 1.2);
     EXPECT_DOUBLE_EQ(number(bloom, "threshold"), 1.0);
     EXPECT_DOUBLE_EQ(number(bloom, "intensity"), 0.3);
-    EXPECT_DOUBLE_EQ(number(vl, "maxDistance"), 60.0);
-    EXPECT_DOUBLE_EQ(number(vl, "density"), 0.01);
-    EXPECT_DOUBLE_EQ(number(vl, "anisotropyG"), 0.7);
-    EXPECT_EQ(std::stoll(vl.ValueText("shadowSamples")), 4);
-    EXPECT_EQ(vl.ValueText("temporal"), "false");
-    EXPECT_DOUBLE_EQ(number(vl, "strength"), 0.8);
 }
 
 TEST(BigWorldModuleTest, OpenCommandParsesCoverageOverrideAndStateSerializesNewKeys)
@@ -221,14 +195,11 @@ TEST(BigWorldModuleTest, OpenCommandParsesCoverageOverrideAndStateSerializesNewK
     clouds.fields = { { "enabled", false }, { "coverage", 0.8 } };
     FakeDebugFeature bloom("Bloom");
     bloom.fields = { { "enabled", true }, { "threshold", 1.0 }, { "intensity", 0.3 } };
-    FakeDebugFeature vl("VolumetricLight");
-    vl.fields = { { "enabled", true }, { "game.status", std::string("Ok") } };
 
     FakeModuleDirectory dir;
     dir.features["Grass"] = &grass;
     dir.features["VolumetricCloud"] = &clouds;
     dir.features["Bloom"] = &bloom;
-    dir.features["VolumetricLight"] = &vl;
 
     BigWorldModule module;
     module.OnAttach(EditorModuleAttach{ dir, nullptr, nullptr });
@@ -238,7 +209,7 @@ TEST(BigWorldModuleTest, OpenCommandParsesCoverageOverrideAndStateSerializesNewK
     EXPECT_EQ(bad->httpStatus, 400);
 
     // Without a TerrainModule attached, Open fails on terrain open (409) after sanitizing and storing the plan.
-    const auto opened = module.OnCommand({ "bigworld.open", { { "quality", "lean" }, { "coverage", "0.33" } } });
+    const auto opened = module.OnCommand({ "bigworld.open", { { "quality", "big" }, { "coverage", "0.33" } } });
     ASSERT_TRUE(opened.has_value());
     EXPECT_EQ(opened->httpStatus, 409);
     ASSERT_NE(module.Demo(), nullptr);
@@ -251,13 +222,14 @@ TEST(BigWorldModuleTest, OpenCommandParsesCoverageOverrideAndStateSerializesNewK
     EXPECT_NE(state->body.find("\"cloudCoverage\":0.33"), std::string::npos);
     EXPECT_NE(state->body.find("\"cloudShadowRangeKm\":8"), std::string::npos);
     EXPECT_NE(state->body.find("\"cloudShadowSoftness\":0.6"), std::string::npos);
-    EXPECT_NE(state->body.find("\"cloudSunRays\":0.6"), std::string::npos);
-    EXPECT_NE(state->body.find("\"cloudShaftMist\":0"), std::string::npos);
+    EXPECT_NE(state->body.find("\"cloudSunRays\":1.2"), std::string::npos);
+    EXPECT_NE(state->body.find("\"cloudSunRaysContrast\":2.5"), std::string::npos);
+    EXPECT_NE(state->body.find("\"cloudSunRaysDecay\":1"), std::string::npos);
+    EXPECT_NE(state->body.find("\"cloudSunRaysLength\":1.5"), std::string::npos);
     EXPECT_NE(state->body.find("\"bloomThreshold\":2"), std::string::npos);
     EXPECT_NE(state->body.find("\"bloomIntensity\":0.2"), std::string::npos);
-    EXPECT_NE(state->body.find("\"volumetricDensity\":0.0003"), std::string::npos);
-    EXPECT_NE(state->body.find("\"volumetricLight\":false"), std::string::npos);
-    EXPECT_NE(state->body.find("\"volumetricMaxDistance\":400"), std::string::npos);
+    EXPECT_EQ(state->body.find("volumetric"), std::string::npos);
+    EXPECT_EQ(state->body.find("cloudShaftMist"), std::string::npos);
     EXPECT_NE(state->body.find("\"receivesSunShadow\":true"), std::string::npos);
     EXPECT_NE(state->body.find("\"receivesCloudShadow\":true"), std::string::npos);
     EXPECT_NE(state->body.find("\"castCascades\":1"), std::string::npos);

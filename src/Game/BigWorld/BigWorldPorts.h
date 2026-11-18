@@ -106,9 +106,6 @@ struct FeatureState {
     GrassHealth grass;
     bool cloudsAvailable = false;
     bool cloudsEnabled = false;
-    bool volumetricLightAvailable = false;
-    bool volumetricLightEnabled = false;
-    bool volumetricLightDisabledByProfile = false;
     bool sunAvailable = false;
     bool sunAboveHorizon = true;
     double sunElevationDegrees = 0.0;
