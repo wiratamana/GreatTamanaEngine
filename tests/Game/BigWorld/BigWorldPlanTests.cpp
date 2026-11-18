@@ -81,33 +81,33 @@ TEST(BigWorldPlanTest, DemoCloudAndBloomDefaultsMatchPlanConstants)
 {
     EXPECT_DOUBLE_EQ(kBloomThreshold, 2.0);
     EXPECT_DOUBLE_EQ(kBloomIntensity, 0.2);
-    EXPECT_DOUBLE_EQ(kCloudShadowRangeKm, 24.0);
-    EXPECT_DOUBLE_EQ(kCloudShadowSoftness, 0.85);
-    EXPECT_DOUBLE_EQ(kCloudShadowFill, 0.12);
-    EXPECT_DOUBLE_EQ(kCloudSunRays, 1.2);
-    EXPECT_DOUBLE_EQ(kCloudSunRaysContrast, 2.5);
-    EXPECT_DOUBLE_EQ(kCloudSunRaysDecay, 1.0);
-    EXPECT_DOUBLE_EQ(kCloudSunRaysLength, 1.5);
+    EXPECT_DOUBLE_EQ(kCloudShadowRangeKm, 16.0);
+    EXPECT_DOUBLE_EQ(kCloudShadowSoftness, 0.50);
+    EXPECT_DOUBLE_EQ(kCloudShadowFill, 0.20);
+    EXPECT_DOUBLE_EQ(kCloudSunRays, 0.55);
+    EXPECT_DOUBLE_EQ(kCloudSunRaysContrast, 1.65);
+    EXPECT_DOUBLE_EQ(kCloudSunRaysDecay, 0.98);
+    EXPECT_DOUBLE_EQ(kCloudSunRaysLength, 1.25);
 
     for (const Quality q : { Quality::Lean, Quality::Medium, Quality::Big }) {
         const BigWorldPlan plan = MakeBigWorldPlan(q);
         const FeatureTweak* clouds = FindTweak(plan, "VolumetricCloud");
         ASSERT_NE(clouds, nullptr);
-        EXPECT_EQ(ValueOf(*clouds, "shadowRangeKm"), "24");
-        EXPECT_EQ(ValueOf(*clouds, "shadowSoftness"), "0.85");
-        EXPECT_EQ(ValueOf(*clouds, "shadowFill"), "0.12");
-        EXPECT_EQ(ValueOf(*clouds, "sunRays"), "1.2");
-        EXPECT_EQ(ValueOf(*clouds, "sunRaysContrast"), "2.5");
-        EXPECT_EQ(ValueOf(*clouds, "sunRaysDecay"), "1");
-        EXPECT_EQ(ValueOf(*clouds, "sunRaysLength"), "1.5");
+        EXPECT_EQ(ValueOf(*clouds, "shadowRangeKm"), "16");
+        EXPECT_EQ(ValueOf(*clouds, "shadowSoftness"), "0.5");
+        EXPECT_EQ(ValueOf(*clouds, "shadowFill"), "0.2");
+        EXPECT_EQ(ValueOf(*clouds, "sunRays"), "0.55");
+        EXPECT_EQ(ValueOf(*clouds, "sunRaysContrast"), "1.65");
+        EXPECT_EQ(ValueOf(*clouds, "sunRaysDecay"), "0.98");
+        EXPECT_EQ(ValueOf(*clouds, "sunRaysLength"), "1.25");
     }
 }
 
 TEST(BigWorldPlanTest, CloudCoverageFollowsTierConstantsAndOverridesCleanly)
 {
-    EXPECT_DOUBLE_EQ(kLeanCloudCoverage, 0.48);
-    EXPECT_DOUBLE_EQ(kMediumCloudCoverage, 0.52);
-    EXPECT_DOUBLE_EQ(kBigCloudCoverage, 0.52);
+    EXPECT_DOUBLE_EQ(kLeanCloudCoverage, 0.50);
+    EXPECT_DOUBLE_EQ(kMediumCloudCoverage, 0.56);
+    EXPECT_DOUBLE_EQ(kBigCloudCoverage, 0.56);
 
     const BigWorldPlan lean = MakeBigWorldPlan(Quality::Lean);
     const BigWorldPlan medium = MakeBigWorldPlan(Quality::Medium);
@@ -115,9 +115,9 @@ TEST(BigWorldPlanTest, CloudCoverageFollowsTierConstantsAndOverridesCleanly)
     EXPECT_DOUBLE_EQ(lean.cloudCoverage, kLeanCloudCoverage);
     EXPECT_DOUBLE_EQ(medium.cloudCoverage, kMediumCloudCoverage);
     EXPECT_DOUBLE_EQ(big.cloudCoverage, kBigCloudCoverage);
-    EXPECT_EQ(ValueOf(*FindTweak(lean, "VolumetricCloud"), "coverage"), "0.48");
-    EXPECT_EQ(ValueOf(*FindTweak(medium, "VolumetricCloud"), "coverage"), "0.52");
-    EXPECT_EQ(ValueOf(*FindTweak(big, "VolumetricCloud"), "coverage"), "0.52");
+    EXPECT_EQ(ValueOf(*FindTweak(lean, "VolumetricCloud"), "coverage"), "0.5");
+    EXPECT_EQ(ValueOf(*FindTweak(medium, "VolumetricCloud"), "coverage"), "0.56");
+    EXPECT_EQ(ValueOf(*FindTweak(big, "VolumetricCloud"), "coverage"), "0.56");
 
     BigWorldPlan custom = MakeBigWorldPlan(Quality::Big);
     SetCloudCoverage(custom, 0.32);
@@ -135,7 +135,7 @@ TEST(BigWorldPlanTest, CloudCoverageFollowsTierConstantsAndOverridesCleanly)
     BigWorldPlan nanPlan = MakeBigWorldPlan(Quality::Lean);
     SetCloudCoverage(nanPlan, std::numeric_limits<double>::quiet_NaN());
     EXPECT_DOUBLE_EQ(nanPlan.cloudCoverage, kLeanCloudCoverage);
-    EXPECT_EQ(ValueOf(*FindTweak(nanPlan, "VolumetricCloud"), "coverage"), "0.48");
+    EXPECT_EQ(ValueOf(*FindTweak(nanPlan, "VolumetricCloud"), "coverage"), "0.5");
 }
 
 TEST(BigWorldPlanTest, GrassPresetFollowsTheTier)
@@ -175,11 +175,17 @@ TEST(BigWorldPlanTest, LowerTiersMarchTheCloudsWithFewerStepsAndAtLowerResolutio
     ASSERT_NE(lean, nullptr);
     ASSERT_NE(medium, nullptr);
     ASSERT_NE(big, nullptr);
-    EXPECT_LT(std::stoi(ValueOf(*lean, "maxSteps")), std::stoi(ValueOf(*medium, "maxSteps")));
-    EXPECT_EQ(ValueOf(*lean, "resolutionDivisor"), "6");
-    EXPECT_EQ(ValueOf(*medium, "resolutionDivisor"), "4");
-    for (const char* key : { "maxSteps", "resolutionDivisor", "shadowSteps", "shadowUpdate" }) {
+    EXPECT_EQ(ValueOf(*lean, "maxSteps"), "48");
+    EXPECT_EQ(ValueOf(*medium, "maxSteps"), "56");
+    EXPECT_EQ(ValueOf(*big, "maxSteps"), "68");
+    EXPECT_EQ(ValueOf(*lean, "resolutionDivisor"), "4");
+    EXPECT_EQ(ValueOf(*medium, "resolutionDivisor"), "3");
+    EXPECT_EQ(ValueOf(*lean, "shadowSteps"), "8");
+    EXPECT_EQ(ValueOf(*lean, "shadowUpdate"), "4");
+    for (const char* key : { "resolutionDivisor", "shadowSteps", "shadowUpdate" }) {
         EXPECT_EQ(ValueOf(*big, key), "") << key; // the full tier keeps the feature default
+    }
+    for (const char* key : { "maxSteps", "resolutionDivisor", "shadowSteps", "shadowUpdate" }) {
         EXPECT_NE(std::find(big->restoreKeys.begin(), big->restoreKeys.end(), key), big->restoreKeys.end()) << key;
     }
 }

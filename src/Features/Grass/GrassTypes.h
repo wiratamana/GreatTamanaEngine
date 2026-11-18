@@ -332,7 +332,7 @@ struct GrassSettings {
     bool receiveSunShadow = true;
     bool receiveCloudShadow = true;
     float shadowStrength = 1.0f;    // Fraction of cascade and cloud shadow applied to the blade sun term.
-    float cloudFill = 0.16f;        // Subtle diffuse sky fill added to shadowed blades.
+    float cloudFill = 0.22f;        // Subtle diffuse sky fill added to shadowed blades.
     bool castShadows = true;
     float shadowMaxTexelM = 0.40f;  // Skip cascades coarser than this texel size (m).
     float shadowBiasTexels = 1.0f;  // Shift shadow blades toward the sun (texels).

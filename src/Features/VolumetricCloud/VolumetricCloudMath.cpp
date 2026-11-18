@@ -274,7 +274,8 @@ void AdvanceCloudWind(double (&offset)[2], double (&step)[2], float speed, float
 
 double CloudWindPeriodM(const VolumetricCloudSettings& safe) noexcept
 {
-    constexpr std::uint64_t kMaxPeriodM = 100000000ull;
+    // Float32 wind offsets stay below 0.1 m per step up to 1,048,576 m; every world-scrolled tile must wrap cleanly.
+    constexpr std::uint64_t kMaxPeriodM = 1048576ull;
     std::uint64_t period = 1;
     for (const float tile : { safe.weatherScaleM, safe.weatherScaleM * kCloudFarWeatherTileScale, safe.shapeScaleM,
              safe.shapeScaleM * kCloudLargeShapeScale, safe.detailScaleM }) {
@@ -333,7 +334,8 @@ float CloudSunScatter(const VolumetricCloudSettings& safe, float cosTheta, float
     const float silverHg = CloudHenyeyGreenstein(cosTheta, safe.silverG);
     const float silverPhase = kCloudSilverPhaseCap * (1.0f - std::exp(-silverHg / kCloudSilverPhaseCap));
     const float silver = safe.silverIntensity * silverPhase * CloudBeer(opticalDepth);
-    return sum + silver * CloudBeer(opticalDepth * kCloudSilverThinDepthScale);
+    const float scatter = sum + silver * CloudBeer(opticalDepth * kCloudSilverThinDepthScale);
+    return scatter / (1.0f + scatter / kCloudSunScatterShoulder);
 }
 
 Vec3 BoundCloudLuma(const Vec3& radiance, float maxLuma) noexcept
@@ -616,10 +618,11 @@ std::uint32_t CloudOwnSampleIndex(std::uint64_t frameIndex, std::uint32_t diviso
     return static_cast<std::uint32_t>((frameIndex / cycle) & 255u);
 }
 
-float CloudMarchJitter(float blueNoise, std::uint64_t frameIndex, std::uint32_t /*divisor*/) noexcept
+float CloudMarchJitter(float blueNoise, std::uint64_t frameIndex, std::uint32_t divisor) noexcept
 {
     constexpr double kGoldenRatio = 0.61803398875;
-    const double value = static_cast<double>(blueNoise) + static_cast<double>(frameIndex & 1023u) * kGoldenRatio;
+    const std::uint32_t cycle = CloudOwnSampleIndex(frameIndex, divisor);
+    const double value = static_cast<double>(blueNoise) + static_cast<double>(cycle) * kGoldenRatio;
     return static_cast<float>(value - std::floor(value));
 }
 
@@ -718,6 +721,10 @@ bool CloudTapUsable(float tapEndKm, float tapDistanceKm, float tapTransmittance,
     constexpr float kSlackKm = 0.02f;
     // The tap must have looked at least as far as this pixel's surface.
     if (tapEndKm < (1.0f - kRelative) * pixelEndKm - kSlackKm) {
+        return false;
+    }
+    // Reject open-sky or far-background taps on opaque foreground geometry so sky clouds never bleed onto ridges.
+    if (pixelEndKm < 50.0f && tapEndKm > pixelEndKm * 1.08f + 0.15f) {
         return false;
     }
     // A cloud that sits behind this pixel's surface must not be added to it.

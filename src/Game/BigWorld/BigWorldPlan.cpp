@@ -46,21 +46,22 @@ const char* GrassPresetFor(Quality quality) noexcept
     return "Big";
 }
 
-// Cloud cost levers of the lower tiers: a coarser march grid saves most for the least visible change.
+// Cloud march and shadow cost levers per quality tier.
 void AddCloudTierValues(Quality quality, FeatureTweak& clouds)
 {
     switch (quality) {
     case Quality::Lean:
         clouds.values.push_back({ "maxSteps", "48" });
-        clouds.values.push_back({ "resolutionDivisor", "6" });
-        clouds.values.push_back({ "shadowSteps", "6" });
+        clouds.values.push_back({ "resolutionDivisor", "4" });
+        clouds.values.push_back({ "shadowSteps", "8" });
         clouds.values.push_back({ "shadowUpdate", "4" });
         break;
     case Quality::Medium:
-        clouds.values.push_back({ "maxSteps", "64" });
-        clouds.values.push_back({ "resolutionDivisor", "4" });
+        clouds.values.push_back({ "maxSteps", "56" });
+        clouds.values.push_back({ "resolutionDivisor", "3" });
         break;
     case Quality::Big:
+        clouds.values.push_back({ "maxSteps", "68" });
         break;
     }
 }

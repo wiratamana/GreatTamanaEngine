@@ -38,8 +38,8 @@ const float kSlackKm = 0.02;
 const float kClearTransmittance = 0.999;
 const float kSnapTexels = 0.004;
 const float kSceneHdrKnee = 64.0;
-const float kResolveShoulderStart = 2.2;
-const float kResolveShoulderCeiling = 5.2;
+const float kResolveShoulderStart = 4.2;
+const float kResolveShoulderCeiling = 8.5;
 const vec3 kCloudResolveLumaWeights = vec3(0.2126, 0.7152, 0.0722);
 
 float CloudLuma(vec3 rgb)
@@ -77,6 +77,9 @@ vec3 SceneBehindCloud(vec3 scene, float transmittance)
 bool TapUsable(vec4 color, vec4 aux, float pixelEndKm)
 {
     if (aux.y < (1.0 - kRelative) * pixelEndKm - kSlackKm) {
+        return false;
+    }
+    if (pixelEndKm < 50.0 && aux.y > pixelEndKm * 1.08 + 0.15) {
         return false;
     }
     return color.a > kClearTransmittance || aux.x <= (1.0 + kRelative) * pixelEndKm + kSlackKm;
@@ -362,13 +365,13 @@ void main()
     float cloudDistanceKm;
     // Accumulate marched sample count up to the freshBlend floor, relaxing gently only under real motion.
     float shiftLength = clamp(length(reprojectionShift), 0.0, 1.0);
-    float motionFactor = smoothstep(0.05, 1.0, shiftLength);
+    float motionFactor = smoothstep(0.15, 1.0, shiftLength);
     bool adaptive = params.motion.z > 0.5;
     float maxCount = max(1.0 / max(params.blend.y, 0.01) - 1.0, 0.0);
     float effectiveCount = adaptive ? min(historyCount, mix(maxCount, 1.0, motionFactor)) : 0.0;
     float newCount = 0.0;
     if (hasHistory && hasFresh) {
-        // Clamp history tightly on high-contrast cloud-to-sky silhouettes and relax inside smooth cloud bellies.
+        // Preserve exact Bayer-reconstructed history when still; engage variance clamping smoothly under motion.
         vec4 kept = history;
         if (params.blend.z > 0.0 && boxCount > 0.0) {
             vec4 mean = moment1 / boxCount;
@@ -379,7 +382,9 @@ void main()
             vec4 clampMin = max(min(mean - sigma * expand, fresh) - 1e-3, vec4(0.0));
             vec4 clampMax = max(mean + sigma * expand, fresh) + 1e-3;
             clampMax.a = min(clampMax.a, 1.0);
-            kept = clamp(history, clampMin, clampMax);
+            vec4 clamped = clamp(history, clampMin, clampMax);
+            float clampWeight = smoothstep(0.15, 1.25, length(reprojectionShift));
+            kept = mix(history, clamped, clampWeight);
         }
         bool marched = maxTapWeight > 0.999;
         float alpha = marched ? params.blend.y : params.blend.x;

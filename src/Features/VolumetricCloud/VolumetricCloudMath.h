@@ -92,12 +92,13 @@ float CloudPhase(const VolumetricCloudSettings& safe, float cosTheta, float ecce
 // Beer-Lambert transmittance for an optical depth.
 float CloudBeer(float opticalDepth) noexcept;
 
-// Soft ceiling and thin-optical-depth gate on the silver-lining lobe (VolumetricCloudLighting.glsl).
+// Soft ceiling, thin-optical-depth gate and phase shoulder on sun scattering (VolumetricCloudLighting.glsl).
 inline constexpr float kCloudSilverPhaseCap = 4.0f;
-inline constexpr float kCloudSilverThinDepthScale = 0.85f;
+inline constexpr float kCloudSilverThinDepthScale = 0.90f;
+inline constexpr float kCloudSunScatterShoulder = 1.85f;
 
 // Smooth luminance ceiling on a cloud sample (VolumetricCloudLighting.glsl kMaxSourceLuma).
-inline constexpr float kCloudMaxSourceLuma = 10.0f;
+inline constexpr float kCloudMaxSourceLuma = 12.0f;
 
 // Sun light reaching a sample: sum over octaves plus the thin-optical-depth gated silver lobe.
 float CloudSunScatter(const VolumetricCloudSettings& safe, float cosTheta, float opticalDepth) noexcept;
@@ -191,7 +192,7 @@ struct CloudShadowStrengths {
 CloudShadowStrengths ComputeCloudShadowStrengths(const VolumetricCloudSettings& safe, float sunUp) noexcept;
 
 // Width in texels of the march grid when the divisor is automatic (setting 0).
-inline constexpr float kCloudAutoMarchTexels = 320.0f;
+inline constexpr float kCloudAutoMarchTexels = 632.0f;
 inline constexpr std::uint32_t kCloudMaxResolutionDivisor = 6;
 
 // The march resolution divisor in use: the setting rounded to 1..6; 0 picks it from `viewWidth` (4 when it is unknown).
@@ -208,7 +209,7 @@ CloudSampleOffset CloudBayerOffset(std::uint64_t frameIndex, std::uint32_t divis
 // How often the pixel marched on `frameIndex` was marched before, wrapped at 256.
 std::uint32_t CloudOwnSampleIndex(std::uint64_t frameIndex, std::uint32_t divisor) noexcept;
 
-// Start jitter in [0, 1) of a marched pixel: full-res pixel blue noise stepped every frame by the golden ratio.
+// Start jitter in [0, 1) of a marched pixel: full-res pixel blue noise stepped once per Bayer cycle by the golden ratio.
 float CloudMarchJitter(float blueNoise, std::uint64_t frameIndex, std::uint32_t divisor = 1) noexcept;
 
 // Screen-space sun rays: how far toward the sun a pixel looks (share of the way) and the radius of the sun glow.
@@ -249,10 +250,10 @@ float CloudAerialComposite(float scene, float cloudTransmittance, float cloudLig
 inline constexpr float kCloudSceneHdrKnee = 64.0f;
 
 // Soft HDR luminance shoulder applied to resolved cloud radiance before compositing (VolumetricCloudResolve.comp).
-inline constexpr float kCloudResolveShoulderStart = 2.2f;
-inline constexpr float kCloudResolveShoulderCeiling = 5.2f;
+inline constexpr float kCloudResolveShoulderStart = 4.2f;
+inline constexpr float kCloudResolveShoulderCeiling = 8.5f;
 
-// CPU twin of CompressCloudShoulder() in VolumetricCloudResolve.comp: chroma-preserving HDR shoulder above 2.2.
+// CPU twin of CompressCloudShoulder() in VolumetricCloudResolve.comp: chroma-preserving HDR shoulder above 4.2.
 Vec3 CompressCloudResolveLuma(const Vec3& radiance) noexcept;
 
 // CPU twin of SceneBehindCloud() in VolumetricCloudResolve.comp: steepens occlusion above kCloudSceneHdrKnee.

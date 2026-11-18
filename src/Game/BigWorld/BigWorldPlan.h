@@ -12,18 +12,18 @@ namespace gte::bigworld {
 enum class Quality { Lean, Medium, Big };
 
 // Default cloud coverage per tier: lower than the 0.8 feature default so clouds leave sunlit gaps.
-inline constexpr double kLeanCloudCoverage = 0.48;
-inline constexpr double kMediumCloudCoverage = 0.52;
-inline constexpr double kBigCloudCoverage = 0.52;
+inline constexpr double kLeanCloudCoverage = 0.50;
+inline constexpr double kMediumCloudCoverage = 0.56;
+inline constexpr double kBigCloudCoverage = 0.56;
 
 // Cloud shadow and screen-space sun-shaft defaults for the demo.
-inline constexpr double kCloudShadowRangeKm = 24.0;     // Covers +/-12 km terrain; nested 1/8 near map spans 3 km (~23.4 m/texel).
-inline constexpr double kCloudShadowSoftness = 0.85;    // Smooth cumulus penumbra without blocky shadow texels.
-inline constexpr double kCloudShadowFill = 0.12;        // Subtle diffuse sky fill on cloud-shaded ground.
-inline constexpr double kCloudSunRays = 1.2;            // Screen-space sun shafts through cloud gaps.
-inline constexpr double kCloudSunRaysContrast = 2.5;    // Suppresses uniform sky veil so partial cloud gaps form beams.
-inline constexpr double kCloudSunRaysDecay = 1.0;       // Radial falloff of sun-shaft taps away from the sun.
-inline constexpr double kCloudSunRaysLength = 1.5;      // Reach of the sun shafts across the screen in view heights.
+inline constexpr double kCloudShadowRangeKm = 16.0;     // Covers +/-8 km terrain; nested 1/8 near map spans 2 km (~15.6 m/texel).
+inline constexpr double kCloudShadowSoftness = 0.50;    // Crisp foreground cumulus dapples without blocky shadow texels.
+inline constexpr double kCloudShadowFill = 0.20;        // Balanced diffuse sky fill on cloud-shaded ground.
+inline constexpr double kCloudSunRays = 0.55;           // Subtle screen-space sun shafts through cloud gaps without glare.
+inline constexpr double kCloudSunRaysContrast = 1.65;   // Suppresses uniform sky veil so partial cloud gaps form beams.
+inline constexpr double kCloudSunRaysDecay = 0.98;      // Radial falloff of sun-shaft taps away from the sun.
+inline constexpr double kCloudSunRaysLength = 1.25;     // Reach of the sun shafts across the screen in view heights.
 
 // Bloom defaults for the demo: threshold above 1.0 white and softer intensity so sunlit clouds do not veil the sky.
 inline constexpr double kBloomThreshold = 2.0;

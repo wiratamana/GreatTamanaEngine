@@ -535,10 +535,11 @@ void main()
     vec3 sunDir = params.sunDirection.xyz;
     float cloudVis = SampleWaterCloudShadow(params.eyeTime.xyz + hit, sunDir);
 
-    // Light on the water body: hemisphere ambient stays unattenuated while clouds shade direct sun scatter.
+    // Light on the water body: cool overcast ambient and attenuated direct sun scatter inside cloud shadows.
     float sunUp = max(sunDir.y, 0.0);
-    float bodySunVis = mix(0.12, 1.0, cloudVis);
-    vec3 bodyLight = kAmbient * params.skyInfo.w + params.sunRadiance.rgb * (kDirectScale * sunUp * max(normal.y, 0.0) * bodySunVis);
+    float bodySunVis = mix(0.10, 1.0, cloudVis);
+    vec3 bodyAmbient = kAmbient * params.skyInfo.w * mix(vec3(0.76, 0.84, 0.95), vec3(1.0), cloudVis);
+    vec3 bodyLight = bodyAmbient + params.sunRadiance.rgb * (kDirectScale * sunUp * max(normal.y, 0.0) * bodySunVis);
 
     // Refraction: shift the seabed lookup by the surface slope, keep it only where it still lies behind the water.
     // Deep water hides the seabed, so its colour is not read at all.
@@ -554,17 +555,19 @@ void main()
         }
         seabed = texelFetch(sceneColor, p2, 0).rgb;
     }
-    // Without collimated sun beams, shallow volume scatter shifts toward deeper sapphire tones.
+    // Without direct sun beams, shallow water scatter and column tint shift cooler without re-darkening shadowed seabed.
     float deepMix = 1.0 - exp(-verticalDepth / clarity);
-    float shadowedDeepMix = mix(deepMix, 1.0, 0.4 * (1.0 - cloudVis));
+    float shadowedDeepMix = mix(deepMix, 1.0, 0.45 * (1.0 - cloudVis));
     vec3 bodyColor = mix(params.shallowColor.rgb, params.deepColor.rgb, shadowedDeepMix) * bodyLight;
-    vec3 under = seabed * transmit + bodyColor * (1.0 - transmit);
+    vec3 refractTint = mix(vec3(0.86, 0.94, 1.04), vec3(1.0), cloudVis);
+    vec3 under = seabed * (transmit * refractTint) + bodyColor * (1.0 - transmit);
 
-    // Reflection: sky from the look-up table, screen-space hits when enabled.
+    // Reflection: clear-sky LUT has no clouds, so shift shadowed water reflection to cooler sapphire/slate.
     float shoreFresnel = smoothstep(0.0, 0.35, verticalDepth);
     float reflectWeight = fresnel * shoreFresnel;
-    vec3 reflection = ReflectionColor(hit, dir, normal, p, fullSize, reflectWeight);
-    vec3 color = mix(under, reflection * params.surfaceInfo.w, reflectWeight);
+    vec3 refl = ReflectionColor(hit, dir, normal, p, fullSize, reflectWeight);
+    refl *= mix(vec3(0.58, 0.66, 0.78), vec3(1.0), cloudVis);
+    vec3 color = mix(under, refl * params.surfaceInfo.w, reflectWeight);
 
     // Sun glint vanishes rapidly as cloud optical depth scatters the solar disk cone.
     float nDotL = max(dot(normal, sunDir), 0.0);
@@ -579,7 +582,7 @@ void main()
         color += params.sunRadiance.rgb * (params.sunDirection.w * f * DistributionGgx(nDotH, a) * vis * nDotL * kDirectScale * 3.14159265 * clamp(sunDir.y * 8.0, 0.0, 1.0) * glintVis);
     }
 
-    vec3 foamLight = kAmbient * params.skyInfo.w + params.sunRadiance.rgb * (kDirectScale * sunUp * mix(0.20, 1.0, cloudVis));
+    vec3 foamLight = bodyAmbient + params.sunRadiance.rgb * (kDirectScale * sunUp * mix(0.18, 1.0, cloudVis));
     color = mix(color, params.foamColor.rgb * foamLight, foam);
     Store(p, vec4(min(color, vec3(60000.0)), 1.0), windowDepth);
 }

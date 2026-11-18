@@ -9,7 +9,7 @@ const vec3 kOctaveTint = vec3(0.9, 0.97, 1.1);
 const vec3 kSunWarmTint = vec3(1.0, 0.88, 0.7);
 const float kGlowEccentricity = 0.3;
 const float kSilverPhaseCap = 4.0;
-const float kMaxSourceLuma = 10.0;
+const float kMaxSourceLuma = 12.0;
 const vec3 kCloudLumaWeights = vec3(0.2126, 0.7152, 0.0722);
 // Share of its segment a sun sample may move (1 = anywhere inside).
 const float kLightJitterSpan = 0.9;
@@ -123,7 +123,9 @@ vec3 SunScatter(float cosTheta, float opticalDepth)
     }
     float silverPhase = kSilverPhaseCap * (1.0 - exp(-HenyeyGreenstein(cosTheta, params.lightScatter.x) / kSilverPhaseCap));
     float silver = params.lightPhase.w * silverPhase * exp(-opticalDepth);
-    return sum + vec3(silver * exp(-opticalDepth * 0.85));
+    vec3 scatter = sum + vec3(silver * exp(-opticalDepth * 0.90));
+    scatter = scatter / (1.0 + scatter / 1.85);
+    return scatter;
 }
 
 // Nubis in-scatter probability: shades cavities and bases softly with a subtle thin-rim lift toward the sun.
@@ -147,15 +149,17 @@ vec3 CloudSourceRadiance(CloudLightInput s)
         vec3 scatter = SunScatter(cosTheta, s.sunOpticalDepth);
         float powder = 0.35 + 0.65 * (1.0 - exp(-3.5 * s.density));
         float awayFromSun = Saturate(0.5 - 0.5 * cosTheta);
-        scatter *= mix(1.0, powder, params.lightMarch.w * awayFromSun * awayFromSun);
+        float powderWeight = params.lightMarch.w * smoothstep(0.0, 0.08, s.density) * awayFromSun * awayFromSun * (1.0 - Saturate(cosTheta));
+        scatter *= mix(1.0, powder, powderWeight);
         // Shades thin edges and cavities; farField.w = 0 turns it off.
         scatter *= mix(1.0, InScatterProbability(s.lodDensity, s.heightFraction, cosTheta), params.farField.w);
         // Slow-decaying diffusion keeps thick cloud cores softly luminous.
         float tau = s.sunOpticalDepth;
         vec3 diffuse = vec3(params.lightTune.y * (tau / (tau + 2.0)) / (1.0 + 0.15 * tau) / (4.0 * kPi));
-        // Forward glow decays steadily with optical depth so dense cores self-shadow instead of blowing out.
+        // Forward glow builds after thin optical depth and decays in dense self-shadowed cores.
         float glowDecay = mix(0.45, 0.30, Saturate(cosTheta));
-        vec3 glow = vec3(params.lightTune.z * s.lodDensity * exp(-tau * glowDecay) * HenyeyGreenstein(cosTheta, kGlowEccentricity));
+        float glowDepthGate = smoothstep(0.3, 2.0, s.sunOpticalDepth);
+        vec3 glow = vec3(params.lightTune.z * s.lodDensity * glowDepthGate * exp(-tau * glowDecay) * HenyeyGreenstein(cosTheta, kGlowEccentricity));
         sun = s.sunRadiance * mix(vec3(1.0), kSunWarmTint, params.lightTune2.x) * (scatter + diffuse + glow);
     }
     float skyShare = mix(params.lightMisc.y, 1.0, pow(max(s.heightFraction, 1e-5), 0.7)) * s.skyVisibility;

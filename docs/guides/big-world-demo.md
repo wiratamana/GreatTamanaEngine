@@ -17,13 +17,13 @@
 ## Quality tiers
 | Tier | Terrain profile | Grass preset | Cloud coverage | Cloud cost settings | River |
 |---|---|---|---|---|---|
-| `lean` | `lean` (no VL, SSGI, GTAO) | Lean | `0.48` (`kLeanCloudCoverage`) | `maxSteps` 48, `resolutionDivisor` 6, `shadowSteps` 6, `shadowUpdate` 4 | no |
-| `medium` | `lean` (no VL, SSGI, GTAO) | Medium | `0.52` (`kMediumCloudCoverage`) | `maxSteps` 64, `resolutionDivisor` 4 | yes |
-| `big` (menu default) | `lean` (no VL, SSGI, GTAO) | Big | `0.52` (`kBigCloudCoverage`) | feature defaults (`maxSteps` 96) | yes |
+| `lean` | `lean` (no VL, SSGI, GTAO) | Lean | `0.50` (`kLeanCloudCoverage`) | `maxSteps` 48, `resolutionDivisor` 4, `shadowSteps` 8, `shadowUpdate` 4 | no |
+| `medium` | `lean` (no VL, SSGI, GTAO) | Medium | `0.56` (`kMediumCloudCoverage`) | `maxSteps` 56, `resolutionDivisor` 3 | yes |
+| `big` (menu default) | `lean` (no VL, SSGI, GTAO) | Big | `0.56` (`kBigCloudCoverage`) | `maxSteps` 68 (auto `resolutionDivisor` 2, feature shadow defaults) | yes |
 
 Every tier snapshots and restores the render settings it touches:
 - `Bloom`: `enabled` `true`, `threshold` `2.0` (`kBloomThreshold`), `intensity` `0.2` (`kBloomIntensity`) so sunlit clouds do not veil the sky.
-- `VolumetricCloud`: `coverage` (`0.48`–`0.52`), `shadowRangeKm` `24` (`kCloudShadowRangeKm`, ±12 km far map plus nested 3 km near map at ~23.4 m per 128x128 texel), `shadowSoftness` `0.85` (`kCloudShadowSoftness`), `shadowFill` `0.12` (`kCloudShadowFill`), `sunRays` `1.2` (`kCloudSunRays`), `sunRaysContrast` `2.5` (`kCloudSunRaysContrast`), `sunRaysDecay` `1.0` (`kCloudSunRaysDecay`), `sunRaysLength` `1.5` (`kCloudSunRaysLength`), plus the tier march levers above.
+- `VolumetricCloud`: `coverage` (`0.50`–`0.56`), `shadowRangeKm` `16` (`kCloudShadowRangeKm`, ±8 km far map plus nested 2.0 km near map at ~15.6 m per 128x128 texel), `shadowSoftness` `0.50` (`kCloudShadowSoftness`), `shadowFill` `0.20` (`kCloudShadowFill`), `sunRays` `0.55` (`kCloudSunRays`), `sunRaysContrast` `1.65` (`kCloudSunRaysContrast`), `sunRaysDecay` `0.98` (`kCloudSunRaysDecay`), `sunRaysLength` `1.25` (`kCloudSunRaysLength`), plus the tier march levers above.
 - `Grass`: `enabled` `true` and the tier preset.
 
 ## Open and close over HTTP
