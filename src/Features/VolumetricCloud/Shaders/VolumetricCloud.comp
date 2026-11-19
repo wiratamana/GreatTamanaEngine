@@ -217,7 +217,7 @@ const float kLumpAmpSmallM = 90.0;
 const float kSkinCoverage = 0.12;
 const float kFootRamp = 0.34;
 const float kRoofRamp = 0.20;
-const float kSkinCarve = 0.62;
+const float kSkinCarve = 0.46;
 const float kSkinEdge = 0.12;
 const float kPuffInvR2 = 2.2;
 const float kPuffWeightLarge = 0.30;
@@ -376,7 +376,7 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
             + kPuffWeightMedium * wMedium * LumpDome(shapeSample.b, kPuffInvR2)
             + kPuffWeightFine * wFine * LumpDome(shapeSample.a, kPuffInvR2))
             / (kPuffWeightLarge + kPuffWeightMedium * wMedium + kPuffWeightFine * wFine);
-        float skin = Saturate((margin - kSkinCarve * (1.0 - puff)) / kSkinEdge) * smoothstep(0.03, 0.10, margin);
+        float skin = Saturate((margin - kSkinCarve * (1.0 - puff)) / kSkinEdge) * smoothstep(0.06, 0.16, margin);
         body += skin * (1.0 - farStreak);
     }
     return Saturate(body);
@@ -465,7 +465,8 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
     vec3 ambientRadiance = integrated ? gSkyAmbient : params.ambientColor.rgb * params.sunColorAndAmbient.w;
 
     float stepLength = (tStart + stepOffset) * rayGrowth;
-    float t = tStart + jitter * params.density.w * stepLength;
+    // The start offset spans a whole coarse stride so every ray-step phase gets sampled over the frames.
+    float t = tStart + jitter * params.density.w * stepLength * coarseMultiplier;
     vec3 light = vec3(0.0);
     float transmittance = 1.0;
     float cutoff = max(params.march.w, kMinTransmittance);
@@ -814,7 +815,8 @@ void main()
     float bn = texelFetch(blueNoise, pixel & 127, 0).r;
     // Full-res pixel blue noise stepped once per Bayer cycle by the golden ratio for coherent reconstruction.
     float jitter = fract(bn + float(cycle) * 0.61803398875);
-    gLightJitter = fract(jitter * 1.7 + bn * 3.1);
+    // The sun-march jitter advances on its own irrational slope so it never locks to the ray step offset.
+    gLightJitter = fract(texelFetch(blueNoise, (pixel + ivec2(73, 19)) & 127, 0).r + float(cycle) * 0.41421356237);
     if (AtmosphereOn()) {
         gSkyAmbient = SkyAmbientRadiance();
         gGroundRadiance = GroundBounceRadiance(params.sunColorAndAmbient.rgb, params.sunDirectionAndIntensity.xyz);
