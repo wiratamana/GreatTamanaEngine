@@ -211,22 +211,21 @@ float ShapeValue(vec4 sn)
 // Fixed altitude slice and sphere radii for the 2D Worley cauliflower roof height field.
 const float kLumpSliceM = 2315.0;
 const float kLumpAmpLargeM = 380.0;
-const float kLumpAmpMedM = 190.0;
-const float kLumpAmpSmallM = 90.0;
+const float kLumpAmpMedM = 260.0;
+const float kLumpAmpSmallM = 120.0;
 // Skin model: coverage floor and ramp of the footprint, roof ramp, puff carve depth and edge softness.
-const float kSkinCoverage = 0.17;
-const float kFootRamp = 0.34;
+const float kSkinCoverage = 0.13;
+const float kFootRamp = 0.42;
 const float kRoofRamp = 0.20;
-const float kSkinCarve = 0.72;
-const float kSkinEdge = 0.11;
+const float kSkinCarveBig = 0.72;
+const float kSkinCarveSmall = 0.90;
+const float kSkinEdge = 0.07;
 const float kPuffInvR2 = 2.2;
-const float kPuffWeightLarge = 0.25;
-const float kPuffWeightMedium = 0.50;
-const float kPuffWeightFine = 0.25;
+const float kPuffWeightLarge = 0.20;
+const float kPuffWeightMedium = 0.40;
+const float kPuffWeightFine = 0.40;
 // Share of the roof lump amplitude that small low clouds keep.
-const float kLumpSmallCloudFloor = 0.45;
-// Footprint shrink toward the roof: strength, and the height share where it starts.
-const float kDomeTaper = 0.90;
+const float kLumpSmallCloudFloor = 0.80;
 const float kDomeTaperStart = 0.0;
 // Rays this far above the highest roof of a column take the clear-air stride.
 const float kRoofSkipMargin = 0.10;
