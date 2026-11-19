@@ -214,7 +214,7 @@ const float kLumpAmpLargeM = 380.0;
 const float kLumpAmpMedM = 190.0;
 const float kLumpAmpSmallM = 90.0;
 // Skin model: coverage floor and ramp of the footprint, roof ramp, puff carve depth and edge softness.
-const float kSkinCoverage = 0.12;
+const float kSkinCoverage = 0.15;
 const float kFootRamp = 0.34;
 const float kRoofRamp = 0.20;
 const float kSkinCarve = 0.46;
@@ -223,6 +223,8 @@ const float kPuffInvR2 = 2.2;
 const float kPuffWeightLarge = 0.30;
 const float kPuffWeightMedium = 0.40;
 const float kPuffWeightFine = 0.30;
+// Rays this far above the highest roof of a column take the clear-air stride.
+const float kRoofSkipMargin = 0.10;
 const float kLumpInvR2Large = 2.05;
 const float kLumpInvR2Med = 2.30;
 const float kLumpInvR2Small = 2.55;
@@ -279,6 +281,7 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float peakFloor = params.density.z * smoothstep(0.42, 0.78, wCov) * smoothstep(0.35, 0.75, wm.b) * gCloudSize;
     hMax = max(hMax, peakFloor);
     if (heightFraction >= max(hMax, 0.16)) {
+        gWeatherClear = heightFraction >= max(hMax, 0.16) + kRoofSkipMargin;
         return 0.0;
     }
 
@@ -349,10 +352,10 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     densityFactor = params.density.x * rampBottom * rampTop * wm.a * 2.0;
 
     // Footprint narrows with height into a wide pyramid; the roof follows the lumpy top.
-    float basePedestal = 1.0 + 0.22 * (1.0 - smoothstep(0.04, 0.26, heightFraction));
+    float basePedestal = 1.0 + 0.12 * (1.0 - smoothstep(0.04, 0.26, heightFraction));
     float flankMass = Saturate(wm.g * 1.04 * coverage);
     float flankCov = mix(wCov, min(wCov, flankMass), smoothstep(0.12, 0.72, hNorm) * (1.0 - farStreak));
-    float domeTaper = 1.0 - 0.66 * smoothstep(0.15, 1.0, hNorm);
+    float domeTaper = 1.0 - 0.80 * smoothstep(0.10, 1.0, hNorm);
     float rawEff = Saturate(flankCov * basePedestal * domeTaper);
 
     // Far rolls keep the soft threshold body; it fades out where the skin model takes over.
@@ -392,6 +395,10 @@ float CloudDetail(vec3 position, float heightFraction, float shape, float densit
 {
     if (shape <= 0.0 || densityFactor <= 0.0) {
         return 0.0;
+    }
+    // A fully solid body has nothing left to erode.
+    if (shape >= 0.995) {
+        return CloudCurve(shape) * densityFactor;
     }
     float fromEyeLength = length(position.xz - params.eyeAndPlanetRadius.xz);
     detailAmount *= 1.0 - smoothstep(18000.0, 52000.0, fromEyeLength);

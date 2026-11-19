@@ -6,7 +6,7 @@ const float kMinPhaseDenominator = 1e-4;
 // Per octave colour of the multiple scattering at full blue shift; red and green fall, blue rises.
 const vec3 kOctaveTint = vec3(0.9, 0.97, 1.1);
 // Sun light at full warmth: the blue falls first, like light that crossed more air.
-const vec3 kSunWarmTint = vec3(1.0, 0.88, 0.7);
+const vec3 kSunWarmTint = vec3(1.0, 0.82, 0.6);
 const float kGlowEccentricity = 0.3;
 const float kSilverPhaseCap = 4.0;
 const float kMaxSourceLuma = 12.0;
@@ -16,6 +16,10 @@ const float kLightJitterSpan = 0.9;
 const float kLowSunWarmthStart = 0.14;
 const float kLowSunWarmthEnd = 0.31;
 const float kLowSunWarmthGain = 1.85;
+// Sky light tint inside cloud shade: pulls cyan toward periwinkle.
+const vec3 kShadeTint = vec3(1.03, 0.93, 1.02);
+// Share of the sun light kept at the flat cloud base; the upper cloud keeps all of it.
+const float kBaseSunKeep = 0.45;
 
 struct CloudLightInput {
     vec3 position;          // World position of the sample, metres.
@@ -178,13 +182,14 @@ vec3 CloudSourceRadiance(CloudLightInput s)
         float crownLift = smoothstep(0.42, 0.90, s.heightFraction) * exp(-s.sunOpticalDepth * 0.45) * 0.22;
         vec3 crown = vec3(crownLift / (4.0 * kPi));
         float warmth = EffectiveSunWarmth(params.lightTune2.x, s.sunDirection.y);
-        sun = s.sunRadiance * mix(vec3(1.0), kSunWarmTint, warmth) * (scatter + diffuse + glow + crown);
+        float baseSun = mix(kBaseSunKeep, 1.0, smoothstep(0.02, 0.22, s.heightFraction));
+        sun = s.sunRadiance * mix(vec3(1.0), kSunWarmTint, warmth) * (scatter + diffuse + glow + crown) * baseSun;
     }
     float skyShare = mix(params.lightMisc.y, 1.0, pow(max(s.heightFraction, 1e-5), 0.7)) * s.skyVisibility;
     // Light bounced up from the ground reaches the low part of the cloud where ground is sunlit.
     float groundShare = (1.0 - s.heightFraction) * (1.0 - s.heightFraction);
     groundShare *= mix(0.15, 1.0, exp(-0.15 * s.sunOpticalDepth));
-    return sun + s.ambientRadiance * skyShare + s.groundRadiance * groundShare;
+    return sun + s.ambientRadiance * kShadeTint * skyShare + s.groundRadiance * groundShare;
 }
 
 // Smooth luminance ceiling: keeps hue, leaves normal cloud brightness intact and approaches maxLuma smoothly.
