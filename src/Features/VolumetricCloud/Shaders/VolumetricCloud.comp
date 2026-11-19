@@ -227,6 +227,12 @@ const float kPuffCrossMix = 0.25;
 const float kPuffWeightLarge = 0.20;
 const float kPuffWeightMedium = 0.40;
 const float kPuffWeightFine = 0.40;
+// Fine puff octave: frequency multiple, offset, carve depth and the distance range it fades out over.
+const float kMicroScale = 4.0;
+const vec3 kMicroOffset = vec3(0.37, 0.11, 0.73);
+const float kMicroCarve = 0.30;
+const float kMicroStartM = 5000.0;
+const float kMicroEndM = 14000.0;
 const float kFootOuterTaper = 0.28;
 const float kFootOuterLean = 0.14;
 // Share of the roof lump amplitude that small low clouds keep.
@@ -455,7 +461,15 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
         puff = mix(puff, supportedLump, kCrownPuffCoherence * smoothstep(0.62, 0.82, hNorm));
         float skinCarve = mix(kSkinCarveSmall, kSkinCarveBig, gCloudSize);
         float minMargin = mix(kSkinMinMargin, kCrownMinMargin, smoothstep(0.66, 0.82, hNorm));
-        float skin = Saturate((margin - skinCarve * (1.0 - puff)) / kSkinEdge) * smoothstep(minMargin, minMargin + 0.10, margin);
+        // Near clouds get a finer puff octave so small cumulus show bumps tens of metres wide.
+        float microCarve = 0.0;
+        float microWeight = 1.0 - smoothstep(kMicroStartM, kMicroEndM, fromEyeLength);
+        if (gPrimaryRay && microWeight > 0.0) {
+            vec4 microSample = textureLod(shapeVolume, shapeUv * kMicroScale + kMicroOffset, 0.0);
+            float microPuff = LumpDome(Saturate(mix(microSample.b, microSample.a, 0.5) + puffWarp), kPuffInvR2);
+            microCarve = kMicroCarve * microWeight * (1.0 - microPuff);
+        }
+        float skin = Saturate((margin - skinCarve * (1.0 - puff) - microCarve) / kSkinEdge) * smoothstep(minMargin, minMargin + 0.10, margin);
         float coreBoost = mix(1.0, kCoreDensityBoost, smoothstep(kCoreMarginStart, kCoreMarginEnd, margin));
         densityFactor *= mix(1.0, coreBoost, 1.0 - farStreak);
         body += skin * (1.0 - farStreak);
