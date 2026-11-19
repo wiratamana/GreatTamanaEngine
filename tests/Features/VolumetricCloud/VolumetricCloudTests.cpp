@@ -1492,7 +1492,7 @@ TEST(VolumetricCloudShaderTest, DetailIsCurlWarpedBillowAndWispErosionAndTheCurv
     EXPECT_NE(march.find("float billowErosion"), std::string::npos);
     EXPECT_NE(march.find("float wispErosion"), std::string::npos);
     // The density curve is applied to the eroded body, not to the body before the erosion.
-    EXPECT_NE(march.find("return CloudCurve(body) * densityFactor;"), std::string::npos);
+    EXPECT_NE(march.find("return CloudCurve(Saturate(Remap(shape, erosion, 1.0, 0.0, 1.0))) * densityFactor;"), std::string::npos);
     // The exponent lives in one place, CloudCurve(); CloudShape() returns the linear body.
     EXPECT_NE(march.find("float CloudCurve(float body)"), std::string::npos);
     EXPECT_NE(march.find("return Saturate(body);"), std::string::npos);
@@ -2645,7 +2645,7 @@ TEST(VolumetricCloudShaderTest, MarchShaderRemovesSkinNormalAndSuppressesVertica
         march.find("shapeUv / kLargeShapeScale + kLargeShapeOffset"));
     EXPECT_NE(march.find("float roundTop = 1.0 - smoothstep(localTop"), std::string::npos);
     EXPECT_NE(march.find("float basePedestal ="), std::string::npos);
-    EXPECT_NE(march.find("float domeTaper = 1.0 - kDomeTaper * taperCurve;"), std::string::npos);
+    EXPECT_NE(march.find("float domeTaper = 1.0 - kDomeTaper * smoothstep(kDomeTaperStart, 1.0, hNorm);"), std::string::npos);
     EXPECT_NE(march.find("float rawEff = Saturate(flankCov * basePedestal * domeTaper);"), std::string::npos);
     EXPECT_NE(march.find("float LumpDome(float v, float invR2)"), std::string::npos);
     EXPECT_NE(march.find("float skinCarve ="), std::string::npos);
