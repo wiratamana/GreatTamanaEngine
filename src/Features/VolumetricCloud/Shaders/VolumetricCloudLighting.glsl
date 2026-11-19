@@ -19,7 +19,11 @@ const float kLowSunWarmthGain = 1.85;
 // Sky light tint inside cloud shade: pulls cyan toward periwinkle.
 const vec3 kShadeTint = vec3(1.03, 0.93, 1.02);
 // Share of the sun light kept at the flat cloud base; the upper cloud keeps all of it.
-const float kBaseSunKeep = 0.45;
+const float kBaseSunKeep = 0.25;
+// Height fraction where the base sun reduction has fully faded out; wide so it never reads as a band.
+const float kBaseSunFadeEnd = 0.32;
+// Share of the forward glow removed when looking straight into the sun.
+const float kGlowSunDamp = 0.35;
 
 struct CloudLightInput {
     vec3 position;          // World position of the sample, metres.
@@ -178,11 +182,12 @@ vec3 CloudSourceRadiance(CloudLightInput s)
         float glowDecay = mix(0.45, 0.30, Saturate(cosTheta));
         float glowDepthGate = smoothstep(0.3, 2.0, s.sunOpticalDepth);
         vec3 glow = vec3(params.lightTune.z * s.lodDensity * glowDepthGate * exp(-tau * glowDecay) * HenyeyGreenstein(cosTheta, kGlowEccentricity));
+        glow *= 1.0 - kGlowSunDamp * Saturate(cosTheta) * Saturate(cosTheta);
         // Sunlit upper-crown multi-scatter lift makes cauliflower dome tops gleam cleanly.
-        float crownLift = smoothstep(0.42, 0.90, s.heightFraction) * exp(-s.sunOpticalDepth * 0.45) * 0.22;
+        float crownLift = smoothstep(0.30, 0.90, s.heightFraction) * exp(-s.sunOpticalDepth * 0.45) * 0.26;
         vec3 crown = vec3(crownLift / (4.0 * kPi));
         float warmth = EffectiveSunWarmth(params.lightTune2.x, s.sunDirection.y);
-        float baseSun = mix(kBaseSunKeep, 1.0, smoothstep(0.02, 0.22, s.heightFraction));
+        float baseSun = mix(kBaseSunKeep, 1.0, smoothstep(0.0, kBaseSunFadeEnd, s.heightFraction));
         sun = s.sunRadiance * mix(vec3(1.0), kSunWarmTint, warmth) * (scatter + diffuse + glow + crown) * baseSun;
     }
     float skyShare = mix(params.lightMisc.y, 1.0, pow(max(s.heightFraction, 1e-5), 0.7)) * s.skyVisibility;

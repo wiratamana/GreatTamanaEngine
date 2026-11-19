@@ -214,20 +214,28 @@ const float kLumpAmpLargeM = 380.0;
 const float kLumpAmpMedM = 190.0;
 const float kLumpAmpSmallM = 90.0;
 // Skin model: coverage floor and ramp of the footprint, roof ramp, puff carve depth and edge softness.
-const float kSkinCoverage = 0.15;
+const float kSkinCoverage = 0.17;
 const float kFootRamp = 0.34;
 const float kRoofRamp = 0.20;
-const float kSkinCarve = 0.46;
-const float kSkinEdge = 0.12;
+const float kSkinCarve = 0.72;
+const float kSkinEdge = 0.11;
 const float kPuffInvR2 = 2.2;
-const float kPuffWeightLarge = 0.30;
-const float kPuffWeightMedium = 0.40;
-const float kPuffWeightFine = 0.30;
+const float kPuffWeightLarge = 0.25;
+const float kPuffWeightMedium = 0.50;
+const float kPuffWeightFine = 0.25;
+// Share of the roof lump amplitude that small low clouds keep.
+const float kLumpSmallCloudFloor = 0.45;
+// Footprint shrink toward the roof: strength, and the height share where it starts.
+const float kDomeTaper = 0.90;
+const float kDomeTaperStart = 0.0;
 // Rays this far above the highest roof of a column take the clear-air stride.
 const float kRoofSkipMargin = 0.10;
 const float kLumpInvR2Large = 2.05;
 const float kLumpInvR2Med = 2.30;
 const float kLumpInvR2Small = 2.55;
+// Lower bounds of the base fade heights (fractions of the layer) so no single height shows as a shelf.
+const float kMinBaseRound = 0.18;
+const float kMinDensityRamp = 0.50;
 
 // Maps an inverted-Worley channel to a convex spherical cap with crisp cell-border creases.
 float LumpDome(float v, float invR2)
@@ -289,7 +297,8 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float massAmp = smoothstep(0.10, 0.50, wCov);
     float lodKeep = 1.0 - gShapeLod;
     float thickness = max(params.layer.y - params.layer.x, kMinWidth);
-    float ampFrac = (kLumpAmpLargeM + kLumpAmpMedM + kLumpAmpSmallM) / thickness * smoothstep(0.14, 0.50, hMax) * massAmp;
+    float sizeAmp = mix(kLumpSmallCloudFloor, 1.0, smoothstep(0.14, 0.50, hMax) * massAmp);
+    float ampFrac = (kLumpAmpLargeM + kLumpAmpMedM + kLumpAmpSmallM) / thickness * sizeAmp;
     float lump = 0.5;
     if (ampFrac * lodKeep > 0.003) {
         vec2 lumpXz = position.xz + wind + 0.35 * params.structure.zw;
@@ -344,18 +353,18 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     // Gentle macro condensation base plane with crisp rounded cauliflower dome tops.
     float baseShift = clamp((0.5 - shapeLarge) * params.structure2.z * 0.08, -0.005, 0.008);
     baseShift += clamp((0.5 - shapeMid) * params.structure3.z * 0.04, 0.0, 0.01);
-    float roundBottom = smoothstep(baseShift, baseShift + params.heightShape.x, heightFraction);
+    float roundBottom = smoothstep(baseShift, baseShift + max(params.heightShape.x, kMinBaseRound), heightFraction);
     float roundTop = 1.0 - smoothstep(localTop * 0.83, localTop, heightFraction);
 
-    float rampBottom = heightFraction * Saturate(Remap(heightFraction, 0.0, params.heightShape.z, 0.0, 1.0));
+    float rampBottom = heightFraction * Saturate(Remap(heightFraction, 0.0, max(params.heightShape.z, kMinDensityRamp), 0.0, 1.0));
     float rampTop = Saturate(Remap(heightFraction, params.heightShape.w, 1.0, 1.0, 0.0));
     densityFactor = params.density.x * rampBottom * rampTop * wm.a * 2.0;
 
     // Footprint narrows with height into a wide pyramid; the roof follows the lumpy top.
-    float basePedestal = 1.0 + 0.12 * (1.0 - smoothstep(0.04, 0.26, heightFraction));
+    float basePedestal = 1.0 + 0.12 * (1.0 - smoothstep(0.0, 0.50, heightFraction));
     float flankMass = Saturate(wm.g * 1.04 * coverage);
-    float flankCov = mix(wCov, min(wCov, flankMass), smoothstep(0.12, 0.72, hNorm) * (1.0 - farStreak));
-    float domeTaper = 1.0 - 0.80 * smoothstep(0.10, 1.0, hNorm);
+    float flankCov = mix(wCov, min(wCov, flankMass), smoothstep(0.0, 0.60, hNorm) * (1.0 - farStreak));
+    float domeTaper = 1.0 - kDomeTaper * smoothstep(kDomeTaperStart, 1.0, hNorm);
     float rawEff = Saturate(flankCov * basePedestal * domeTaper);
 
     // Far rolls keep the soft threshold body; it fades out where the skin model takes over.
