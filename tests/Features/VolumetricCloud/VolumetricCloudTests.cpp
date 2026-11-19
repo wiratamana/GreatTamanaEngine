@@ -1483,6 +1483,18 @@ TEST(VolumetricCloudShaderTest, MarchShaderUsesTheOwnSampleJitterAndBlendsTheLig
     EXPECT_NE(march.find("mix(skyVisibilityA, skyVisibilityB, blend)"), std::string::npos);
 }
 
+TEST(VolumetricCloudShaderTest, NearCloudsCarveAFinePuffOctaveOnPrimaryRaysAndShadeItsValleys)
+{
+    const std::string march = gte::ReadShaderText("VolumetricCloud.comp");
+    const std::size_t octave = march.find("textureLod(shapeVolume, shapeUv * kMicroScale + kMicroOffset, 0.0)");
+    ASSERT_NE(octave, std::string::npos);
+    EXPECT_NE(march.rfind("if (gPrimaryRay && microWeight > 0.0)", octave), std::string::npos);
+    EXPECT_NE(march.find("- microCarve) / kSkinEdge)"), std::string::npos);
+    EXPECT_NE(march.find("gMicroCrevice = microWeight * (1.0 - microPuff);"), std::string::npos);
+    const std::string lighting = gte::ReadShaderText("VolumetricCloudLighting.glsl");
+    EXPECT_NE(lighting.find("1.0 - kMicroCreviceShade * gMicroCrevice"), std::string::npos);
+}
+
 TEST(VolumetricCloudShaderTest, DetailIsCurlWarpedBillowAndWispErosionAndTheCurveComesAfterTheErosion)
 {
     const std::string march = gte::ReadShaderText("VolumetricCloud.comp");
