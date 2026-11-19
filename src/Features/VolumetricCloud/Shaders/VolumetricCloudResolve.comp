@@ -227,6 +227,19 @@ vec3 SunShaftSpokes(vec2 uv, vec4 centerSample, float spokeStrength)
     if (distToSun <= kSpokeMinDist) {
         return vec3(0.0);
     }
+    vec2 sunNdc = sunUv * 2.0 - 1.0;
+    vec4 sunNear = params.invViewProjection * vec4(sunNdc, 0.0, 1.0);
+    vec4 sunFar = params.invViewProjection * vec4(sunNdc, 1.0, 1.0);
+    if (abs(sunNear.w) > 1e-6 && abs(sunFar.w) > 1e-6) {
+        vec3 rawSunDir = sunFar.xyz / sunFar.w - sunNear.xyz / sunNear.w;
+        float rawSunLen = length(rawSunDir);
+        if (rawSunLen > 1e-5) {
+            spokeStrength *= 1.0 - smoothstep(0.75, 0.92, SafeFloat(rawSunDir.y / rawSunLen, 0.0));
+        }
+    }
+    if (spokeStrength <= 0.0) {
+        return vec3(0.0);
+    }
 
     vec2 radialDir = toSun / distToSun;
     vec2 tangent = vec2(-radialDir.y / aspect, radialDir.x);
@@ -255,8 +268,9 @@ vec3 SunShaftSpokes(vec2 uv, vec4 centerSample, float spokeStrength)
         ? (sunShaftsRgbCentre / max(centreLuma, kSpokeMinLuma))
         : (fallbackRgb / max(fallbackLuma, kSpokeMinLuma));
 
+    float shaftPresence = smoothstep(0.0, 0.02, centreLuma);
     float falloff = exp(-distToSun * kSpokeFalloff);
-    vec3 spokeRgb = hue * (spoke * kSpokeGain * falloff * spokeStrength);
+    vec3 spokeRgb = hue * (spoke * kSpokeGain * falloff * spokeStrength * shaftPresence);
     float peak = max(spokeRgb.r, max(spokeRgb.g, spokeRgb.b));
     spokeRgb /= (1.0 + peak / kSpokeSoftCap);
     return SafeNonNegVec3(spokeRgb);

@@ -40,14 +40,18 @@ float CloudShapeValue(float perlinWorley, float worleyG, float worleyB, float wo
 float CloudDomedRoofHeight(
     float weatherCoverageProduct, float turretPeak, float cloudSize, float peakMin) noexcept;
 
-// CPU twin of the lower-core interior solidity bias coreSolid in CloudShape() (VolumetricCloud.comp).
-float CloudCoreSolidBias(float weatherCoverageProduct, float heightFraction, float hMax) noexcept;
+// CPU twin of the interior column floor coreFloor in CloudShape() (VolumetricCloud.comp).
+float CloudCoreFloor(float weatherCoverageProduct, float hNorm) noexcept;
 
-// CPU twin of the medium-Worley modulated turret top height localTop in CloudShape() (VolumetricCloud.comp).
-float CloudTurretLocalTop(float hMax, float shapeMid, float farStreak = 0.0f) noexcept;
+// CPU twin of the 2D-monotonic Worley dome roof localTop in CloudShape() (VolumetricCloud.comp).
+float CloudTurretLocalTop(
+    float hMax, float dome2DA, float dome2DB, float shapeLod = 0.0f, float farStreak = 0.0f) noexcept;
 
-// CPU twin of the height-masked crown erosion shellMask in CloudDetail() (VolumetricCloud.comp).
-float CloudCrownShellMask(float heightFraction, float shape, float bodyErosion) noexcept;
+// CPU twin of the hNorm-gated outer cauliflower floret weight in CloudShape() (VolumetricCloud.comp).
+float CloudFloretWeight(float hNorm, float weatherCoverageProduct, float distanceFromEyeM) noexcept;
+
+// CPU twin of the hNorm-masked crown and underside erosion shellMask in CloudDetail() (VolumetricCloud.comp).
+float CloudCrownShellMask(float hNorm, float shape, float bodyErosion) noexcept;
 
 // Share of the sky light that reaches a sample with `upwardOpticalDepth` of cloud above it (SkyVisibility()).
 float CloudSkyVisibility(float upwardOpticalDepth, float strength, float floor) noexcept;
@@ -84,8 +88,11 @@ inline constexpr float kCloudFarWeatherTileScale = 2.8f;
 // The big lobe octave reads the shape volume at this multiple of the shape tile (VolumetricCloud.comp kLargeShapeScale).
 inline constexpr float kCloudLargeShapeScale = 2.0f;
 
-// The crown floret octave reads the shape volume at the shape tile divided by this factor (VolumetricCloud.comp kSmallShapeScale).
-inline constexpr float kCloudSmallShapeScale = 2.5f;
+// Near primary-ray floret lookup reads the shape volume at the shape tile divided by this factor (VolumetricCloud.comp).
+inline constexpr float kCloudMidFloretScale = 1.25f;
+
+// The 2D turret dome lookup reads the weather map at the weather tile divided by this factor (VolumetricCloud.comp).
+inline constexpr float kCloudTurretWeatherScale = 2.5f;
 
 // The far-zoomed shape lookup reads the shape volume at this multiple of the shape tile (VolumetricCloud.comp kFarZoom).
 inline constexpr float kCloudFarZoom = 2.8f;

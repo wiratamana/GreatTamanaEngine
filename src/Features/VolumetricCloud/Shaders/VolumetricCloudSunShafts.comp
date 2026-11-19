@@ -147,18 +147,21 @@ void main()
     float marchShare = distToSun > 1e-5 ? (rayLen / max(distToSun, 1e-5)) : 0.0;
     vec2 marchVec = rawToSun * marchShare;
 
-    // Clip off-screen rays at the frustum border so taps stay on the true radial line.
-    float sClip = 1.0;
+    // Clip off-screen rays at the frustum border with a C1 corner smooth-min so corner diagonals have no crease.
+    float rawClipX = 1e6;
     if (marchVec.x > 1e-6) {
-        sClip = min(sClip, max((uvMax.x - uv.x) / marchVec.x, 0.0));
+        rawClipX = max((uvMax.x - uv.x) / marchVec.x, 0.0);
     } else if (marchVec.x < -1e-6) {
-        sClip = min(sClip, max((uvMin.x - uv.x) / marchVec.x, 0.0));
+        rawClipX = max((uvMin.x - uv.x) / marchVec.x, 0.0);
     }
+    float rawClipY = 1e6;
     if (marchVec.y > 1e-6) {
-        sClip = min(sClip, max((uvMax.y - uv.y) / marchVec.y, 0.0));
+        rawClipY = max((uvMax.y - uv.y) / marchVec.y, 0.0);
     } else if (marchVec.y < -1e-6) {
-        sClip = min(sClip, max((uvMin.y - uv.y) / marchVec.y, 0.0));
+        rawClipY = max((uvMin.y - uv.y) / marchVec.y, 0.0);
     }
+    float cornerBlend = max(0.12 - abs(rawClipX - rawClipY), 0.0) / 0.12;
+    float sClip = clamp(min(rawClipX, rawClipY) - cornerBlend * cornerBlend * 0.03, 0.0, 1.0);
     vec2 clippedVec = marchVec * sClip;
     float clippedLen = rayLen * sClip;
 

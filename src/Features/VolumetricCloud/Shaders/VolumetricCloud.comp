@@ -97,8 +97,6 @@ const float kFarStreakAcross = 2.8;
 const float kFarTopScale = 0.4;
 const float kFarFill = 0.3;
 const float kCoverageGain = 1.18;
-const float kSmallShapeScale = 2.5;
-const vec3 kSmallShapeOffset = vec3(0.53, 0.07, 0.29);
 // The finest shape octaves fade out between these distances.
 const float kShapeLodStartM = 12000.0;
 const float kShapeLodEndM = 40000.0;
@@ -188,6 +186,7 @@ bool LayerSegment(float cameraY, float dirY, out float tStart, out float tEnd)
 
 // Cloud body at a world position: the coverage-eroded base shape, and the height-based density factor.
 // Returns the shape; `densityFactor` is the part that scales it.
+
 // Set by CloudShape(): the weather map holds no cloud at the last sampled position.
 bool gWeatherClear = false;
 // Set by CloudShape(): 0 for an isolated small cell, 1 for a big mass.
@@ -195,6 +194,10 @@ float gCloudSize = 1.0;
 
 // Set by CloudShape(): 0 near, 1 far; the finest shape octaves fade out with distance (they would alias into dots).
 float gShapeLod = 0.0;
+// Set by CloudShape(): height fraction normalized to the column's 2D-monotonic localTop.
+float gCloudHNorm = 0.0;
+// True on primary camera march rays; false during sun-light and shadow-map density evaluation.
+bool gPrimaryRay = true;
 
 // Shape value of one volume fetch: Worley cell-wall creases carve convex domes from Perlin-Worley.
 float ShapeValue(vec4 sn)
@@ -213,6 +216,7 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     vec2 fromEye = position.xz - params.eyeAndPlanetRadius.xz;
     float fromEyeLength = length(fromEye);
     gShapeLod = smoothstep(kShapeLodStartM, kShapeLodEndM, fromEyeLength);
+    gCloudHNorm = 0.0;
     float farRamp = smoothstep(params.skyShade2.z, 2.0 * params.skyShade2.z, fromEyeLength);
     float coverage = min(params.weather.w + params.farField.x * farRamp, 1.0);
     float farStreak = smoothstep(kFarStreakStartM, kFarStreakEndM, fromEyeLength);
@@ -231,8 +235,8 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
         wm = mix(wm, textureLod(weatherMap, farUv, 0.0), farBlend);
     }
     float weatherCoverage = max(wm.r, Saturate(coverage - 0.5) * wm.g * 1.1);
-    // Suppress isolated tiny weather specks so they never turn into stray vertical sticks.
-    weatherCoverage *= smoothstep(0.05, 0.16, massAverage);
+    // Suppress isolated tiny weather specks so they never turn into stray vertical sticks or dangling droplets.
+    weatherCoverage *= smoothstep(0.10, 0.25, massAverage);
     weatherCoverage = Saturate(weatherCoverage * mix(1.0, kCoverageGain, smoothstep(0.08, 0.3, weatherCoverage)));
     // The far deck is a band of low rolls: it fills in toward the horizon.
     weatherCoverage = Saturate(weatherCoverage + kFarFill * farStreak * smoothstep(0.0, 0.06, weatherCoverage));
@@ -248,8 +252,19 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float hMax = clamp(0.14 + shoulderEnv + 0.66 * pow(coreTurret, 1.15), 0.14, 0.96);
     float peakFloor = params.density.z * smoothstep(0.42, 0.78, wCov) * smoothstep(0.35, 0.75, wm.b);
     hMax = max(hMax, peakFloor);
-    if (heightFraction >= hMax * 1.10) {
-        gWeatherClear = true;
+    if (heightFraction >= hMax * 1.12) {
+        return 0.0;
+    }
+
+    // 2D-monotonic convex Worley dome roof from weatherMap keeps columns overhang-free with zero 3D fetches.
+    vec2 turretUv = (position.xz + wind + 0.35 * params.structure.zw) / (params.weather.x / 2.5) + vec2(0.37, 0.61);
+    float dome2DB = textureLod(weatherMap, turretUv, 0.0).b;
+    float turret2D = mix(wm.b, 0.50 * wm.b + 0.50 * dome2DB, 1.0 - gShapeLod);
+    float turretMod2D = clamp(0.72 + 0.38 * turret2D, 0.72, 1.06);
+    float localTop = clamp(hMax * turretMod2D * mix(1.0, kFarTopScale, farStreak), 0.16, 0.98);
+    float hNorm = Saturate(heightFraction / max(localTop, 0.16));
+    gCloudHNorm = hNorm;
+    if (heightFraction >= localTop) {
         return 0.0;
     }
 
@@ -265,20 +280,12 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float shape = ShapeValue(shapeSample);
     float shapeMid = shape;
     float shapeLarge = shape;
-    if (params.structure.x > 0.0 || params.structure.y > 0.0 || params.structure2.w > 0.0 || params.structure2.z > 0.0) {
+    float nearLarge = clamp(params.structure.x + params.structure.y * (wm.b - 0.5) * 2.0, 0.0, 0.26);
+    float largeShare = Saturate(nearLarge + params.structure2.w * farRamp);
+    if (largeShare > 0.02) {
         // Big lobe octave carries broad masses, distant decks and macro base undulation.
         shapeLarge = ShapeValue(textureLod(shapeVolume, shapeUv / kLargeShapeScale + kLargeShapeOffset, 0.0));
-        if (params.structure.x > 0.0 || params.structure.y > 0.0 || params.structure2.w > 0.0) {
-            float nearLarge = clamp(params.structure.x + params.structure.y * (wm.b - 0.5) * 2.0, 0.0, 0.26);
-            float largeShare = Saturate(nearLarge + params.structure2.w * farRamp);
-            shape = mix(shape, shapeLarge, largeShare);
-        }
-    }
-    // Height-stratified crown floret octave sculpts convex cauliflower domes above the flat LCL base.
-    float floretMask = smoothstep(0.10, 0.30, heightFraction) * (1.0 - smoothstep(18000.0, 52000.0, fromEyeLength));
-    if (floretMask > 0.02) {
-        float fine = ShapeValue(textureLod(shapeVolume, shapeUv * kSmallShapeScale + kSmallShapeOffset, 0.0));
-        shape = mix(shape, shape * (0.58 + 0.62 * fine), floretMask * 0.65);
+        shape = mix(shape, shapeLarge, largeShare);
     }
     // Far model: the big octave read through a coordinate stretched along the wind gives rolls, not lobes.
     if (farStreak > 0.0) {
@@ -290,31 +297,43 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
         vec3 farUv = vec3(stretched.x, shapeUv.y * params.noise.x, stretched.y) / params.noise.x;
         shape = mix(shape, ShapeValue(textureLod(shapeVolume, farUv / kLargeShapeScale + kLargeShapeOffset, 0.0)), farStreak);
     }
-    // Lower-core solidity bias keeps cluster interiors and shadow footprints free of Worley valley holes.
-    float hNormEst = Saturate(heightFraction / max(hMax, 0.14));
-    float coreSolid = smoothstep(0.24, 0.50, wCov) * (1.0 - smoothstep(0.18, 0.58, hNormEst)) * 0.44;
-    shape = Saturate(shape + coreSolid);
 
-    // Gentle macro condensation base plane with strongly domed cauliflower turret tops.
+    // Gentle macro condensation base plane with 2D-monotonic domed cauliflower turret tops.
     float baseShift = clamp((0.5 - shapeLarge) * params.structure2.z * 0.08, -0.005, 0.008);
     baseShift += clamp((0.5 - shapeMid) * params.structure3.z * 0.04, 0.0, 0.01);
     float roundBottom = smoothstep(baseShift, baseShift + params.heightShape.x, heightFraction);
-    float turretMod = clamp(0.62 + 0.56 * shapeMid, 0.42, 1.08);
-    float localTop = clamp(hMax * turretMod * mix(1.0, kFarTopScale, farStreak), 0.16, 0.98);
     float roundTop = 1.0 - smoothstep(localTop * 0.74, localTop, heightFraction);
 
     float rampBottom = heightFraction * Saturate(Remap(heightFraction, 0.0, params.heightShape.z, 0.0, 1.0));
     float rampTop = Saturate(Remap(heightFraction, params.heightShape.w, 1.0, 1.0, 0.0));
     densityFactor = params.density.x * rampBottom * rampTop * wm.a * 2.0;
 
-    // Linear body; pyramidal base pedestal widens shared flat bottoms while dome taper sculpts turrets.
-    float hNorm = Saturate(heightFraction / max(localTop, 0.14));
+    // Cap outer-shell coverage, enforce a pinhole-free interior column floor, then sculpt florets.
     float basePedestal = 1.0 + 0.18 * (1.0 - smoothstep(0.05, 0.26, heightFraction));
     float domeTaper = 1.0 - 0.56 * smoothstep(0.20, 1.0, hNorm);
-    float effCoverage = Saturate(wCov * basePedestal * domeTaper);
+    float rawEff = Saturate(wCov * basePedestal * domeTaper);
+    float effCoverage = min(rawEff, 0.66);
     float threshold = max(1.0 - effCoverage, params.structure3.y);
     float rampEnd = params.structure3.w > 0.0 ? min(threshold + params.structure3.w, 1.0) : 1.0;
-    return Saturate(Remap(shape * roundBottom * roundTop, threshold, rampEnd, 0.0, 1.0));
+    float body = Saturate(Remap(shape * roundBottom * roundTop, threshold, rampEnd, 0.0, 1.0));
+    float coreFloor = smoothstep(0.26, 0.52, wCov) * smoothstep(0.03, 0.12, hNorm) * (1.0 - smoothstep(0.48, 0.72, hNorm)) * 0.48;
+    body = max(body, coreFloor);
+    float crownGate = smoothstep(0.08, 0.24, hNorm) * (1.0 - smoothstep(18000.0, 52000.0, fromEyeLength));
+    float shellExposure = max(smoothstep(0.32, 0.68, hNorm), 1.0 - smoothstep(0.32, 0.68, wCov));
+    float floretWeight = crownGate * (0.35 + 0.65 * shellExposure);
+    if (floretWeight > 0.02 && body > 0.0) {
+        float convexFloret = 0.45 * shapeSample.b + 0.55 * shapeSample.a;
+        if (gPrimaryRay && fromEyeLength < 14000.0 && body > 0.05 && body < 0.88) {
+            float nearFloret = (1.0 - smoothstep(9000.0, 14000.0, fromEyeLength))
+                * smoothstep(0.05, 0.18, body) * (1.0 - smoothstep(0.68, 0.88, body));
+            vec4 flA = textureLod(shapeVolume, shapeUv * 1.25 + vec3(0.23, 0.11, 0.37), 0.0);
+            convexFloret = mix(convexFloret, flA.g * 0.6 + flA.b * 0.4, 0.50 * nearFloret);
+        }
+        float floretCarve = (1.0 - convexFloret) * 0.52 * floretWeight;
+        body = Saturate(Remap(body, floretCarve, 1.0, 0.0, 1.0));
+        body = max(body, coreFloor * 0.75);
+    }
+    return body;
 }
 
 float CloudCurve(float body)
@@ -353,8 +372,10 @@ float CloudDetail(vec3 position, float heightFraction, float shape, float densit
         vec4 fn = textureLod(detailVolume, world * kFineDetailScale / params.noise.y + 0.31, 0.0);
         erosion = mix(erosion, 1.0 - (fn.g * 0.5 + fn.a * 0.5), fineWeight * 0.5);
     }
-    // Keep flat bases and lower interiors solid while sculpting upper crowns and vaporous base rims.
-    float crownSculpt = params.structure2.x * smoothstep(0.14, 0.42, heightFraction);
+    // Clamp fringe erosion amplitude so thin outer edges never shatter into isolated crumbs.
+    erosion = min(erosion, 0.34 + 0.58 * shape);
+    // Sculpt upper crowns and soft mamma undersides from hNorm while keeping cores solid.
+    float crownSculpt = params.structure2.x * smoothstep(0.10, 0.32, gCloudHNorm) + 0.16 * (1.0 - smoothstep(0.0, 0.14, gCloudHNorm));
     float shellMask = mix(crownSculpt, 1.0, 1.0 - smoothstep(0.08, 0.58, shape));
     erosion *= params.noise.z * detailAmount * shellMask;
     return CloudCurve(Saturate(Remap(shape, erosion, 1.0, 0.0, 1.0))) * densityFactor;
@@ -366,8 +387,11 @@ float CloudDensityAt(vec3 position, float detailAmount)
     float horizontalSquared = dot(position.xz - params.eyeAndPlanetRadius.xz, position.xz - params.eyeAndPlanetRadius.xz);
     float altitude = Altitude(horizontalSquared, position.y);
     float h = Saturate((altitude - params.layer.x) / max(params.layer.y - params.layer.x, kMinWidth));
+    bool wasPrimary = gPrimaryRay;
+    gPrimaryRay = false;
     float factor;
     float shape = CloudShape(position, h, factor);
+    gPrimaryRay = wasPrimary;
     return CloudDetail(position, h, shape, factor, detailAmount);
 }
 
@@ -402,6 +426,7 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
     bool coarse = true;
     uint emptyRun = 0u;
     float coarseHitT = 0.0;
+    float lastCoarseStep = stepLength;
     // The sun march and the sky occlusion run every few lit samples; the samples in between blend the two
     // nearest results, so the light has no steps along the ray.
     bool sunLit = dot(sunRadiance, sunRadiance) > 0.0;
@@ -415,6 +440,7 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
     float skyVisibilityB = 1.0;
     float sunOpticalDepth = 0.0;
     float skyVisibility = 1.0;
+    gPrimaryRay = true;
 
     for (uint i = 0u; i < maxSteps && t < tEnd && transmittance > cutoff; ++i) {
         stepLength = (t + stepOffset) * rayGrowth;
@@ -432,17 +458,20 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
                 coarseHitT = t;
                 lightPrimed = false;
                 if (i > 0u) {
-                    float tMid = max(t - 0.5 * coarseLength, tStart);
+                    float tBack = max(t - lastCoarseStep, tStart);
+                    float tMid = max(t - 0.5 * lastCoarseStep, tStart);
                     vec3 midPos = eye + rd * tMid;
                     float midAlt = Altitude(horizontalScale * tMid * tMid, midPos.y);
                     float midH = Saturate((midAlt - params.layer.x) / (params.layer.y - params.layer.x));
                     float midFactor;
                     float midShape = CloudShape(midPos, midH, midFactor);
-                    t = (midShape * midFactor > 0.0) ? max(t - coarseLength, tStart) : tMid;
+                    bool hitMid = (midShape * midFactor > 0.0);
+                    t = hitMid ? tBack : tMid;
                     continue;
                 }
             } else {
-                t += gWeatherClear ? coarseLength * params.skip.x : coarseLength;
+                lastCoarseStep = gWeatherClear ? coarseLength * params.skip.x : coarseLength;
+                t += lastCoarseStep;
                 continue;
             }
         }
@@ -454,6 +483,7 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
                 emptyRun++;
                 if (emptyRun >= emptyToCoarse) {
                     coarse = true;
+                    lastCoarseStep = stepLength;
                 }
             }
             t += stepLength;
@@ -479,6 +509,7 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
         bool needSun = sunLit && dot(sampleSun, sampleSun) > 0.0;
         if (needSun || needSky) {
             vec3 nextPosition = position + rd * (stepLength * float(lightStride));
+            gPrimaryRay = false;
             if (!lightPrimed) {
                 lightPrimed = true;
                 lightAge = 0u;
@@ -493,6 +524,7 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
                 sunDepthB = needSun ? SunOpticalDepth(nextPosition, sunDirection) : 0.0;
                 skyVisibilityB = needSky ? SkyVisibility(nextPosition) : 1.0;
             }
+            gPrimaryRay = true;
             float blend = smoothstep(0.0, 1.0, float(lightAge) / float(lightStride));
             float minSunDepth = min(sunDepthA, sunDepthB);
             float sunTrans = mix(exp(-(sunDepthA - minSunDepth)), exp(-(sunDepthB - minSunDepth)), blend);
@@ -569,6 +601,7 @@ float CloudNearShadowDensity(vec3 position)
     vec2 offset = position.xz - params.eyeAndPlanetRadius.xz;
     float altitude = Altitude(dot(offset, offset), position.y);
     float h = Saturate((altitude - params.layer.x) / max(params.layer.y - params.layer.x, kMinWidth));
+    gPrimaryRay = false;
     float factor;
     float shape = CloudShape(position, h, factor);
     if (shape * factor <= 0.0) {
@@ -645,11 +678,12 @@ void WriteCloudShadow()
     int raySteps = isNear ? max(steps, 12) : steps;
     float span = sTop - sBottom;
     float segment = span / float(raySteps);
-    float along = 0.5;
     int tapCount = softness > 1e-4 ? 4 : 1;
     float blurScale = softness * texelM;
     float opticalDepth = 0.0;
+    gPrimaryRay = false;
     for (int tap = 0; tap < tapCount; ++tap) {
+        float along = (tapCount > 1) ? (0.125 + 0.25 * float(tap)) : 0.5;
         vec2 tapXz = xz + (tapCount > 1 ? kShadowRgss[tap] * blurScale : vec2(0.0));
         float tapDepth = 0.0;
         if (isNear) {

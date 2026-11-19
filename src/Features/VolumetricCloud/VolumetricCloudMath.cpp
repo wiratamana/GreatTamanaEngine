@@ -219,25 +219,40 @@ float CloudDomedRoofHeight(
     return std::max(hMax, peakFloor);
 }
 
-float CloudCoreSolidBias(float weatherCoverageProduct, float heightFraction, float hMax) noexcept
+float CloudCoreFloor(float weatherCoverageProduct, float hNorm) noexcept
 {
     const float wCov = Saturate(weatherCoverageProduct);
-    const float safeMax = std::isfinite(hMax) ? std::max(hMax, 0.14f) : 0.14f;
-    const float hNormEst = Saturate(heightFraction / safeMax);
-    return SmoothStep(0.24f, 0.50f, wCov) * (1.0f - SmoothStep(0.18f, 0.58f, hNormEst)) * 0.44f;
+    const float h = Saturate(hNorm);
+    return SmoothStep(0.26f, 0.52f, wCov) * SmoothStep(0.03f, 0.12f, h) * (1.0f - SmoothStep(0.48f, 0.72f, h)) * 0.48f;
 }
 
-float CloudTurretLocalTop(float hMax, float shapeMid, float farStreak) noexcept
+float CloudTurretLocalTop(float hMax, float dome2DA, float dome2DB, float shapeLod, float farStreak) noexcept
 {
     const float safeMax = std::isfinite(hMax) ? std::max(hMax, 0.0f) : 0.0f;
-    const float turretMod = std::clamp(0.62f + 0.56f * Saturate(shapeMid), 0.42f, 1.08f);
+    const float lod = Saturate(shapeLod);
+    const float a = Saturate(dome2DA);
+    const float b = Saturate(dome2DB);
+    const float turret2D = a + (0.50f * a + 0.50f * b - a) * (1.0f - lod);
+    const float turretMod2D = std::clamp(0.72f + 0.38f * turret2D, 0.72f, 1.06f);
     const float farScale = 1.0f + (0.4f - 1.0f) * Saturate(farStreak);
-    return std::clamp(safeMax * turretMod * farScale, 0.16f, 0.98f);
+    return std::clamp(safeMax * turretMod2D * farScale, 0.16f, 0.98f);
 }
 
-float CloudCrownShellMask(float heightFraction, float shape, float bodyErosion) noexcept
+float CloudFloretWeight(float hNorm, float weatherCoverageProduct, float distanceFromEyeM) noexcept
 {
-    const float crownSculpt = Saturate(bodyErosion) * SmoothStep(0.14f, 0.42f, heightFraction);
+    const float h = Saturate(hNorm);
+    const float wCov = Saturate(weatherCoverageProduct);
+    const float dist = std::isfinite(distanceFromEyeM) ? std::max(distanceFromEyeM, 0.0f) : 0.0f;
+    const float crownGate = SmoothStep(0.08f, 0.24f, h) * (1.0f - SmoothStep(18000.0f, 52000.0f, dist));
+    const float shellExposure = std::max(SmoothStep(0.32f, 0.68f, h), 1.0f - SmoothStep(0.32f, 0.68f, wCov));
+    return crownGate * (0.35f + 0.65f * shellExposure);
+}
+
+float CloudCrownShellMask(float hNorm, float shape, float bodyErosion) noexcept
+{
+    const float h = Saturate(hNorm);
+    const float crownSculpt = Saturate(bodyErosion) * SmoothStep(0.10f, 0.32f, h)
+        + 0.16f * (1.0f - SmoothStep(0.0f, 0.14f, h));
     const float outerShell = 1.0f - SmoothStep(0.08f, 0.58f, shape);
     return crownSculpt + (1.0f - crownSculpt) * outerShell;
 }
@@ -327,8 +342,9 @@ double CloudWindPeriodM(const VolumetricCloudSettings& safe) noexcept
     // Float32 wind offsets stay below 0.1 m per step up to 1,048,576 m; every world-scrolled tile must wrap cleanly.
     constexpr std::uint64_t kMaxPeriodM = 1048576ull;
     std::uint64_t period = 1;
-    for (const float tile : { safe.weatherScaleM, safe.weatherScaleM * kCloudFarWeatherTileScale, safe.shapeScaleM,
-             safe.shapeScaleM * kCloudLargeShapeScale, safe.shapeScaleM / kCloudSmallShapeScale,
+    for (const float tile : { safe.weatherScaleM, safe.weatherScaleM * kCloudFarWeatherTileScale,
+             safe.weatherScaleM / kCloudTurretWeatherScale, safe.shapeScaleM,
+             safe.shapeScaleM * kCloudLargeShapeScale, safe.shapeScaleM / kCloudMidFloretScale,
              safe.shapeScaleM * kCloudFarZoom, safe.detailScaleM, safe.curlScaleM }) {
         const std::uint64_t metres = static_cast<std::uint64_t>(std::max(std::llround(tile), 1ll));
         period = period / std::gcd(period, metres) * metres;
@@ -749,9 +765,11 @@ VolumetricCloudResolveParamsGpu MakeVolumetricCloudResolveParams(const Volumetri
     p.sizes[3] = resolve.lowHeight;
     const float spoke = std::isfinite(safe.sunRaysSpoke) ? std::clamp(safe.sunRaysSpoke, 0.0f, 4.0f) : VolumetricCloudSettings{}.sunRaysSpoke;
     const float rayFade = std::isfinite(resolve.sunRayFade) ? std::clamp(resolve.sunRayFade, 0.0f, 1.0f) : 0.0f;
+    const float safeSunUp = std::isfinite(facts.sunDirection.y) ? facts.sunDirection.y : 0.0f;
+    const float spokeZenithFade = 1.0f - SmoothStep(0.75f, 0.92f, safeSunUp);
     p.sunRay[0] = resolve.sunUv[0];
     p.sunRay[1] = resolve.sunUv[1];
-    p.sunRay[2] = (std::isfinite(safe.sunRays) && safe.sunRays > 0.0f) ? spoke * rayFade : 0.0f;
+    p.sunRay[2] = (std::isfinite(safe.sunRays) && safe.sunRays > 0.0f) ? spoke * rayFade * spokeZenithFade : 0.0f;
     p.sunRay[3] = safe.sunStar * resolve.sunRayFade;
     for (int i = 0; i < 3; ++i) {
         p.sunRayColor[i] = resolve.sunColor[i];
@@ -842,7 +860,9 @@ VolumetricCloudSunShaftsParamsGpu MakeCloudSunShaftsParams(
     const CloudPerspectivePlanes depthPlanes = ExtractPerspectiveNearFar(facts.viewProjection);
     const float aspect = static_cast<float>(std::max(facts.viewWidth, 1u)) / static_cast<float>(std::max(facts.viewHeight, 1u));
     const float frame = static_cast<float>(facts.frameIndex & 0xFFFFFu);
-    const float intensity = inputsFinite ? safe.sunRays : 0.0f;
+    float intensity = inputsFinite ? safe.sunRays : 0.0f;
+    float contrast = safe.sunRaysContrast;
+    float decay = safe.sunRaysDecay;
     float sunUv[2] = { 0.5f, 0.5f };
     float fade = 0.0f;
     float active = 0.0f;
@@ -851,6 +871,11 @@ VolumetricCloudSunShaftsParamsGpu MakeCloudSunShaftsParams(
         const float dirLenSq = LengthSquared(facts.sunDirection);
         if (std::isfinite(dirLenSq) && dirLenSq > 1e-12f) {
             const Vec3 toSun = facts.sunDirection / std::sqrt(dirLenSq);
+            const float zenithRayFade = 1.0f - 0.65f * SmoothStep(0.82f, 0.98f, toSun.y);
+            const float zenithSoft = SmoothStep(0.88f, 0.98f, toSun.y);
+            intensity *= zenithRayFade;
+            contrast = std::max(0.2f, contrast * (1.0f - 0.35f * zenithSoft));
+            decay = std::min(decay * (1.0f + 0.80f * zenithSoft), 6.0f);
             const Vec4 clip = facts.viewProjection * Vec4(toSun.x * 1000.0f, toSun.y * 1000.0f, toSun.z * 1000.0f, 1.0f);
             if (std::isfinite(clip.x) && std::isfinite(clip.y) && std::isfinite(clip.z) && std::isfinite(clip.w)
                 && clip.w > 1e-3f) {
@@ -872,10 +897,10 @@ VolumetricCloudSunShaftsParamsGpu MakeCloudSunShaftsParams(
     p.sunUvAndReachAndIntensity[1] = sunUv[1];
     p.sunUvAndReachAndIntensity[2] = safe.sunRaysLength;
     p.sunUvAndReachAndIntensity[3] = intensity;
-    p.decayTapsAnisoContrast[0] = safe.sunRaysDecay;
+    p.decayTapsAnisoContrast[0] = decay;
     p.decayTapsAnisoContrast[1] = safe.sunRaysTaps;
     p.decayTapsAnisoContrast[2] = safe.sunRaysAnisotropy;
-    p.decayTapsAnisoContrast[3] = safe.sunRaysContrast;
+    p.decayTapsAnisoContrast[3] = contrast;
     p.sunColorAndHazeMix[0] = inputsFinite ? std::clamp(facts.sunColor.x, 0.0f, kCloudMaxSourceLuma) : 0.0f;
     p.sunColorAndHazeMix[1] = inputsFinite ? std::clamp(facts.sunColor.y, 0.0f, kCloudMaxSourceLuma) : 0.0f;
     p.sunColorAndHazeMix[2] = inputsFinite ? std::clamp(facts.sunColor.z, 0.0f, kCloudMaxSourceLuma) : 0.0f;

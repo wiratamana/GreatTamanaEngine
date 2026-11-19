@@ -73,7 +73,7 @@ struct VolumetricCloudSettings {
     // Detail noise: billowy (rounded lobes) and wispy (fibres) channels, pushed around by a curl noise.
     float curlAmountM = 95.0f;  // How far the curl noise moves the detail lookup, metres.
     float curlScaleM = 3500.0f; // World size of one tile of the curl noise.
-    float wispiness = 0.30f;    // Share of the wispy (fibre) detail near the base and thin fringes; 0 = only billows.
+    float wispiness = 0.16f;    // Share of the wispy (fibre) detail near the base and thin fringes; 0 = only billows.
     float fineDetail = 0.15f;    // Weight of a second, finer fetch of the detail noise; 0 = off.
     float detailFadeDistM = 52000.0f;
     // Far field. Starts at farWeatherStartM and is full at twice that distance.
