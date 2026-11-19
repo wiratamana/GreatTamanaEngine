@@ -226,6 +226,7 @@ const float kPuffWeightMedium = 0.40;
 const float kPuffWeightFine = 0.40;
 // Share of the roof lump amplitude that small low clouds keep.
 const float kLumpSmallCloudFloor = 0.80;
+const float kDomeTaper = 0.90;
 const float kDomeTaperStart = 0.0;
 // Rays this far above the highest roof of a column take the clear-air stride.
 const float kRoofSkipMargin = 0.10;
@@ -387,7 +388,8 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
             + kPuffWeightMedium * wMedium * LumpDome(shapeSample.b, kPuffInvR2)
             + kPuffWeightFine * wFine * LumpDome(shapeSample.a, kPuffInvR2))
             / (kPuffWeightLarge + kPuffWeightMedium * wMedium + kPuffWeightFine * wFine);
-        float skin = Saturate((margin - kSkinCarve * (1.0 - puff)) / kSkinEdge) * smoothstep(0.06, 0.16, margin);
+        float skinCarve = mix(kSkinCarveSmall, kSkinCarveBig, gCloudSize);
+        float skin = Saturate((margin - skinCarve * (1.0 - puff)) / kSkinEdge) * smoothstep(0.06, 0.16, margin);
         body += skin * (1.0 - farStreak);
     }
     return Saturate(body);
