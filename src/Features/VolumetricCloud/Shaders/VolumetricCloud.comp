@@ -221,9 +221,14 @@ const float kSkinCarveBig = 0.72;
 const float kSkinCarveSmall = 0.90;
 const float kSkinEdge = 0.07;
 const float kPuffInvR2 = 2.2;
+const float kPuffVertStretch = 1.30;
+const float kPuffPerlinWarp = 0.18;
+const float kPuffCrossMix = 0.25;
 const float kPuffWeightLarge = 0.20;
 const float kPuffWeightMedium = 0.40;
 const float kPuffWeightFine = 0.40;
+const float kFootOuterTaper = 0.28;
+const float kFootOuterLean = 0.14;
 // Share of the roof lump amplitude that small low clouds keep.
 const float kLumpSmallCloudFloor = 0.80;
 const float kDomeTaper = 0.90;
@@ -251,6 +256,15 @@ const float kLumpInvR2Small = 2.55;
 // Lower bounds of the base fade heights (fractions of the layer) so no single height shows as a shelf.
 const float kMinBaseRound = 0.18;
 const float kMinDensityRamp = 0.50;
+// Close-cloud underside relief, macro-shape detail gate and low-density cull thresholds.
+const float kBellyUndulFrac = 0.15;
+const float kBellyDomeCenter = 0.555;
+const float kBellyDistStartM = 2000.0;
+const float kBellyDistEndM = 4400.0;
+const float kErosionShapeMin = 0.15;
+const float kErosionShapeFull = 0.28;
+const float kDensityCull = 0.04;
+const float kDensityCullTop = 0.08;
 
 // Maps an inverted-Worley channel to a convex spherical cap with crisp cell-border creases.
 float LumpDome(float v, float invR2)
@@ -319,6 +333,7 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float ampFrac = (kLumpAmpLargeM + kLumpAmpMedM + kLumpAmpSmallM) / thickness * sizeAmp;
     float lump = 0.5;
     float cellSignal = 0.0;
+    float bellySignal = 0.0;
     if (ampFrac * lodKeep > 0.003) {
         vec2 lumpXz = position.xz + wind + 0.35 * params.structure.zw;
         vec4 lumpSample = textureLod(shapeVolume, vec3(lumpXz.x, kLumpSliceM, lumpXz.y) / params.noise.x, 0.0);
@@ -326,6 +341,8 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
         float dLarge = LumpDome(lumpSample.g, kLumpInvR2Large);
         float dMed = LumpDome(lumpSample.b, kLumpInvR2Med);
         float dSmall = LumpDome(lumpSample.a, kLumpInvR2Small);
+        float bellyDome = 0.65 * dLarge + 0.35 * dMed;
+        bellySignal = clamp((kBellyDomeCenter - bellyDome) * 2.4 + 0.20 * cellSignal, -1.0, 1.0) * lodKeep;
         float wSmall = 1.0 - smoothstep(0.0, 0.45, gShapeLod);
         float wMed = 1.0 - smoothstep(0.25, 0.80, gShapeLod);
         float support = 0.35 + 0.65 * dLarge;
@@ -351,7 +368,8 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     }
 
     float altitude = params.layer.x + heightFraction * (params.layer.y - params.layer.x);
-    vec3 shapeUv = vec3(position.x + wind.x + shear.x, altitude / params.structure2.y, position.z + wind.y + shear.y) / params.noise.x;
+    float baseVertY = altitude / params.structure2.y;
+    vec3 shapeUv = vec3(position.x + wind.x + shear.x, baseVertY / kPuffVertStretch, position.z + wind.y + shear.y) / params.noise.x;
     vec4 shapeSample = textureLod(shapeVolume, shapeUv, 0.0);
     // Cross-fade to a zoomed world-fixed copy far away so fine shape lobes never alias into dots.
     float zoomMix = smoothstep(kZoomStartM, kZoomEndM, fromEyeLength);
@@ -376,19 +394,26 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
         const vec2 crossAxis = vec2(0.0, 1.0);
         vec2 world2 = shapeUv.xz * params.noise.x;
         vec2 stretched = windAxis * (dot(world2, windAxis) / kFarStreakAlong) + crossAxis * (dot(world2, crossAxis) / kFarStreakAcross);
-        vec3 farUv = vec3(stretched.x, shapeUv.y * params.noise.x, stretched.y) / params.noise.x;
+        vec3 farUv = vec3(stretched.x, baseVertY, stretched.y) / params.noise.x;
         shape = mix(shape, ShapeValue(textureLod(shapeVolume, farUv / kLargeShapeScale + kLargeShapeOffset, 0.0)), farStreak);
     }
 
-    // Gentle macro condensation base plane with crisp rounded cauliflower dome tops.
+    // Flat condensation base at distance; close big undersides undulate softly around the mean plane.
+    float bellyMask = smoothstep(0.35, 0.80, gCloudSize)
+        * smoothstep(0.12, 0.42, colFoot)
+        * (1.0 - smoothstep(kBellyDistStartM, kBellyDistEndM, fromEyeLength));
+    float bellyWave = bellySignal * bellyMask;
+    float baseUndul = kBellyUndulFrac * min(localTop, 0.52) * bellyWave;
     float baseShift = clamp((0.5 - shapeLarge) * params.structure2.z * 0.08, -0.005, 0.008);
-    baseShift += clamp((0.5 - shapeMid) * params.structure3.z * 0.04, 0.0, 0.01);
-    float roundBottom = smoothstep(baseShift, baseShift + max(params.heightShape.x, kMinBaseRound), heightFraction);
+    baseShift += clamp((0.5 - shapeMid) * params.structure3.z * 0.04, 0.0, 0.01) + baseUndul;
+    float baseSpan = max(params.heightShape.x, kMinBaseRound) * (1.0 + kBellyUndulFrac * bellyWave);
+    float roundBottom = smoothstep(baseShift, baseShift + baseSpan, heightFraction);
     float roundTop = 1.0 - smoothstep(localTop * 0.83, localTop, heightFraction);
 
     float rampSpan = max(params.heightShape.z, kMinDensityRamp) * 1.6;
-    float rampT = Saturate(heightFraction / rampSpan);
-    float rampBottom = heightFraction * (2.0 - rampT) * rampT;
+    float hRamp = max(heightFraction - max(baseUndul, 0.0) - min(baseUndul, 0.0) * smoothstep(0.0, 0.04, heightFraction), 0.0);
+    float rampT = Saturate(hRamp / rampSpan);
+    float rampBottom = hRamp * (2.0 - rampT) * rampT;
     float rampTop = Saturate(Remap(heightFraction, params.heightShape.w, 1.0, 1.0, 0.0));
     densityFactor = params.density.x * rampBottom * rampTop * wm.a * 2.0;
 
@@ -412,15 +437,20 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
         body = max(shellBody, coreFloor) * farStreak;
     }
     if (farStreak < 0.999) {
-        // Skin model: solid deep inside, carved by round Worley puffs near the surface (0 at the skin, 1 deep inside).
+        // Skin model: solid inside, outer footprint leans inward, surface carved by warped Worley puffs.
         float footMargin = Saturate((rawEff - kSkinCoverage) / kFootRamp);
+        footMargin *= smoothstep(kFootOuterLean * smoothstep(0.05, 0.75, hNorm), kFootOuterTaper, footMargin);
         float roofMargin = Saturate((localTop - heightFraction) / kRoofRamp);
         float margin = min(min(footMargin, roofMargin), roundBottom);
         float wMedium = 1.0 - smoothstep(0.25, 0.80, gShapeLod);
         float wFine = 1.0 - smoothstep(0.0, 0.45, gShapeLod);
-        float puff = (kPuffWeightLarge * LumpDome(shapeSample.g, kPuffInvR2)
-            + kPuffWeightMedium * wMedium * LumpDome(shapeSample.b, kPuffInvR2)
-            + kPuffWeightFine * wFine * LumpDome(shapeSample.a, kPuffInvR2))
+        float puffWarp = (shapeSample.r - 0.5) * kPuffPerlinWarp;
+        float puffG = Saturate(mix(shapeSample.g, shapeSample.b, kPuffCrossMix) + puffWarp);
+        float puffB = Saturate(mix(shapeSample.b, shapeSample.a, kPuffCrossMix) + puffWarp);
+        float puffA = Saturate(mix(shapeSample.a, shapeSample.g, kPuffCrossMix) + puffWarp);
+        float puff = (kPuffWeightLarge * LumpDome(puffG, kPuffInvR2)
+            + kPuffWeightMedium * wMedium * LumpDome(puffB, kPuffInvR2)
+            + kPuffWeightFine * wFine * LumpDome(puffA, kPuffInvR2))
             / (kPuffWeightLarge + kPuffWeightMedium * wMedium + kPuffWeightFine * wFine);
         puff = mix(puff, supportedLump, kCrownPuffCoherence * smoothstep(0.62, 0.82, hNorm));
         float skinCarve = mix(kSkinCarveSmall, kSkinCarveBig, gCloudSize);
@@ -448,14 +478,18 @@ float CloudDetail(vec3 position, float heightFraction, float shape, float densit
     if (shape >= 0.995) {
         return CloudCurve(shape) * densityFactor;
     }
-    // Detail only erodes established macro body; thin outer skin below ~0.08 fades out.
+    // Zero detail erosion below kErosionShapeMin; thin outer skin fades and low density culls cleanly.
     float bodyGate = smoothstep(0.02, 0.085, shape);
     float cullScale = max(densityFactor, 0.05);
     float fromEyeLength = length(position.xz - params.eyeAndPlanetRadius.xz);
+    float nearFloor = kDensityCull * (1.0 - smoothstep(15000.0, 30000.0, fromEyeLength));
+    float cullLo = max(nearFloor, kDensityCull * cullScale);
+    float cullHi = max(nearFloor * (kDensityCullTop / kDensityCull), kDensityCullTop * cullScale);
+    detailAmount *= smoothstep(kErosionShapeMin, kErosionShapeFull, shape);
     detailAmount *= 1.0 - smoothstep(18000.0, 52000.0, fromEyeLength);
     if (detailAmount <= 0.001) {
         float farDensity = CloudCurve(shape * bodyGate) * densityFactor;
-        return farDensity * smoothstep(0.025 * cullScale, 0.065 * cullScale, farDensity);
+        return farDensity * smoothstep(cullLo, cullHi, farDensity);
     }
     vec2 wind = params.weather.yz;
     float altitude = params.layer.x + heightFraction * (params.layer.y - params.layer.x);
@@ -486,7 +520,7 @@ float CloudDetail(vec3 position, float heightFraction, float shape, float densit
     erosion *= params.noise.z * detailAmount * shellMask * crownBoost;
     erosion = min(erosion, mix(1.0, kCrownErosionShapeMax * shape, smoothstep(0.74, 0.84, gCloudHNorm)));
     float result = CloudCurve(Saturate(Remap(shape, erosion, 1.0, 0.0, 1.0)) * bodyGate) * densityFactor;
-    return result * smoothstep(0.025 * cullScale, 0.065 * cullScale, result);
+    return result * smoothstep(cullLo, cullHi, result);
 }
 
 // Full density at a world position, for light marching.

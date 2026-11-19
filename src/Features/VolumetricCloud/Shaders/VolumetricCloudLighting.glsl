@@ -27,7 +27,7 @@ const vec3 kCrownApricotTint = vec3(1.18, 0.95, 0.68);
 const float kCrownApricotHeightStart = 0.40;
 const float kCrownApricotHeightEnd = 0.78;
 const float kCrownApricotTauDecay = 1.60;
-// Light-path extinction, octave attenuation, mid-tone shelf band, and deep multi-scatter damping.
+// Light-path extinction, octave attenuation, smooth mid-tau bell, and deep multi-scatter damping.
 const float kSunExtinctionScale = 0.44;
 const float kOctaveAttenuationScale = 0.75;
 const float kMultiScatterDepthScale = 1.35;
@@ -36,15 +36,17 @@ const float kMultiScatterIsoMix = 0.20;
 const float kMultiScatterDeepTauStart = 0.85;
 const float kMultiScatterDeepTauEnd = 3.80;
 const float kMultiScatterDeepDamp = 0.22;
-const float kMidScatterTransLow = 0.12;
-const float kMidScatterTransHigh = 0.45;
-const float kMidScatterTransFeather = 0.06;
-const float kMidScatterHeightStart = 0.24;
-const float kMidScatterHeightEnd = 0.36;
+const float kMidScatterTauDecay = 0.85;
+const float kMidScatterBellNorm = 2.31;
+const float kMidScatterHeightStart = 0.22;
+const float kMidScatterHeightEnd = 0.44;
 const float kMidScatterGain = 0.18;
 const vec3 kMidScatterTint = vec3(1.07, 1.00, 0.90);
 const float kMidBandNeutralMix = 0.58;
 const float kPowderBlendScale = 0.35;
+const float kPowderDensityDecay = 3.0;
+const float kPowderTauDecay = 1.6;
+const float kPowderDensityFadeEnd = 0.30;
 // Direct sun gain and side-scatter floor on the upper half for warm-white sunlit domes.
 const float kUpperDirectSunGain = 1.58;
 const float kUpperSunStart = 0.28;
@@ -66,22 +68,42 @@ const float kBacklitCoreTauStart = 1.50;
 const float kBacklitCoreTauEnd = 4.20;
 const float kBacklitCoreSunDamp = 0.30;
 const float kBacklitCoreAmbDamp = 0.16;
-// Smooth macro-density and optical-depth ambient occlusion for puff crevices and thick cores.
+// Two-octave low-extinction scatter and sky-bounce gradient for shaded thick slabs.
+const float kThickSlabExtinctionScale = 0.35;
+const float kThickSlabSecondOctave = 0.58;
+const float kThickSlabScatterGain = 0.26;
+const vec3 kThickSlabWarmTint = vec3(1.08, 0.99, 0.88);
+const float kThickSlabSkyBounce = 0.20;
+const float kThickSlabTauPivotSq = 4.0;
+const float kThickSlabViewStart = 0.24;
+const float kThickSlabViewEnd = 0.46;
+// Macro-density and optical-depth ambient occlusion for shadowed concavities, floored at belly luma.
 const float kCreviceBodyStart = 0.42;
 const float kCreviceBodyEnd = 0.94;
 const float kCreviceTauDecay = 0.28;
 const float kCreviceSkySpan = 0.75;
-const float kCreviceDensityScale = 0.70;
-const float kCreviceAoPower = 1.50;
-const float kCreviceAoStrength = 0.85;
+const float kCreviceDensityScale = 0.58;
+const float kCreviceAoPower = 1.30;
+const float kCreviceAoStrength = 0.70;
 const float kCreviceHeightStart = 0.26;
-const float kCreviceHeightEnd = 0.36;
-// Periwinkle-slate belly shade, low-sun violet-slate shadow cast, and upper-crease ambient tint.
+const float kCreviceHeightEnd = 0.40;
+const float kCreviceDensityGateStart = 0.15;
+const float kCreviceDensityGateEnd = 0.55;
+const float kCreviceTopStart = 0.58;
+const float kCreviceTopEnd = 0.70;
+const float kCreviceTopKeep = 0.30;
+const float kCreviceLitTransStart = 0.24;
+const float kCreviceLitTransEnd = 0.46;
+const float kCreviceLitKeep = 0.30;
+// Periwinkle-slate belly shade, low-sun 3500K mid-tone warmth, and upper-crease ambient tint.
 const vec3 kShadeTint = vec3(0.89, 0.96, 1.07);
 const vec3 kBellyCyanSlate = vec3(0.81, 0.91, 1.21);
 const float kBellyCoolMix = 0.72;
 const vec3 kLowSunVioletSlate = vec3(1.10, 0.88, 1.32);
 const float kLowSunVioletMix = 0.64;
+const vec3 kLowSunMidWarmTint = vec3(1.28, 0.97, 0.54);
+const float kLowSunMidWarmMix = 0.11;
+const float kLowSunMidTauDecay = 0.45;
 const vec3 kUpperCreaseTint = vec3(1.10, 1.01, 0.88);
 const float kUpperAmbientScale = 0.75;
 const float kBellyBaseFloor = 0.62;
@@ -97,13 +119,17 @@ const float kBaseSunFadeEnd = 0.46;
 const float kGroundBounceTop = 0.28;
 const float kGroundBounceScale = 0.075;
 const float kGroundBounceDecay = 1.15;
-// Masks forward scatter to thin optical depths and attenuates near-sun glare above tau 1.5.
+// Masks forward scatter to thin optical depths and damps near-sun glare smoothly across tau.
 const float kForwardHeightStart = 0.24;
 const float kForwardHeightEnd = 0.62;
 const float kForwardDepthDecay = 1.50;
-const float kThickGlareTauStart = 1.15;
-const float kThickGlareTauEnd = 1.85;
-const float kThickGlareDrop = 0.33;
+const float kThickGlareTauStart = 0.65;
+const float kThickGlareTauEnd = 2.45;
+const float kThickGlareDrop = 0.30;
+const float kThickGlarePhaseDrop = 0.22;
+const float kGlowRiseDecay = 2.20;
+const float kGlowFallDecay = 1.35;
+const float kGlowNorm = 1.25;
 // Soft knees let ordinary sunlit tops reach display white while preventing flat overhead blowout.
 const float kMultiScatterShoulder = 0.26;
 const float kScatterShoulder = 1.60;
@@ -225,7 +251,7 @@ vec3 SunScatter(float cosTheta, float opticalDepth, float heightFraction, float 
         if (cosTheta > 0.0) {
             float sidePhase = CloudPhase(0.0, eccentricity);
             phase = mix(sidePhase, rawPhase, forwardMask);
-            phase *= 1.0 - kThickGlareDrop * towardSun * towardSun * thickGlareGate * (1.0 - sideLiftMask);
+            phase *= 1.0 - kThickGlarePhaseDrop * towardSun * towardSun * thickGlareGate * (1.0 - sideLiftMask);
         }
         if (i == 0u) {
             phase = mix(phase, max(phase, kUpperSidePhaseFloor), sideLiftMask);
@@ -248,10 +274,8 @@ vec3 SunScatter(float cosTheta, float opticalDepth, float heightFraction, float 
     float deepMsGate = smoothstep(kMultiScatterDeepTauStart, kMultiScatterDeepTauEnd, opticalDepth);
     multiScatter *= 1.0 - kMultiScatterDeepDamp * deepMsGate;
     multiScatter = multiScatter / (1.0 + multiScatter / kMultiScatterShoulder);
-    float sunTrans = exp(-opticalDepth);
-    float midTransBand = smoothstep(kMidScatterTransLow - kMidScatterTransFeather, kMidScatterTransLow + kMidScatterTransFeather, sunTrans)
-        * (1.0 - smoothstep(kMidScatterTransHigh - kMidScatterTransFeather, kMidScatterTransHigh + kMidScatterTransFeather, sunTrans));
-    float midShelfMask = midTransBand * smoothstep(kMidScatterHeightStart, kMidScatterHeightEnd, heightFraction);
+    float midTransBell = opticalDepth * exp(-opticalDepth * kMidScatterTauDecay) * kMidScatterBellNorm;
+    float midShelfMask = midTransBell * smoothstep(kMidScatterHeightStart, kMidScatterHeightEnd, heightFraction);
     multiScatter *= vec3(1.0) + kMidScatterGain * kMidScatterTint * midShelfMask;
     vec3 scatter = singleScatter + multiScatter;
     scatter = scatter / (1.0 + scatter / kScatterShoulder);
@@ -290,6 +314,7 @@ vec3 CloudSourceRadiance(CloudLightInput s)
     float cosTheta = dot(s.viewDirection, s.sunDirection);
     float tau = s.sunOpticalDepth;
     float lightTau = tau * kSunExtinctionScale;
+    float sunLightTrans = exp(-lightTau);
     float towardSun = Saturate(cosTheta);
     float thickGlareDamp = 1.0 - kThickGlareDrop * smoothstep(kThickGlareTauStart, kThickGlareTauEnd, tau);
     float forwardHeight = smoothstep(kForwardHeightStart, kForwardHeightEnd, s.heightFraction);
@@ -298,17 +323,22 @@ vec3 CloudSourceRadiance(CloudLightInput s)
     float sunAlign = mix(kInteriorAlignAway, kInteriorAlignToward, 0.5 + 0.5 * cosTheta);
     float lowSun = 1.0 - smoothstep(kLowSunWarmthStart, kLowSunWarmthEnd, s.sunDirection.y);
     // Smooth macro height and sun-path optical-depth masks shade interiors and thick cores without detail noise.
-    float aboveBelly = smoothstep(0.22, 0.30, s.heightFraction);
-    float midLowerMask = aboveBelly * (1.0 - smoothstep(0.51, 0.59, s.heightFraction));
+    float aboveBelly = smoothstep(0.20, 0.38, s.heightFraction);
+    float midLowerMask = aboveBelly * (1.0 - smoothstep(0.46, 0.66, s.heightFraction));
     float deepCoreMask = aboveBelly * smoothstep(2.20, 5.00, tau);
     float interiorMacro = max(midLowerMask * smoothstep(kInteriorShadeTauStart, kInteriorShadeTauEnd, tau), deepCoreMask);
     float backlitCore = towardSun * smoothstep(kBacklitCoreTauStart, kBacklitCoreTauEnd, tau);
+    // Shaded thick undersides and backlit slabs receive a vertical and lit-edge multi-scatter gradient.
+    float closeSlab = smoothstep(kThickSlabViewStart, kThickSlabViewEnd, s.viewDirection.y);
+    float closeEdgeGrad = mix(0.35, 1.0, 1.0 - smoothstep(0.45, 0.78, s.viewDirection.y)) * mix(0.65, 1.0, 0.5 + 0.5 * cosTheta);
+    float backlitSlab = towardSun * smoothstep(0.20, 0.48, s.heightFraction) * (1.0 - 0.60 * smoothstep(0.54, 0.84, s.heightFraction));
+    float slabMask = max(backlitSlab, 0.85 * closeSlab * closeEdgeGrad);
     vec3 sun = vec3(0.0);
     if (dot(s.sunRadiance, s.sunRadiance) > 0.0) {
         vec3 scatter = SunScatter(cosTheta, tau, s.heightFraction, forwardMask);
-        float powder = 0.35 + 0.65 * (1.0 - exp(-3.5 * s.density));
+        float powder = 0.35 + 0.65 * (1.0 - exp(-kPowderDensityDecay * s.density)) * (1.0 - exp(-kPowderTauDecay * tau));
         float awayFromSun = Saturate(0.5 - 0.5 * cosTheta);
-        float powderWeight = params.lightMarch.w * kPowderBlendScale * smoothstep(0.0, 0.08, s.density) * awayFromSun * awayFromSun * (1.0 - towardSun);
+        float powderWeight = params.lightMarch.w * kPowderBlendScale * smoothstep(0.0, kPowderDensityFadeEnd, s.density) * awayFromSun * awayFromSun * (1.0 - towardSun);
         scatter *= mix(1.0, powder, powderWeight);
         // Shades thin edges and cavities; farField.w = 0 turns it off.
         scatter *= mix(1.0, InScatterProbability(s.lodDensity, s.heightFraction, cosTheta, forwardMask), params.farField.w);
@@ -320,8 +350,8 @@ vec3 CloudSourceRadiance(CloudLightInput s)
         float sunDepthShade = (1.0 - kInteriorSunDamp * interiorMacro) * (1.0 - kBacklitCoreSunDamp * backlitCore);
         scatter *= sunDepthShade;
         diffuse *= sunDepthShade;
-        // Forward subsurface glow restricted to thin upper parts and damped above tau 1.5.
-        float glowGate = smoothstep(0.05, 0.50, tau) * exp(-tau * 1.35) * forwardHeight * thickGlareDamp;
+        // Smooth subsurface glow across thin upper rims with exponential tau falloff.
+        float glowGate = (1.0 - exp(-tau * kGlowRiseDecay)) * exp(-tau * kGlowFallDecay) * kGlowNorm * forwardHeight * thickGlareDamp;
         vec3 glow = vec3(params.lightTune.z * 0.75 * s.lodDensity * glowGate * HenyeyGreenstein(cosTheta, kGlowEccentricity));
         glow *= 1.0 - kGlowSunDamp * towardSun * towardSun;
         // Sunlit upper-crown lift makes cauliflower dome tops gleam cleanly above creases and mid-tones.
@@ -342,7 +372,13 @@ vec3 CloudSourceRadiance(CloudLightInput s)
         float dayWhiteBalance = (1.0 - lowSun) * (1.0 - crownLowSun * litCrownMask) * mix(0.72, 0.52, smoothstep(0.52, 0.86, s.heightFraction));
         vec3 sunInput = mix(s.sunRadiance, vec3(sunInLuma), Saturate(max(dayWhiteBalance, kMidBandNeutralMix * midBand)));
         float baseSun = mix(kBaseSunKeep, 1.0, smoothstep(kBaseSunFadeStart, kBaseSunFadeEnd, s.heightFraction));
+        float slabTau = lightTau * kThickSlabExtinctionScale;
+        float slabPhase0 = mix(1.0 / (4.0 * kPi), HenyeyGreenstein(cosTheta, 0.38), 0.60);
+        float slabPhase1 = mix(1.0 / (4.0 * kPi), HenyeyGreenstein(cosTheta, 0.20), 0.45);
+        float slabMs = (slabPhase0 * exp(-slabTau) + kThickSlabSecondOctave * slabPhase1 * exp(-0.50 * slabTau)) * kThickSlabScatterGain;
+        vec3 slabWarm = mix(vec3(1.0), kThickSlabWarmTint, exp(-slabTau * 0.65));
         sun = sunInput * warmTint * (scatter + diffuse + glow + crown) * baseSun;
+        sun += sunInput * warmTint * slabWarm * (slabMs * slabMask);
         float sunLuma = dot(sun, kCloudLumaWeights);
         if (sunLuma > kSunShoulderKnee) {
             float excess = sunLuma - kSunShoulderKnee;
@@ -351,7 +387,7 @@ vec3 CloudSourceRadiance(CloudLightInput s)
             sun *= compressed / sunLuma;
         }
     }
-    // Periwinkle-slate belly shade, low-sun violet-slate shadow cast, and cream-neutral upper-dome ambient.
+    // Periwinkle-slate belly shade, low-sun 3500K mid-tone warmth, and cream-neutral upper-dome ambient.
     float bellyFloor = max(params.lightMisc.y, kBellyBaseFloor);
     float baseFloor = mix(bellyFloor, max(params.lightMisc.y, kUpperBaseFloor), smoothstep(0.34, 0.55, s.heightFraction));
     float bellyMask = 1.0 - smoothstep(0.18, 0.34, s.heightFraction);
@@ -363,25 +399,40 @@ vec3 CloudSourceRadiance(CloudLightInput s)
     vec3 coolAmbient = mix(s.ambientRadiance * kShadeTint, kBellyCyanSlate * ambLuma, kBellyCoolMix);
     float shadowCool = 1.0 - smoothstep(0.18, 0.42, s.heightFraction);
     vec3 shadedAmbient = mix(vec3(ambLuma), coolAmbient, shadowCool);
-    float violetMask = lowSun * (1.0 - 0.85 * smoothstep(0.48, 0.78, s.heightFraction) * exp(-lightTau * 0.80));
+    float violetMask = lowSun * (1.0 - smoothstep(0.24, 0.52, s.heightFraction));
     shadedAmbient = mix(shadedAmbient, ambLuma * kLowSunVioletSlate, kLowSunVioletMix * violetMask);
-    float upperCream = smoothstep(0.50, 0.78, s.heightFraction) * (1.0 - 0.65 * lowSun);
+    float upperCream = smoothstep(0.50, 0.78, s.heightFraction) * (1.0 - 0.50 * lowSun);
     shadedAmbient = mix(shadedAmbient, ambLuma * kUpperCreaseTint, 0.75 * upperCream);
+    float sunChromaLuma = dot(s.sunRadiance, kCloudLumaWeights);
+    vec3 sunChroma = sunChromaLuma > 1e-4 ? (s.sunRadiance / sunChromaLuma) : kLowSunMidWarmTint;
+    vec3 lowSunMidTone = mix(kLowSunMidWarmTint, sunChroma, 0.45);
+    lowSunMidTone /= max(dot(lowSunMidTone, kCloudLumaWeights), 1e-4);
+    float lowSunMidMask = lowSun * smoothstep(0.28, 0.52, s.heightFraction) * exp(-lightTau * kLowSunMidTauDecay);
+    shadedAmbient = mix(shadedAmbient, ambLuma * lowSunMidTone, kLowSunMidWarmMix * lowSunMidMask);
     float upperAmbientCut = mix(1.0, kUpperAmbientScale, smoothstep(0.32, 0.70, s.heightFraction));
     float litAmbientDamp = mix(1.0, 0.52, smoothstep(0.30, 0.74, s.heightFraction) * exp(-lightTau * 0.75));
     float bellyTrim = mix(1.0, kBellyAmbientScale, 1.0 - smoothstep(0.22, 0.30, s.heightFraction));
     float ambDepthShade = (1.0 - kInteriorAmbDamp * interiorMacro) * (1.0 - kBacklitCoreAmbDamp * aboveBelly * backlitCore);
     float lowSunBellyLift = 1.0 + kLowSunBellyLift * lowSun * (1.0 - smoothstep(0.16, 0.44, s.heightFraction));
-    // Smooth macro density and optical-depth occlusion shade concave puff crevices and thick cores.
+    float thickTauRamp = (tau * tau) / (tau * tau + kThickSlabTauPivotSq);
+    float thickSkyBounce = 1.0 + kThickSlabSkyBounce * thickTauRamp * slabMask;
+    // Concavity occlusion gated by density, height, and sun transmittance, floored at the belly level.
     float creviceBody = smoothstep(kCreviceBodyStart, kCreviceBodyEnd, s.lodDensity);
     float skyOcclusion = Saturate((1.0 - s.skyVisibility) / kCreviceSkySpan);
     float sunOcclusion = 1.0 - exp(-tau * kCreviceTauDecay);
     float macroDensity = creviceBody * (0.15 + 0.40 * skyOcclusion + 0.45 * sunOcclusion);
     float creviceAo = pow(max(1.0 - clamp(macroDensity * kCreviceDensityScale, 0.0, 1.0), 1e-4), kCreviceAoPower);
-    float litTopGuard = smoothstep(0.42, 0.75, s.heightFraction) * exp(-tau * 1.50) * (1.0 - skyOcclusion);
-    float creviceMask = smoothstep(kCreviceHeightStart, kCreviceHeightEnd, s.heightFraction) * (1.0 - litTopGuard);
-    vec3 ambient = shadedAmbient * (skyShare * upperAmbientCut * litAmbientDamp * bellyTrim * ambDepthShade * lowSunBellyLift * kAmbientGain);
-    ambient *= mix(1.0, creviceAo, kCreviceAoStrength * creviceMask);
+    float creviceDensityGate = smoothstep(kCreviceDensityGateStart, kCreviceDensityGateEnd, s.density);
+    float creviceTopKeep = mix(1.0, kCreviceTopKeep, smoothstep(kCreviceTopStart, kCreviceTopEnd, s.heightFraction));
+    float creviceLitKeep = mix(1.0, kCreviceLitKeep, smoothstep(kCreviceLitTransStart, kCreviceLitTransEnd, sunLightTrans));
+    float creviceMask = smoothstep(kCreviceHeightStart, kCreviceHeightEnd, s.heightFraction) * creviceDensityGate * creviceTopKeep * creviceLitKeep;
+    vec3 ambient = shadedAmbient * (skyShare * upperAmbientCut * litAmbientDamp * bellyTrim * ambDepthShade * lowSunBellyLift * thickSkyBounce * kAmbientGain);
+    vec3 bellyTintRef = mix(coolAmbient, ambLuma * kLowSunVioletSlate, kLowSunVioletMix * lowSun);
+    float bellyScaleRef = mix(bellyFloor, 1.0, 0.22) * kBellySkyVisFloor * kBellyAmbientScale * (1.0 + kLowSunBellyLift * lowSun) * kAmbientGain;
+    float bellyFloorLuma = dot(bellyTintRef, kCloudLumaWeights) * bellyScaleRef;
+    float ambPreLuma = dot(ambient, kCloudLumaWeights);
+    float aoFloor = Saturate((bellyFloorLuma - dot(sun, kCloudLumaWeights)) / max(ambPreLuma, 1e-4));
+    ambient *= max(mix(1.0, creviceAo, kCreviceAoStrength * creviceMask), aoFloor);
     // Ground bounce reaches only unoccluded lower rims so warm ground light cannot muddy shadowed bellies.
     float lowRim = 1.0 - smoothstep(0.0, kGroundBounceTop, s.heightFraction);
     float groundShare = lowRim * lowRim * kGroundBounceScale * exp(-kGroundBounceDecay * tau);

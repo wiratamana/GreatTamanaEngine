@@ -2662,7 +2662,7 @@ TEST(VolumetricCloudShaderTest, MarchShaderRemovesSkinNormalAndSuppressesVertica
     EXPECT_NE(lighting.find("CloudDensityAt(samplePosition, params.lightMisc.w * (i == 0u ? 1.0 : 0.55))"), std::string::npos);
     EXPECT_NE(lighting.find("float silverMask ="), std::string::npos);
     EXPECT_NE(lighting.find("scatter = scatter / (1.0 + scatter / kScatterShoulder);"), std::string::npos);
-    EXPECT_NE(lighting.find("smoothstep(0.0, 0.08, s.density)"), std::string::npos);
+    EXPECT_NE(lighting.find("smoothstep(0.0, kPowderDensityFadeEnd, s.density)"), std::string::npos);
     EXPECT_NE(lighting.find("EffectiveSunWarmth(params.lightTune2.x, s.sunDirection.y)"), std::string::npos);
 }
 
