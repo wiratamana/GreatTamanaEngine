@@ -456,10 +456,10 @@ TEST(VolumetricCloudParamsTest, TheDetailAndStepSettingsReachTheBlockWithTheShip
     EXPECT_FLOAT_EQ(defaults.coarseMultiplier, 2.0f);
     EXPECT_FLOAT_EQ(defaults.clearSkip, 1.8f);
     EXPECT_FLOAT_EQ(defaults.maxSteps, 80.0f);
-    EXPECT_FLOAT_EQ(defaults.sunSteps, 6.0f);
+    EXPECT_FLOAT_EQ(defaults.sunSteps, 4.0f);
     EXPECT_FLOAT_EQ(defaults.minTransmittance, 0.012f);
     EXPECT_FLOAT_EQ(defaults.jitter, 1.0f);
-    EXPECT_FLOAT_EQ(defaults.lightStride, 2.0f);
+    EXPECT_FLOAT_EQ(defaults.lightStride, 3.0f);
     EXPECT_FLOAT_EQ(defaults.maxStepDepth, 0.4f);
     EXPECT_FLOAT_EQ(defaults.lightDetail, 1.0f);
     EXPECT_FLOAT_EQ(defaults.inScatter, 0.48f);

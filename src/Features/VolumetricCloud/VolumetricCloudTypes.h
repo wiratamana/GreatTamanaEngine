@@ -107,7 +107,7 @@ struct VolumetricCloudSettings {
     // Lighting. Intensities scale the sun and sky radiance the engine hands over.
     float sunIntensity = 6.3f;
     float ambientIntensity = 0.40f;
-    float sunSteps = 6.0f;          // Samples of the march toward the sun.
+    float sunSteps = 4.0f;          // Samples of the march toward the sun.
     float lightReach = 0.7f;        // Length of that march, as a fraction of the layer thickness.
     float msOctaves = 4.0f;         // Multiple scattering octaves.
     float msAttenuation = 0.52f;    // Per octave factor on the optical depth.
@@ -124,7 +124,7 @@ struct VolumetricCloudSettings {
     float hazeDistanceM = 45000.0f; // Distance at which a cloud has faded to 1/e into the sky behind it.
     float inScatter = 0.48f;        // Nubis in-scatter chance: shades cavities and thin rims softly; 0 = off.
     float lightDetail = 1.0f;       // Share of the fine erosion the nearest sun samples use.
-    float lightStride = 2.0f;       // Lit samples between two sun marches; the light in between is blended.
+    float lightStride = 3.0f;       // Lit samples between two sun marches; the light in between is blended.
     float skyOcclusion = 0.85f;     // How strongly cloud above a sample blocks the sky light; 0 = height ramp only.
     float skyOcclusionReachM = 600.0f; // Height above a sample that the occlusion looks at.
     float skyFloor = 0.25f;         // Share of the sky light that always reaches a sample.
