@@ -3,25 +3,34 @@
 
 const float kPi = 3.14159265359;
 const float kMinPhaseDenominator = 1e-4;
-// Per octave colour of the multiple scattering at full blue shift; red and green fall, blue rises.
-const vec3 kOctaveTint = vec3(0.9, 0.97, 1.1);
-// Sun light at full warmth: the blue falls first, like light that crossed more air.
-const vec3 kSunWarmTint = vec3(1.0, 0.82, 0.6);
+// Gentle cool shift on deeper scattering octaves so mid-tones stay neutral while tops stay warm.
+const vec3 kOctaveTint = vec3(0.94, 0.98, 1.03);
+// Sun light at full warmth: ivory-gold on sunlit tops, stronger when the sun sits low.
+const vec3 kSunWarmTint = vec3(1.0, 0.84, 0.63);
 const float kGlowEccentricity = 0.3;
 const float kSilverPhaseCap = 4.0;
-const float kMaxSourceLuma = 12.0;
+const float kMaxSourceLuma = 5.0;
 const vec3 kCloudLumaWeights = vec3(0.2126, 0.7152, 0.0722);
 // Share of its segment a sun sample may move (1 = anywhere inside).
 const float kLightJitterSpan = 0.9;
 const float kLowSunWarmthStart = 0.14;
 const float kLowSunWarmthEnd = 0.31;
-const float kLowSunWarmthGain = 1.85;
-// Sky light tint inside cloud shade: pulls cyan toward periwinkle.
-const vec3 kShadeTint = vec3(1.03, 0.93, 1.02);
-// Share of the sun light kept at the flat cloud base; the upper cloud keeps all of it.
-const float kBaseSunKeep = 0.25;
-// Height fraction where the base sun reduction has fully faded out; wide so it never reads as a band.
-const float kBaseSunFadeEnd = 0.32;
+const float kLowSunWarmthGain = 1.65;
+// Cool cyan-slate shade tint for shadowed cloud bases; avoids warm violet or beige casts.
+const vec3 kShadeTint = vec3(0.92, 1.02, 0.90);
+const vec3 kBellyCyanSlate = vec3(0.81, 0.98, 1.58);
+// Keeps direct and scattered sun out of the lower condensation belly where underside opacity forms.
+const float kBaseSunKeep = 0.02;
+const float kBaseSunFadeStart = 0.16;
+const float kBaseSunFadeEnd = 0.46;
+// Masks forward scatter and silver lining to thin optical depths and upper cloud parts.
+const float kForwardHeightStart = 0.24;
+const float kForwardHeightEnd = 0.62;
+const float kForwardDepthDecay = 1.50;
+// Soft knees that keep multi-scattered overhead puffs from flattening into a single white value.
+const float kMultiScatterShoulder = 0.055;
+const float kScatterShoulder = 0.28;
+const float kSunRadianceShoulder = 2.4;
 // Share of the forward glow removed when looking straight into the sun.
 const float kGlowSunDamp = 0.35;
 
@@ -115,8 +124,8 @@ float SkyVisibility(vec3 position)
     return mix(params.skyShade.z, 1.0, exp(-opticalDepth * params.skyShade.x));
 }
 
-// Sun light reaching a sample: multiple-scattering octaves plus a thin-optical-depth silver rim lobe.
-vec3 SunScatter(float cosTheta, float opticalDepth)
+// Sun light reaching a sample: compressed multi-scattering octaves plus a thin upper-edge silver rim.
+vec3 SunScatter(float cosTheta, float opticalDepth, float heightFraction, float forwardMask)
 {
     uint octaves = uint(params.lightMarch.z);
     float attenuation = 1.0;
@@ -124,30 +133,41 @@ vec3 SunScatter(float cosTheta, float opticalDepth)
     float eccentricity = 1.0;
     vec3 tint = mix(vec3(1.0), kOctaveTint, params.skyShade2.y);
     vec3 tintPower = vec3(1.0);
-    vec3 sum = vec3(0.0);
+    vec3 singleScatter = vec3(0.0);
+    vec3 multiScatter = vec3(0.0);
     for (uint i = 0u; i < octaves; ++i) {
-        sum += tintPower * (contribution * CloudPhase(cosTheta, eccentricity) * exp(-opticalDepth * attenuation));
+        float rawPhase = CloudPhase(cosTheta, eccentricity);
+        float phase = cosTheta > 0.0 ? mix(CloudPhase(0.0, eccentricity), rawPhase, forwardMask) : rawPhase;
+        float depthScale = (i == 0u) ? 1.0 : 1.45;
+        vec3 term = tintPower * (contribution * phase * exp(-opticalDepth * attenuation * depthScale));
+        if (i == 0u) {
+            singleScatter = term;
+        } else {
+            multiScatter += term * 0.62;
+        }
         attenuation *= params.lightScatter.y;
         contribution *= params.lightScatter.z;
         eccentricity *= params.lightScatter.w;
         tintPower *= tint;
     }
+    multiScatter = multiScatter / (1.0 + multiScatter / kMultiScatterShoulder);
+    vec3 scatter = singleScatter + multiScatter;
+    scatter = scatter / (1.0 + scatter / kScatterShoulder);
     float silverPhase = kSilverPhaseCap * (1.0 - exp(-HenyeyGreenstein(cosTheta, params.lightScatter.x) / kSilverPhaseCap));
-    float silver = params.lightPhase.w * silverPhase * exp(-opticalDepth);
-    vec3 scatter = sum + vec3(silver * exp(-opticalDepth * 0.90));
-    scatter = scatter / (1.0 + scatter / 1.85);
-    return scatter;
+    float silverMask = smoothstep(0.28, 0.68, heightFraction) * exp(-opticalDepth * 2.20);
+    float silver = params.lightPhase.w * silverPhase * silverMask;
+    return scatter + vec3(silver);
 }
 
-// Nubis in-scatter probability: shades cavities and bases softly with a subtle thin-rim lift toward the sun.
-float InScatterProbability(float lodDensity, float h, float cosTheta)
+// Nubis in-scatter probability: shades cavities and bases while masking thin-rim lift to upper thin edges.
+float InScatterProbability(float lodDensity, float h, float cosTheta, float forwardMask)
 {
     float d = Saturate(lodDensity);
-    float expo = clamp(Remap(h, 0.3, 0.85, 0.5, 2.0), 0.5, 2.0);
-    float depthP = 0.28 + 0.72 * pow(max(d, 1e-5), expo);
-    float vertP = pow(clamp(Remap(h, 0.03, 0.18, 0.45, 1.0), 0.45, 1.0), 0.7);
+    float expo = clamp(Remap(h, 0.28, 0.85, 0.65, 2.0), 0.65, 2.0);
+    float depthP = 0.24 + 0.76 * pow(max(d, 1e-5), expo);
+    float vertP = pow(clamp(Remap(h, 0.06, 0.34, 0.30, 1.0), 0.30, 1.0), 0.80);
     float towardSun = Saturate(cosTheta);
-    float rimLift = towardSun * towardSun * (1.0 - d) * 0.20;
+    float rimLift = towardSun * towardSun * (1.0 - d) * 0.20 * forwardMask;
     return mix(Saturate(depthP * vertP), 1.0, rimLift);
 }
 
@@ -166,35 +186,55 @@ float EffectiveSunWarmth(float baseWarmth, float sunUp)
 vec3 CloudSourceRadiance(CloudLightInput s)
 {
     float cosTheta = dot(s.viewDirection, s.sunDirection);
+    float tau = s.sunOpticalDepth;
+    float forwardHeight = smoothstep(kForwardHeightStart, kForwardHeightEnd, s.heightFraction);
+    float forwardMask = forwardHeight * exp(-tau * kForwardDepthDecay);
     vec3 sun = vec3(0.0);
     if (dot(s.sunRadiance, s.sunRadiance) > 0.0) {
-        vec3 scatter = SunScatter(cosTheta, s.sunOpticalDepth);
+        vec3 scatter = SunScatter(cosTheta, tau, s.heightFraction, forwardMask);
         float powder = 0.35 + 0.65 * (1.0 - exp(-3.5 * s.density));
         float awayFromSun = Saturate(0.5 - 0.5 * cosTheta);
         float powderWeight = params.lightMarch.w * smoothstep(0.0, 0.08, s.density) * awayFromSun * awayFromSun * (1.0 - Saturate(cosTheta));
         scatter *= mix(1.0, powder, powderWeight);
         // Shades thin edges and cavities; farField.w = 0 turns it off.
-        scatter *= mix(1.0, InScatterProbability(s.lodDensity, s.heightFraction, cosTheta), params.farField.w);
-        // Slow-decaying diffusion keeps thick cloud cores softly luminous.
-        float tau = s.sunOpticalDepth;
-        vec3 diffuse = vec3(params.lightTune.y * (tau / (tau + 2.0)) / (1.0 + 0.15 * tau) / (4.0 * kPi));
-        // Forward glow builds after thin optical depth and decays in dense self-shadowed cores.
-        float glowDecay = mix(0.45, 0.30, Saturate(cosTheta));
-        float glowDepthGate = smoothstep(0.3, 2.0, s.sunOpticalDepth);
-        vec3 glow = vec3(params.lightTune.z * s.lodDensity * glowDepthGate * exp(-tau * glowDecay) * HenyeyGreenstein(cosTheta, kGlowEccentricity));
-        glow *= 1.0 - kGlowSunDamp * Saturate(cosTheta) * Saturate(cosTheta);
-        // Sunlit upper-crown multi-scatter lift makes cauliflower dome tops gleam cleanly.
-        float crownLift = smoothstep(0.30, 0.90, s.heightFraction) * exp(-s.sunOpticalDepth * 0.45) * 0.26;
+        scatter *= mix(1.0, InScatterProbability(s.lodDensity, s.heightFraction, cosTheta, forwardMask), params.farField.w);
+        // Upper and mid-body diffusion keeps puff interiors luminous without warming shadowed bellies.
+        float diffMask = smoothstep(0.24, 0.58, s.heightFraction) * exp(-0.55 * tau);
+        vec3 diffuse = vec3(params.lightTune.y * 0.45 * diffMask * (tau / (tau + 1.8)) / (4.0 * kPi));
+        // Forward subsurface glow restricted to thin upper parts so bellies and thick cores do not glow.
+        float towardSun = Saturate(cosTheta);
+        float glowGate = smoothstep(0.05, 0.50, tau) * exp(-tau * 1.35) * forwardHeight;
+        vec3 glow = vec3(params.lightTune.z * 0.75 * s.lodDensity * glowGate * HenyeyGreenstein(cosTheta, kGlowEccentricity));
+        glow *= 1.0 - kGlowSunDamp * towardSun * towardSun;
+        // Sunlit upper-crown lift makes cauliflower dome tops gleam cleanly above mid-tones.
+        float crownLift = smoothstep(0.45, 0.92, s.heightFraction) * exp(-tau * 0.80) * 0.18;
         vec3 crown = vec3(crownLift / (4.0 * kPi));
         float warmth = EffectiveSunWarmth(params.lightTune2.x, s.sunDirection.y);
-        float baseSun = mix(kBaseSunKeep, 1.0, smoothstep(0.0, kBaseSunFadeEnd, s.heightFraction));
-        sun = s.sunRadiance * mix(vec3(1.0), kSunWarmTint, warmth) * (scatter + diffuse + glow + crown) * baseSun;
+        float topWarmMask = smoothstep(0.32, 0.75, s.heightFraction) * exp(-tau * 0.55);
+        vec3 warmTint = mix(vec3(1.0), kSunWarmTint, Saturate(warmth * (0.30 + 0.85 * topWarmMask)));
+        // Gently neutralizes low-sun chroma inside mid-tones so tops read warm and mid-tones read neutral.
+        float sunInLuma = dot(s.sunRadiance, kCloudLumaWeights);
+        float midBand = smoothstep(0.25, 0.45, s.heightFraction) * (1.0 - smoothstep(0.55, 0.82, s.heightFraction)) * smoothstep(0.5, 1.8, tau);
+        vec3 sunInput = mix(s.sunRadiance, vec3(sunInLuma), 0.40 * midBand);
+        float baseSun = mix(kBaseSunKeep, 1.0, smoothstep(kBaseSunFadeStart, kBaseSunFadeEnd, s.heightFraction));
+        sun = sunInput * warmTint * (scatter + diffuse + glow + crown) * baseSun;
+        float sunLuma = dot(sun, kCloudLumaWeights);
+        sun /= (1.0 + sunLuma / kSunRadianceShoulder);
     }
-    float skyShare = mix(params.lightMisc.y, 1.0, pow(max(s.heightFraction, 1e-5), 0.7)) * s.skyVisibility;
-    // Light bounced up from the ground reaches the low part of the cloud where ground is sunlit.
-    float groundShare = (1.0 - s.heightFraction) * (1.0 - s.heightFraction);
-    groundShare *= mix(0.15, 1.0, exp(-0.15 * s.sunOpticalDepth));
-    return sun + s.ambientRadiance * kShadeTint * skyShare + s.groundRadiance * groundShare;
+    // Cool cyan-slate sky shade in shadowed bases, desaturating toward neutral in sunlit upper clouds.
+    float baseFloor = max(params.lightMisc.y, 0.46);
+    float skyShare = mix(baseFloor, 1.0, pow(max(s.heightFraction, 1e-5), 0.75)) * s.skyVisibility;
+    float ambLuma = dot(s.ambientRadiance, kCloudLumaWeights);
+    vec3 coolAmbient = mix(s.ambientRadiance * kShadeTint, kBellyCyanSlate * ambLuma, 0.78);
+    float shadowCool = Saturate((1.0 - smoothstep(0.18, 0.54, s.heightFraction)) * 0.78 + (1.0 - exp(-tau * 0.55)) * 0.22);
+    vec3 shadedAmbient = mix(vec3(ambLuma), coolAmbient, shadowCool);
+    float litAmbientDamp = mix(1.0, 0.46, smoothstep(0.28, 0.72, s.heightFraction) * exp(-tau * 0.80));
+    float lowSunBellyLift = 1.0 + 0.38 * (1.0 - smoothstep(0.12, 0.32, s.sunDirection.y)) * (1.0 - smoothstep(0.16, 0.46, s.heightFraction));
+    vec3 ambient = shadedAmbient * (skyShare * litAmbientDamp * lowSunBellyLift * 1.24);
+    // Ground bounce reaches only unoccluded lower rims so warm ground light cannot muddy shadowed bellies.
+    float lowRim = 1.0 - smoothstep(0.0, 0.38, s.heightFraction);
+    float groundShare = lowRim * lowRim * 0.18 * exp(-0.65 * tau);
+    return sun + ambient + s.groundRadiance * groundShare;
 }
 
 // Smooth luminance ceiling: keeps hue, leaves normal cloud brightness intact and approaches maxLuma smoothly.

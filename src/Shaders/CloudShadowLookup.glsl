@@ -4,7 +4,7 @@
 #define CLOUD_SHADOW_LOOKUP_GLSL
 
 const float kCloudShadowNearScale = 8.0;
-const float kCloudShadowFarFade = 0.1;
+const float kCloudShadowFarFade = 0.06;
 const float kCloudShadowNearFade = 0.15;
 
 // Cubic B-spline (4 x 4 texels) over one square region starting at `rowOffset`.

@@ -81,9 +81,9 @@ TEST(BigWorldPlanTest, DemoCloudAndBloomDefaultsMatchPlanConstants)
 {
     EXPECT_DOUBLE_EQ(kBloomThreshold, 2.0);
     EXPECT_DOUBLE_EQ(kBloomIntensity, 0.2);
-    EXPECT_DOUBLE_EQ(kCloudShadowRangeKm, 16.0);
+    EXPECT_DOUBLE_EQ(kCloudShadowRangeKm, 28.0);
     EXPECT_DOUBLE_EQ(kCloudShadowSoftness, 0.48);
-    EXPECT_DOUBLE_EQ(kCloudShadowFill, 0.22);
+    EXPECT_DOUBLE_EQ(kCloudShadowFill, 0.06);
     EXPECT_DOUBLE_EQ(kCloudSunRays, 0.55);
     EXPECT_DOUBLE_EQ(kCloudSunRaysContrast, 1.65);
     EXPECT_DOUBLE_EQ(kCloudSunRaysDecay, 0.98);
@@ -93,9 +93,9 @@ TEST(BigWorldPlanTest, DemoCloudAndBloomDefaultsMatchPlanConstants)
         const BigWorldPlan plan = MakeBigWorldPlan(q);
         const FeatureTweak* clouds = FindTweak(plan, "VolumetricCloud");
         ASSERT_NE(clouds, nullptr);
-        EXPECT_EQ(ValueOf(*clouds, "shadowRangeKm"), "16");
+        EXPECT_EQ(ValueOf(*clouds, "shadowRangeKm"), "28");
         EXPECT_EQ(ValueOf(*clouds, "shadowSoftness"), "0.48");
-        EXPECT_EQ(ValueOf(*clouds, "shadowFill"), "0.22");
+        EXPECT_EQ(ValueOf(*clouds, "shadowFill"), "0.06");
         EXPECT_EQ(ValueOf(*clouds, "sunRays"), "0.55");
         EXPECT_EQ(ValueOf(*clouds, "sunRaysContrast"), "1.65");
         EXPECT_EQ(ValueOf(*clouds, "sunRaysDecay"), "0.98");

@@ -23,7 +23,7 @@
 
 Every tier snapshots and restores the render settings it touches:
 - `Bloom`: `enabled` `true`, `threshold` `2.0` (`kBloomThreshold`), `intensity` `0.2` (`kBloomIntensity`) so sunlit clouds do not veil the sky.
-- `VolumetricCloud`: `coverage` (`0.50`–`0.55`), `shadowRangeKm` `16` (`kCloudShadowRangeKm`, ±8 km far map at 125 m/texel plus nested 2.0 km near map at ~15.6 m per 128x128 texel), `shadowSoftness` `0.48` (`kCloudShadowSoftness`), `shadowFill` `0.22` (`kCloudShadowFill`), `sunRays` `0.55` (`kCloudSunRays`), `sunRaysContrast` `1.65` (`kCloudSunRaysContrast`), `sunRaysDecay` `0.98` (`kCloudSunRaysDecay`), `sunRaysLength` `1.25` (`kCloudSunRaysLength`), plus the tier march levers above.
+- `VolumetricCloud`: `coverage` (`0.50`–`0.55`), `shadowRangeKm` `28` (`kCloudShadowRangeKm`, ±14 km far map at 219 m/texel plus nested 3.5 km near map at ~27 m per 128x128 texel), `shadowSoftness` `0.48` (`kCloudShadowSoftness`), `shadowFill` `0.06` (`kCloudShadowFill`), `sunRays` `0.55` (`kCloudSunRays`), `sunRaysContrast` `1.65` (`kCloudSunRaysContrast`), `sunRaysDecay` `0.98` (`kCloudSunRaysDecay`), `sunRaysLength` `1.25` (`kCloudSunRaysLength`), plus the tier march levers above.
 - `Grass`: `enabled` `true` and the tier preset.
 
 ## Open and close over HTTP

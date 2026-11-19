@@ -19,7 +19,7 @@ inline constexpr const char* kCloudShadowChannel = "ShadowMap";
 inline constexpr std::uint32_t kCloudShadowMapSize = 128;
 inline constexpr std::uint32_t kCloudShadowNearScale = 8;
 inline constexpr std::uint32_t kCloudShadowMapRows = 2 * kCloudShadowMapSize;
-inline constexpr float kCloudShadowFarEdgeFade = 0.1f;
+inline constexpr float kCloudShadowFarEdgeFade = 0.06f;
 inline constexpr float kCloudShadowNearEdgeFade = 0.15f;
 
 // Sun light that the cloud layer lets through, stacked as 128x128 far (rows 0..127) and 128x128 near (rows 128..255).

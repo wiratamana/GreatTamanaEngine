@@ -38,13 +38,23 @@ const float kSlackKm = 0.02;
 const float kClearTransmittance = 0.999;
 const float kSnapTexels = 0.004;
 const float kSceneHdrKnee = 64.0;
-const float kResolveShoulderStart = 3.6;
-const float kResolveShoulderCeiling = 7.2;
+const float kResolveShoulderStart = 2.0;
+const float kResolveShoulderCeiling = 4.2;
+const float kFireflyLumaKnee = 2.5;
+const float kHistoryFeatherRadiusSq = 1.96;
 const vec3 kCloudResolveLumaWeights = vec3(0.2126, 0.7152, 0.0722);
 
 float CloudLuma(vec3 rgb)
 {
     return dot(max(rgb, vec3(0.0)), kCloudResolveLumaWeights);
+}
+
+// Suppresses single-ray HDR fireflies without biasing premultiplied cloud silhouettes toward empty sky.
+float TapFireflyWeight(vec4 tapColor)
+{
+    float opacity = max(1.0 - tapColor.a, 0.05);
+    float excessLuma = max(CloudLuma(tapColor.rgb) / opacity - kFireflyLumaKnee, 0.0);
+    return 1.0 / (1.0 + excessLuma * 0.35);
 }
 
 // Chroma-preserving soft HDR shoulder above kResolveShoulderStart toward kResolveShoulderCeiling.
@@ -93,7 +103,7 @@ vec4 CatmullRomWeights(float f)
     return vec4(-0.5 * f3 + f2 - 0.5 * f, 1.5 * f3 - 2.5 * f2 + 1.0, -1.5 * f3 + 2.0 * f2 + 0.5 * f, 0.5 * f3 - 0.5 * f2);
 }
 
-// Fetches usable history texels with optional clamped Catmull-Rom sharpening and accumulated sample count.
+// Fetches usable history texels with interior Catmull-Rom sharpening and smooth bilinear silhouettes.
 bool FetchHistory(vec2 texelPosition, float pixelEndKm, out vec4 color, out float distanceKm, out float count)
 {
     ivec2 size = min(textureSize(historyColor, 0), textureSize(historyAux, 0));
@@ -137,7 +147,10 @@ bool FetchHistory(vec2 texelPosition, float pixelEndKm, out vec4 color, out floa
     }
     color = colorSum / weightSum;
     count = countSum / weightSum;
-    if (params.motion.y > 0.0 && weightSum > 0.999) {
+    // Fade cubic negative lobes on high-contrast alpha edges so silhouettes never sharpen into stair-steps.
+    float alphaSpan = clamp(innerMax.a - innerMin.a, 0.0, 1.0);
+    float sharpWeight = params.motion.y * (1.0 - smoothstep(0.15, 0.50, alphaSpan));
+    if (sharpWeight > 1e-3 && weightSum > 0.999) {
         vec4 wx = CatmullRomWeights(f.x);
         vec4 wy = CatmullRomWeights(f.y);
         vec4 cubic = vec4(0.0);
@@ -148,7 +161,7 @@ bool FetchHistory(vec2 texelPosition, float pixelEndKm, out vec4 color, out floa
             }
         }
         cubic = clamp(cubic, innerMin, innerMax);
-        color = mix(color, cubic, params.motion.y);
+        color = mix(color, cubic, sharpWeight);
     }
     distanceKm = distanceWeight > 0.0 ? distanceSum / distanceWeight : 0.0;
     return true;
@@ -297,16 +310,16 @@ void main()
         pixelEndKm = min(length(world.xyz / world.w) * 0.001, kNoSurfaceKm);
     }
 
-    // Upsample 3x3 low-res taps with Karis inverse-luminance weights, silhouette distance dilation and moments.
+    // Fetch 3x3 low-res neighbourhood once for bilateral upsampling, distance dilation and variance moments.
     int divisor = int(params.counts.x);
     ivec2 lowSize = min(ivec2(params.sizes.zw), min(textureSize(lowColor, 0), textureSize(lowAux, 0)));
     vec2 lowPosition = vec2(pixel - ivec2(params.counts.yz)) / float(divisor);
     ivec2 lowNearest = ivec2(floor(lowPosition + 0.5));
     bool exactSample = dot(lowPosition - vec2(lowNearest), lowPosition - vec2(lowNearest)) < 1e-4;
-    vec4 freshSum = vec4(0.0);
-    float freshDistanceSum = 0.0;
-    float freshDistanceWeight = 0.0;
-    float freshWeight = 0.0;
+    vec4 tapColors[9];
+    float tapDistances[9];
+    vec2 tapDeltas[9];
+    uint usableMask = 0u;
     float maxTapWeight = 0.0;
     float nearestCloudKm = 1e30;
     vec4 minColor = vec4(1e30);
@@ -314,14 +327,24 @@ void main()
     vec4 moment1 = vec4(0.0);
     vec4 moment2 = vec4(0.0);
     float boxCount = 0.0;
+    float refAlphaSum = 0.0;
+    float refAlphaWeight = 0.0;
+    float refDistanceSum = 0.0;
+    float refDistanceWeight = 0.0;
     for (int k = 0; k < 9; ++k) {
         ivec2 offset = ivec2(k % 3 - 1, k / 3 - 1);
-        ivec2 c = clamp(lowNearest + offset, ivec2(0), lowSize - 1);
+        ivec2 sampleGrid = lowNearest + offset;
+        ivec2 c = clamp(sampleGrid, ivec2(0), lowSize - 1);
         vec4 tapColor = texelFetch(lowColor, c, 0);
         vec4 tapAux = texelFetch(lowAux, c, 0);
+        vec2 d = abs(lowPosition - vec2(sampleGrid));
+        tapColors[k] = tapColor;
+        tapDistances[k] = tapAux.x;
+        tapDeltas[k] = d;
         if (!TapUsable(tapColor, tapAux, pixelEndKm)) {
             continue;
         }
+        usableMask |= (1u << uint(k));
         minColor = min(minColor, tapColor);
         maxColor = max(maxColor, tapColor);
         moment1 += tapColor;
@@ -330,23 +353,70 @@ void main()
         if (1.0 - tapColor.a > 0.01 && tapAux.x > 0.0) {
             nearestCloudKm = min(nearestCloudKm, tapAux.x);
         }
-        vec2 d = abs(lowPosition - vec2(lowNearest + offset));
         float bilinearW = max(1.0 - d.x, 0.0) * max(1.0 - d.y, 0.0);
         maxTapWeight = max(maxTapWeight, bilinearW);
-        float w = exactSample ? bilinearW : (max(1.25 - d.x, 0.0) * max(1.25 - d.y, 0.0));
-        if (w <= 0.0) {
+        if (bilinearW > 0.0) {
+            refAlphaSum += tapColor.a * bilinearW;
+            refAlphaWeight += bilinearW;
+            float refCloudW = bilinearW * (1.0 - tapColor.a);
+            refDistanceSum += tapAux.x * refCloudW;
+            refDistanceWeight += refCloudW;
+        }
+    }
+
+    float refAlpha = refAlphaWeight > 0.0 ? (refAlphaSum / refAlphaWeight) : 1.0;
+    float refDistanceKm = refDistanceWeight > 0.0
+        ? (refDistanceSum / refDistanceWeight)
+        : (nearestCloudKm < 1e20 ? nearestCloudKm : 0.0);
+    float edgeContrast = boxCount > 0.0 ? clamp(maxColor.a - minColor.a, 0.0, 1.0) : 0.0;
+    float silhouetteEdge = smoothstep(0.15, 0.50, edgeContrast);
+    float skyBorder = smoothstep(0.55, 0.90, boxCount > 0.0 ? maxColor.a : 1.0);
+    float refPresence = clamp((1.0 - refAlpha) * 4.0, 0.0, 1.0);
+
+    // Edge-aware upsample: bilateral in transmittance and cloud distance, isotropic along sky silhouettes.
+    vec4 freshSum = vec4(0.0);
+    float freshWeight = 0.0;
+    vec4 smoothLowSum = vec4(0.0);
+    float smoothLowWeight = 0.0;
+    float freshDistanceSum = 0.0;
+    float freshDistanceWeight = 0.0;
+    for (int k = 0; k < 9; ++k) {
+        if ((usableMask & (1u << uint(k))) == 0u) {
             continue;
         }
-        float hdrW = 1.0 / (1.0 + CloudLuma(tapColor.rgb) * 0.5);
-        float sampleW = w * hdrW;
-        freshSum += tapColor * sampleW;
-        freshWeight += sampleW;
-        float cloudWeight = w * (1.0 - tapColor.a);
-        freshDistanceSum += tapAux.x * cloudWeight;
-        freshDistanceWeight += cloudWeight;
+        vec4 tapColor = tapColors[k];
+        float tapDistKm = tapDistances[k];
+        vec2 d = tapDeltas[k];
+        float bilinearW = max(1.0 - d.x, 0.0) * max(1.0 - d.y, 0.0);
+        float tentW = max(1.20 - d.x, 0.0) * max(1.20 - d.y, 0.0);
+        float r2 = dot(d, d);
+        float isoW = exp(-1.30 * r2) * max(1.0 - r2 / 3.6, 0.0);
+
+        float tapPresence = clamp((1.0 - tapColor.a) * 4.0, 0.0, 1.0);
+        float distDiff = (tapDistKm > 0.0 && refDistanceKm > 0.0)
+            ? abs(tapDistKm - refDistanceKm) / max(min(tapDistKm, refDistanceKm), 0.25)
+            : 0.0;
+        float distW = mix(1.0, exp(-distDiff * 4.0), tapPresence * refPresence);
+        float transW = mix(1.0, exp(-abs(tapColor.a - refAlpha) * 3.0), 1.0 - skyBorder);
+        float commonW = distW * transW * TapFireflyWeight(tapColor);
+
+        float smoothW = isoW * commonW;
+        smoothLowSum += tapColor * smoothW;
+        smoothLowWeight += smoothW;
+
+        float spatialW = exactSample ? bilinearW : mix(tentW, isoW, silhouetteEdge);
+        if (spatialW > 0.0) {
+            float sampleW = spatialW * commonW;
+            freshSum += tapColor * sampleW;
+            freshWeight += sampleW;
+            float cloudWeight = spatialW * distW * (1.0 - tapColor.a);
+            freshDistanceSum += tapDistKm * cloudWeight;
+            freshDistanceWeight += cloudWeight;
+        }
     }
     bool hasFresh = freshWeight > 1e-5;
     vec4 fresh = hasFresh ? freshSum / freshWeight : vec4(0.0, 0.0, 0.0, 1.0);
+    vec4 smoothLow = smoothLowWeight > 1e-5 ? (smoothLowSum / smoothLowWeight) : fresh;
     float freshDistanceKm = freshDistanceWeight > 0.0
         ? min(freshDistanceSum / freshDistanceWeight, nearestCloudKm)
         : (nearestCloudKm < 1e20 ? nearestCloudKm : 0.0);
@@ -356,6 +426,7 @@ void main()
     float historyDistanceKm = 0.0;
     float historyCount = 0.0;
     bool hasHistory = false;
+    vec2 previousTexel = vec2(pixel);
     vec2 reprojectionShift = vec2(0.0);
     if (params.counts.w != 0u) {
         vec4 nearPoint = params.invViewProjection * vec4(ndc, 0.0, 1.0);
@@ -366,7 +437,7 @@ void main()
         vec4 clip = params.prevViewProjection * vec4(previous, 1.0);
         if (clip.w > 0.0) {
             vec2 previousUv = clip.xy / clip.w * 0.5 + 0.5;
-            vec2 previousTexel = previousUv * vec2(fullSize) - 0.5;
+            previousTexel = previousUv * vec2(fullSize) - 0.5;
             // Snap near-integer texels so still pixels never lose half-float precision across non-marched frames.
             vec2 snapped = floor(previousTexel + 0.5);
             previousTexel = mix(previousTexel, snapped, lessThan(abs(previousTexel - snapped), vec2(kSnapTexels)));
@@ -391,7 +462,6 @@ void main()
             vec4 mean = moment1 / boxCount;
             vec4 variance = max(moment2 / boxCount - mean * mean, vec4(0.0));
             vec4 sigma = sqrt(variance);
-            float edgeContrast = clamp(maxColor.a - minColor.a, 0.0, 1.0);
             float expand = params.blend.z * mix(3.0, 1.0, smoothstep(0.08, 0.45, edgeContrast));
             vec4 clampMin = max(min(mean - sigma * expand, fresh) - 1e-3, vec4(0.0));
             vec4 clampMax = max(mean + sigma * expand, fresh) + 1e-3;
@@ -428,30 +498,55 @@ void main()
     imageStore(historyColorOut, pixel, cloud);
     imageStore(historyAuxOut, pixel, vec4(cloudDistanceKm, pixelEndKm, newCount, 0.0));
 
-    // Gentle 3x3 transmittance-weighted spatial filter on unconverged fringe pixels to prevent single-ray stipple.
-    if (newCount < 3.0 && cloud.a > 0.05 && cloud.a < 0.95) {
-        vec4 fringeSum = vec4(0.0);
-        float fringeWeight = 0.0;
-        for (int k = 0; k < 9; ++k) {
-            ivec2 offset = ivec2(k % 3 - 1, k / 3 - 1);
-            ivec2 c = clamp(lowNearest + offset, ivec2(0), lowSize - 1);
-            vec4 tapColor = texelFetch(lowColor, c, 0);
-            vec4 tapAux = texelFetch(lowAux, c, 0);
-            if (!TapUsable(tapColor, tapAux, pixelEndKm)) {
-                continue;
+    // Feather cloud-against-sky silhouettes by ~1.2 px for display only so interiors and history stay crisp.
+    float skySilhouette = silhouetteEdge * smoothstep(0.45, 0.85, boxCount > 0.0 ? maxColor.a : 0.0);
+    if (skySilhouette > 1e-3) {
+        float converged = smoothstep(0.0, float(max(divisor, 1)), newCount);
+        float lowContour = smoothstep(0.01, 0.14, smoothLow.a) * (1.0 - smoothstep(0.86, 0.99, smoothLow.a));
+        float cloudPresence = clamp((1.0 - cloud.a) * 4.0, 0.0, 1.0);
+        float localEdge = lowContour;
+        vec4 feathered = smoothLow;
+        if (hasHistory && converged > 0.01) {
+            ivec2 histSize = min(textureSize(historyColor, 0), textureSize(historyAux, 0));
+            ivec2 histCenter = ivec2(floor(previousTexel + 0.5));
+            vec4 histSum = vec4(0.0);
+            float histWeight = 0.0;
+            float histMinAlpha = 1.0;
+            float histMaxAlpha = 0.0;
+            for (int k = 0; k < 9; ++k) {
+                ivec2 hcCoord = histCenter + ivec2(k % 3 - 1, k / 3 - 1);
+                if (any(lessThan(hcCoord, ivec2(0))) || any(greaterThanEqual(hcCoord, histSize))) {
+                    continue;
+                }
+                vec2 hd = previousTexel - vec2(hcCoord);
+                float falloff = max(1.0 - dot(hd, hd) / kHistoryFeatherRadiusSq, 0.0);
+                float hw = falloff * falloff;
+                if (hw <= 0.0) {
+                    continue;
+                }
+                vec4 hc = texelFetch(historyColor, hcCoord, 0);
+                vec4 ha = texelFetch(historyAux, hcCoord, 0);
+                if (!TapUsable(hc, ha, pixelEndKm)) {
+                    continue;
+                }
+                histMinAlpha = min(histMinAlpha, hc.a);
+                histMaxAlpha = max(histMaxAlpha, hc.a);
+                float hcPresence = clamp((1.0 - hc.a) * 4.0, 0.0, 1.0);
+                float hDistDiff = (ha.x > 0.0 && cloudDistanceKm > 0.0)
+                    ? abs(ha.x - cloudDistanceKm) / max(min(ha.x, cloudDistanceKm), 0.25)
+                    : 0.0;
+                hw *= mix(1.0, exp(-hDistDiff * 4.0), hcPresence * cloudPresence) * TapFireflyWeight(hc);
+                histSum += hc * hw;
+                histWeight += hw;
             }
-            float tentW = (offset.x == 0 ? 2.0 : 1.0) * (offset.y == 0 ? 2.0 : 1.0);
-            float transW = exp(-abs(tapColor.a - cloud.a) * 6.0);
-            float hdrW = 1.0 / (1.0 + CloudLuma(tapColor.rgb) * 0.5);
-            float w = tentW * transW * hdrW;
-            fringeSum += tapColor * w;
-            fringeWeight += w;
+            if (histWeight > 1e-5) {
+                float histContour = smoothstep(0.04, 0.25, max(histMaxAlpha - histMinAlpha, 0.0));
+                localEdge = mix(lowContour, histContour, converged);
+                feathered = mix(smoothLow, histSum / histWeight, converged);
+            }
         }
-        if (fringeWeight > 1e-5) {
-            float freshFade = 1.0 - smoothstep(0.0, 3.0, newCount);
-            float fringeGate = smoothstep(0.05, 0.15, cloud.a) * (1.0 - smoothstep(0.85, 0.95, cloud.a));
-            cloud = mix(cloud, fringeSum / fringeWeight, 0.65 * freshFade * fringeGate);
-        }
+        float featherMix = skySilhouette * localEdge * mix(0.85, 0.65, converged);
+        cloud = mix(cloud, feathered, featherMix);
     }
 
     cloud.rgb = CompressCloudShoulder(cloud.rgb);

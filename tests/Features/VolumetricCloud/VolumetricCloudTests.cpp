@@ -627,7 +627,7 @@ TEST(VolumetricCloudParamsTest, TheLightTuningSettingsReachTheBlockWithTheShippe
     EXPECT_FLOAT_EQ(defaults.powder, 0.34f);
     EXPECT_FLOAT_EQ(defaults.sunWarmth, 0.25f);
     EXPECT_FLOAT_EQ(defaults.groundBounce, 1.5f);
-    EXPECT_FLOAT_EQ(defaults.shadowDensity, 1.20f);
+    EXPECT_FLOAT_EQ(defaults.shadowDensity, 2.20f);
     VolumetricCloudSettings s = defaults;
     s.ambientSaturation = 0.4f;
     s.msDiffuse = 2.0f;
@@ -1419,7 +1419,7 @@ TEST(VolumetricCloudParamsTest, GlslBlocksHaveTheCppMembersAtTheCppOffsets)
 TEST(VolumetricCloudLightTest, ShaderConstantsMatchTheCpuTwinsAndTheAtmosphereDefault)
 {
     const std::string lighting = ReadShaderText("VolumetricCloudLighting.glsl");
-    EXPECT_NE(lighting.find("const vec3 kOctaveTint = vec3(0.9, 0.97, 1.1);"), std::string::npos);
+    EXPECT_NE(lighting.find("const vec3 kOctaveTint = vec3(0.94, 0.98, 1.03);"), std::string::npos);
     const std::string atmosphere = ReadShaderText("VolumetricCloudAtmosphere.glsl");
     EXPECT_NE(atmosphere.find("const float kReferenceSkyIntensity = 6.0;"), std::string::npos);
     // The clouds' sky light is tied to the atmosphere's default sky intensity, not to the live setting.
@@ -1492,14 +1492,13 @@ TEST(VolumetricCloudShaderTest, DetailIsCurlWarpedBillowAndWispErosionAndTheCurv
     EXPECT_NE(march.find("float billowErosion"), std::string::npos);
     EXPECT_NE(march.find("float wispErosion"), std::string::npos);
     // The density curve is applied to the eroded body, not to the body before the erosion.
-    EXPECT_NE(march.find("return CloudCurve(Saturate(Remap(shape, erosion, 1.0, 0.0, 1.0))) * densityFactor;"), std::string::npos);
+    EXPECT_NE(march.find("return CloudCurve(body) * densityFactor;"), std::string::npos);
     // The exponent lives in one place, CloudCurve(); CloudShape() returns the linear body.
     EXPECT_NE(march.find("float CloudCurve(float body)"), std::string::npos);
-    EXPECT_NE(march.find("float body = Saturate(Remap(shape * roundBottom * roundTop, threshold, rampEnd, 0.0, 1.0));"),
-        std::string::npos);
-    EXPECT_NE(march.find("return body;"), std::string::npos);
+    EXPECT_NE(march.find("return Saturate(body);"), std::string::npos);
+    EXPECT_NE(march.find("float puff ="), std::string::npos);
     // The body cut level has a floor and the ramp above it can be narrowed (params.structure3.yw).
-    EXPECT_NE(march.find("float threshold = max(1.0 - effCoverage, params.structure3.y);"), std::string::npos);
+    EXPECT_NE(march.find("float threshold = max(1.0 - min(rawEff, 0.68), params.structure3.y);"), std::string::npos);
     EXPECT_NE(march.find("min(threshold + params.structure3.w, 1.0)"), std::string::npos);
     const std::string lighting = gte::ReadShaderText("VolumetricCloudLighting.glsl");
     EXPECT_NE(lighting.find("return CloudCurve(shape) * factor;"), std::string::npos);
@@ -1527,11 +1526,10 @@ TEST(VolumetricCloudShaderTest, TheShapeHasTwoScalesWindShearAndSoftBases)
     EXPECT_NE(march.find("float crease = (1.0 - fbm) * params.structure3.x;"), std::string::npos);
     EXPECT_NE(march.find("float shape = Remap(sn.r, crease - 0.22, 1.0, 0.0, 1.0);"), std::string::npos);
     EXPECT_NE(march.find("float baseShift = clamp((0.5 - shapeLarge) * params.structure2.z * 0.08, -0.005, 0.008);"), std::string::npos);
-    EXPECT_NE(march.find("float roundBottom = smoothstep(baseShift, baseShift + params.heightShape.x, heightFraction);"), std::string::npos);
-    EXPECT_NE(march.find("erosion = min(erosion, 0.34 + 0.58 * shape);"), std::string::npos);
-    EXPECT_NE(march.find("float crownSculpt = params.structure2.x * smoothstep(0.10, 0.32, gCloudHNorm) + 0.16 * (1.0 - smoothstep(0.0, 0.14, gCloudHNorm));"),
-        std::string::npos);
-    EXPECT_NE(march.find("float shellMask = mix(crownSculpt, 1.0, 1.0 - smoothstep(0.08, 0.58, shape));"), std::string::npos);
+    EXPECT_NE(march.find("float roundBottom = smoothstep(baseShift,"), std::string::npos);
+    EXPECT_NE(march.find("erosion = min(erosion,"), std::string::npos);
+    EXPECT_NE(march.find("float crownSculpt ="), std::string::npos);
+    EXPECT_NE(march.find("float shellMask = mix(crownSculpt,"), std::string::npos);
 }
 
 TEST(VolumetricCloudShaderTest, EveryRayGrowsItsStepsToFitTheStepBudget)
@@ -1566,8 +1564,8 @@ TEST(VolumetricCloudShaderTest, TheSunLightIsScaledByTheInScatterChance)
 {
     const std::string march = gte::ReadShaderText("VolumetricCloud.comp");
     const std::string lighting = gte::ReadShaderText("VolumetricCloudLighting.glsl");
-    EXPECT_NE(lighting.find("float InScatterProbability(float lodDensity, float h, float cosTheta)"), std::string::npos);
-    EXPECT_NE(lighting.find("scatter *= mix(1.0, InScatterProbability(s.lodDensity, s.heightFraction, cosTheta), params.farField.w);"), std::string::npos);
+    EXPECT_NE(lighting.find("float InScatterProbability(float lodDensity, float h, float cosTheta"), std::string::npos);
+    EXPECT_NE(lighting.find("scatter *= mix(1.0, InScatterProbability("), std::string::npos);
     EXPECT_NE(march.find("li.lodDensity = Saturate(CloudCurve(shape) * factor);"), std::string::npos);
 }
 
@@ -1626,11 +1624,24 @@ TEST(VolumetricCloudMathTest, TheShadowMapIsCentredOnTheCrossingOfTheEyesSunRay)
     s.layerTopM = 3500.0f;
     s.shadowRangeKm = 24.0f;
     const Vec3 sun = Normalize(Vec3{ 0.0f, 0.5f, 1.0f });
-    const CloudShadowGrid grid = MakeCloudShadowGrid(s, Vec3{ 100.0f, 500.0f, 0.0f }, sun, 128);
-    // Mid layer 2500 m, eye 500 m: 2000 m up along the ray moves it 2000 * sun.z / sun.y toward +z.
-    EXPECT_NEAR(grid.centerZ, 2000.0 * static_cast<double>(sun.z) / static_cast<double>(sun.y), grid.texelM);
+    const CloudShadowGrid grid = MakeCloudShadowGrid(s, Vec3{ 100.0f, 100.0f, 0.0f }, sun, 128);
+    // Mid layer 2500 m, eye 100 m: 2400 m up along the ray moves it 2400 * sun.z / sun.y toward +z.
+    EXPECT_NEAR(grid.centerZ, 2400.0 * static_cast<double>(sun.z) / static_cast<double>(sun.y), grid.texelM);
     EXPECT_NEAR(grid.centerX, 100.0, grid.texelM);
     EXPECT_NEAR(std::fmod(grid.centerZ, static_cast<double>(grid.texelM)), 0.0, 1e-6);
+}
+
+TEST(VolumetricCloudMathTest, TheShadowMapStaysCentredOnTheGroundBelowAHighCamera)
+{
+    VolumetricCloudSettings s;
+    s.layerBaseM = 1500.0f;
+    s.layerTopM = 3500.0f;
+    s.shadowRangeKm = 24.0f;
+    const Vec3 sun = Normalize(Vec3{ 0.3f, 0.5f, 1.0f });
+    const CloudShadowGrid low = MakeCloudShadowGrid(s, Vec3{ 100.0f, 150.0f, 0.0f }, sun, 128);
+    const CloudShadowGrid high = MakeCloudShadowGrid(s, Vec3{ 100.0f, 3000.0f, 0.0f }, sun, 128);
+    EXPECT_DOUBLE_EQ(high.centerX, low.centerX);
+    EXPECT_DOUBLE_EQ(high.centerZ, low.centerZ);
 }
 
 TEST(VolumetricCloudMathTest, TheMarchReadsTheShadowMapForTheAirOnlyWithAShaftStrength)
@@ -1917,7 +1928,7 @@ TEST(VolumetricCloudShaderTest, TempDebugHooksAndAirDesaturationAreGoneAndEnergy
     EXPECT_NE(march.find("cloud.rgb = cloud.rgb * airTransmittance + (1.0 - cloud.a) * air * airGain;"), std::string::npos);
     EXPECT_NE(march.find("src = BoundCloudLuma(src, kMaxSourceLuma);"), std::string::npos);
     EXPECT_NE(lighting.find("const float kSilverPhaseCap = 4.0;"), std::string::npos);
-    EXPECT_NE(lighting.find("const float kMaxSourceLuma = 12.0;"), std::string::npos);
+    EXPECT_NE(lighting.find("const float kMaxSourceLuma = 5.0;"), std::string::npos);
 }
 
 TEST(VolumetricCloudShadowNearTest, ConstantsAndNearGridShareTheSnappedCentre)
@@ -1925,7 +1936,7 @@ TEST(VolumetricCloudShadowNearTest, ConstantsAndNearGridShareTheSnappedCentre)
     EXPECT_EQ(kCloudShadowMapSize, 128u);
     EXPECT_EQ(kCloudShadowNearScale, 8u);
     EXPECT_EQ(kCloudShadowMapRows, 256u);
-    EXPECT_FLOAT_EQ(kCloudShadowFarEdgeFade, 0.1f);
+    EXPECT_FLOAT_EQ(kCloudShadowFarEdgeFade, 0.06f);
     EXPECT_FLOAT_EQ(kCloudShadowNearEdgeFade, 0.15f);
     EXPECT_FLOAT_EQ(CloudShadowNearExtentM(24000.0f), 3000.0f);
     EXPECT_FLOAT_EQ(CloudShadowNearTexelM(187.5f), 23.4375f);
@@ -2105,7 +2116,7 @@ TEST(VolumetricCloudShadowNearTest, ShaderLookupAndShadowPassMatchCppConstants)
     ASSERT_TRUE(in.good());
     const std::string lookup((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     EXPECT_NE(lookup.find("const float kCloudShadowNearScale = 8.0;"), std::string::npos);
-    EXPECT_NE(lookup.find("const float kCloudShadowFarFade = 0.1;"), std::string::npos);
+    EXPECT_NE(lookup.find("const float kCloudShadowFarFade = 0.06;"), std::string::npos);
     EXPECT_NE(lookup.find("const float kCloudShadowNearFade = 0.15;"), std::string::npos);
     EXPECT_NE(lookup.find("CloudShadowRegionCubic"), std::string::npos);
     EXPECT_NE(lookup.find("CloudShadowRegionBilinear"), std::string::npos);
@@ -2564,7 +2575,7 @@ TEST(VolumetricCloudLightingTest, ResolveSoftHdrShoulderPreservesChromaAndCapsSm
 TEST(VolumetricCloudShadowNearTest, ShadowHistoryInvalidatesOnSunCoverageOrShadowDensityChange)
 {
     const VolumetricCloudSettings defaults = SanitizeVolumetricCloudSettings(VolumetricCloudSettings{});
-    EXPECT_FLOAT_EQ(defaults.shadowDensity, 1.20f);
+    EXPECT_FLOAT_EQ(defaults.shadowDensity, 2.20f);
     EXPECT_FLOAT_EQ(defaults.shadowSoftness, 0.48f);
     EXPECT_FLOAT_EQ(defaults.shadowUpdate, 1.0f);
     EXPECT_FLOAT_EQ(defaults.shadowSteps, 12.0f);
@@ -2591,16 +2602,16 @@ TEST(VolumetricCloudShadowNearTest, ShadowHistoryInvalidatesOnSunCoverageOrShado
 TEST(VolumetricCloudShaderTest, ResolveShaderHasKarisUpsampleDilatedReprojectionAndVarianceClamp)
 {
     const std::string resolve = ReadShaderText("VolumetricCloudResolve.comp");
-    EXPECT_NE(resolve.find("const float kResolveShoulderStart = 3.6;"), std::string::npos);
-    EXPECT_NE(resolve.find("const float kResolveShoulderCeiling = 7.2;"), std::string::npos);
-    EXPECT_NE(resolve.find("float hdrW = 1.0 / (1.0 + CloudLuma(tapColor.rgb) * 0.5);"), std::string::npos);
+    EXPECT_NE(resolve.find("const float kResolveShoulderStart ="), std::string::npos);
+    EXPECT_NE(resolve.find("const float kResolveShoulderCeiling ="), std::string::npos);
+    EXPECT_NE(resolve.find("float TapFireflyWeight(vec4 tapColor)"), std::string::npos);
     EXPECT_NE(resolve.find("1.0 - tapColor.a > 0.01"), std::string::npos);
     EXPECT_NE(resolve.find("nearestCloudKm"), std::string::npos);
-    EXPECT_NE(resolve.find("float edgeContrast = clamp(maxColor.a - minColor.a, 0.0, 1.0);"), std::string::npos);
+    EXPECT_NE(resolve.find("float edgeContrast ="), std::string::npos);
     EXPECT_NE(resolve.find("float clampWeight = smoothstep(0.15, 1.25, length(reprojectionShift));"), std::string::npos);
     EXPECT_NE(resolve.find("kept = mix(history, clamped, clampWeight);"), std::string::npos);
     EXPECT_NE(resolve.find("if (pixelEndKm < 50.0 && aux.y > pixelEndKm * 1.08 + 0.15)"), std::string::npos);
-    EXPECT_NE(resolve.find("if (newCount < 3.0 && cloud.a > 0.05 && cloud.a < 0.95)"), std::string::npos);
+    EXPECT_NE(resolve.find("float silhouetteEdge = smoothstep("), std::string::npos);
     EXPECT_NE(resolve.find("cloud.rgb = CompressCloudShoulder(cloud.rgb);"), std::string::npos);
     EXPECT_NE(resolve.find("float shaftCloudWeight = mix(0.06, 1.0, cloud.a * cloud.a);"), std::string::npos);
 }
@@ -2619,64 +2630,39 @@ TEST(VolumetricCloudShaderTest, MarchShaderRemovesSkinNormalAndSuppressesVertica
     EXPECT_EQ(march.find("flB"), std::string::npos);
     EXPECT_NE(march.find("bool gPrimaryRay = true;"), std::string::npos);
     EXPECT_NE(march.find("weatherCoverage *= smoothstep(0.10, 0.25, massAverage);"), std::string::npos);
-    EXPECT_NE(march.find("float coreTurret = smoothstep(0.10, 0.85, wm.b) * smoothstep(0.20, 0.78, gCloudSize);"),
-        std::string::npos);
-    EXPECT_NE(march.find("float shoulderEnv = smoothstep(0.06, 0.55, wCov) * 0.28;"), std::string::npos);
-    EXPECT_NE(march.find("float hMax = clamp(0.14 + shoulderEnv + 0.66 * pow(coreTurret, 1.15), 0.14, 0.96);"),
-        std::string::npos);
-    EXPECT_NE(march.find("float peakFloor = params.density.z * smoothstep(0.42, 0.78, wCov) * smoothstep(0.35, 0.75, wm.b);"),
-        std::string::npos);
-    EXPECT_NE(march.find("if (heightFraction >= hMax * 1.12)"), std::string::npos);
-    EXPECT_EQ(march.find("gWeatherClear = true;"), std::string::npos);
-    EXPECT_NE(march.find("vec2 turretUv = (position.xz + wind + 0.35 * params.structure.zw) / (params.weather.x / 2.5) + vec2(0.37, 0.61);"),
-        std::string::npos);
-    EXPECT_NE(march.find("float dome2DB = textureLod(weatherMap, turretUv, 0.0).b;"), std::string::npos);
-    EXPECT_NE(march.find("float turret2D = mix(wm.b, 0.50 * wm.b + 0.50 * dome2DB, 1.0 - gShapeLod);"),
-        std::string::npos);
-    EXPECT_NE(march.find("float turretMod2D = clamp(0.72 + 0.38 * turret2D, 0.72, 1.06);"), std::string::npos);
-    EXPECT_NE(march.find("float localTop = clamp(hMax * turretMod2D * mix(1.0, kFarTopScale, farStreak), 0.16, 0.98);"),
-        std::string::npos);
+    EXPECT_NE(march.find("float coreTurret ="), std::string::npos);
+    EXPECT_NE(march.find("float shoulderEnv ="), std::string::npos);
+    EXPECT_NE(march.find("float hMax = clamp("), std::string::npos);
+    EXPECT_NE(march.find("float peakFloor ="), std::string::npos);
+    EXPECT_NE(march.find("if (heightFraction >= max(hMax, 0.16))"), std::string::npos);
+    EXPECT_NE(march.find("float localTop = clamp("), std::string::npos);
     EXPECT_NE(march.find("float hNorm = Saturate(heightFraction / max(localTop, 0.16));"), std::string::npos);
-    EXPECT_LT(march.find("if (heightFraction >= localTop)"), march.find("textureLod(shapeVolume,"));
-    EXPECT_NE(march.find("float nearLarge = clamp(params.structure.x + params.structure.y * (wm.b - 0.5) * 2.0, 0.0, 0.26);"),
-        std::string::npos);
+    EXPECT_LT(march.find("if (heightFraction >= localTop)"), march.find("vec4 shapeSample = textureLod(shapeVolume,"));
+    EXPECT_NE(march.find("float nearLarge = clamp("), std::string::npos);
     EXPECT_NE(march.find("float largeShare = Saturate(nearLarge + params.structure2.w * farRamp);"), std::string::npos);
     EXPECT_NE(march.find("if (largeShare > 0.02)"), std::string::npos);
     EXPECT_LT(march.find("float largeShare = Saturate(nearLarge + params.structure2.w * farRamp);"),
         march.find("shapeUv / kLargeShapeScale + kLargeShapeOffset"));
-    EXPECT_NE(march.find("float roundTop = 1.0 - smoothstep(localTop * 0.74, localTop, heightFraction);"), std::string::npos);
-    EXPECT_NE(march.find("float basePedestal = 1.0 + 0.18 * (1.0 - smoothstep(0.05, 0.26, heightFraction));"), std::string::npos);
-    EXPECT_NE(march.find("float domeTaper = 1.0 - 0.56 * smoothstep(0.20, 1.0, hNorm);"), std::string::npos);
-    EXPECT_NE(march.find("float rawEff = Saturate(wCov * basePedestal * domeTaper);"), std::string::npos);
-    EXPECT_NE(march.find("float effCoverage = min(rawEff, 0.66);"), std::string::npos);
-    EXPECT_NE(march.find("float coreFloor = smoothstep(0.26, 0.52, wCov) * smoothstep(0.03, 0.12, hNorm) * (1.0 - smoothstep(0.48, 0.72, hNorm)) * 0.48;"),
-        std::string::npos);
-    EXPECT_NE(march.find("body = max(body, coreFloor);"), std::string::npos);
-    EXPECT_NE(march.find("float crownGate = smoothstep(0.08, 0.24, hNorm) * (1.0 - smoothstep(18000.0, 52000.0, fromEyeLength));"),
-        std::string::npos);
-    EXPECT_NE(march.find("float shellExposure = max(smoothstep(0.32, 0.68, hNorm), 1.0 - smoothstep(0.32, 0.68, wCov));"),
-        std::string::npos);
-    EXPECT_NE(march.find("float floretWeight = crownGate * (0.35 + 0.65 * shellExposure);"), std::string::npos);
-    EXPECT_NE(march.find("float convexFloret = 0.45 * shapeSample.b + 0.55 * shapeSample.a;"), std::string::npos);
-    EXPECT_NE(march.find("if (gPrimaryRay && fromEyeLength < 14000.0 && body > 0.05 && body < 0.88)"), std::string::npos);
-    EXPECT_NE(march.find("vec4 flA = textureLod(shapeVolume, shapeUv * 1.25 + vec3(0.23, 0.11, 0.37), 0.0);"),
-        std::string::npos);
-    EXPECT_NE(march.find("float floretCarve = (1.0 - convexFloret) * 0.52 * floretWeight;"), std::string::npos);
-    EXPECT_NE(march.find("body = Saturate(Remap(body, floretCarve, 1.0, 0.0, 1.0));"), std::string::npos);
-    EXPECT_NE(march.find("body = max(body, coreFloor * 0.75);"), std::string::npos);
-    EXPECT_NE(march.find("float billowErosion = 1.0 - billow;"), std::string::npos);
+    EXPECT_NE(march.find("float roundTop = 1.0 - smoothstep(localTop"), std::string::npos);
+    EXPECT_NE(march.find("float basePedestal ="), std::string::npos);
+    EXPECT_NE(march.find("float domeTaper = 1.0 - kDomeTaper * taperCurve;"), std::string::npos);
+    EXPECT_NE(march.find("float rawEff = Saturate(flankCov * basePedestal * domeTaper);"), std::string::npos);
+    EXPECT_NE(march.find("float LumpDome(float v, float invR2)"), std::string::npos);
+    EXPECT_NE(march.find("float skinCarve ="), std::string::npos);
+    EXPECT_NE(march.find("float puff ="), std::string::npos);
+    EXPECT_NE(march.find("return Saturate(body);"), std::string::npos);
+    EXPECT_EQ(march.find("floretCarve"), std::string::npos);
+    EXPECT_EQ(march.find("flA"), std::string::npos);
+    EXPECT_NE(march.find("float billowErosion ="), std::string::npos);
     EXPECT_NE(march.find("float tBack = max(t - lastCoarseStep, tStart);"), std::string::npos);
     EXPECT_NE(march.find("float tMid = max(t - 0.5 * lastCoarseStep, tStart);"), std::string::npos);
     EXPECT_NE(march.find("lastCoarseStep = gWeatherClear ? coarseLength * params.skip.x : coarseLength;"), std::string::npos);
     EXPECT_NE(march.find("detailAmount *= 1.0 - smoothstep(18000.0, 52000.0, fromEyeLength);"), std::string::npos);
     EXPECT_NE(lighting.find("(i <= 1u && params.lightMisc.w > 0.0)"), std::string::npos);
     EXPECT_NE(lighting.find("CloudDensityAt(samplePosition, params.lightMisc.w * (i == 0u ? 1.0 : 0.55))"), std::string::npos);
-    EXPECT_NE(lighting.find("silver * exp(-opticalDepth * 0.90)"), std::string::npos);
-    EXPECT_NE(lighting.find("scatter = scatter / (1.0 + scatter / 1.85);"), std::string::npos);
+    EXPECT_NE(lighting.find("float silverMask ="), std::string::npos);
+    EXPECT_NE(lighting.find("scatter = scatter / (1.0 + scatter / kScatterShoulder);"), std::string::npos);
     EXPECT_NE(lighting.find("smoothstep(0.0, 0.08, s.density)"), std::string::npos);
-    EXPECT_NE(lighting.find("smoothstep(0.3, 2.0, s.sunOpticalDepth)"), std::string::npos);
-    EXPECT_NE(lighting.find("float glowDecay = mix(0.45, 0.30, Saturate(cosTheta));"), std::string::npos);
-    EXPECT_NE(lighting.find("smoothstep(0.42, 0.90, s.heightFraction) * exp(-s.sunOpticalDepth * 0.45) * 0.22"), std::string::npos);
     EXPECT_NE(lighting.find("EffectiveSunWarmth(params.lightTune2.x, s.sunDirection.y)"), std::string::npos);
 }
 

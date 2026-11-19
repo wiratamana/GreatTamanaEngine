@@ -155,19 +155,19 @@ struct VolumetricCloudSettings {
 
     // Cloud shadows: a map of the sun light the layer lets through, read by the lit materials.
     float shadowStrength = 1.0f;  // 0 = no cloud shadows (the map is not made); 1 = a full cloud blocks the sun fully.
-    float shadowRangeKm = 24.0f;  // Width of the map around the camera.
+    float shadowRangeKm = 28.0f;  // Width of the map around the camera.
     float shadowSoftness = 0.48f; // Blur of the shadow edge in map texels.
     float shadowUpdate = 1.0f;    // Every texel is redone once per this many frames (1..4).
-    float shadowDensity = 1.20f;  // Factor on the optical depth of the shadow ray; tuned for crisp cumulus footprints.
+    float shadowDensity = 2.20f;  // Factor on the optical depth of the shadow ray; tuned for crisp cumulus footprints.
     float shadowSteps = 12.0f;    // Samples of the shadow ray through the layer.
     float shaftStrength = 1.0f;  // 0 = no light shafts; 1 = the air loses the sun light the clouds block (uses the shadow map).
     float shaftSharpness = 3.0f; // Exponent on the sun transmittance of the air; higher gives crisper beams and darker gaps.
-    float shaftHaze = 0.6f;     // Density per km of the haze that carries the light curtains near the ground (its extinction is a quarter of it; 0 = none).
-    float shaftFill = 0.45f;     // Sky light in the shadowed columns of the haze (0 = black, 1 = like the sky's multiple scattering).
+    float shaftHaze = 0.3f;     // Density per km of the haze that carries the light curtains near the ground (its extinction is a quarter of it; 0 = none).
+    float shaftFill = 0.30f;     // Sky light in the shadowed columns of the haze (0 = black, 1 = like the sky's multiple scattering).
     float shaftMist = 0.0f;      // Extinction per km of an extra near-field mist in the volumetric light (0 = none).
     float shaftHeightM = 2500.0f; // Scale height of that haze; it thins out above.
     float shaftHighSunKeep = 0.7f; // Share of low-sun shaft strength and beam haze kept when the sun is overhead.
-    float shadowFill = 0.22f;     // Share of the blocked sun that reaches shadowed ground as diffuse light.
+    float shadowFill = 0.06f;     // Share of the blocked sun that reaches shadowed ground as diffuse light.
     float sunRays = 0.55f;          // Intensity of the quarter-res screen-space sun shafts through cloud gaps (0 = off).
     float sunRaysDecay = 1.0f;      // Exponential decay of sun-shaft taps away from the sun.
     float sunRaysLength = 1.5f;     // Reach of the sun shafts across the screen, in view heights.

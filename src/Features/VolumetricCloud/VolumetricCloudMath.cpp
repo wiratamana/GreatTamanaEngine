@@ -16,6 +16,8 @@ constexpr float kMinLayerThicknessM = 50.0f;
 constexpr float kMinStepM = 1e-4f;
 // A camera standing on the ground looks into it, even with rounding at 6371 km.
 constexpr float kGroundSlackM = 0.5f;
+// Highest receiver height the shadow map is centred for; higher cameras still look at the ground below them.
+constexpr double kCloudShadowGridMaxReceiverM = 150.0;
 constexpr float kMinPhaseDenominator = 1e-4f;
 // Radiance of the blue sky light, relative to the sun's luminance.
 constexpr float kAmbientTint[3] = { 0.55f, 0.7f, 1.0f };
@@ -595,9 +597,10 @@ CloudShadowGrid MakeCloudShadowGrid(
     grid.texelM = safe.shadowRangeKm * 1000.0f / static_cast<float>(std::max(mapSize, 1u));
     grid.nearTexelM = CloudShadowNearTexelM(grid.texelM);
     const double texel = static_cast<double>(grid.texelM);
-    // The map is read where a receiver's sun ray crosses the layer: centre it on the crossing of the eye's own ray.
+    // The map is read where a receiver's sun ray crosses the layer: centre it on the crossing of the ground under the eye.
     const double sunUp = std::max(static_cast<double>(sunDirection.y), 0.04);
-    const double along = (0.5 * (static_cast<double>(safe.layerBaseM) + static_cast<double>(safe.layerTopM)) - static_cast<double>(eye.y)) / sunUp;
+    const double receiverY = std::clamp(static_cast<double>(eye.y), 0.0, kCloudShadowGridMaxReceiverM);
+    const double along = (0.5 * (static_cast<double>(safe.layerBaseM) + static_cast<double>(safe.layerTopM)) - receiverY) / sunUp;
     const double crossX = static_cast<double>(eye.x) + static_cast<double>(sunDirection.x) * along;
     const double crossZ = static_cast<double>(eye.z) + static_cast<double>(sunDirection.z) * along;
     grid.centerX = std::round(crossX / texel) * texel;
