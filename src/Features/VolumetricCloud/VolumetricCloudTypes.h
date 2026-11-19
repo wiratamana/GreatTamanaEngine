@@ -155,7 +155,7 @@ struct VolumetricCloudSettings {
 
     // Cloud shadows: a map of the sun light the layer lets through, read by the lit materials.
     float shadowStrength = 1.0f;  // 0 = no cloud shadows (the map is not made); 1 = a full cloud blocks the sun fully.
-    float shadowRangeKm = 28.0f;  // Width of the map around the camera.
+    float shadowRangeKm = 20.0f;  // Width of the map around the camera.
     float shadowSoftness = 0.48f; // Blur of the shadow edge in map texels.
     float shadowUpdate = 1.0f;    // Every texel is redone once per this many frames (1..4).
     float shadowDensity = 2.20f;  // Factor on the optical depth of the shadow ray; tuned for crisp cumulus footprints.

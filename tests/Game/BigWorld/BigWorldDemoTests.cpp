@@ -355,7 +355,7 @@ TEST_F(BigWorldDemoTest, SuccessPathReachesReadyAndSwitchesFeaturesOn)
     EXPECT_EQ(demo.State().status, "ready");
     EXPECT_EQ(features.values["VolumetricCloud"]["enabled"], "true");
     EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], "0.55");
-    EXPECT_EQ(features.values["VolumetricCloud"]["shadowRangeKm"], "28");
+    EXPECT_EQ(features.values["VolumetricCloud"]["shadowRangeKm"], "20");
     EXPECT_EQ(features.values["VolumetricCloud"]["shadowSoftness"], "0.48");
     EXPECT_EQ(features.values["VolumetricCloud"]["shadowFill"], "0.06");
     EXPECT_EQ(features.values["VolumetricCloud"]["sunRays"], "0.55");
@@ -384,7 +384,7 @@ TEST_F(BigWorldDemoTest, EachTierAppliesItsSettingsAndRestoresRoundTripOnClose)
         OpenAndRunToReady(c.quality);
         EXPECT_EQ(terrain.lastProfile, "lean") << QualityName(c.quality);
         EXPECT_EQ(features.values["VolumetricCloud"]["coverage"], c.coverage) << QualityName(c.quality);
-        EXPECT_EQ(features.values["VolumetricCloud"]["shadowRangeKm"], "28") << QualityName(c.quality);
+        EXPECT_EQ(features.values["VolumetricCloud"]["shadowRangeKm"], "20") << QualityName(c.quality);
         EXPECT_EQ(features.values["VolumetricCloud"]["shadowSoftness"], "0.48") << QualityName(c.quality);
         EXPECT_EQ(features.values["VolumetricCloud"]["shadowFill"], "0.06") << QualityName(c.quality);
         EXPECT_EQ(features.values["VolumetricCloud"]["sunRays"], "0.55") << QualityName(c.quality);
@@ -868,7 +868,7 @@ TEST_F(BigWorldDemoTest, JsonCarriesPhasePlanKeysShadowKeysAndEscapesText)
     EXPECT_NE(json.find("\"info\":\"\""), std::string::npos);
     EXPECT_NE(json.find("\"terrainProfile\":\"lean\""), std::string::npos);
     EXPECT_NE(json.find("\"cloudCoverage\":0.55"), std::string::npos);
-    EXPECT_NE(json.find("\"cloudShadowRangeKm\":28"), std::string::npos);
+    EXPECT_NE(json.find("\"cloudShadowRangeKm\":20"), std::string::npos);
     EXPECT_NE(json.find("\"cloudShadowSoftness\":0.48"), std::string::npos);
     EXPECT_NE(json.find("\"cloudShadowFill\":0.06"), std::string::npos);
     EXPECT_NE(json.find("\"cloudSunRays\":0.55"), std::string::npos);

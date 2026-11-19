@@ -1419,7 +1419,7 @@ TEST(VolumetricCloudParamsTest, GlslBlocksHaveTheCppMembersAtTheCppOffsets)
 TEST(VolumetricCloudLightTest, ShaderConstantsMatchTheCpuTwinsAndTheAtmosphereDefault)
 {
     const std::string lighting = ReadShaderText("VolumetricCloudLighting.glsl");
-    EXPECT_NE(lighting.find("const vec3 kOctaveTint = vec3(0.94, 0.98, 1.03);"), std::string::npos);
+    EXPECT_NE(lighting.find("const vec3 kOctaveTint = vec3(0.99, 0.995, 1.004);"), std::string::npos);
     const std::string atmosphere = ReadShaderText("VolumetricCloudAtmosphere.glsl");
     EXPECT_NE(atmosphere.find("const float kReferenceSkyIntensity = 6.0;"), std::string::npos);
     // The clouds' sky light is tied to the atmosphere's default sky intensity, not to the live setting.
@@ -1492,7 +1492,7 @@ TEST(VolumetricCloudShaderTest, DetailIsCurlWarpedBillowAndWispErosionAndTheCurv
     EXPECT_NE(march.find("float billowErosion"), std::string::npos);
     EXPECT_NE(march.find("float wispErosion"), std::string::npos);
     // The density curve is applied to the eroded body, not to the body before the erosion.
-    EXPECT_NE(march.find("return CloudCurve(Saturate(Remap(shape, erosion, 1.0, 0.0, 1.0))) * densityFactor;"), std::string::npos);
+    EXPECT_NE(march.find("float result = CloudCurve(Saturate(Remap(shape, erosion, 1.0, 0.0, 1.0)) * bodyGate) * densityFactor;"), std::string::npos);
     // The exponent lives in one place, CloudCurve(); CloudShape() returns the linear body.
     EXPECT_NE(march.find("float CloudCurve(float body)"), std::string::npos);
     EXPECT_NE(march.find("return Saturate(body);"), std::string::npos);
@@ -1928,7 +1928,7 @@ TEST(VolumetricCloudShaderTest, TempDebugHooksAndAirDesaturationAreGoneAndEnergy
     EXPECT_NE(march.find("cloud.rgb = cloud.rgb * airTransmittance + (1.0 - cloud.a) * air * airGain;"), std::string::npos);
     EXPECT_NE(march.find("src = BoundCloudLuma(src, kMaxSourceLuma);"), std::string::npos);
     EXPECT_NE(lighting.find("const float kSilverPhaseCap = 4.0;"), std::string::npos);
-    EXPECT_NE(lighting.find("const float kMaxSourceLuma = 5.0;"), std::string::npos);
+    EXPECT_NE(lighting.find("const float kMaxSourceLuma = 7.5;"), std::string::npos);
 }
 
 TEST(VolumetricCloudShadowNearTest, ConstantsAndNearGridShareTheSnappedCentre)
