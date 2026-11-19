@@ -77,6 +77,8 @@ const float kThickSlabSkyBounce = 0.20;
 const float kThickSlabTauPivotSq = 4.0;
 const float kThickSlabViewStart = 0.24;
 const float kThickSlabViewEnd = 0.46;
+// Darkening of the valleys between the fine puffs (0 = none).
+const float kMicroCreviceShade = 0.40;
 // Macro-density and optical-depth ambient occlusion for shadowed concavities, floored at belly luma.
 const float kCreviceBodyStart = 0.42;
 const float kCreviceBodyEnd = 0.94;
@@ -436,7 +438,9 @@ vec3 CloudSourceRadiance(CloudLightInput s)
     // Ground bounce reaches only unoccluded lower rims so warm ground light cannot muddy shadowed bellies.
     float lowRim = 1.0 - smoothstep(0.0, kGroundBounceTop, s.heightFraction);
     float groundShare = lowRim * lowRim * kGroundBounceScale * exp(-kGroundBounceDecay * tau);
-    return sun + ambient + s.groundRadiance * groundShare;
+    // Valleys between the fine puffs sit in shade, so the bumps keep a lit-crown to dark-crease contrast.
+    float puffShade = 1.0 - kMicroCreviceShade * gMicroCrevice;
+    return (sun + ambient) * puffShade + s.groundRadiance * groundShare;
 }
 
 // Smooth luminance ceiling: preserves hue, leaves normal cloud brightness intact, and approaches maxLuma smoothly.
