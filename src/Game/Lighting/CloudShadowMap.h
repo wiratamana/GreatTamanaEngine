@@ -17,7 +17,7 @@ inline constexpr const char* kCloudShadowChannel = "ShadowMap";
 
 // Texels per side of one region, nested near-map scale and stacked texture height (far rows then near rows).
 inline constexpr std::uint32_t kCloudShadowMapSize = 128;
-inline constexpr std::uint32_t kCloudShadowNearScale = 8;
+inline constexpr std::uint32_t kCloudShadowNearScale = 4;
 inline constexpr std::uint32_t kCloudShadowMapRows = 2 * kCloudShadowMapSize;
 inline constexpr float kCloudShadowFarEdgeFade = 0.06f;
 inline constexpr float kCloudShadowNearEdgeFade = 0.15f;

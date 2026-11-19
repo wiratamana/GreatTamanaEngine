@@ -1492,7 +1492,8 @@ TEST(VolumetricCloudShaderTest, NearCloudsCarveAFinePuffOctaveOnPrimaryRaysAndSh
     EXPECT_NE(march.find("- microCarve) / kSkinEdge)"), std::string::npos);
     EXPECT_NE(march.find("gMicroCrevice = microWeight * (1.0 - microPuff);"), std::string::npos);
     const std::string lighting = gte::ReadShaderText("VolumetricCloudLighting.glsl");
-    EXPECT_NE(lighting.find("1.0 - kMicroCreviceShade * gMicroCrevice"), std::string::npos);
+    EXPECT_NE(lighting.find("kMicroCreviceShade * mix(kMicroCreviceBellyKeep, 1.0"), std::string::npos);
+    EXPECT_NE(lighting.find("* gMicroCrevice;"), std::string::npos);
 }
 
 TEST(VolumetricCloudShaderTest, DetailIsCurlWarpedBillowAndWispErosionAndTheCurveComesAfterTheErosion)
@@ -1946,15 +1947,15 @@ TEST(VolumetricCloudShaderTest, TempDebugHooksAndAirDesaturationAreGoneAndEnergy
 TEST(VolumetricCloudShadowNearTest, ConstantsAndNearGridShareTheSnappedCentre)
 {
     EXPECT_EQ(kCloudShadowMapSize, 128u);
-    EXPECT_EQ(kCloudShadowNearScale, 8u);
+    EXPECT_EQ(kCloudShadowNearScale, 4u);
     EXPECT_EQ(kCloudShadowMapRows, 256u);
     EXPECT_FLOAT_EQ(kCloudShadowFarEdgeFade, 0.06f);
     EXPECT_FLOAT_EQ(kCloudShadowNearEdgeFade, 0.15f);
-    EXPECT_FLOAT_EQ(CloudShadowNearExtentM(24000.0f), 3000.0f);
-    EXPECT_FLOAT_EQ(CloudShadowNearTexelM(187.5f), 23.4375f);
+    EXPECT_FLOAT_EQ(CloudShadowNearExtentM(24000.0f), 6000.0f);
+    EXPECT_FLOAT_EQ(CloudShadowNearTexelM(187.5f), 46.875f);
 
     const CloudShadowMap defaults;
-    EXPECT_FLOAT_EQ(defaults.nearScale, 8.0f);
+    EXPECT_FLOAT_EQ(defaults.nearScale, 4.0f);
     EXPECT_EQ(defaults.mapRows, 256u);
 
     for (const float rangeKm : { 24.0f, 8.0f, 12.0f }) {
@@ -2012,7 +2013,7 @@ TEST(VolumetricCloudShadowNearTest, EdgeFadeAndNearBlendAreZeroOutsideAndOneInsi
 
     CloudShadowMap m;
     m.sunDirection = Vec3::Up();
-    m.extentM = 24000.0f; // Near extent = 3000 m, half-width = 1500 m, inner full-weight half-width = 1050 m.
+    m.extentM = 24000.0f; // Near extent = 6000 m, half-width = 3000 m, inner full-weight half-width = 2100 m.
     m.layerBaseM = 1500.0f;
     m.layerTopM = 4500.0f;
     m.strength = 1.0f;
@@ -2021,13 +2022,13 @@ TEST(VolumetricCloudShadowNearTest, EdgeFadeAndNearBlendAreZeroOutsideAndOneInsi
     EXPECT_FLOAT_EQ(CloudShadowNearBlend(m, Vec3{ 1000.0f, 0.0f, -1000.0f }), 1.0f);
     EXPECT_TRUE(CloudShadowNearCovers(m, Vec3{ 0.0f, 0.0f, 0.0f }));
 
-    const float borderBlend = CloudShadowNearBlend(m, Vec3{ 1350.0f, 0.0f, 0.0f });
+    const float borderBlend = CloudShadowNearBlend(m, Vec3{ 2700.0f, 0.0f, 0.0f });
     EXPECT_GT(borderBlend, 0.0f);
     EXPECT_LT(borderBlend, 1.0f);
-    EXPECT_TRUE(CloudShadowNearCovers(m, Vec3{ 1350.0f, 0.0f, 0.0f }));
+    EXPECT_TRUE(CloudShadowNearCovers(m, Vec3{ 2700.0f, 0.0f, 0.0f }));
 
-    EXPECT_FLOAT_EQ(CloudShadowNearBlend(m, Vec3{ 1600.0f, 0.0f, 0.0f }), 0.0f);
-    EXPECT_FALSE(CloudShadowNearCovers(m, Vec3{ 1600.0f, 0.0f, 0.0f }));
+    EXPECT_FLOAT_EQ(CloudShadowNearBlend(m, Vec3{ 3200.0f, 0.0f, 0.0f }), 0.0f);
+    EXPECT_FALSE(CloudShadowNearCovers(m, Vec3{ 3200.0f, 0.0f, 0.0f }));
 
     CloudShadowMap legacy = m;
     legacy.mapRows = kCloudShadowMapSize;
@@ -2063,12 +2064,12 @@ TEST(VolumetricCloudShadowNearTest, CpuLookupTwinKeepsFarBitIdenticalAndResolves
     mFar.mapRows = kSide;
     mFar.nearScale = 1.0f;
 
-    // Outside the 3 km near map, stacked 128x256 lookups must stay bit-identical to 128x128 far-only lookups.
+    // Outside the 6 km near map, stacked 128x256 lookups must stay bit-identical to 128x128 far-only lookups.
     const float alongGround = 0.5f * (m.layerBaseM + m.layerTopM) / m.sunDirection.y;
     const float baseReceiverX = m.centerX - m.sunDirection.x * alongGround;
     const float baseReceiverZ = m.centerZ - m.sunDirection.z * alongGround;
     for (int step = 0; step < 12; ++step) {
-        const float offsetM = 1650.0f + static_cast<float>(step) * 950.0f;
+        const float offsetM = 3300.0f + static_cast<float>(step) * 700.0f;
         const Vec3 pos{ baseReceiverX + offsetM, 0.0f, baseReceiverZ - 0.5f * offsetM };
         EXPECT_FLOAT_EQ(
             SampleCloudSunTransmittance(stacked, kSide, kRows, m, pos),
@@ -2080,7 +2081,7 @@ TEST(VolumetricCloudShadowNearTest, CpuLookupTwinKeepsFarBitIdenticalAndResolves
             << step;
     }
 
-    // A single ~180 m cloud puff written into the near region is resolved, while the far region stays flat.
+    // A single ~300 m cloud puff written into the near region is resolved, while the far region stays flat.
     std::fill(farOnly.begin(), farOnly.end(), 0.85f);
     std::fill(stacked.begin(), stacked.begin() + static_cast<std::size_t>(kSide) * kSide, 0.85f);
     std::fill(stacked.begin() + static_cast<std::size_t>(kSide) * kSide, stacked.end(), 1.0f);
@@ -2093,13 +2094,13 @@ TEST(VolumetricCloudShadowNearTest, CpuLookupTwinKeepsFarBitIdenticalAndResolves
             const float lz = (static_cast<float>(y) + 0.5f - 0.5f * static_cast<float>(kSide)) * nearTexelM;
             const float dx = lx - puffOffsetX;
             const float dz = lz - puffOffsetZ;
-            if (dx * dx + dz * dz <= 90.0f * 90.0f) {
+            if (dx * dx + dz * dz <= 150.0f * 150.0f) {
                 stacked[static_cast<std::size_t>(y + kSide) * kSide + x] = 0.15f;
             }
         }
     }
     const Vec3 underPuff{ baseReceiverX + puffOffsetX, 0.0f, baseReceiverZ + puffOffsetZ };
-    const Vec3 besidePuff{ baseReceiverX + puffOffsetX + 240.0f, 0.0f, baseReceiverZ + puffOffsetZ };
+    const Vec3 besidePuff{ baseReceiverX + puffOffsetX + 400.0f, 0.0f, baseReceiverZ + puffOffsetZ };
     EXPECT_LT(SampleCloudSunTransmittance(stacked, kSide, kRows, m, underPuff), 0.25f);
     EXPECT_GT(SampleCloudSunTransmittance(stacked, kSide, kRows, m, besidePuff), 0.95f);
     EXPECT_NEAR(SampleCloudSunTransmittance(farOnly, kSide, kSide, mFar, underPuff), 0.85f, 1e-5f);
@@ -2112,7 +2113,7 @@ TEST(VolumetricCloudShadowNearTest, CpuLookupTwinKeepsFarBitIdenticalAndResolves
 
     float prevT = SampleCloudSunTransmittance(stacked, kSide, kRows, m, Vec3{ baseReceiverX, 0.0f, baseReceiverZ });
     EXPECT_NEAR(prevT, 0.2f, 1e-5f);
-    for (int step = 1; step <= 160; ++step) {
+    for (int step = 1; step <= 400; ++step) {
         const float x = baseReceiverX + static_cast<float>(step) * 10.0f;
         const float curT = SampleCloudSunTransmittance(stacked, kSide, kRows, m, Vec3{ x, 0.0f, baseReceiverZ });
         EXPECT_GE(curT + 1e-6f, prevT) << step;
@@ -2127,7 +2128,7 @@ TEST(VolumetricCloudShadowNearTest, ShaderLookupAndShadowPassMatchCppConstants)
     std::ifstream in(std::filesystem::path(GTE_TEST_SHADERS_DIR) / "CloudShadowLookup.glsl", std::ios::binary);
     ASSERT_TRUE(in.good());
     const std::string lookup((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    EXPECT_NE(lookup.find("const float kCloudShadowNearScale = 8.0;"), std::string::npos);
+    EXPECT_NE(lookup.find("const float kCloudShadowNearScale = 4.0;"), std::string::npos);
     EXPECT_NE(lookup.find("const float kCloudShadowFarFade = 0.06;"), std::string::npos);
     EXPECT_NE(lookup.find("const float kCloudShadowNearFade = 0.15;"), std::string::npos);
     EXPECT_NE(lookup.find("CloudShadowRegionCubic"), std::string::npos);
@@ -2138,7 +2139,7 @@ TEST(VolumetricCloudShadowNearTest, ShaderLookupAndShadowPassMatchCppConstants)
     }
 
     const std::string march = ReadShaderText("VolumetricCloud.comp");
-    EXPECT_NE(march.find("const int kShadowNearScale = 8;"), std::string::npos);
+    EXPECT_NE(march.find("const int kShadowNearScale = 4;"), std::string::npos);
     EXPECT_NE(march.find("const float kNearShadowDetail = 0.15;"), std::string::npos);
     EXPECT_NE(march.find("CloudNearShadowDensity"), std::string::npos);
     EXPECT_NE(march.find("CloudCurve(shape) * factor * modulation"), std::string::npos);

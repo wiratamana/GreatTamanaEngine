@@ -79,7 +79,7 @@ const float kThickSlabViewStart = 0.24;
 const float kThickSlabViewEnd = 0.46;
 // Darkening of the valleys between the fine puffs (0 = none).
 const float kMicroCreviceShade = 0.40;
-// Macro-density and optical-depth ambient occlusion for shadowed concavities, floored at belly luma.
+const float kMicroCreviceBellyKeep = 0.35;
 const float kCreviceBodyStart = 0.42;
 const float kCreviceBodyEnd = 0.94;
 const float kCreviceTauDecay = 0.28;
@@ -439,7 +439,7 @@ vec3 CloudSourceRadiance(CloudLightInput s)
     float lowRim = 1.0 - smoothstep(0.0, kGroundBounceTop, s.heightFraction);
     float groundShare = lowRim * lowRim * kGroundBounceScale * exp(-kGroundBounceDecay * tau);
     // Valleys between the fine puffs sit in shade, so the bumps keep a lit-crown to dark-crease contrast.
-    float puffShade = 1.0 - kMicroCreviceShade * gMicroCrevice;
+    float puffShade = 1.0 - kMicroCreviceShade * mix(kMicroCreviceBellyKeep, 1.0, smoothstep(0.18, 0.45, s.heightFraction)) * gMicroCrevice;
     return (sun + ambient) * puffShade + s.groundRadiance * groundShare;
 }
 

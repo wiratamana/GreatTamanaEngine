@@ -730,10 +730,10 @@ vec4 MarchClouds(vec3 eye, vec3 rd, float tStart, float tEnd, float jitter, floa
     return vec4(light, transmittance);
 }
 
-// Cloud shadow map mode: stacked 128x256 map with far region (rows 0..127) and nested 1/8 near region (rows 128..255).
+// Cloud shadow map mode: stacked 128x256 map with far region (rows 0..127) and nested 1/4 near region (rows 128..255).
 const int kShadowMaxSteps = 24;
 const float kShadowMinSunY = 0.03;
-const int kShadowNearScale = 8;
+const int kShadowNearScale = 4;
 const vec2 kShadowRgss[4] = vec2[4](
     vec2(-0.45, -0.18),
     vec2(0.18, -0.45),

@@ -3,7 +3,7 @@
 #ifndef CLOUD_SHADOW_LOOKUP_GLSL
 #define CLOUD_SHADOW_LOOKUP_GLSL
 
-const float kCloudShadowNearScale = 8.0;
+const float kCloudShadowNearScale = 4.0;
 const float kCloudShadowFarFade = 0.06;
 const float kCloudShadowNearFade = 0.15;
 const float kCloudShadowFarGamma = 1.25;
