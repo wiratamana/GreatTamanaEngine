@@ -6,7 +6,8 @@
 const float kCloudShadowNearScale = 8.0;
 const float kCloudShadowFarFade = 0.06;
 const float kCloudShadowNearFade = 0.15;
-const float kCloudShadowFarGamma = 1.6;
+const float kCloudShadowFarGamma = 1.25;
+const float kCloudShadowFarMinTransmittance = 0.25;
 
 // Cubic B-spline (4 x 4 texels) over one square region starting at `rowOffset`.
 float CloudShadowRegionCubic(sampler2D shadowMap, vec2 uv, int rowOffset, float size)
@@ -74,11 +75,11 @@ float CloudShadowRegionFar(sampler2D shadowMap, vec2 uv, int rowOffset, float si
     return clamp(transmittance, 0.0, 1.0);
 }
 
-// Contrast curve on filtered far-region transmittance so small multi-texel cloud footprints stay dark.
+// Contrast curve on filtered far-region transmittance, floored so far shadows never turn solid black.
 float CloudShadowSharpenFar(float transmittance)
 {
     float t = clamp(transmittance, 0.0, 1.0);
-    return t > 0.0 ? pow(t, kCloudShadowFarGamma) : 0.0;
+    return mix(kCloudShadowFarMinTransmittance, 1.0, t > 0.0 ? pow(t, kCloudShadowFarGamma) : 0.0);
 }
 
 // `grid`: xy map centre x, z (m), z 1 / far map width (m), w strength (0 = no map).

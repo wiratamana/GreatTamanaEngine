@@ -19,7 +19,15 @@ const float kLightJitterSpan = 0.9;
 const float kLowSunWarmthStart = 0.10;
 const float kLowSunWarmthEnd = 0.26;
 const float kLowSunWarmthGain = 2.95;
-// Light-path extinction, octave attenuation, and macro depth damping for deep multi-scattering.
+// Golden-apricot crown warmth below 22 degrees sun elevation (sin 22 deg = 0.375) on lit crowns.
+const float kCrownApricotSunStart = 0.18;
+const float kCrownApricotSunEnd = 0.38;
+const float kCrownApricotGain = 1.20;
+const vec3 kCrownApricotTint = vec3(1.18, 0.95, 0.68);
+const float kCrownApricotHeightStart = 0.40;
+const float kCrownApricotHeightEnd = 0.78;
+const float kCrownApricotTauDecay = 1.60;
+// Light-path extinction, octave attenuation, mid-tone shelf band, and deep multi-scatter damping.
 const float kSunExtinctionScale = 0.44;
 const float kOctaveAttenuationScale = 0.75;
 const float kMultiScatterDepthScale = 1.35;
@@ -28,6 +36,15 @@ const float kMultiScatterIsoMix = 0.20;
 const float kMultiScatterDeepTauStart = 0.85;
 const float kMultiScatterDeepTauEnd = 3.80;
 const float kMultiScatterDeepDamp = 0.22;
+const float kMidScatterTransLow = 0.12;
+const float kMidScatterTransHigh = 0.45;
+const float kMidScatterTransFeather = 0.06;
+const float kMidScatterHeightStart = 0.24;
+const float kMidScatterHeightEnd = 0.36;
+const float kMidScatterGain = 0.18;
+const vec3 kMidScatterTint = vec3(1.07, 1.00, 0.90);
+const float kMidBandNeutralMix = 0.58;
+const float kPowderBlendScale = 0.35;
 // Direct sun gain and side-scatter floor on the upper half for warm-white sunlit domes.
 const float kUpperDirectSunGain = 1.58;
 const float kUpperSunStart = 0.28;
@@ -49,6 +66,16 @@ const float kBacklitCoreTauStart = 1.50;
 const float kBacklitCoreTauEnd = 4.20;
 const float kBacklitCoreSunDamp = 0.30;
 const float kBacklitCoreAmbDamp = 0.16;
+// Smooth macro-density and optical-depth ambient occlusion for puff crevices and thick cores.
+const float kCreviceBodyStart = 0.42;
+const float kCreviceBodyEnd = 0.94;
+const float kCreviceTauDecay = 0.28;
+const float kCreviceSkySpan = 0.75;
+const float kCreviceDensityScale = 0.70;
+const float kCreviceAoPower = 1.50;
+const float kCreviceAoStrength = 0.85;
+const float kCreviceHeightStart = 0.26;
+const float kCreviceHeightEnd = 0.36;
 // Periwinkle-slate belly shade, low-sun violet-slate shadow cast, and upper-crease ambient tint.
 const vec3 kShadeTint = vec3(0.89, 0.96, 1.07);
 const vec3 kBellyCyanSlate = vec3(0.81, 0.91, 1.21);
@@ -221,6 +248,11 @@ vec3 SunScatter(float cosTheta, float opticalDepth, float heightFraction, float 
     float deepMsGate = smoothstep(kMultiScatterDeepTauStart, kMultiScatterDeepTauEnd, opticalDepth);
     multiScatter *= 1.0 - kMultiScatterDeepDamp * deepMsGate;
     multiScatter = multiScatter / (1.0 + multiScatter / kMultiScatterShoulder);
+    float sunTrans = exp(-opticalDepth);
+    float midTransBand = smoothstep(kMidScatterTransLow - kMidScatterTransFeather, kMidScatterTransLow + kMidScatterTransFeather, sunTrans)
+        * (1.0 - smoothstep(kMidScatterTransHigh - kMidScatterTransFeather, kMidScatterTransHigh + kMidScatterTransFeather, sunTrans));
+    float midShelfMask = midTransBand * smoothstep(kMidScatterHeightStart, kMidScatterHeightEnd, heightFraction);
+    multiScatter *= vec3(1.0) + kMidScatterGain * kMidScatterTint * midShelfMask;
     vec3 scatter = singleScatter + multiScatter;
     scatter = scatter / (1.0 + scatter / kScatterShoulder);
     float silverPhase = kSilverPhaseCap * (1.0 - exp(-HenyeyGreenstein(cosTheta, params.lightScatter.x) / kSilverPhaseCap));
@@ -276,7 +308,7 @@ vec3 CloudSourceRadiance(CloudLightInput s)
         vec3 scatter = SunScatter(cosTheta, tau, s.heightFraction, forwardMask);
         float powder = 0.35 + 0.65 * (1.0 - exp(-3.5 * s.density));
         float awayFromSun = Saturate(0.5 - 0.5 * cosTheta);
-        float powderWeight = params.lightMarch.w * smoothstep(0.0, 0.08, s.density) * awayFromSun * awayFromSun * (1.0 - towardSun);
+        float powderWeight = params.lightMarch.w * kPowderBlendScale * smoothstep(0.0, 0.08, s.density) * awayFromSun * awayFromSun * (1.0 - towardSun);
         scatter *= mix(1.0, powder, powderWeight);
         // Shades thin edges and cavities; farField.w = 0 turns it off.
         scatter *= mix(1.0, InScatterProbability(s.lodDensity, s.heightFraction, cosTheta, forwardMask), params.farField.w);
@@ -298,13 +330,17 @@ vec3 CloudSourceRadiance(CloudLightInput s)
         float warmth = EffectiveSunWarmth(params.lightTune2.x, s.sunDirection.y);
         float topWarmMask = smoothstep(0.32, 0.75, s.heightFraction) * exp(-lightTau * 0.55);
         vec3 warmTint = mix(vec3(1.0), kSunWarmTint, Saturate(warmth * (0.25 + 0.85 * topWarmMask)));
+        float crownLowSun = 1.0 - smoothstep(kCrownApricotSunStart, kCrownApricotSunEnd, s.sunDirection.y);
+        float litCrownMask = smoothstep(kCrownApricotHeightStart, kCrownApricotHeightEnd, s.heightFraction) * exp(-lightTau * kCrownApricotTauDecay);
+        float crownApricot = Saturate(kCrownApricotGain * crownLowSun * litCrownMask);
         float apricotMask = lowSun * mix(0.65, 1.0, smoothstep(0.22, 0.70, s.heightFraction)) * exp(-lightTau * 0.35);
-        warmTint *= mix(vec3(1.0), kLowSunApricotTint, apricotMask);
-        // Balances daytime white tops and neutral mid-tones while preserving golden-apricot low-sun colour.
+        warmTint *= mix(vec3(1.0), kLowSunApricotTint, apricotMask * (1.0 - litCrownMask));
+        warmTint *= mix(vec3(1.0), kCrownApricotTint, crownApricot);
+        // Daytime white balance on tops and warm-neutral mid-tones; lit crowns warm below 22 degrees.
         float sunInLuma = dot(s.sunRadiance, kCloudLumaWeights);
         float midBand = smoothstep(0.24, 0.38, s.heightFraction) * (1.0 - smoothstep(0.46, 0.64, s.heightFraction)) * smoothstep(0.6, 2.2, tau) * (1.0 - lowSun);
-        float dayWhiteBalance = (1.0 - lowSun) * mix(0.72, 0.52, smoothstep(0.52, 0.86, s.heightFraction));
-        vec3 sunInput = mix(s.sunRadiance, vec3(sunInLuma), Saturate(max(dayWhiteBalance, 0.82 * midBand)));
+        float dayWhiteBalance = (1.0 - lowSun) * (1.0 - crownLowSun * litCrownMask) * mix(0.72, 0.52, smoothstep(0.52, 0.86, s.heightFraction));
+        vec3 sunInput = mix(s.sunRadiance, vec3(sunInLuma), Saturate(max(dayWhiteBalance, kMidBandNeutralMix * midBand)));
         float baseSun = mix(kBaseSunKeep, 1.0, smoothstep(kBaseSunFadeStart, kBaseSunFadeEnd, s.heightFraction));
         sun = sunInput * warmTint * (scatter + diffuse + glow + crown) * baseSun;
         float sunLuma = dot(sun, kCloudLumaWeights);
@@ -336,7 +372,16 @@ vec3 CloudSourceRadiance(CloudLightInput s)
     float bellyTrim = mix(1.0, kBellyAmbientScale, 1.0 - smoothstep(0.22, 0.30, s.heightFraction));
     float ambDepthShade = (1.0 - kInteriorAmbDamp * interiorMacro) * (1.0 - kBacklitCoreAmbDamp * aboveBelly * backlitCore);
     float lowSunBellyLift = 1.0 + kLowSunBellyLift * lowSun * (1.0 - smoothstep(0.16, 0.44, s.heightFraction));
+    // Smooth macro density and optical-depth occlusion shade concave puff crevices and thick cores.
+    float creviceBody = smoothstep(kCreviceBodyStart, kCreviceBodyEnd, s.lodDensity);
+    float skyOcclusion = Saturate((1.0 - s.skyVisibility) / kCreviceSkySpan);
+    float sunOcclusion = 1.0 - exp(-tau * kCreviceTauDecay);
+    float macroDensity = creviceBody * (0.15 + 0.40 * skyOcclusion + 0.45 * sunOcclusion);
+    float creviceAo = pow(max(1.0 - clamp(macroDensity * kCreviceDensityScale, 0.0, 1.0), 1e-4), kCreviceAoPower);
+    float litTopGuard = smoothstep(0.42, 0.75, s.heightFraction) * exp(-tau * 1.50) * (1.0 - skyOcclusion);
+    float creviceMask = smoothstep(kCreviceHeightStart, kCreviceHeightEnd, s.heightFraction) * (1.0 - litTopGuard);
     vec3 ambient = shadedAmbient * (skyShare * upperAmbientCut * litAmbientDamp * bellyTrim * ambDepthShade * lowSunBellyLift * kAmbientGain);
+    ambient *= mix(1.0, creviceAo, kCreviceAoStrength * creviceMask);
     // Ground bounce reaches only unoccluded lower rims so warm ground light cannot muddy shadowed bellies.
     float lowRim = 1.0 - smoothstep(0.0, kGroundBounceTop, s.heightFraction);
     float groundShare = lowRim * lowRim * kGroundBounceScale * exp(-kGroundBounceDecay * tau);

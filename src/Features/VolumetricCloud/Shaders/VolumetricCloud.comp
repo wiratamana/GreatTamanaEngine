@@ -228,6 +228,21 @@ const float kPuffWeightFine = 0.40;
 const float kLumpSmallCloudFloor = 0.80;
 const float kDomeTaper = 0.90;
 const float kDomeTaperStart = 0.0;
+const float kBasePedestalGain = 0.12;
+// Per-cell height, lump-amplitude and taper variation ranges.
+const float kCellHeightVar = 0.25;
+const float kCellLumpVar = 0.20;
+const float kCellTaperVar = 0.20;
+// Roof peak support, crown puff connection, top erosion cap and interior core boost.
+const float kPeakSupportLow = 0.20;
+const float kPeakSupportHigh = 0.85;
+const float kSkinMinMargin = 0.06;
+const float kCrownMinMargin = 0.20;
+const float kCrownPuffCoherence = 0.35;
+const float kCrownErosionShapeMax = 0.72;
+const float kCoreDensityBoost = 1.70;
+const float kCoreMarginStart = 0.35;
+const float kCoreMarginEnd = 0.80;
 // Rays this far above the highest roof of a column take the clear-air stride.
 const float kRoofSkipMargin = 0.10;
 const float kLumpInvR2Large = 2.05;
@@ -258,7 +273,8 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float farStreak = smoothstep(kFarStreakStartM, kFarStreakEndM, fromEyeLength);
     vec2 weatherPosition = position.xz + wind + 0.5 * params.structure.zw;
     // Domain warp: no straight or long smooth contour of the weather field.
-    weatherPosition += (textureLod(curlMap, weatherPosition / kWeatherWarpTileM, 0.0).rg * 2.0 - 1.0) * kWeatherWarpM;
+    vec3 weatherWarp = textureLod(curlMap, weatherPosition / kWeatherWarpTileM, 0.0).rgb * 2.0 - 1.0;
+    weatherPosition += weatherWarp.rg * kWeatherWarpM;
     vec4 wm = textureLod(weatherMap, weatherPosition / params.weather.x, 0.0);
     // Mean coverage around the point: tells an isolated small cell (low) from a big mass (high).
     float massAverage = 1.5 * wm.g;
@@ -283,13 +299,15 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
         return 0.0;
     }
     float wCov = Saturate(coverage * weatherCoverage);
+    float flankMass = Saturate(wm.g * 1.04 * coverage);
     float coreTurret = smoothstep(0.10, 0.85, wm.b) * gCloudSize;
     float shoulderEnv = smoothstep(0.06, 0.55, wCov) * (0.15 + 0.13 * gCloudSize);
     float hMax = clamp(0.14 + shoulderEnv + 0.66 * pow(coreTurret, 1.15), 0.14, 0.96);
     float peakFloor = params.density.z * smoothstep(0.42, 0.78, wCov) * smoothstep(0.35, 0.75, wm.b) * gCloudSize;
     hMax = max(hMax, peakFloor);
-    if (heightFraction >= max(hMax, 0.16)) {
-        gWeatherClear = heightFraction >= max(hMax, 0.16) + kRoofSkipMargin;
+    float hMaxCeil = clamp(hMax * (1.0 + kCellHeightVar), 0.16, 0.96);
+    if (heightFraction >= hMaxCeil) {
+        gWeatherClear = heightFraction >= hMaxCeil + kRoofSkipMargin;
         return 0.0;
     }
 
@@ -300,9 +318,11 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float sizeAmp = mix(kLumpSmallCloudFloor, 1.0, smoothstep(0.14, 0.50, hMax) * massAmp);
     float ampFrac = (kLumpAmpLargeM + kLumpAmpMedM + kLumpAmpSmallM) / thickness * sizeAmp;
     float lump = 0.5;
+    float cellSignal = 0.0;
     if (ampFrac * lodKeep > 0.003) {
         vec2 lumpXz = position.xz + wind + 0.35 * params.structure.zw;
         vec4 lumpSample = textureLod(shapeVolume, vec3(lumpXz.x, kLumpSliceM, lumpXz.y) / params.noise.x, 0.0);
+        cellSignal = clamp(Remap(lumpSample.r, 0.32, 0.82, -1.0, 1.0), -1.0, 1.0) * lodKeep;
         float dLarge = LumpDome(lumpSample.g, kLumpInvR2Large);
         float dMed = LumpDome(lumpSample.b, kLumpInvR2Med);
         float dSmall = LumpDome(lumpSample.a, kLumpInvR2Small);
@@ -313,7 +333,17 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
         lump = Saturate(lumpM / (kLumpAmpLargeM + kLumpAmpMedM * wMed + kLumpAmpSmallM * wSmall));
         lump = mix(0.5, lump, lodKeep);
     }
-    float localTop = clamp((hMax - ampFrac * (1.0 - lump)) * mix(1.0, kFarTopScale, farStreak), 0.16, 0.98);
+    // Vary cell height and lump relief; cap lump peaks above the mean roof by column footprint support.
+    float warpCell = weatherWarp.b * lodKeep;
+    float heightVar = clamp(0.85 * cellSignal + 0.45 * warpCell, -1.0, 1.0);
+    float lumpVar = clamp(0.60 * cellSignal - 0.70 * warpCell, -1.0, 1.0);
+    hMax = clamp(hMax * (1.0 + kCellHeightVar * heightVar), 0.14, 0.96);
+    ampFrac *= 1.0 + kCellLumpVar * lumpVar;
+    float colFlank = mix(min(wCov, flankMass), wCov, farStreak);
+    float colFoot = Saturate((colFlank - kSkinCoverage) / kFootRamp);
+    float peakSupport = smoothstep(kPeakSupportLow, kPeakSupportHigh, colFoot);
+    float supportedLump = min(lump, 0.5) + max(lump - 0.5, 0.0) * peakSupport;
+    float localTop = clamp((hMax - ampFrac * (1.0 - supportedLump)) * mix(1.0, kFarTopScale, farStreak), 0.16, 0.98);
     float hNorm = Saturate(heightFraction / max(localTop, 0.16));
     gCloudHNorm = hNorm;
     if (heightFraction >= localTop) {
@@ -356,15 +386,19 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float roundBottom = smoothstep(baseShift, baseShift + max(params.heightShape.x, kMinBaseRound), heightFraction);
     float roundTop = 1.0 - smoothstep(localTop * 0.83, localTop, heightFraction);
 
-    float rampBottom = heightFraction * Saturate(Remap(heightFraction, 0.0, max(params.heightShape.z, kMinDensityRamp), 0.0, 1.0));
+    float rampSpan = max(params.heightShape.z, kMinDensityRamp) * 1.6;
+    float rampT = Saturate(heightFraction / rampSpan);
+    float rampBottom = heightFraction * (2.0 - rampT) * rampT;
     float rampTop = Saturate(Remap(heightFraction, params.heightShape.w, 1.0, 1.0, 0.0));
     densityFactor = params.density.x * rampBottom * rampTop * wm.a * 2.0;
 
-    // Footprint narrows with height into a wide pyramid; the roof follows the lumpy top.
-    float basePedestal = 1.0 + 0.12 * (1.0 - smoothstep(0.0, 0.50, heightFraction));
-    float flankMass = Saturate(wm.g * 1.04 * coverage);
-    float flankCov = mix(wCov, min(wCov, flankMass), smoothstep(0.0, 0.60, hNorm) * (1.0 - farStreak));
-    float domeTaper = 1.0 - kDomeTaper * smoothstep(kDomeTaperStart, 1.0, hNorm);
+    // One smooth monotonic hNorm pyramid profile with per-cell taper variation.
+    float taperCurve = mix(hNorm, smoothstep(kDomeTaperStart, 1.0, hNorm), 0.55);
+    float basePedestal = 1.0 + kBasePedestalGain * (1.0 - taperCurve);
+    float flankCov = mix(wCov, min(wCov, flankMass), taperCurve * (1.0 - farStreak));
+    float taperVar = clamp(0.70 * warpCell - 0.55 * cellSignal, -1.0, 1.0);
+    float taperStrength = kDomeTaper * (1.0 + kCellTaperVar * taperVar);
+    float domeTaper = Saturate(1.0 - taperStrength * taperCurve);
     float rawEff = Saturate(flankCov * basePedestal * domeTaper);
 
     // Far rolls keep the soft threshold body; it fades out where the skin model takes over.
@@ -388,8 +422,12 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
             + kPuffWeightMedium * wMedium * LumpDome(shapeSample.b, kPuffInvR2)
             + kPuffWeightFine * wFine * LumpDome(shapeSample.a, kPuffInvR2))
             / (kPuffWeightLarge + kPuffWeightMedium * wMedium + kPuffWeightFine * wFine);
+        puff = mix(puff, supportedLump, kCrownPuffCoherence * smoothstep(0.62, 0.82, hNorm));
         float skinCarve = mix(kSkinCarveSmall, kSkinCarveBig, gCloudSize);
-        float skin = Saturate((margin - skinCarve * (1.0 - puff)) / kSkinEdge) * smoothstep(0.06, 0.16, margin);
+        float minMargin = mix(kSkinMinMargin, kCrownMinMargin, smoothstep(0.66, 0.82, hNorm));
+        float skin = Saturate((margin - skinCarve * (1.0 - puff)) / kSkinEdge) * smoothstep(minMargin, minMargin + 0.10, margin);
+        float coreBoost = mix(1.0, kCoreDensityBoost, smoothstep(kCoreMarginStart, kCoreMarginEnd, margin));
+        densityFactor *= mix(1.0, coreBoost, 1.0 - farStreak);
         body += skin * (1.0 - farStreak);
     }
     return Saturate(body);
@@ -431,8 +469,8 @@ float CloudDetail(vec3 position, float heightFraction, float shape, float densit
     float wisp = dn.b * 0.6 + dn.a * 0.4;
     // Inverted Worley channels peak at puff centres; upper-half wisp mix breaks concentric spherical rings.
     float wispErosion = 1.0 - wisp;
-    float billowErosion = mix(1.0 - billow, wispErosion, 0.28 * smoothstep(0.25, 0.58, gCloudHNorm));
-    float wispShare = params.detailShape.z * max(1.0 - smoothstep(0.0, 0.08, heightFraction), Saturate(1.0 - 2.0 * shape) * 0.45);
+    float billowErosion = mix(1.0 - billow, wispErosion, 0.28 * smoothstep(0.18, 0.65, gCloudHNorm));
+    float wispShare = params.detailShape.z * max(1.0 - smoothstep(0.0, 0.22, heightFraction), Saturate(1.0 - 2.0 * shape) * 0.45);
     float erosion = mix(billowErosion, wispErosion, Saturate(wispShare));
     float fineWeight = params.detailShape.w * (1.0 - smoothstep(1500.0, 3500.0, fromEyeLength));
     if (fineWeight > 0.005) {
@@ -441,11 +479,12 @@ float CloudDetail(vec3 position, float heightFraction, float shape, float densit
     }
     // Clamp fringe erosion amplitude so thin outer edges never shatter into isolated crumbs.
     erosion = min(erosion, 0.34 + 0.58 * shape);
-    // Sculpt upper crowns and soft mamma undersides from hNorm; extra top-crown carve suppresses ghost caps.
-    float crownSculpt = params.structure2.x * smoothstep(0.10, 0.32, gCloudHNorm) + 0.16 * (1.0 - smoothstep(0.0, 0.14, gCloudHNorm));
+    // Monotonic base-to-crown sculpt; top erosion scales with local shape so crowns stay connected.
+    float crownSculpt = mix(min(0.14, params.structure2.x), params.structure2.x, smoothstep(0.0, 0.55, gCloudHNorm));
     float shellMask = mix(crownSculpt, 1.0, 1.0 - smoothstep(0.08, 0.58, shape));
-    float crownBoost = 1.0 + 0.24 * smoothstep(0.74, 0.86, gCloudHNorm);
+    float crownBoost = 1.0 + 0.24 * smoothstep(0.74, 0.86, gCloudHNorm) * smoothstep(0.25, 0.65, shape);
     erosion *= params.noise.z * detailAmount * shellMask * crownBoost;
+    erosion = min(erosion, mix(1.0, kCrownErosionShapeMax * shape, smoothstep(0.74, 0.84, gCloudHNorm)));
     float result = CloudCurve(Saturate(Remap(shape, erosion, 1.0, 0.0, 1.0)) * bodyGate) * densityFactor;
     return result * smoothstep(0.025 * cullScale, 0.065 * cullScale, result);
 }
@@ -646,13 +685,16 @@ const vec2 kShadowRgss[4] = vec2[4](
     vec2(0.18, -0.45),
     vec2(-0.18, 0.45),
     vec2(0.45, 0.18));
-const float kNearShadowDetail = 0.4;
+const float kNearShadowDetail = 0.15;
+const float kNearShadowDensityFloor = 0.05;
+const float kNearShadowBlurScale = 1.25;
+const float kNearShadowHistoryTent = 0.44;
 const int kFarShadowMinSteps = 20;
 const float kFarShadowGain = 2.0;
 const float kFarShadowCurve = 0.75;
 const float kFarShadowBaseLift = 1.8;
-const float kFarShadowBlurScale = 0.45;
-const float kFarShadowHistoryTent = 0.08;
+const float kFarShadowBlurScale = 0.56;
+const float kFarShadowHistoryTent = 0.10;
 
 vec4 ShadowHistoryAt(vec2 uv, int rowOffset, int side)
 {
@@ -692,7 +734,8 @@ float CloudNearShadowDensity(vec3 position)
     float rawErosion = mix(1.0 - dn.r, 1.0 - dn.b, params.detailShape.z * 0.35);
     float edgeWeight = (1.0 - smoothstep(0.15, 0.55, shape)) * 0.35;
     float modulation = clamp(1.0 + (0.5 - rawErosion) * 2.0 * kNearShadowDetail * edgeWeight, 0.85, 1.15);
-    return CloudCurve(shape) * factor * modulation;
+    float d = CloudCurve(shape) * factor * modulation;
+    return max(0.0, d - kNearShadowDensityFloor);
 }
 
 // Far shadow density: preserves thin fringes and low-deck slabs across coarse far-region texels.
@@ -750,7 +793,7 @@ void WriteCloudShadow()
     float softness = max(params.shadowTune.x, 0.0);
     vec4 previous = vec4(1.0, 0.0, 0.0, 1.0);
     if (haveHistory) {
-        float tentTexels = (isNear ? 0.35 : kFarShadowHistoryTent) * clamp(softness, 0.0, 2.0);
+        float tentTexels = (isNear ? kNearShadowHistoryTent : kFarShadowHistoryTent) * clamp(softness, 0.0, 2.0);
         vec2 o = vec2(tentTexels / float(side));
         previous = 0.25 * (ShadowHistoryAt(historyUv + vec2(o.x, o.y), rowOffset, side)
             + ShadowHistoryAt(historyUv + vec2(-o.x, o.y), rowOffset, side)
@@ -773,7 +816,7 @@ void WriteCloudShadow()
     float span = sTop - sBottom;
     float segment = span / float(raySteps);
     int tapCount = softness > 1e-4 ? 4 : 1;
-    float blurScale = (isNear ? softness : min(softness, 1.0) * kFarShadowBlurScale) * texelM;
+    float blurScale = (isNear ? softness * kNearShadowBlurScale : min(softness, 1.0) * kFarShadowBlurScale) * texelM;
     float opticalDepth = 0.0;
     gPrimaryRay = false;
     for (int tap = 0; tap < tapCount; ++tap) {

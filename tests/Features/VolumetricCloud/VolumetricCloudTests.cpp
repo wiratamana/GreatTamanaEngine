@@ -2127,7 +2127,7 @@ TEST(VolumetricCloudShadowNearTest, ShaderLookupAndShadowPassMatchCppConstants)
 
     const std::string march = ReadShaderText("VolumetricCloud.comp");
     EXPECT_NE(march.find("const int kShadowNearScale = 8;"), std::string::npos);
-    EXPECT_NE(march.find("const float kNearShadowDetail = 0.4;"), std::string::npos);
+    EXPECT_NE(march.find("const float kNearShadowDetail = 0.15;"), std::string::npos);
     EXPECT_NE(march.find("CloudNearShadowDensity"), std::string::npos);
     EXPECT_NE(march.find("CloudCurve(shape) * factor * modulation"), std::string::npos);
     EXPECT_NE(march.find("float transmittance = exp(-opticalDepth);"), std::string::npos);
@@ -2634,7 +2634,7 @@ TEST(VolumetricCloudShaderTest, MarchShaderRemovesSkinNormalAndSuppressesVertica
     EXPECT_NE(march.find("float shoulderEnv ="), std::string::npos);
     EXPECT_NE(march.find("float hMax = clamp("), std::string::npos);
     EXPECT_NE(march.find("float peakFloor ="), std::string::npos);
-    EXPECT_NE(march.find("if (heightFraction >= max(hMax, 0.16))"), std::string::npos);
+    EXPECT_NE(march.find("if (heightFraction >= hMaxCeil)"), std::string::npos);
     EXPECT_NE(march.find("float localTop = clamp("), std::string::npos);
     EXPECT_NE(march.find("float hNorm = Saturate(heightFraction / max(localTop, 0.16));"), std::string::npos);
     EXPECT_LT(march.find("if (heightFraction >= localTop)"), march.find("vec4 shapeSample = textureLod(shapeVolume,"));
@@ -2645,7 +2645,7 @@ TEST(VolumetricCloudShaderTest, MarchShaderRemovesSkinNormalAndSuppressesVertica
         march.find("shapeUv / kLargeShapeScale + kLargeShapeOffset"));
     EXPECT_NE(march.find("float roundTop = 1.0 - smoothstep(localTop"), std::string::npos);
     EXPECT_NE(march.find("float basePedestal ="), std::string::npos);
-    EXPECT_NE(march.find("float domeTaper = 1.0 - kDomeTaper * smoothstep(kDomeTaperStart, 1.0, hNorm);"), std::string::npos);
+    EXPECT_NE(march.find("float domeTaper = Saturate(1.0 - taperStrength * taperCurve);"), std::string::npos);
     EXPECT_NE(march.find("float rawEff = Saturate(flankCov * basePedestal * domeTaper);"), std::string::npos);
     EXPECT_NE(march.find("float LumpDome(float v, float invR2)"), std::string::npos);
     EXPECT_NE(march.find("float skinCarve ="), std::string::npos);
