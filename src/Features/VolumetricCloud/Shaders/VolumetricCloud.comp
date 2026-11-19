@@ -210,8 +210,19 @@ float ShapeValue(vec4 sn)
 
 // Fixed altitude slice and sphere radii for the 2D Worley cauliflower roof height field.
 const float kLumpSliceM = 2315.0;
-const float kLumpFloor = 0.48;
-const float kLumpSmoothMean = 0.82;
+const float kLumpAmpLargeM = 380.0;
+const float kLumpAmpMedM = 190.0;
+const float kLumpAmpSmallM = 90.0;
+// Skin model: coverage floor and ramp of the footprint, roof ramp, puff carve depth and edge softness.
+const float kSkinCoverage = 0.12;
+const float kFootRamp = 0.34;
+const float kRoofRamp = 0.20;
+const float kSkinCarve = 0.62;
+const float kSkinEdge = 0.12;
+const float kPuffInvR2 = 2.2;
+const float kPuffWeightLarge = 0.30;
+const float kPuffWeightMedium = 0.40;
+const float kPuffWeightFine = 0.30;
 const float kLumpInvR2Large = 2.05;
 const float kLumpInvR2Med = 2.30;
 const float kLumpInvR2Small = 2.55;
@@ -271,26 +282,26 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
         return 0.0;
     }
 
-    // Fixed-altitude shapeVolume slice builds a 2D-monotonic multi-octave spherical dome roof with deep creases.
+    // Fixed-altitude shapeVolume slice stacks round dome caps (heights in metres) under the cloud top envelope.
     float massAmp = smoothstep(0.10, 0.50, wCov);
     float lodKeep = 1.0 - gShapeLod;
+    float thickness = max(params.layer.y - params.layer.x, kMinWidth);
+    float ampFrac = (kLumpAmpLargeM + kLumpAmpMedM + kLumpAmpSmallM) / thickness * smoothstep(0.14, 0.50, hMax) * massAmp;
     float lump = 0.5;
-    if (massAmp * lodKeep > 0.005) {
+    if (ampFrac * lodKeep > 0.003) {
         vec2 lumpXz = position.xz + wind + 0.35 * params.structure.zw;
         vec4 lumpSample = textureLod(shapeVolume, vec3(lumpXz.x, kLumpSliceM, lumpXz.y) / params.noise.x, 0.0);
         float dLarge = LumpDome(lumpSample.g, kLumpInvR2Large);
         float dMed = LumpDome(lumpSample.b, kLumpInvR2Med);
         float dSmall = LumpDome(lumpSample.a, kLumpInvR2Small);
-        float wSmall = 0.20 * (1.0 - smoothstep(0.0, 0.45, gShapeLod));
-        float wMed = 0.30 * (1.0 - smoothstep(0.25, 0.80, gShapeLod));
-        float wLarge = 1.0 - wSmall - wMed;
-        float weighted = wLarge * dLarge + wMed * dMed + wSmall * dSmall;
-        float envelope = mix(1.0, 0.55 + 0.45 * max(dLarge, 0.75 * dMed), 1.0 - smoothstep(0.35, 0.90, gShapeLod));
-        lump = Saturate((weighted * envelope - 0.08) / 0.74);
+        float wSmall = 1.0 - smoothstep(0.0, 0.45, gShapeLod);
+        float wMed = 1.0 - smoothstep(0.25, 0.80, gShapeLod);
+        float support = 0.35 + 0.65 * dLarge;
+        float lumpM = kLumpAmpLargeM * dLarge + kLumpAmpMedM * wMed * dMed * support + kLumpAmpSmallM * wSmall * dSmall * support;
+        lump = Saturate(lumpM / (kLumpAmpLargeM + kLumpAmpMedM * wMed + kLumpAmpSmallM * wSmall));
+        lump = mix(0.5, lump, lodKeep);
     }
-    float smoothTop = mix(kLumpFloor, kLumpSmoothMean, massAmp);
-    float lumpyTop = mix(kLumpFloor, 1.0, lump * massAmp);
-    float localTop = clamp(hMax * mix(smoothTop, lumpyTop, lodKeep) * mix(1.0, kFarTopScale, farStreak), 0.16, 0.98);
+    float localTop = clamp((hMax - ampFrac * (1.0 - lump)) * mix(1.0, kFarTopScale, farStreak), 0.16, 0.98);
     float hNorm = Saturate(heightFraction / max(localTop, 0.16));
     gCloudHNorm = hNorm;
     if (heightFraction >= localTop) {
@@ -337,35 +348,38 @@ float CloudShape(vec3 position, float heightFraction, out float densityFactor)
     float rampTop = Saturate(Remap(heightFraction, params.heightShape.w, 1.0, 1.0, 0.0));
     densityFactor = params.density.x * rampBottom * rampTop * wm.a * 2.0;
 
-    // Taper flanks with hNorm into a wide pyramid while filling each cauliflower dome cleanly to its crown.
+    // Footprint narrows with height into a wide pyramid; the roof follows the lumpy top.
     float basePedestal = 1.0 + 0.22 * (1.0 - smoothstep(0.04, 0.26, heightFraction));
     float flankMass = Saturate(wm.g * 1.04 * coverage);
     float flankCov = mix(wCov, min(wCov, flankMass), smoothstep(0.12, 0.72, hNorm) * (1.0 - farStreak));
     float domeTaper = 1.0 - 0.66 * smoothstep(0.15, 1.0, hNorm);
     float rawEff = Saturate(flankCov * basePedestal * domeTaper);
-    float effCoverage = min(rawEff, 0.68);
-    float threshold = max(1.0 - effCoverage, params.structure3.y);
-    float rampEnd = params.structure3.w > 0.0 ? min(threshold + params.structure3.w, 1.0) : 1.0;
-    float shellBody = Saturate(Remap(shape * roundBottom, threshold, rampEnd, 0.0, 1.0)) * roundTop;
-    float coreCov = flankCov * mix(1.0, domeTaper, 0.55) * (0.82 + 0.18 * lump);
-    float coreFloor = smoothstep(0.24, 0.42, coreCov) * smoothstep(0.045, 0.12, heightFraction) * roundBottom * roundTop * 0.78;
-    float body = max(shellBody, coreFloor);
-    float crownGate = smoothstep(0.08, 0.24, hNorm) * (1.0 - smoothstep(18000.0, 52000.0, fromEyeLength));
-    float shellExposure = max(smoothstep(0.32, 0.68, hNorm), 1.0 - smoothstep(0.32, 0.68, wCov));
-    float floretWeight = crownGate * (0.35 + 0.65 * shellExposure);
-    if (floretWeight > 0.02 && body > 0.0) {
-        float convexFloret = 0.45 * shapeSample.b + 0.55 * shapeSample.a;
-        if (gPrimaryRay && fromEyeLength < 14000.0 && body > 0.05 && body < 0.88) {
-            float nearFloret = (1.0 - smoothstep(9000.0, 14000.0, fromEyeLength))
-                * smoothstep(0.05, 0.18, body) * (1.0 - smoothstep(0.68, 0.88, body));
-            vec4 flA = textureLod(shapeVolume, shapeUv * 1.25 + vec3(0.23, 0.11, 0.37), 0.0);
-            convexFloret = mix(convexFloret, flA.g * 0.6 + flA.b * 0.4, 0.50 * nearFloret);
-        }
-        float floretCarve = (1.0 - convexFloret) * 0.38 * floretWeight;
-        body = Saturate(Remap(body, floretCarve, 1.0, 0.0, 1.0));
-        body = max(body, coreFloor * 0.85);
+
+    // Far rolls keep the soft threshold body; it fades out where the skin model takes over.
+    float body = 0.0;
+    if (farStreak > 0.001) {
+        float threshold = max(1.0 - min(rawEff, 0.68), params.structure3.y);
+        float rampEnd = params.structure3.w > 0.0 ? min(threshold + params.structure3.w, 1.0) : 1.0;
+        float shellBody = Saturate(Remap(shape * roundBottom, threshold, rampEnd, 0.0, 1.0)) * roundTop;
+        float coreCov = flankCov * mix(1.0, domeTaper, 0.55);
+        float coreFloor = smoothstep(0.24, 0.42, coreCov) * smoothstep(0.045, 0.12, heightFraction) * roundBottom * roundTop * 0.78;
+        body = max(shellBody, coreFloor) * farStreak;
     }
-    return body;
+    if (farStreak < 0.999) {
+        // Skin model: solid deep inside, carved by round Worley puffs near the surface (0 at the skin, 1 deep inside).
+        float footMargin = Saturate((rawEff - kSkinCoverage) / kFootRamp);
+        float roofMargin = Saturate((localTop - heightFraction) / kRoofRamp);
+        float margin = min(min(footMargin, roofMargin), roundBottom);
+        float wMedium = 1.0 - smoothstep(0.25, 0.80, gShapeLod);
+        float wFine = 1.0 - smoothstep(0.0, 0.45, gShapeLod);
+        float puff = (kPuffWeightLarge * LumpDome(shapeSample.g, kPuffInvR2)
+            + kPuffWeightMedium * wMedium * LumpDome(shapeSample.b, kPuffInvR2)
+            + kPuffWeightFine * wFine * LumpDome(shapeSample.a, kPuffInvR2))
+            / (kPuffWeightLarge + kPuffWeightMedium * wMedium + kPuffWeightFine * wFine);
+        float skin = Saturate((margin - kSkinCarve * (1.0 - puff)) / kSkinEdge) * smoothstep(0.03, 0.10, margin);
+        body += skin * (1.0 - farStreak);
+    }
+    return Saturate(body);
 }
 
 float CloudCurve(float body)
