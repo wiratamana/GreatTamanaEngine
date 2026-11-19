@@ -369,8 +369,8 @@ FVol WorleyInv2D(int n, int cells, std::uint32_t seed, const FVol* warpX = nullp
     return out;
 }
 
-// Weather 512^2: R wide radial cumulus cones, G 26-texel blurred R mass, B inner turret dome, A core density.
-Volume BakeWeather(std::uint32_t size) {
+// Weather 512^2: R scalloped cloverleaf cumulus bouquets, G 24-texel blurred R mass, B multi-puff dome, A core density.
+Volume BakeWeather(std::uint32_t size, const Volume& curl) {
     const int n = static_cast<int>(size);
     const std::size_t total = static_cast<std::size_t>(n) * static_cast<std::size_t>(n);
     const double invTotal = 1.0 / static_cast<double>(total);
@@ -385,178 +385,339 @@ Volume BakeWeather(std::uint32_t size) {
         return std::max(a, b) + h * h * k * 0.25f;
     };
 
-    // Periodic Perlin warp and detail fields keep radial Worley cumulus cones organic and seamless.
+    // Periodic 2-octave Perlin domain warps and detail fields keep cloverleaf Worley bouquets organic and seamless.
     const FVol warpX = pf(3, 2, 201u), warpY = pf(3, 2, 211u);
+    const FVol warpFX = pf(6, 2, 221u), warpFY = pf(6, 2, 231u);
     const FVol pt = pf(4, 3, 131u), pd = pf(7, 3, 141u);
-    const int coneBlurR = std::max(1, static_cast<int>(std::lround(static_cast<double>(size) * 7.0 / 512.0)));
-    const float coneBlurSigma = 3.0f * (static_cast<float>(coneBlurR) / 7.0f);
+    const int coneBlurR = std::max(1, static_cast<int>(std::lround(static_cast<double>(size) * 4.0 / 512.0)));
+    const float coneBlurSigma = 1.7f * (static_cast<float>(coneBlurR) / 4.0f);
+    const int massBlurR = std::max(1, static_cast<int>(std::lround(static_cast<double>(size) * 16.0 / 512.0)));
+    const float massBlurSigma = 6.8f * (static_cast<float>(massBlurR) / 16.0f);
+    const int speckBlurR = std::max(1, static_cast<int>(std::lround(static_cast<double>(size) * 10.0 / 512.0)));
+    const float speckBlurSigma = 4.2f * (static_cast<float>(speckBlurR) / 10.0f);
 
-    struct Rect { int x0, x1, y0, y1; double invArea; };
-    auto makeRect = [&](double u0, double u1, double v0, double v1) -> Rect {
-        const int x0 = std::clamp(static_cast<int>(std::lround(u0 * static_cast<double>(n))), 0, n - 1);
-        const int x1 = std::clamp(static_cast<int>(std::lround(u1 * static_cast<double>(n))), x0 + 1, n);
-        const int y0 = std::clamp(static_cast<int>(std::lround(v0 * static_cast<double>(n))), 0, n - 1);
-        const int y1 = std::clamp(static_cast<int>(std::lround(v1 * static_cast<double>(n))), y0 + 1, n);
-        return {x0, x1, y0, y1, 1.0 / static_cast<double>((x1 - x0) * (y1 - y0))};
-    };
-    const Rect rcFg = makeRect(0.824, 0.840, 0.850, 0.864);
-    const Rect rcMg = makeRect(0.844, 0.876, 0.845, 0.868);
-    const Rect rcV03 = makeRect(0.080, 0.130, 0.960, 0.984);
-    const Rect rcV01 = makeRect(0.217, 0.258, 0.960, 0.984);
-
+    // Exact VolumetricCloud.comp weather UV lookup at windOffset=(0,0), windShearM=280, windDirection=45 deg.
+    constexpr float kHalfShearM = -0.5f * 280.0f * 0.70710678f;
+    constexpr float kWeatherWarpTileM = 50000.0f;
+    constexpr float kWeatherWarpM = 1200.0f;
+    constexpr float kWeatherScaleM = 25000.0f;
+    const int cw = static_cast<int>(curl.h.width), ch = static_cast<int>(curl.h.height);
     const int m2 = 2 * n;
-    FVol r2(static_cast<std::size_t>(m2) * static_cast<std::size_t>(m2), 0.0f);
-    struct WinStats { double mean, mn, mx, clear05, shd35; };
-    auto evalWin = [&](int sx, int sy, const Rect& rc) -> WinStats {
-        double sum = 0.0;
-        float mn = 1.0f, mx = 0.0f;
-        int cClr = 0, cShd = 0;
-        for (int y = rc.y0; y < rc.y1; ++y) {
-            const float* row = &r2[static_cast<std::size_t>(sy + y) * static_cast<std::size_t>(m2) + static_cast<std::size_t>(sx)];
-            for (int x = rc.x0; x < rc.x1; ++x) {
-                const float v = row[x];
-                sum += static_cast<double>(v);
-                mn = std::min(mn, v);
-                mx = std::max(mx, v);
-                if (v <= 0.05f) ++cClr;
-                if (v >= 0.35f) ++cShd;
+    auto fract01 = [](float v) { return v - std::floor(v); };
+    auto sampleCurlRG = [&](float u, float v, float& cr, float& cg) {
+        const float fx = fract01(u) * static_cast<float>(cw) - 0.5f;
+        const float fy = fract01(v) * static_cast<float>(ch) - 0.5f;
+        const int ix0 = static_cast<int>(std::floor(fx)), iy0 = static_cast<int>(std::floor(fy));
+        const float tx = fx - static_cast<float>(ix0), ty = fy - static_cast<float>(iy0);
+        const int x0 = Wrap(ix0, cw), x1 = Wrap(ix0 + 1, cw);
+        const int y0 = Wrap(iy0, ch), y1 = Wrap(iy0 + 1, ch);
+        auto fetch = [&](int x, int y, int c) {
+            return static_cast<float>(curl.data[(static_cast<std::size_t>(y) * cw + x) * 4 + c]) * (1.0f / 255.0f);
+        };
+        cr = (1.0f - ty) * ((1.0f - tx) * fetch(x0, y0, 0) + tx * fetch(x1, y0, 0)) +
+             ty * ((1.0f - tx) * fetch(x0, y1, 0) + tx * fetch(x1, y1, 0));
+        cg = (1.0f - ty) * ((1.0f - tx) * fetch(x0, y0, 1) + tx * fetch(x1, y0, 1)) +
+             ty * ((1.0f - tx) * fetch(x0, y1, 1) + tx * fetch(x1, y1, 1));
+    };
+    auto shaderTexel = [&](float px, float pz) -> std::pair<int, int> {
+        float wx = px + kHalfShearM, wz = pz + kHalfShearM;
+        float cr = 0.5f, cg = 0.5f;
+        sampleCurlRG(wx / kWeatherWarpTileM, wz / kWeatherWarpTileM, cr, cg);
+        wx += (cr * 2.0f - 1.0f) * kWeatherWarpM;
+        wz += (cg * 2.0f - 1.0f) * kWeatherWarpM;
+        const float wu = fract01(wx / kWeatherScaleM);
+        const float wv = fract01(wz / kWeatherScaleM);
+        const int ix = Wrap(static_cast<int>(std::lround(wu * static_cast<float>(n) - 0.5f)), n);
+        const int iy = Wrap(static_cast<int>(std::lround(wv * static_cast<float>(n) - 0.5f)), n);
+        return {ix, iy};
+    };
+
+    // Ground shadow windows evaluate max weather R across 4 cloud-bearing altitudes along the sun slant ray.
+    struct Tap4 { std::uint32_t o[4]; };
+    struct SampleSet {
+        std::vector<Tap4> r2Off;
+        std::vector<Tap4> r1Idx;
+        double invCount = 1.0;
+    };
+    auto makeCloudSet = [&](float px0, float px1, float pz0, float pz1, int nx, int nz) {
+        SampleSet s;
+        s.r2Off.reserve(static_cast<std::size_t>(nx) * nz);
+        s.r1Idx.reserve(static_cast<std::size_t>(nx) * nz);
+        for (int j = 0; j < nz; ++j) {
+            const float pz = pz0 + (pz1 - pz0) * (static_cast<float>(j) / static_cast<float>(std::max(nz - 1, 1)));
+            for (int i = 0; i < nx; ++i) {
+                const float px = px0 + (px1 - px0) * (static_cast<float>(i) / static_cast<float>(std::max(nx - 1, 1)));
+                const auto [ix, iy] = shaderTexel(px, pz);
+                const auto o2 = static_cast<std::uint32_t>(iy * m2 + ix);
+                const auto o1 = static_cast<std::uint32_t>(iy * n + ix);
+                s.r2Off.push_back({{o2, o2, o2, o2}});
+                s.r1Idx.push_back({{o1, o1, o1, o1}});
             }
         }
-        return {sum * rc.invArea, static_cast<double>(mn), static_cast<double>(mx),
-                static_cast<double>(cClr) * rc.invArea, static_cast<double>(cShd) * rc.invArea};
+        s.invCount = 1.0 / static_cast<double>(s.r2Off.size());
+        return s;
+    };
+    constexpr float kGroundY = 16.0f;
+    constexpr float kRayHeights[4] = {1650.0f, 2050.0f, 2500.0f, 3000.0f};
+    auto makeGroundSet = [&](float gx0, float gx1, float gz0, float gz1, int nx, int nz,
+                             float sunX, float sunY, float sunZ) {
+        SampleSet s;
+        s.r2Off.reserve(static_cast<std::size_t>(nx) * nz);
+        s.r1Idx.reserve(static_cast<std::size_t>(nx) * nz);
+        float along[4];
+        for (int k = 0; k < 4; ++k) along[k] = (kRayHeights[k] - kGroundY) / sunY;
+        for (int j = 0; j < nz; ++j) {
+            const float gz = gz0 + (gz1 - gz0) * (static_cast<float>(j) / static_cast<float>(std::max(nz - 1, 1)));
+            for (int i = 0; i < nx; ++i) {
+                const float gx = gx0 + (gx1 - gx0) * (static_cast<float>(i) / static_cast<float>(std::max(nx - 1, 1)));
+                Tap4 t2{}, t1{};
+                for (int k = 0; k < 4; ++k) {
+                    const auto [ix, iy] = shaderTexel(gx + sunX * along[k], gz + sunZ * along[k]);
+                    t2.o[k] = static_cast<std::uint32_t>(iy * m2 + ix);
+                    t1.o[k] = static_cast<std::uint32_t>(iy * n + ix);
+                }
+                s.r2Off.push_back(t2);
+                s.r1Idx.push_back(t1);
+            }
+        }
+        s.invCount = 1.0 / static_cast<double>(s.r2Off.size());
+        return s;
+    };
+
+    constexpr float kSun2X = -0.5265f, kSun2Y = 0.573576f, kSun2Z = -0.6275f;
+    constexpr float kSun3X = 0.866025f, kSun3Y = 0.500000f, kSun3Z = 0.0f;
+    const SampleSet setFgMeadow = makeGroundSet(-2020.0f, -1780.0f, -940.0f, -660.0f, 12, 12, kSun2X, kSun2Y, kSun2Z);
+    const SampleSet setLeftHill = makeGroundSet(-1950.0f, -1500.0f, -660.0f, -380.0f, 16, 12, kSun2X, kSun2Y, kSun2Z);
+    SampleSet setFgUnion = setFgMeadow;
+    setFgUnion.r2Off.insert(setFgUnion.r2Off.end(), setLeftHill.r2Off.begin(), setLeftHill.r2Off.end());
+    setFgUnion.r1Idx.insert(setFgUnion.r1Idx.end(), setLeftHill.r1Idx.begin(), setLeftHill.r1Idx.end());
+    setFgUnion.invCount = 1.0 / static_cast<double>(setFgUnion.r2Off.size());
+    const double fgCnt = static_cast<double>(setFgMeadow.r2Off.size());
+    const double hillCnt = static_cast<double>(setLeftHill.r2Off.size());
+    const SampleSet setMgLake = makeGroundSet(-1660.0f, -1300.0f, -920.0f, -640.0f, 13, 10, kSun2X, kSun2Y, kSun2Z);
+    const SampleSet setBeach = makeGroundSet(-1220.0f, -920.0f, -920.0f, -640.0f, 12, 10, kSun2X, kSun2Y, kSun2Z);
+    const SampleSet setCoast = makeGroundSet(-850.0f, 2500.0f, -1800.0f, 400.0f, 24, 16, kSun2X, kSun2Y, kSun2Z);
+    const SampleSet setNearEast = makeCloudSet(-1400.0f, 1600.0f, -1800.0f, 200.0f, 18, 14);
+    const SampleSet setMidEast = makeCloudSet(2800.0f, 11000.0f, -3500.0f, 2500.0f, 28, 20);
+    const SampleSet setV03 = makeGroundSet(-2600.0f, -1400.0f, -1050.0f, -550.0f, 18, 12, kSun3X, kSun3Y, kSun3Z);
+
+    auto rayMaxR = [](const float* base, const Tap4& t) -> float {
+        return std::max(std::max(base[t.o[0]], base[t.o[1]]), std::max(base[t.o[2]], base[t.o[3]]));
+    };
+    FVol r2(static_cast<std::size_t>(m2) * static_cast<std::size_t>(m2), 0.0f);
+    struct WinStats { double mean, mn, mx, clr08, clr12, shd50, shd55, core70; };
+    auto evalSet = [&](int sx, int sy, const SampleSet& s) -> WinStats {
+        const float* base = &r2[static_cast<std::size_t>(sy) * static_cast<std::size_t>(m2) + static_cast<std::size_t>(sx)];
+        double sum = 0.0;
+        float mn = 1.0f, mx = 0.0f;
+        int cClr08 = 0, cClr12 = 0, cShd50 = 0, cShd55 = 0, cCore70 = 0;
+        for (const Tap4& t : s.r2Off) {
+            const float v = rayMaxR(base, t);
+            sum += static_cast<double>(v);
+            mn = std::min(mn, v);
+            mx = std::max(mx, v);
+            if (v <= 0.08f) ++cClr08;
+            if (v <= 0.12f) ++cClr12;
+            if (v >= 0.50f) ++cShd50;
+            if (v >= 0.55f) ++cShd55;
+            if (v >= 0.70f) ++cCore70;
+        }
+        return {sum * s.invCount, static_cast<double>(mn), static_cast<double>(mx),
+                static_cast<double>(cClr08) * s.invCount,
+                static_cast<double>(cClr12) * s.invCount,
+                static_cast<double>(cShd50) * s.invCount,
+                static_cast<double>(cShd55) * s.invCount,
+                static_cast<double>(cCore70) * s.invCount};
     };
 
     auto sq = [](double d) { return d * d; };
     auto hingeLo = [](double v, double lo) { return std::max(0.0, lo - v); };
     auto hingeHi = [](double v, double hi) { return std::max(0.0, v - hi); };
     auto scoreShift = [&](int sx, int sy, double baseLoss, double cutoff) -> double {
-        const WinStats fg = evalWin(sx, sy, rcFg);
-        double loss = baseLoss + 30.0 * sq(hingeHi(fg.mean, 0.055)) + 20.0 * sq(hingeLo(fg.clear05, 0.80)) +
-                      0.05 * sq(fg.mean - 0.02);
+        const WinStats fm = evalSet(sx, sy, setFgMeadow);
+        double loss = baseLoss + 400.0 * sq(hingeHi(fm.mean, 0.045)) + 150.0 * sq(hingeLo(fm.clr08, 0.90));
         if (loss >= cutoff) return loss;
-        const WinStats mg = evalWin(sx, sy, rcMg);
-        loss += 20.0 * sq(hingeLo(mg.mean, 0.49)) + 25.0 * sq(hingeLo(mg.mx, 0.78)) +
-                15.0 * sq(hingeLo(mg.shd35, 0.60)) + 0.05 * sq(mg.mean - 0.55);
+        const WinStats fh = evalSet(sx, sy, setLeftHill);
+        const double fguMean = (fm.mean * fgCnt + fh.mean * hillCnt) * setFgUnion.invCount;
+        const double fguClr08 = (fm.clr08 * fgCnt + fh.clr08 * hillCnt) * setFgUnion.invCount;
+        loss += 400.0 * (sq(hingeHi(fh.mean, 0.045)) + sq(hingeHi(fguMean, 0.045))) +
+                150.0 * (sq(hingeLo(fh.clr08, 0.90)) + sq(hingeLo(fguClr08, 0.92)));
         if (loss >= cutoff) return loss;
-        const WinStats v3 = evalWin(sx, sy, rcV03);
-        loss += 15.0 * sq(hingeLo(v3.mean, 0.42)) + 20.0 * sq(hingeLo(v3.mx, 0.72)) +
-                20.0 * sq(hingeHi(v3.mn, 0.12)) + 0.05 * sq(v3.mean - 0.46);
+        const WinStats mg = evalSet(sx, sy, setMgLake);
+        const WinStats bc = evalSet(sx, sy, setBeach);
+        loss += 80.0 * sq(hingeLo(mg.mean, 0.50)) + 80.0 * sq(hingeLo(mg.shd55, 0.55)) +
+                80.0 * sq(hingeLo(mg.mx, 0.79)) + 120.0 * sq(hingeHi(bc.mean, 0.175));
         if (loss >= cutoff) return loss;
-        const WinStats v1 = evalWin(sx, sy, rcV01);
-        return loss + 15.0 * (sq(hingeLo(v1.mean, 0.30)) + sq(hingeHi(v1.mean, 0.54))) +
-               20.0 * sq(hingeLo(v1.mx, 0.69)) + 20.0 * sq(hingeHi(v1.mn, 0.09)) + 0.05 * sq(v1.mean - 0.41);
+        const WinStats ne = evalSet(sx, sy, setNearEast);
+        const WinStats me = evalSet(sx, sy, setMidEast);
+        loss += 60.0 * sq(hingeHi(ne.mean, 0.22)) + 60.0 * sq(hingeHi(ne.mx, 0.70)) +
+                60.0 * sq(hingeLo(me.core70, 0.18));
+        if (loss >= cutoff) return loss;
+        const WinStats co = evalSet(sx, sy, setCoast);
+        const WinStats v3 = evalSet(sx, sy, setV03);
+        loss += 50.0 * (sq(hingeLo(co.mean, 0.26)) + sq(hingeHi(co.mean, 0.59))) +
+                60.0 * (sq(hingeLo(co.clr12, 0.31)) + sq(hingeLo(co.shd50, 0.31))) +
+                50.0 * (sq(hingeLo(v3.mean, 0.28)) + sq(hingeHi(v3.mean, 0.58))) +
+                50.0 * sq(hingeLo(v3.mx, 0.68)) + 50.0 * sq(hingeHi(v3.mn, 0.10));
+        return loss + 0.02 * fguMean + 0.004 * bc.mean +
+               0.002 * (sq(0.60 - mg.mean) + sq(0.42 - co.mean) + sq(0.42 - v3.mean));
     };
 
-    // Smooth union of 3-, 4-, and cluster-supported 7-cell cones modulated by 2-cell Perlin macro streets.
-    FVol bestRUnshifted(total, 0.0f), field(total, 0.0f), peak(total, 0.0f), rRaw(total, 0.0f);
+    auto sym2D = [&](const FVol& src, int sym) {
+        if (sym == 0) return src;
+        FVol dst(src.size());
+        for (int y = 0; y < n; ++y) {
+            const int ty = (sym & 2) ? (n - 1 - y) : y;
+            for (int x = 0; x < n; ++x) {
+                const int tx = (sym & 1) ? (n - 1 - x) : x;
+                const int sx0 = (sym & 4) ? ty : tx;
+                const int sy0 = (sym & 4) ? tx : ty;
+                dst[static_cast<std::size_t>(y) * static_cast<std::size_t>(n) + static_cast<std::size_t>(x)] =
+                    src[static_cast<std::size_t>(sy0) * static_cast<std::size_t>(n) + static_cast<std::size_t>(sx0)];
+            }
+        }
+        return dst;
+    };
+
+    // Scalloped cloverleaf union of warped 3/4-cell clusters, 8-cell primary domes, and cluster-gated 13-cell shoulder domes.
+    FVol bestRUnshifted(total, 0.0f), bestW8Unshifted(total, 0.0f);
+    FVol field(total, 0.0f), domePeak(total, 0.0f), rRaw(total, 0.0f);
     double bestLoss = 1e30;
-    int bestSx = 0, bestSy = 0;
-    const int gridSteps = std::min(64, n);
+    int bestSym = 0, bestSx = 0, bestSy = 0;
+    const int gridSteps = std::min(128, n);
     const int polishR = std::max(1, static_cast<int>(std::lround(static_cast<double>(size) * 4.0 / 512.0)));
-    constexpr int kSeedTrials = 5;
+    constexpr int kSeedTrials = 12;
     for (int trial = 0; trial < kSeedTrials; ++trial) {
-        const std::uint32_t sb = 500u + 137u * static_cast<std::uint32_t>(trial);
-        const FVol macro = pf(2, 2, sb + 1u);
-        const FVol cap = pf(5, 2, sb + 11u);
-        const FVol w3 = WorleyInv2D(n, 3, sb + 21u, &warpX, &warpY, 0.052f);
-        const FVol w4 = WorleyInv2D(n, 4, sb + 31u, &warpX, &warpY, 0.046f);
-        const FVol w7 = WorleyInv2D(n, 7, sb + 41u, &warpX, &warpY, 0.036f);
+        const std::uint32_t sm = 6375u + 73u * static_cast<std::uint32_t>(trial);
+        const std::uint32_t sp = 583u + 27u * static_cast<std::uint32_t>(trial);
+        const std::uint32_t sc = 2174u + 58u * static_cast<std::uint32_t>(trial);
+        const FVol macro = pf(4, 2, sm + 1u);
+        const FVol cap = pf(4, 2, sc);
+        const FVol w3 = WorleyInv2D(n, 3, sm + 21u, &warpX, &warpY, 0.078f);
+        const FVol w4 = WorleyInv2D(n, 4, sm + 31u, &warpX, &warpY, 0.072f);
+        const FVol w8 = WorleyInv2D(n, 8, sp + 41u, &warpFX, &warpFY, 0.052f);
+        const FVol w13 = WorleyInv2D(n, 13, sp + 51u, &warpFX, &warpFY, 0.038f);
 
         ParallelFor(n, [&](int y) {
             const std::size_t row = static_cast<std::size_t>(y) * static_cast<std::size_t>(n);
             for (int x = 0; x < n; ++x) {
                 const std::size_t i = row + static_cast<std::size_t>(x);
-                const float m = Smoothstep(0.18f, 0.82f, macro[i]);
-                const float street = 0.75f + 0.25f * m;
+                const float m = Smoothstep(0.20f, 0.80f, macro[i]);
+                const float street = 0.62f + 0.38f * m;
                 const float c34 = smax(w3[i], w4[i] - 0.03f, 0.06f);
-                const float supp = Smoothstep(0.48f, 0.70f, c34 * street);
-                const float wUnion = smax(c34, w7[i] - 0.06f - 0.20f * (1.0f - supp), 0.06f);
-                field[i] = wUnion * street;
-                peak[i] = 0.90f + 0.05f * (0.60f * m + 0.40f * cap[i]);
+                const float cMacro = c34 * street;
+                const float supp8 = Smoothstep(0.42f, 0.66f, cMacro);
+                const float gate13 = Smoothstep(0.36f, 0.62f, cMacro);
+                const float w8Sharp = std::pow(w8[i], 1.35f);
+                const float w13Gated = std::pow(w13[i], 1.85f) * gate13;
+                const float dCore = cMacro * (0.64f + 0.36f * w8Sharp);
+                const float d8 = (w8Sharp + 0.04f) * supp8;
+                field[i] = smax(smax(dCore, d8, 0.030f), w13Gated * 1.08f, 0.025f);
+                const float coreCap = 2.00f * cMacro * Smoothstep(0.55f, 0.86f, cap[i]);
+                domePeak[i] = std::max(std::max(w8[i] * supp8, coreCap), 0.99f * w13[i] * Smoothstep(0.28f, 0.70f, cap[i]));
             }
         });
 
-        float edge = 0.59f, shHi = 0.13f, coreShift = -0.05f;
-        constexpr float kSpan = 0.37f;
+        float edge = 0.468f, rimHi = 0.28f, pkLo = 0.44f;
+        constexpr float kSpan = 0.075f;
         double fClear = 0.0, fShoulder = 0.0, fCore = 0.0;
         FVol rCandidate;
-        for (int cal = 0; cal < 4; ++cal) {
+        for (int cal = 0; cal < 6; ++cal) {
             const float invSpan = 1.0f / kSpan;
-            const float cLo = 0.21f + coreShift, cHi = 0.55f + coreShift * 0.70f;
             ParallelFor(n, [&](int y) {
                 const std::size_t row = static_cast<std::size_t>(y) * static_cast<std::size_t>(n);
                 for (int x = 0; x < n; ++x) {
                     const std::size_t i = row + static_cast<std::size_t>(x);
                     const float t = std::clamp((field[i] - edge) * invSpan, 0.0f, 1.0f);
-                    const float cone = 0.39f * Smoothstep(0.0f, shHi, t) +
-                                       0.18f * Smoothstep(0.10f, 0.45f, t) +
-                                       0.25f * Smoothstep(cLo, cHi, t) +
-                                       0.18f * Smoothstep(0.52f, 0.94f, t);
-                    rRaw[i] = peak[i] * cone;
+                    const float rim = Smoothstep(0.0f, rimHi, t) * (0.85f + 0.15f * Smoothstep(0.12f, 0.65f, t));
+                    const float vigor = 0.45f + 0.53f * Smoothstep(pkLo, pkLo + 0.40f, domePeak[i]);
+                    rRaw[i] = rim * vigor;
                 }
             });
+            const FVol mass16 = BlurPeriodic2D(rRaw, n, massBlurR, massBlurSigma);
+            for (std::size_t i = 0; i < total; ++i) rRaw[i] *= Smoothstep(0.13f, 0.23f, mass16[i]);
             rCandidate = BlurPeriodic2D(rRaw, n, coneBlurR, coneBlurSigma);
+            const FVol speck10 = BlurPeriodic2D(rCandidate, n, speckBlurR, speckBlurSigma);
+            for (std::size_t i = 0; i < total; ++i) rCandidate[i] *= Smoothstep(0.06f, 0.14f, speck10[i]);
+
             std::size_t cntClear = 0, cntShoulder = 0, cntCore = 0;
             for (float rv : rCandidate) {
                 if (rv <= 0.04f) ++cntClear;
                 if (rv >= 0.30f) ++cntShoulder;
-                if (rv >= 0.72f) ++cntCore;
+                if (rv >= 0.70f) ++cntCore;
             }
             fClear = static_cast<double>(cntClear) * invTotal;
             fShoulder = static_cast<double>(cntShoulder) * invTotal;
             fCore = static_cast<double>(cntCore) * invTotal;
-            if (cal + 1 < 4) {
-                edge += static_cast<float>((0.480 - fClear) * 0.20);
-                shHi = std::clamp(shHi + static_cast<float>((fShoulder - 0.420) * 0.45), 0.06f, 0.30f);
-                coreShift = std::clamp(coreShift + static_cast<float>((fCore - 0.160) * 0.65), -0.16f, 0.22f);
+            if (cal + 1 < 6) {
+                edge += static_cast<float>((0.512 - fClear) * 0.26);
+                rimHi = std::clamp(rimHi + static_cast<float>((fShoulder - 0.405) * 0.65), 0.04f, 0.55f);
+                pkLo = std::clamp(pkLo + static_cast<float>((fCore - 0.185) * 0.55), 0.15f, 0.85f);
             }
         }
 
-        // Deterministic 64x64 torus roll search with +-4 texel local polish scores final rolled R directly.
-        for (int yy = 0; yy < n; ++yy) {
-            const float* src = &rCandidate[static_cast<std::size_t>(yy) * static_cast<std::size_t>(n)];
-            float* dst0 = &r2[static_cast<std::size_t>(yy) * static_cast<std::size_t>(m2)];
-            float* dst1 = &r2[static_cast<std::size_t>(yy + n) * static_cast<std::size_t>(m2)];
-            std::memcpy(dst0, src, static_cast<std::size_t>(n) * sizeof(float));
-            std::memcpy(dst0 + n, src, static_cast<std::size_t>(n) * sizeof(float));
-            std::memcpy(dst1, dst0, static_cast<std::size_t>(m2) * sizeof(float));
-        }
-
-        const double histLoss = 12.0 * (sq(hingeLo(fShoulder, 0.380)) + sq(hingeHi(fShoulder, 0.460)) +
-                                        sq(hingeLo(fCore, 0.120)) + sq(hingeHi(fCore, 0.200)) +
-                                        sq(hingeLo(fClear, 0.440)) + sq(hingeHi(fClear, 0.520)));
-        double trialLoss = 1e30;
-        int trialSx = 0, trialSy = 0;
-        for (int ky = 0; ky < gridSteps; ++ky) {
-            const int sy = (ky * n) / gridSteps;
-            for (int kx = 0; kx < gridSteps; ++kx) {
-                const int sx = (kx * n) / gridSteps;
-                const double loss = scoreShift(sx, sy, histLoss, trialLoss);
-                if (loss < trialLoss) {
-                    trialLoss = loss;
-                    trialSx = sx;
-                    trialSy = sy;
+        const double histLoss = 15.0 * (sq(hingeLo(fShoulder, 0.360)) + sq(hingeHi(fShoulder, 0.440)) +
+                                        sq(hingeLo(fCore, 0.140)) + sq(hingeHi(fCore, 0.220)) +
+                                        sq(hingeLo(fClear, 0.460)) + sq(hingeHi(fClear, 0.540)));
+        double bestTrialSymLoss = bestLoss;
+        int bestTrialSym = 0, bestTrialSx = 0, bestTrialSy = 0;
+        for (int sym = 0; sym < 8; ++sym) {
+            const FVol rSym = sym2D(rCandidate, sym);
+            for (int yy = 0; yy < n; ++yy) {
+                const float* src = &rSym[static_cast<std::size_t>(yy) * static_cast<std::size_t>(n)];
+                float* dst0 = &r2[static_cast<std::size_t>(yy) * static_cast<std::size_t>(m2)];
+                float* dst1 = &r2[static_cast<std::size_t>(yy + n) * static_cast<std::size_t>(m2)];
+                std::memcpy(dst0, src, static_cast<std::size_t>(n) * sizeof(float));
+                std::memcpy(dst0 + n, src, static_cast<std::size_t>(n) * sizeof(float));
+                std::memcpy(dst1, dst0, static_cast<std::size_t>(m2) * sizeof(float));
+            }
+            struct Cand { double loss; int sx, sy; };
+            constexpr int kTopCoarse = 10;
+            Cand topCands[kTopCoarse];
+            for (Cand& c : topCands) c = {1e30, 0, 0};
+            for (int ky = 0; ky < gridSteps; ++ky) {
+                const int sy = (ky * n) / gridSteps;
+                for (int kx = 0; kx < gridSteps; ++kx) {
+                    const int sx = (kx * n) / gridSteps;
+                    const double loss = scoreShift(sx, sy, histLoss, topCands[kTopCoarse - 1].loss);
+                    if (loss < topCands[kTopCoarse - 1].loss) {
+                        topCands[kTopCoarse - 1] = {loss, sx, sy};
+                        for (int p = kTopCoarse - 1; p > 0 && topCands[p].loss < topCands[p - 1].loss; --p)
+                            std::swap(topCands[p], topCands[p - 1]);
+                    }
                 }
             }
-        }
-        const int baseSx = trialSx, baseSy = trialSy;
-        for (int dy = -polishR; dy <= polishR; ++dy) {
-            const int sy = Wrap(baseSy + dy, n);
-            for (int dx = -polishR; dx <= polishR; ++dx) {
-                const int sx = Wrap(baseSx + dx, n);
-                const double loss = scoreShift(sx, sy, histLoss, trialLoss);
-                if (loss < trialLoss) {
-                    trialLoss = loss;
-                    trialSx = sx;
-                    trialSy = sy;
+            double symLoss = topCands[0].loss;
+            int symSx = topCands[0].sx, symSy = topCands[0].sy;
+            for (const Cand& base : topCands) {
+                if (base.loss >= 1e29) continue;
+                for (int dy = -polishR; dy <= polishR; ++dy) {
+                    const int sy = Wrap(base.sy + dy, n);
+                    for (int dx = -polishR; dx <= polishR; ++dx) {
+                        const int sx = Wrap(base.sx + dx, n);
+                        const double loss = scoreShift(sx, sy, histLoss, symLoss);
+                        if (loss < symLoss) {
+                            symLoss = loss;
+                            symSx = sx;
+                            symSy = sy;
+                        }
+                    }
                 }
             }
+            if (symLoss < bestTrialSymLoss) {
+                bestTrialSymLoss = symLoss;
+                bestTrialSym = sym;
+                bestTrialSx = symSx;
+                bestTrialSy = symSy;
+            }
         }
-        if (trialLoss < bestLoss) {
-            bestLoss = trialLoss;
-            bestSx = trialSx;
-            bestSy = trialSy;
+        if (bestTrialSymLoss < bestLoss) {
+            bestLoss = bestTrialSymLoss;
+            bestSym = bestTrialSym;
+            bestSx = bestTrialSx;
+            bestSy = bestTrialSy;
             bestRUnshifted = std::move(rCandidate);
+            bestW8Unshifted = std::move(w8);
         }
     }
 
@@ -570,59 +731,68 @@ Volume BakeWeather(std::uint32_t size) {
         }
         return dst;
     };
-    // Compensate for shader curl-map domain warp so midground lake and river catch the cluster shadow.
-    const int warpCompX = static_cast<int>(std::lround(33.0 * static_cast<double>(size) / 512.0));
-    const int warpCompY = static_cast<int>(std::lround(-26.0 * static_cast<double>(size) / 512.0));
-    const int finalSx = Wrap(bestSx + warpCompX, n);
-    const int finalSy = Wrap(bestSy + warpCompY, n);
-    const FVol r = roll2D(bestRUnshifted, finalSx, finalSy);
+    const int finalSx = bestSx, finalSy = bestSy;
+    const FVol r = roll2D(sym2D(bestRUnshifted, bestSym), finalSx, finalSy);
+    const FVol w8Rolled = roll2D(sym2D(bestW8Unshifted, bestSym), finalSx, finalSy);
     const FVol ptRolled = roll2D(pt, finalSx, finalSy), pdRolled = roll2D(pd, finalSx, finalSy);
 
-    auto measure = [&](const Rect& rc) -> WinStats {
+    auto measure = [&](const SampleSet& s) -> WinStats {
         double sum = 0.0, mn = 1.0, mx = 0.0;
-        int cClr = 0, cShd = 0;
-        for (int y = rc.y0; y < rc.y1; ++y) {
-            const std::size_t row = static_cast<std::size_t>(y) * static_cast<std::size_t>(n);
-            for (int x = rc.x0; x < rc.x1; ++x) {
-                const double v = static_cast<double>(r[row + static_cast<std::size_t>(x)]);
-                sum += v;
-                mn = std::min(mn, v);
-                mx = std::max(mx, v);
-                if (v <= 0.05) ++cClr;
-                if (v >= 0.35) ++cShd;
-            }
+        int cClr08 = 0, cClr12 = 0, cShd50 = 0, cShd55 = 0, cCore70 = 0;
+        for (const Tap4& t : s.r1Idx) {
+            const float vf = rayMaxR(r.data(), t);
+            const double v = static_cast<double>(vf);
+            sum += v;
+            mn = std::min(mn, v);
+            mx = std::max(mx, v);
+            if (vf <= 0.08f) ++cClr08;
+            if (vf <= 0.12f) ++cClr12;
+            if (vf >= 0.50f) ++cShd50;
+            if (vf >= 0.55f) ++cShd55;
+            if (vf >= 0.70f) ++cCore70;
         }
-        return {sum * rc.invArea, mn, mx, static_cast<double>(cClr) * rc.invArea, static_cast<double>(cShd) * rc.invArea};
+        return {sum * s.invCount, mn, mx,
+                static_cast<double>(cClr08) * s.invCount,
+                static_cast<double>(cClr12) * s.invCount,
+                static_cast<double>(cShd50) * s.invCount,
+                static_cast<double>(cShd55) * s.invCount,
+                static_cast<double>(cCore70) * s.invCount};
     };
     std::size_t totClear = 0, totShoulder = 0, totCore = 0;
     float maxR = 0.0f;
     for (float rv : r) {
         if (rv <= 0.04f) ++totClear;
         if (rv >= 0.30f) ++totShoulder;
-        if (rv >= 0.72f) ++totCore;
+        if (rv >= 0.70f) ++totCore;
         maxR = std::max(maxR, rv);
     }
-    const WinStats stFg = measure(rcFg), stMg = measure(rcMg), stV3 = measure(rcV03), stV1 = measure(rcV01);
+    const WinStats stFg = measure(setFgMeadow), stHill = measure(setLeftHill), stFgAll = measure(setFgUnion);
+    const WinStats stMg = measure(setMgLake), stBeach = measure(setBeach), stCoast = measure(setCoast);
+    const WinStats stNearE = measure(setNearEast), stMidE = measure(setMidEast), stV3 = measure(setV03);
     std::printf(
-        "weather stats: r>=0.30 %.1f%% core %.1f%% clear %.1f%% max %.2f | "
-        "fg(mean=%.3f clr=%.2f) mg(mean=%.2f max=%.2f shd=%.2f) "
-        "v03(mean=%.2f max=%.2f min=%.2f) v01(mean=%.2f max=%.2f min=%.2f)\n",
+        "weather stats: r>=0.30 %.1f%% r>=0.70 %.1f%% clear %.1f%% max %.2f | "
+        "fg(mean=%.3f clr08=%.2f) hill(mean=%.3f clr08=%.2f) fgAll(mean=%.3f clr08=%.2f) "
+        "mg(mean=%.2f shd55=%.2f max=%.2f) beach(mean=%.3f) coast(mean=%.2f clr12=%.2f shd50=%.2f) "
+        "nearE(mean=%.3f max=%.2f) midE(r70=%.2f) v03(mean=%.2f max=%.2f min=%.2f)\n",
         100.0 * static_cast<double>(totShoulder) * invTotal, 100.0 * static_cast<double>(totCore) * invTotal,
         100.0 * static_cast<double>(totClear) * invTotal, static_cast<double>(maxR),
-        stFg.mean, stFg.clear05, stMg.mean, stMg.mx, stMg.shd35,
-        stV3.mean, stV3.mx, stV3.mn, stV1.mean, stV1.mx, stV1.mn);
+        stFg.mean, stFg.clr08, stHill.mean, stHill.clr08, stFgAll.mean, stFgAll.clr08,
+        stMg.mean, stMg.shd55, stMg.mx, stBeach.mean, stCoast.mean, stCoast.clr12, stCoast.shd50,
+        stNearE.mean, stNearE.mx, stMidE.core70, stV3.mean, stV3.mx, stV3.mn);
 
-    // 26-texel Gaussian blur drives G; B forms a narrower smoothed inner turret dome; A couples core density.
-    const int blurRadius = std::max(1, static_cast<int>(std::lround(static_cast<double>(size) * 26.0 / 512.0)));
-    const float blurSigma = static_cast<float>(blurRadius) / 2.8f;
+    // 24-texel Gaussian blur drives G; widened scalloped w8+pt modulation drives B; A couples core density.
+    const int blurRadius = std::max(1, static_cast<int>(std::lround(static_cast<double>(size) * 24.0 / 512.0)));
+    const float blurSigma = 14.0f * (static_cast<float>(blurRadius) / 24.0f);
     const FVol blurredR = BlurPeriodic2D(r, n, blurRadius, blurSigma);
 
-    const int turretRadius = std::max(1, static_cast<int>(std::lround(static_cast<double>(size) * 5.0 / 512.0)));
-    const float turretSigma = 2.2f * (static_cast<float>(turretRadius) / 5.0f);
+    const int turretRadius = std::max(1, static_cast<int>(std::lround(static_cast<double>(size) * 3.0 / 512.0)));
+    const float turretSigma = 1.4f * (static_cast<float>(turretRadius) / 3.0f);
     FVol g(total), bRaw(total), a(total);
     for (std::size_t i = 0; i < total; ++i) {
         g[i] = std::clamp(blurredR[i] * 1.15f, 0.0f, 1.0f);
-        bRaw[i] = Smoothstep(0.45f, 0.86f, r[i]) * (0.72f + 0.28f * Smoothstep(0.25f, 0.75f, ptRolled[i]));
+        const float w8Mod = std::clamp(0.65f * w8Rolled[i] + 0.35f * Smoothstep(0.15f, 0.85f, ptRolled[i]) + 0.18f, 0.0f, 1.0f);
+        const float dome = std::min(smax(w8Mod, Smoothstep(0.55f, 0.88f, r[i]), 0.08f), 1.0f);
+        bRaw[i] = Smoothstep(0.24f, 0.78f, r[i]) * (0.52f + 0.48f * dome);
         a[i] = 0.68f + 0.32f * Smoothstep(0.15f, 0.80f, 0.5f * pdRolled[i] + 0.5f * r[i]);
     }
     const FVol b = BlurPeriodic2D(bRaw, n, turretRadius, turretSigma);
@@ -850,7 +1020,8 @@ int main(int argc, char** argv) {
 
     if (mode == "weather") {  // dev shortcut: only the weather map (+ preview png) into --out
         fs::create_directories(dir);
-        Volume weather = BakeWeather(512);
+        Volume curl = BakeCurl(128);
+        Volume weather = BakeWeather(512, curl);
         if (!WriteGtvol(dir / "cloud_weather_512.gtvol", weather)) { std::printf("write failed\n"); return 1; }
         WritePng(dir / "cloud_weather_512.png", 512, 512, 4, weather.data);
         std::printf("weather written to %s\n", dir.string().c_str());
@@ -871,7 +1042,7 @@ int main(int argc, char** argv) {
         Volume curl = BakeCurl(128);
         std::printf("curl 128^2 baked in %.0f ms\n", ms(t0));
         t0 = Clock::now();
-        Volume weather = BakeWeather(512);
+        Volume weather = BakeWeather(512, curl);
         std::printf("weather 512^2 baked in %.0f ms\n", ms(t0));
 
         Volume blue;
